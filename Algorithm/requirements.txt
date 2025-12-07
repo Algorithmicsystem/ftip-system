@@ -12,3 +12,4 @@ pulp>=2.7.0
 httpx<1,>=0.23.0
 openai>=1.0.0
 itsdangerous>=2.1.2
+requests>=2.32.0
