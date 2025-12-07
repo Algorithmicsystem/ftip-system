@@ -4,11 +4,12 @@ from .pipeline import FatTailPipeline
 from .alpha_kernel import StructuralAlphaKernel
 from .superfactor import SuperfactorModel
 from .backtest.simulator import evaluate_backtest
+from typing import Optional
 
 class FTIPSystem:
     """High level orchestrator for the FTIP workflow."""
 
-    def __init__(self, pipeline: FatTailPipeline | None = None):
+    def __init__(self, pipeline: Optional[FatTailPipeline] = None):
         self.pipeline = pipeline or FatTailPipeline()
         self.kernel = StructuralAlphaKernel()
         self.superfactor = SuperfactorModel(self.kernel)
