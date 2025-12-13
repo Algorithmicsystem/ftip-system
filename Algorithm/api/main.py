@@ -1,238 +1,290 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
-from collections.abc import Mapping
-import math
 import os
+import math
+import statistics
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
-from ftip.system import FTIPSystem
+
+# -----------------------------
+# App + metadata
+# -----------------------------
+
+APP_NAME = "FTIP System API"
+
+# Railway injects these at runtime (often present):
+# - RAILWAY_GIT_COMMIT_SHA
+# - RAILWAY_ENVIRONMENT
+RAILWAY_GIT_SHA = os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown")
+RAILWAY_ENV = os.getenv("RAILWAY_ENVIRONMENT", "unknown")
 
 
-# ----------------------------
-# JSON-safety helpers
-# ----------------------------
-def _clean_value(v: Any) -> Any:
-    if v is None:
-        return None
+app = FastAPI(
+    title=APP_NAME,
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url=None,
+)
 
-    if isinstance(v, (bool, int, str)):
-        return v
+PUBLIC_ENDPOINTS = [
+    "/health",
+    "/version",
+    "/run_all",
+    "/run_backtest",
+    "/run_scores",
+    "/docs",
+]
 
+
+# -----------------------------
+# Models
+# -----------------------------
+
+class DataPoint(BaseModel):
+    # ISO date or datetime string (e.g. "2024-01-01" or "2024-01-01T00:00:00")
+    timestamp: str = Field(..., description="ISO date or datetime")
+    close: float = Field(..., description="Close price")
+    volume: Optional[float] = Field(None, description="Volume")
+    fundamental: Optional[float] = Field(None, description="Fundamental signal")
+    sentiment: Optional[float] = Field(None, description="Sentiment signal (-1..1)")
+    crowd: Optional[float] = Field(None, description="Crowd signal (-1..1)")
+
+
+class BacktestRequest(BaseModel):
+    data: List[DataPoint]
+    include_equity_curve: bool = False
+    include_returns: bool = False
+
+
+class ScoresRequest(BaseModel):
+    data: List[DataPoint]
+
+
+# -----------------------------
+# Helpers
+# -----------------------------
+
+def _parse_iso_to_date(ts: str) -> str:
+    """
+    Normalize timestamp to YYYY-MM-DD string.
+    Accepts date or datetime ISO strings.
+    """
     try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return v
-
-    return f if math.isfinite(f) else None
-
-
-def _to_serializable(obj: Any) -> Any:
-    """Convert pandas objects & nested structures to JSON-safe plain Python."""
-    if isinstance(obj, pd.Series):
-        return {
-            "index": [str(i) for i in obj.index],
-            "values": [_clean_value(v) for v in obj.to_list()],
-        }
-
-    if isinstance(obj, pd.DataFrame):
-        data = []
-        for row in obj.to_numpy().tolist():
-            data.append([_clean_value(v) for v in row])
-        return {
-            "index": [str(i) for i in obj.index],
-            "columns": [str(c) for c in obj.columns],
-            "data": data,
-        }
-
-    # IMPORTANT: treat any dict-like object as mapping (not only dict)
-    if isinstance(obj, Mapping):
-        return {str(k): _to_serializable(v) for k, v in obj.items()}
-
-    if isinstance(obj, list):
-        return [_to_serializable(v) for v in obj]
-
-    return _clean_value(obj)
+        # datetime.fromisoformat accepts YYYY-MM-DD too (gives midnight)
+        dt = datetime.fromisoformat(ts)
+        return dt.date().isoformat()
+    except Exception:
+        # last-resort: try strict date
+        try:
+            d = date.fromisoformat(ts)
+            return d.isoformat()
+        except Exception:
+            # keep original if unparsable (but stable key)
+            return ts
 
 
-def _build_backtest_summary(
-    backtest: Any,
+def _pct_change(series: List[float]) -> List[float]:
+    if not series:
+        return []
+    out = [0.0]
+    for i in range(1, len(series)):
+        prev = series[i - 1]
+        cur = series[i]
+        if prev == 0:
+            out.append(0.0)
+        else:
+            out.append((cur / prev) - 1.0)
+    return out
+
+
+def _max_drawdown(equity: List[float]) -> float:
+    if not equity:
+        return 0.0
+    peak = equity[0]
+    max_dd = 0.0
+    for x in equity:
+        if x > peak:
+            peak = x
+        dd = (peak - x) / peak if peak != 0 else 0.0
+        if dd > max_dd:
+            max_dd = dd
+    return max_dd
+
+
+def _safe_stdev(x: List[float]) -> float:
+    if len(x) < 2:
+        return 0.0
+    try:
+        return statistics.stdev(x)
+    except Exception:
+        return 0.0
+
+
+def _safe_mean(x: List[float]) -> float:
+    if not x:
+        return 0.0
+    try:
+        return statistics.mean(x)
+    except Exception:
+        return 0.0
+
+
+def _compute_backtest_summary(
+    closes: List[float],
+    dates: List[str],
     include_equity_curve: bool,
     include_returns: bool,
-) -> Optional[Dict[str, Any]]:
+) -> Dict[str, Any]:
     """
-    Normalizes whatever FTIP returns into a stable summary.
-    If equity/returns are not requested, we keep output small.
+    Simple baseline backtest:
+    - daily returns derived from close series
+    - equity curve = cumulative product of (1 + r)
+    - metrics computed from daily returns (assume ~252 trading days)
     """
-    if backtest is None:
-        return None
+    rets = _pct_change(closes)
+    equity = []
+    eq = 1.0
+    for r in rets:
+        eq *= (1.0 + r)
+        equity.append(eq)
 
-    # Accept dict-like objects
-    if isinstance(backtest, Mapping):
-        bt: Dict[str, Any] = dict(backtest)  # normalize to real dict
+    total_return = (equity[-1] - 1.0) if equity else 0.0
+
+    # Annualization (geometric)
+    n = max(len(rets) - 1, 1)  # exclude first 0.0 return for count
+    years = n / 252.0
+    if years <= 0:
+        annual_return = 0.0
     else:
-        # Unknown object — safest is to serialize raw
-        return {"raw": _to_serializable(backtest)}
+        annual_return = (equity[-1] ** (1.0 / years)) - 1.0 if equity else 0.0
 
-    summary: Dict[str, Any] = {}
+    # Volatility + Sharpe (rf=0)
+    # Use returns excluding first element (often 0.0)
+    rets_eff = rets[1:] if len(rets) > 1 else []
+    mu = _safe_mean(rets_eff)
+    sigma = _safe_stdev(rets_eff)
+    volatility = sigma * math.sqrt(252.0) if sigma > 0 else 0.0
+    sharpe = (mu / sigma) * math.sqrt(252.0) if sigma > 0 else 0.0
 
-    # pull common metrics directly if present
-    for key in [
-        "total_return",
-        "annual_return",
-        "cagr",
-        "sharpe",
-        "max_drawdown",
-        "volatility",
-        "num_trades",
-        "win_rate",
-    ]:
-        if key in bt:
-            summary[key] = _clean_value(bt.get(key))
+    max_dd = _max_drawdown(equity)
 
-    # nested stats support
-    stats = bt.get("stats")
-    if isinstance(stats, Mapping):
-        for key in [
-            "total_return",
-            "annual_return",
-            "cagr",
-            "sharpe",
-            "max_drawdown",
-            "volatility",
-            "num_trades",
-            "win_rate",
-        ]:
-            if key in stats and key not in summary:
-                summary[key] = _clean_value(stats.get(key))
+    summary: Dict[str, Any] = {
+        "total_return": float(total_return),
+        "annual_return": float(annual_return),
+        "sharpe": float(sharpe),
+        "max_drawdown": float(max_dd),
+        "volatility": float(volatility),
+    }
 
-    # heavy series only if requested
-    if include_equity_curve and "equity_curve" in bt:
-        summary["equity_curve"] = _to_serializable(bt.get("equity_curve"))
-    if include_returns and "returns" in bt:
-        summary["returns"] = _to_serializable(bt.get("returns"))
+    if include_equity_curve:
+        summary["equity_curve"] = {dates[i]: float(equity[i]) for i in range(min(len(dates), len(equity)))}
+
+    if include_returns:
+        summary["returns"] = {dates[i]: float(rets[i]) for i in range(min(len(dates), len(rets)))}
 
     return summary
 
 
-# ----------------------------
-# Pydantic models
-# ----------------------------
-class DataPoint(BaseModel):
-    timestamp: str
-    close: float
-    volume: Optional[float] = None
-    fundamental: Optional[float] = None
-    sentiment: Optional[float] = None
-    crowd: Optional[float] = None
+def _compute_scores(points: List[DataPoint]) -> Dict[str, Any]:
+    """
+    Example scoring layer: combines (fundamental, sentiment, crowd) into a simple score.
+    This keeps the endpoint stable; you can replace logic later without breaking the API.
+    """
+    if not points:
+        return {"score": 0.0, "components": {"fundamental": 0.0, "sentiment": 0.0, "crowd": 0.0}}
+
+    # Take latest non-null values
+    latest = points[-1]
+    f = float(latest.fundamental) if latest.fundamental is not None else 0.0
+    s = float(latest.sentiment) if latest.sentiment is not None else 0.0
+    c = float(latest.crowd) if latest.crowd is not None else 0.0
+
+    # Normalize fundamental loosely (avoid explode)
+    # If you have a defined scale later, replace this.
+    f_norm = math.tanh(f / 10.0)  # keeps it in (-1..1)
+
+    # Weighted sum
+    score = 0.50 * f_norm + 0.30 * s + 0.20 * c
+
+    return {
+        "score": float(score),
+        "components": {
+            "fundamental": float(f_norm),
+            "sentiment": float(s),
+            "crowd": float(c),
+        },
+    }
 
 
-class RunAllRequest(BaseModel):
-    data: List[DataPoint]
-    include_backtest: bool = Field(default=True)
-    include_backtest_summary: bool = Field(default=True)
-    include_equity_curve: bool = Field(default=False)  # big JSON, default off
-    include_returns: bool = Field(default=False)       # big JSON, default off
-
-
-class RunBacktestRequest(BaseModel):
-    data: List[DataPoint]
-    include_equity_curve: bool = Field(default=False)
-    include_returns: bool = Field(default=False)
-
-
-class RunScoresRequest(BaseModel):
-    data: List[DataPoint]
-
-
-# ----------------------------
-# App
-# ----------------------------
-app = FastAPI(title="FTIP System API")
-system = FTIPSystem()
-
+# -----------------------------
+# Routes
+# -----------------------------
 
 @app.get("/")
-def root():
-    # IMPORTANT: keep this list accurate (helps you sanity-check deployments)
+def root() -> Dict[str, Any]:
     return {
-        "name": "FTIP System API",
+        "name": APP_NAME,
         "status": "ok",
-        "endpoints": ["/health", "/version", "/run_all", "/run_backtest", "/run_scores", "/docs"],
+        "endpoints": PUBLIC_ENDPOINTS,
     }
 
 
 @app.get("/health")
-def health():
+def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/version")
-def version():
+def version() -> Dict[str, str]:
     return {
-        "railway_git_commit_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown",
-        "railway_environment": os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_ENV") or "unknown",
-    }
-
-
-def _df_from_points(points: List[DataPoint]) -> pd.DataFrame:
-    df = pd.DataFrame([p.model_dump() for p in points])
-    return df.set_index("timestamp")
-
-
-@app.post("/run_all")
-def run_all(req: RunAllRequest):
-    df = _df_from_points(req.data)
-    results = system.run_all(df)
-
-    payload: Dict[str, Any] = {}
-
-    for k in ["features", "labels", "scores", "structural_alpha", "superfactor"]:
-        if k in results:
-            payload[k] = _to_serializable(results[k])
-
-    backtest = results.get("backtest")
-
-    if req.include_backtest:
-        payload["backtest"] = _to_serializable(backtest)
-
-    if req.include_backtest_summary:
-        payload["backtest_summary"] = _build_backtest_summary(
-            backtest,
-            include_equity_curve=req.include_equity_curve,
-            include_returns=req.include_returns,
-        )
-
-    return payload
-
-
-@app.post("/run_backtest")
-def run_backtest(req: RunBacktestRequest):
-    df = _df_from_points(req.data)
-    results = system.run_all(df)
-    backtest = results.get("backtest")
-
-    return {
-        "backtest_summary": _build_backtest_summary(
-            backtest,
-            include_equity_curve=req.include_equity_curve,
-            include_returns=req.include_returns,
-        )
+        "railway_git_commit_sha": RAILWAY_GIT_SHA,
+        "railway_environment": RAILWAY_ENV,
     }
 
 
 @app.post("/run_scores")
-def run_scores(req: RunScoresRequest):
-    df = _df_from_points(req.data)
-    results = system.run_all(df)
+def run_scores(payload: ScoresRequest) -> Dict[str, Any]:
+    scores = _compute_scores(payload.data)
+    return {"scores": scores}
 
-    out: Dict[str, Any] = {}
-    if "scores" in results:
-        out["scores"] = _to_serializable(results["scores"])
-    if "features" in results:
-        out["features"] = _to_serializable(results["features"])
-    return out
+
+@app.post("/run_backtest")
+def run_backtest(payload: BacktestRequest) -> Dict[str, Any]:
+    # Normalize dates + close series
+    dates = [_parse_iso_to_date(p.timestamp) for p in payload.data]
+    closes = [float(p.close) for p in payload.data]
+
+    summary = _compute_backtest_summary(
+        closes=closes,
+        dates=dates,
+        include_equity_curve=payload.include_equity_curve,
+        include_returns=payload.include_returns,
+    )
+
+    # IMPORTANT: no "raw" wrapper, and series are only included if flags are True
+    return {"backtest_summary": summary}
+
+
+@app.post("/run_all")
+def run_all(payload: BacktestRequest) -> Dict[str, Any]:
+    # Reuse the same request structure for convenience
+    dates = [_parse_iso_to_date(p.timestamp) for p in payload.data]
+    closes = [float(p.close) for p in payload.data]
+
+    scores = _compute_scores(payload.data)
+    summary = _compute_backtest_summary(
+        closes=closes,
+        dates=dates,
+        include_equity_curve=payload.include_equity_curve,
+        include_returns=payload.include_returns,
+    )
+
+    return {
+        "scores": scores,
+        "backtest_summary": summary,
+    }
 
