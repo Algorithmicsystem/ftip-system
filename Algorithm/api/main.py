@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 import math
+import os
 
 import pandas as pd
 from fastapi import FastAPI
@@ -12,30 +13,18 @@ from ftip.system import FTIPSystem
 # JSON-safety helpers
 # ---------------------------
 def _clean_value(v: Any):
-    """
-    Make a single value JSON-safe:
-    - Convert NaN / +inf / -inf to None
-    - Keep ints/strings/bools/None as-is
-    """
     if v is None:
         return None
-
-    # bool is a subclass of int, but that's fine here
     if isinstance(v, (int, str, bool)):
         return v
-
     try:
         f = float(v)
     except (TypeError, ValueError):
         return v
-
-    if math.isfinite(f):
-        return f
-    return None
+    return f if math.isfinite(f) else None
 
 
 def _to_serializable(obj: Any):
-    """Convert pandas objects and nested types to JSON-safe Python structures."""
     if isinstance(obj, pd.Series):
         return {
             "index": [str(i) for i in obj.index],
@@ -62,11 +51,6 @@ def _to_serializable(obj: Any):
 
 
 def _backtest_summary(backtest_obj: Any):
-    """
-    Defensive summary:
-    - If backtest is dict and contains stats, extract common keys
-    - Otherwise serialize whatever exists
-    """
     if backtest_obj is None:
         return None
 
@@ -112,7 +96,7 @@ def root():
     return {
         "name": "FTIP System API",
         "status": "ok",
-        "endpoints": ["/health", "/run_all", "/docs"],
+        "endpoints": ["/health", "/version", "/run_all", "/docs"],
     }
 
 
@@ -121,15 +105,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/version")
+def version():
+    # Railway typically provides this env var; if not, you still get “unknown”
+    return {
+        "railway_git_commit_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA", "unknown"),
+        "railway_environment": os.getenv("RAILWAY_ENVIRONMENT", "unknown"),
+    }
+
+
 @app.post("/run_all")
 def run_all(req: RunAllRequest):
-    # Build DataFrame from request
     df = pd.DataFrame([row.model_dump() for row in req.data]).set_index("timestamp")
 
-    # Run the system
-    results = system.run_all(df)  # expected dict of Series/DataFrames/scalars/etc.
+    results = system.run_all(df)
 
-    # Convert to JSON-safe output
     payload = {k: _to_serializable(v) for k, v in results.items()}
     payload["backtest_summary"] = _backtest_summary(results.get("backtest"))
 
