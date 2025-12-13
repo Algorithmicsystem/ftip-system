@@ -1,106 +1,53 @@
-from typing import Any, Dict, List, Optional
+from typing import List, Optional, Dict, Any
 import math
-
 import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 from ftip.system import FTIPSystem
 
+# ----------------------------
+# Helpers for JSON safety
+# ----------------------------
 
-# ---------- Helpers for cleaning / summarizing results ----------
-
-def _sanitize_scalar(val: Any) -> Optional[float]:
-    """Make sure floats are JSON-safe (no NaN/inf)."""
-    if isinstance(val, (float, int)) and not isinstance(val, bool):
-        if math.isfinite(val):
-            return float(val)
-        return None
-    return None
-
-
-def build_summary(result: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract a compact performance summary from the backtest block.
-
-    This is defensive: if the expected keys aren't there, we just
-    return an empty dict instead of crashing.
-    """
-    summary: Dict[str, Any] = {}
-
-    backtest = result.get("backtest")
-    if not isinstance(backtest, dict):
-        return summary
-
-    # If there's a nested stats dict, use that, otherwise use backtest itself.
-    stats = backtest.get("stats", backtest)
-    if not isinstance(stats, dict):
-        return summary
-
-    # Common metrics we care about
-    for key in ["cagr", "sharpe", "max_drawdown", "volatility", "num_trades", "win_rate"]:
-        if key in stats:
-            summary[key] = _sanitize_scalar(stats[key])
-
-    return summary
-
-
-def _clean_value(v: Any) -> Any:
-    """
-    Make a single value JSON-safe:
-    - Convert NaN / +inf / -inf to None
-    - Leave normal numbers & strings as-is
-    """
+def _clean_value(v):
     if v is None:
         return None
-
-    if isinstance(v, (str, bool)):
+    if isinstance(v, (bool, str)):
         return v
-
-    # ints / floats
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
+    try:
         f = float(v)
-        if math.isfinite(f):
-            return f
+    except (TypeError, ValueError):
         return None
-
-    # Anything else (e.g. objects we don't want to try to cast)
-    return v
+    return f if math.isfinite(f) else None
 
 
-def _to_serializable(obj: Any) -> Any:
-    """Convert pandas objects (and nested structures) to plain Python types for JSON."""
-    # Pandas Series -> {index, values}
+def _to_serializable(obj):
     if isinstance(obj, pd.Series):
         return {
             "index": [str(i) for i in obj.index],
-            "values": [_clean_value(v) for v in obj.to_list()],
+            "values": [_clean_value(v) for v in obj.tolist()],
         }
 
-    # Pandas DataFrame -> {index, columns, data}
     if isinstance(obj, pd.DataFrame):
-        data: List[List[Any]] = []
-        for row in obj.to_numpy().tolist():
-            data.append([_clean_value(v) for v in row])
         return {
             "index": [str(i) for i in obj.index],
             "columns": [str(c) for c in obj.columns],
-            "data": data,
+            "data": [[_clean_value(v) for v in row] for row in obj.to_numpy()],
         }
 
-    # Dicts: recurse into values
     if isinstance(obj, dict):
         return {k: _to_serializable(v) for k, v in obj.items()}
 
-    # Lists / tuples: recurse element-wise
-    if isinstance(obj, (list, tuple)):
+    if isinstance(obj, list):
         return [_to_serializable(v) for v in obj]
 
-    # Fallback scalar
     return _clean_value(obj)
 
 
-# ---------- Request models ----------
+# ----------------------------
+# API models
+# ----------------------------
 
 class DataPoint(BaseModel):
     timestamp: str
@@ -115,21 +62,12 @@ class RunAllRequest(BaseModel):
     data: List[DataPoint]
 
 
-# ---------- FastAPI app + system ----------
+# ----------------------------
+# FastAPI app
+# ----------------------------
 
 app = FastAPI(title="FTIP System API")
 system = FTIPSystem()
-
-
-@app.get("/")
-def root():
-    """
-    Simple root endpoint so Railway/health checks get 200 on '/'.
-    """
-    return {
-        "status": "ok",
-        "message": "FTIP System API is running. See /docs for interactive UI.",
-    }
 
 
 @app.get("/health")
@@ -138,19 +76,10 @@ def health():
 
 
 @app.post("/run_all")
-def run_all(req: RunAllRequest) -> Dict[str, Any]:
-    # Build DataFrame from request
+def run_all(req: RunAllRequest):
     df = pd.DataFrame([row.model_dump() for row in req.data])
     df = df.set_index("timestamp")
 
-    # Run the full system pipeline
-    raw_results: Dict[str, Any] = system.run_all(df)
-
-    # Convert everything to JSON-safe types
-    serializable = {k: _to_serializable(v) for k, v in raw_results.items()}
-
-    # Add a compact performance summary (if backtest stats are present)
-    serializable["summary"] = build_summary(raw_results)
-
-    return serializable
+    results = system.run_all(df)
+    return {k: _to_serializable(v) for k, v in results.items()}
 
