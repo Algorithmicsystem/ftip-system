@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
+from collections.abc import Mapping
 import math
 import os
+
 import pandas as pd
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
@@ -14,11 +16,6 @@ from ftip.system import FTIPSystem
 # JSON-safety helpers
 # ----------------------------
 def _clean_value(v: Any) -> Any:
-    """
-    Make a single value JSON-safe:
-    - Convert NaN / +inf / -inf to None
-    - Leave normal numbers & strings as-is
-    """
     if v is None:
         return None
 
@@ -30,9 +27,7 @@ def _clean_value(v: Any) -> Any:
     except (TypeError, ValueError):
         return v
 
-    if math.isfinite(f):
-        return f
-    return None
+    return f if math.isfinite(f) else None
 
 
 def _to_serializable(obj: Any) -> Any:
@@ -53,7 +48,8 @@ def _to_serializable(obj: Any) -> Any:
             "data": data,
         }
 
-    if isinstance(obj, dict):
+    # IMPORTANT: treat any dict-like object as mapping (not only dict)
+    if isinstance(obj, Mapping):
         return {str(k): _to_serializable(v) for k, v in obj.items()}
 
     if isinstance(obj, list):
@@ -62,45 +58,62 @@ def _to_serializable(obj: Any) -> Any:
     return _clean_value(obj)
 
 
-def _build_backtest_summary(backtest: Any, include_equity_curve: bool, include_returns: bool) -> Optional[Dict[str, Any]]:
+def _build_backtest_summary(
+    backtest: Any,
+    include_equity_curve: bool,
+    include_returns: bool,
+) -> Optional[Dict[str, Any]]:
     """
-    Create a compact, stable summary block from whatever FTIP returns.
-    Your FTIP backtest may be:
-      - dict with 'equity_curve' and 'returns'
-      - dict with nested stats
-      - None
-    We normalize into a consistent summary payload.
+    Normalizes whatever FTIP returns into a stable summary.
+    If equity/returns are not requested, we keep output small.
     """
     if backtest is None:
         return None
 
-    if not isinstance(backtest, dict):
-        # Unknown structure; serialize safely
+    # Accept dict-like objects
+    if isinstance(backtest, Mapping):
+        bt: Dict[str, Any] = dict(backtest)  # normalize to real dict
+    else:
+        # Unknown object — safest is to serialize raw
         return {"raw": _to_serializable(backtest)}
 
     summary: Dict[str, Any] = {}
 
-    # If direct keys exist
-    eq = backtest.get("equity_curve")
-    rets = backtest.get("returns")
+    # pull common metrics directly if present
+    for key in [
+        "total_return",
+        "annual_return",
+        "cagr",
+        "sharpe",
+        "max_drawdown",
+        "volatility",
+        "num_trades",
+        "win_rate",
+    ]:
+        if key in bt:
+            summary[key] = _clean_value(bt.get(key))
 
-    # Common stats keys we try to extract if present anywhere
-    for key in ["total_return", "annual_return", "cagr", "sharpe", "max_drawdown", "volatility", "num_trades", "win_rate"]:
-        if key in backtest:
-            summary[key] = _clean_value(backtest.get(key))
-
-    # nested stats dict support
-    stats = backtest.get("stats")
-    if isinstance(stats, dict):
-        for key in ["total_return", "annual_return", "cagr", "sharpe", "max_drawdown", "volatility", "num_trades", "win_rate"]:
+    # nested stats support
+    stats = bt.get("stats")
+    if isinstance(stats, Mapping):
+        for key in [
+            "total_return",
+            "annual_return",
+            "cagr",
+            "sharpe",
+            "max_drawdown",
+            "volatility",
+            "num_trades",
+            "win_rate",
+        ]:
             if key in stats and key not in summary:
                 summary[key] = _clean_value(stats.get(key))
 
-    # include heavy series only if requested
-    if include_equity_curve:
-        summary["equity_curve"] = _to_serializable(eq) if eq is not None else None
-    if include_returns:
-        summary["returns"] = _to_serializable(rets) if rets is not None else None
+    # heavy series only if requested
+    if include_equity_curve and "equity_curve" in bt:
+        summary["equity_curve"] = _to_serializable(bt.get("equity_curve"))
+    if include_returns and "returns" in bt:
+        summary["returns"] = _to_serializable(bt.get("returns"))
 
     return summary
 
@@ -119,7 +132,6 @@ class DataPoint(BaseModel):
 
 class RunAllRequest(BaseModel):
     data: List[DataPoint]
-    # payload control flags (important for web)
     include_backtest: bool = Field(default=True)
     include_backtest_summary: bool = Field(default=True)
     include_equity_curve: bool = Field(default=False)  # big JSON, default off
@@ -145,6 +157,7 @@ system = FTIPSystem()
 
 @app.get("/")
 def root():
+    # IMPORTANT: keep this list accurate (helps you sanity-check deployments)
     return {
         "name": "FTIP System API",
         "status": "ok",
@@ -159,7 +172,6 @@ def health():
 
 @app.get("/version")
 def version():
-    # Railway sets RAILWAY_GIT_COMMIT_SHA automatically (or similar). We also fallback to env vars.
     return {
         "railway_git_commit_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_COMMIT_SHA") or "unknown",
         "railway_environment": os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_ENV") or "unknown",
@@ -168,25 +180,20 @@ def version():
 
 def _df_from_points(points: List[DataPoint]) -> pd.DataFrame:
     df = pd.DataFrame([p.model_dump() for p in points])
-    df = df.set_index("timestamp")
-    return df
+    return df.set_index("timestamp")
 
 
 @app.post("/run_all")
 def run_all(req: RunAllRequest):
     df = _df_from_points(req.data)
+    results = system.run_all(df)
 
-    results = system.run_all(df)  # dict
-
-    # Always return the core blocks if present
     payload: Dict[str, Any] = {}
 
-    # Serialize core keys if they exist
     for k in ["features", "labels", "scores", "structural_alpha", "superfactor"]:
         if k in results:
             payload[k] = _to_serializable(results[k])
 
-    # backtest handling
     backtest = results.get("backtest")
 
     if req.include_backtest:
@@ -204,9 +211,6 @@ def run_all(req: RunAllRequest):
 
 @app.post("/run_backtest")
 def run_backtest(req: RunBacktestRequest):
-    """
-    Focused endpoint: only backtest summary (optionally include equity_curve/returns).
-    """
     df = _df_from_points(req.data)
     results = system.run_all(df)
     backtest = results.get("backtest")
@@ -222,9 +226,6 @@ def run_backtest(req: RunBacktestRequest):
 
 @app.post("/run_scores")
 def run_scores(req: RunScoresRequest):
-    """
-    Focused endpoint: only scores (smaller response, ideal for frontend calls).
-    """
     df = _df_from_points(req.data)
     results = system.run_all(df)
 
