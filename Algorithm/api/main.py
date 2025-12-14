@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import math
 import datetime as dt
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
@@ -70,6 +70,17 @@ class BacktestSummary(BaseModel):
 
     equity_curve: Optional[Dict[str, float]] = None
     returns: Optional[Dict[str, float]] = None
+
+
+class WalkForwardRequest(BaseModel):
+    symbol: str
+    from_date: str  # YYYY-MM-DD
+    to_date: str    # YYYY-MM-DD
+    lookback: int = 252
+    horizons: List[int] = [5, 21, 63]  # trading bars
+    # Optional evaluation window inside [from_date, to_date]
+    eval_start: Optional[str] = None   # YYYY-MM-DD
+    eval_end: Optional[str] = None     # YYYY-MM-DD
 
 
 # ------------------------------------------------------------------------------
@@ -285,10 +296,6 @@ def _detect_regime(
     vol_ann: float,
     trend_strength: Optional[float],
 ) -> str:
-    # Simple + robust regime detector
-    # - HIGH_VOL if annualized vol above threshold
-    # - TRENDING if SMA spread strong
-    # - else CHOPPY
     if vol_ann >= 0.45:
         return "HIGH_VOL"
     if trend_strength is not None and abs(trend_strength) >= 0.05:
@@ -297,12 +304,11 @@ def _detect_regime(
 
 
 def _thresholds_for_regime(regime: str) -> Dict[str, float]:
-    # Dynamic thresholds per regime
     if regime == "HIGH_VOL":
         return {"buy": 0.45, "sell": -0.45}
     if regime == "TRENDING":
         return {"buy": 0.20, "sell": -0.20}
-    return {"buy": 0.30, "sell": -0.30}  # CHOPPY default
+    return {"buy": 0.30, "sell": -0.30}
 
 
 def compute_signal_core(
@@ -310,13 +316,8 @@ def compute_signal_core(
     as_of: str,
     lookback: int = 252,
 ) -> Dict[str, Any]:
-    """
-    Computes a signal for a given as_of date using only candles <= as_of.
-    Returns a fully-explained dict (features + regime + thresholds + score + signal).
-    """
-    sym_notes: List[str] = []
+    notes: List[str] = []
 
-    # Filter <= as_of (candles expected already sorted asc; we’ll be safe)
     cutoff = dt.date.fromisoformat(as_of)
     usable = [c for c in candles if dt.date.fromisoformat(c.timestamp) <= cutoff]
     usable.sort(key=lambda c: c.timestamp)
@@ -329,7 +330,7 @@ def compute_signal_core(
 
     effective_lookback = min(lookback, len(usable))
     if effective_lookback < lookback:
-        sym_notes.append(
+        notes.append(
             f"Requested lookback={lookback}, but only {len(usable)} bars available by {as_of}. "
             f"Using effective_lookback={effective_lookback}."
         )
@@ -337,16 +338,12 @@ def compute_signal_core(
     window = usable[-effective_lookback:]
     closes = [c.close for c in window]
     vols = [float(c.volume) if c.volume is not None else float("nan") for c in window]
-    # Clean volumes (fallback to 0 if all missing)
     vol_clean: List[float] = []
     for v in vols:
-        if v != v:  # NaN
-            vol_clean.append(0.0)
-        else:
-            vol_clean.append(float(v))
+        vol_clean.append(0.0 if v != v else float(v))  # NaN -> 0
 
     rets = _pct_change(closes)
-    rets_1 = rets[1:]  # exclude 0.0 first
+    rets_1 = rets[1:]
 
     mom_5 = _momentum(closes, 5) or 0.0
     mom_21 = _momentum(closes, 21) or 0.0
@@ -371,11 +368,8 @@ def compute_signal_core(
     regime = _detect_regime(closes, rets_1, vol_ann, trend_sma20_50)
     thresholds = _thresholds_for_regime(regime)
 
-    # Score: weighted blend (kept intentionally simple, interpretable)
-    # Normalize RSI around 50
-    rsi_component = (rsi14_val - 50.0) / 50.0  # ~[-1, +1]
-    # Volume zscore is noisy: clip it
-    volz_component = max(-2.0, min(2.0, volume_z20_val)) / 2.0  # [-1, +1]
+    rsi_component = (rsi14_val - 50.0) / 50.0
+    volz_component = max(-2.0, min(2.0, volume_z20_val)) / 2.0
 
     score = (
         0.25 * mom_5 +
@@ -385,38 +379,33 @@ def compute_signal_core(
         0.10 * rsi_component +
         0.05 * volz_component
     )
-
-    # Clamp score to [-1, +1] for stability
     score = max(-1.0, min(1.0, float(score)))
 
-    # Confidence: base on absolute score, reduced in HIGH_VOL
     confidence = abs(score)
     if regime == "HIGH_VOL":
         confidence *= 0.65
-        sym_notes.append("Confidence reduced due to HIGH_VOL regime.")
+        notes.append("Confidence reduced due to HIGH_VOL regime.")
 
-    # Decide signal
     signal = "HOLD"
     if score >= thresholds["buy"]:
         signal = "BUY"
     elif score <= thresholds["sell"]:
         signal = "SELL"
 
-    # Notes for interpretability
     if trend_sma20_50 > 0:
-        sym_notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
+        notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
     elif trend_sma20_50 < 0:
-        sym_notes.append("Short-term trend (SMA20 vs SMA50) is negative.")
+        notes.append("Short-term trend (SMA20 vs SMA50) is negative.")
 
     if vol_ann >= 0.45:
-        sym_notes.append("Volatility is elevated; treat signal with caution.")
+        notes.append("Volatility is elevated; treat signal with caution.")
 
     if regime == "TRENDING":
-        sym_notes.append("Regime: TRENDING (trend strength strong).")
+        notes.append("Regime: TRENDING (trend strength strong).")
     elif regime == "CHOPPY":
-        sym_notes.append("Regime: CHOPPY (trend not strong; signals are less reliable).")
+        notes.append("Regime: CHOPPY (trend not strong; signals are less reliable).")
     else:
-        sym_notes.append("Regime: HIGH_VOL (volatility high).")
+        notes.append("Regime: HIGH_VOL (volatility high).")
 
     features = {
         "mom_5": float(mom_5),
@@ -439,12 +428,12 @@ def compute_signal_core(
         "signal": signal,
         "confidence": float(confidence),
         "features": features,
-        "notes": sym_notes,
+        "notes": notes,
     }
 
 
 # ------------------------------------------------------------------------------
-# STEP 1 (NEW): Walk-forward validation core (pure python, no endpoint yet)
+# Walk-forward validation core
 # ------------------------------------------------------------------------------
 
 def walk_forward_core(
@@ -454,16 +443,6 @@ def walk_forward_core(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Walk-forward evaluation:
-    For each day t in [start_date, end_date], compute signal using only data <= t,
-    then compute forward returns for given horizons: (close[t+h]/close[t] - 1).
-    Returns summary + sample rows.
-
-    IMPORTANT:
-    - candles must be daily, ascending by timestamp (we sort anyway)
-    - horizons are in trading bars (days in the dataset), not calendar days
-    """
     if not candles or len(candles) < 80:
         raise ValueError("Need more candles for walk-forward evaluation (recommend >= ~80).")
 
@@ -473,49 +452,32 @@ def walk_forward_core(
     horizons = sorted(list(set(int(h) for h in horizons if int(h) > 0)))
     max_h = max(horizons)
 
-    # Sort candles asc
     candles = sorted(candles, key=lambda c: c.timestamp)
 
-    # Apply date filters (inclusive)
-    if start_date:
-        sd = dt.date.fromisoformat(start_date)
-    else:
-        sd = dt.date.fromisoformat(candles[0].timestamp)
+    sd = dt.date.fromisoformat(start_date) if start_date else dt.date.fromisoformat(candles[0].timestamp)
+    ed = dt.date.fromisoformat(end_date) if end_date else dt.date.fromisoformat(candles[-1].timestamp)
 
-    if end_date:
-        ed = dt.date.fromisoformat(end_date)
-    else:
-        ed = dt.date.fromisoformat(candles[-1].timestamp)
-
-    # Build index of timestamps
     dates = [dt.date.fromisoformat(c.timestamp) for c in candles]
 
-    # We need enough past for at least 30-bar signal quality + enough forward for max_h
-    rows: List[Dict[str, Any]] = []
-
-    # We’ll start at index where we have at least min(lookback, i+1) >= 30
     MIN_BARS_FOR_SIGNAL = 30
+    rows: List[Dict[str, Any]] = []
 
     for i in range(len(candles)):
         day = dates[i]
         if day < sd or day > ed:
             continue
 
-        # must have enough history
         if (i + 1) < MIN_BARS_FOR_SIGNAL:
             continue
 
-        # must have enough future bars for all horizons
         if i + max_h >= len(candles):
             continue
 
         as_of = candles[i].timestamp
 
-        # compute signal using only candles <= as_of
         try:
             sig = compute_signal_core(candles[: i + 1], as_of=as_of, lookback=lookback)
         except HTTPException:
-            # should be rare given MIN_BARS_FOR_SIGNAL, but safe
             continue
 
         base_close = candles[i].close
@@ -535,7 +497,8 @@ def walk_forward_core(
 
     if not rows:
         return {
-            "rows": [],
+            "rows_sample": [],
+            "row_count": 0,
             "summary": {},
             "by_regime": {},
             "by_confidence_bucket": {},
@@ -548,7 +511,6 @@ def walk_forward_core(
             },
         }
 
-    # Aggregations
     def _bucket(conf: float) -> str:
         if conf >= 0.75:
             return "0.75-1.00"
@@ -604,7 +566,6 @@ def walk_forward_core(
     by_regime = {rg: {k: _finalize(v) for k, v in per.items()} for rg, per in by_regime.items()}
     by_bucket = {b: {k: _finalize(v) for k, v in per.items()} for b, per in by_bucket.items()}
 
-    # Keep payload small: return sample rows (head/tail)
     head_n = 10
     tail_n = 10
     sample_rows = rows[:head_n] + (rows[-tail_n:] if len(rows) > head_n else [])
@@ -643,6 +604,7 @@ def root() -> Dict[str, Any]:
             "/run_backtest",
             "/run_scores",
             "/signal",
+            "/walk_forward",
             "/market/massive/bars",
             "/storage/massive/s3_config",
             "/docs",
@@ -709,8 +671,6 @@ def signal(
     as_of: str = Query(..., description="YYYY-MM-DD"),
     lookback: int = Query(252, ge=30, le=5000),
 ) -> Dict[str, Any]:
-    # Fetch a wider range than lookback to be safe (calendar vs trading days)
-    # We'll use ~3x lookback as a simple buffer.
     as_of_d = dt.date.fromisoformat(as_of)
     from_d = as_of_d - dt.timedelta(days=max(lookback * 3, 365))
     candles = massive_fetch_daily_bars(symbol, from_d.isoformat(), as_of_d.isoformat())
@@ -718,6 +678,39 @@ def signal(
     out = compute_signal_core(candles, as_of=as_of, lookback=lookback)
     out["symbol"] = symbol.upper().strip()
     return out
+
+
+@app.post("/walk_forward")
+def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
+    sym = req.symbol.upper().strip()
+
+    if req.lookback < 30:
+        raise HTTPException(status_code=400, detail="lookback must be >= 30")
+    if not req.horizons:
+        raise HTTPException(status_code=400, detail="horizons must be non-empty")
+    if any(int(h) <= 0 for h in req.horizons):
+        raise HTTPException(status_code=400, detail="all horizons must be positive integers")
+
+    # Fetch exactly the requested range from Polygon
+    candles = massive_fetch_daily_bars(sym, req.from_date, req.to_date)
+
+    # Optional evaluation sub-window
+    start = req.eval_start or req.from_date
+    end = req.eval_end or req.to_date
+
+    try:
+        result = walk_forward_core(
+            candles=candles,
+            lookback=int(req.lookback),
+            horizons=[int(h) for h in req.horizons],
+            start_date=start,
+            end_date=end,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    result["symbol"] = sym
+    return result
 
 
 @app.post("/run_scores")
