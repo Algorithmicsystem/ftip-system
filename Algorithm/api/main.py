@@ -35,13 +35,11 @@ def _railway_env() -> str:
     return _env("RAILWAY_ENVIRONMENT", "unknown") or "unknown"
 
 
-def _model_dump(m: BaseModel, *, exclude_none: bool = True) -> Dict[str, Any]:
-    """
-    Compatibility helper: works on Pydantic v2 (model_dump) and v1 (dict).
-    """
-    if hasattr(m, "model_dump"):
-        return m.model_dump(exclude_none=exclude_none)  # type: ignore[attr-defined]
-    return m.dict(exclude_none=exclude_none)  # type: ignore[call-arg]
+def _parse_date(s: str) -> dt.date:
+    try:
+        return dt.date.fromisoformat(s)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid date '{s}'. Use YYYY-MM-DD.")
 
 
 # ------------------------------------------------------------------------------
@@ -82,28 +80,17 @@ class BacktestSummary(BaseModel):
     returns: Optional[Dict[str, float]] = None
 
 
-class SignalResponse(BaseModel):
-    symbol: str
-    as_of: str
-    lookback: int
-
-    score: float
-    signal: str  # "BUY", "SELL", "HOLD"
-    confidence: float  # 0..1
-
-    features: Dict[str, float]
-    notes: List[str]
-
-
 # ------------------------------------------------------------------------------
-# Massive (Polygon legacy) REST API client
+# Massive (Polygon-compatible) REST API client
 # ------------------------------------------------------------------------------
 
-# Massive is the new brand name; keep POLYGON_* envs as backward-compatible fallbacks.
+# NOTE:
+# - For Polygon, set MARKETDATA_BASE_URL = "https://api.polygon.io"
+# - Your code supports MASSIVE_* and POLYGON_* env var names.
 MARKETDATA_BASE_URL = (
     _env("MASSIVE_BASE_URL")
     or _env("POLYGON_BASE_URL")
-    or "https://api.massive.com"
+    or "https://api.polygon.io"
 )
 
 MARKETDATA_API_KEY = _env("MASSIVE_API_KEY") or _env("POLYGON_API_KEY")
@@ -121,9 +108,8 @@ def _require_marketdata_key() -> str:
 
 def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[Candle]:
     """
-    Aggregates (Daily):
+    Polygon-compatible Aggregates (Daily):
       GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}?adjusted=true&sort=asc&limit=50000&apiKey=...
-    Works on Massive, and still works on Polygon legacy domains.
     """
     api_key = _require_marketdata_key()
     sym = symbol.upper().strip()
@@ -151,8 +137,7 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 
     candles: List[Candle] = []
     for r in results:
-        # aggregate fields:
-        # t = timestamp in ms, c = close, v = volume
+        # Polygon agg fields: t (ms), c (close), v (volume)
         t_ms = r.get("t")
         c = r.get("c")
         v = r.get("v")
@@ -167,8 +152,7 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 
 
 # ------------------------------------------------------------------------------
-# Massive Flat Files (S3-compatible) config (keys come from env vars)
-# NOTE: You are NOT using these in code yet; this just stores them properly.
+# Massive Flat Files (S3-compatible) config (not used yet; just exposed safely)
 # ------------------------------------------------------------------------------
 
 MASSIVE_S3_ENDPOINT = _env("MASSIVE_S3_ENDPOINT", "https://files.massive.com") or "https://files.massive.com"
@@ -177,7 +161,7 @@ MASSIVE_S3_SECRET_ACCESS_KEY = _env("MASSIVE_S3_SECRET_ACCESS_KEY")
 
 
 # ------------------------------------------------------------------------------
-# Math helpers
+# Helpers: math / stats / indicators
 # ------------------------------------------------------------------------------
 
 def _pct_change(series: List[float]) -> List[float]:
@@ -192,20 +176,28 @@ def _pct_change(series: List[float]) -> List[float]:
     return out
 
 
-def _mean(values: List[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
-
-
 def _std(values: List[float]) -> float:
     if len(values) < 2:
         return 0.0
-    mu = _mean(values)
+    mu = sum(values) / len(values)
     var = sum((x - mu) ** 2 for x in values) / (len(values) - 1)
     return math.sqrt(var)
 
 
+def _mean(values: List[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
+def _sma(values: List[float], window: int) -> Optional[float]:
+    if window <= 0 or len(values) < window:
+        return None
+    return sum(values[-window:]) / window
+
+
 def _max_drawdown(equity: List[float]) -> float:
-    peak = equity[0] if equity else 1.0
+    if not equity:
+        return 0.0
+    peak = equity[0]
     mdd = 0.0
     for x in equity:
         if x > peak:
@@ -216,43 +208,60 @@ def _max_drawdown(equity: List[float]) -> float:
     return mdd
 
 
+def _rsi(values: List[float], period: int = 14) -> Optional[float]:
+    # Classic Wilder RSI
+    if period <= 0 or len(values) < period + 1:
+        return None
+    gains = []
+    losses = []
+    for i in range(1, period + 1):
+        chg = values[i] - values[i - 1]
+        gains.append(max(0.0, chg))
+        losses.append(max(0.0, -chg))
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    # Continue smoothing
+    for i in range(period + 1, len(values)):
+        chg = values[i] - values[i - 1]
+        gain = max(0.0, chg)
+        loss = max(0.0, -chg)
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _zscore_last(values: List[float], window: int) -> Optional[float]:
+    if window <= 1 or len(values) < window:
+        return None
+    w = values[-window:]
+    mu = _mean(w)
+    sd = _std(w)
+    if sd == 0:
+        return 0.0
+    return (values[-1] - mu) / sd
+
+
+def _safe_momentum(closes: List[float], window: int) -> Optional[float]:
+    # momentum over window days: close/close[-window] - 1
+    if window <= 0 or len(closes) <= window:
+        return None
+    base = closes[-(window + 1)]
+    if base == 0:
+        return None
+    return (closes[-1] / base) - 1.0
+
+
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
-def _safe_div(a: float, b: float, default: float = 0.0) -> float:
-    return a / b if b not in (0.0, -0.0) else default
-
-
-def _parse_date(s: str) -> dt.date:
-    try:
-        return dt.date.fromisoformat(s)
-    except Exception:
-        raise HTTPException(status_code=400, detail=f"Invalid date '{s}'. Use YYYY-MM-DD.")
-
-
-def _date_to_str(d: dt.date) -> str:
-    return d.isoformat()
-
-
-def _slice_as_of(candles: List[Candle], as_of: str) -> List[Candle]:
-    """
-    Candles are daily ISO strings. Keep <= as_of.
-    """
-    asof = _parse_date(as_of)
-    out: List[Candle] = []
-    for c in candles:
-        try:
-            d = _parse_date(c.timestamp)
-        except Exception:
-            continue
-        if d <= asof:
-            out.append(c)
-    return out
-
-
 # ------------------------------------------------------------------------------
-# Simple backtest engine (buy-and-hold placeholder)
+# Backtest core (placeholder buy-and-hold)
 # ------------------------------------------------------------------------------
 
 def run_backtest_core(candles: List[Candle], include_equity: bool, include_returns: bool) -> BacktestSummary:
@@ -265,9 +274,7 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
         equity.append(equity[-1] * (1.0 + r))
 
     total_return = equity[-1] - 1.0
-
-    # Annualization (assume ~252 trading days)
-    n = max(1, len(rets) - 1)
+    n = max(1, len(rets) - 1)  # number of return periods
     ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
 
     vol = _std(rets[1:]) * math.sqrt(252.0) if len(rets) > 2 else 0.0
@@ -287,163 +294,220 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
 
 
 # ------------------------------------------------------------------------------
-# Feature engineering + scoring engine (signal-only; no broker execution)
+# Signal engine: features -> regime -> score -> signal
 # ------------------------------------------------------------------------------
 
-def _sma(values: List[float], window: int) -> float:
-    if window <= 0 or len(values) < window:
-        return values[-1] if values else 0.0
-    return _mean(values[-window:])
-
-
-def _rsi_like(returns: List[float], window: int = 14) -> float:
-    """
-    Simple RSI-style oscillator in range [0,100].
-    Uses returns, not price deltas. Good enough as a baseline.
-    """
-    if len(returns) < window + 1:
-        return 50.0
-    rs = returns[-window:]
-    gains = [r for r in rs if r > 0]
-    losses = [-r for r in rs if r < 0]
-    avg_gain = _mean(gains) if gains else 0.0
-    avg_loss = _mean(losses) if losses else 0.0
-    if avg_loss == 0.0:
-        return 100.0 if avg_gain > 0 else 50.0
-    rel = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rel))
-
-
-def _zscore(x: float, series: List[float]) -> float:
-    mu = _mean(series)
-    sd = _std(series)
-    if sd == 0.0:
-        return 0.0
-    return (x - mu) / sd
-
-
-def compute_features(candles: List[Candle]) -> Dict[str, float]:
+def _compute_features(candles: List[Candle]) -> Tuple[Dict[str, Any], List[str]]:
+    notes: List[str] = []
     closes = [c.close for c in candles]
-    vols = [float(c.volume) for c in candles if c.volume is not None]
-    returns = _pct_change(closes)
+    vols = [c.volume for c in candles]
 
-    # Momentum features
-    mom_5 = _safe_div(closes[-1], closes[-6], 1.0) - 1.0 if len(closes) >= 6 else 0.0
-    mom_21 = _safe_div(closes[-1], closes[-22], 1.0) - 1.0 if len(closes) >= 22 else 0.0
-    mom_63 = _safe_div(closes[-1], closes[-64], 1.0) - 1.0 if len(closes) >= 64 else 0.0
+    last_close = closes[-1]
+    mom_5 = _safe_momentum(closes, 5)
+    mom_21 = _safe_momentum(closes, 21)
+    mom_63 = _safe_momentum(closes, 63)
 
-    sma_20 = _sma(closes, 20)
-    sma_50 = _sma(closes, 50)
-    trend_sma = _safe_div(sma_20, sma_50, 1.0) - 1.0 if sma_50 != 0 else 0.0
+    sma20 = _sma(closes, 20)
+    sma50 = _sma(closes, 50)
+    trend_sma20_50 = None
+    if sma20 is not None and sma50 is not None and sma50 != 0:
+        trend_sma20_50 = (sma20 / sma50) - 1.0
 
-    # Volatility (annualized)
-    vol_ann = _std(returns[1:]) * math.sqrt(252.0) if len(returns) > 2 else 0.0
+    # Volatility from daily returns
+    rets = _pct_change(closes)
+    vol_ann = _std(rets[1:]) * math.sqrt(252.0) if len(rets) > 2 else None
 
-    # RSI-ish
-    rsi14 = _rsi_like(returns, 14)
+    rsi14 = _rsi(closes, 14)
 
-    # Volume zscore vs trailing (if volume exists)
-    vol_z = 0.0
-    if len(vols) >= 20:
-        last_v = vols[-1]
-        trailing = vols[-20:]
-        vol_z = _zscore(last_v, trailing)
+    volume_z20 = None
+    if all(v is not None for v in vols):
+        vol_vals = [float(v) for v in vols if v is not None]
+        if len(vol_vals) == len(vols):
+            volume_z20 = _zscore_last(vol_vals, 20)
 
-    return {
-        "mom_5": float(mom_5),
-        "mom_21": float(mom_21),
-        "mom_63": float(mom_63),
-        "trend_sma20_50": float(trend_sma),
-        "volatility_ann": float(vol_ann),
-        "rsi14": float(rsi14),
-        "volume_z20": float(vol_z),
-        "last_close": float(closes[-1]) if closes else 0.0,
+    # Notes
+    if trend_sma20_50 is not None:
+        if trend_sma20_50 > 0:
+            notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
+        else:
+            notes.append("Short-term trend (SMA20 vs SMA50) is negative.")
+
+    if vol_ann is not None and vol_ann >= 0.45:
+        notes.append("Volatility is elevated; treat signal with caution.")
+
+    feats: Dict[str, Any] = {
+        "mom_5": mom_5,
+        "mom_21": mom_21,
+        "mom_63": mom_63,
+        "trend_sma20_50": trend_sma20_50,
+        "volatility_ann": vol_ann,
+        "rsi14": rsi14,
+        "volume_z20": volume_z20,
+        "last_close": last_close,
     }
+    return feats, notes
 
 
-def score_signal(features: Dict[str, float]) -> Tuple[float, str, float, List[str]]:
+def _detect_regime(features: Dict[str, Any]) -> Tuple[str, Dict[str, float], List[str]]:
     """
-    Returns: (score, signal, confidence, notes)
-    score: roughly [-1, +1]
+    Simple regime detection:
+      - HIGH_VOL if vol >= 0.45
+      - TRENDING if abs(trend) >= 0.03 and vol < 0.35
+      - else CHOPPY
+    """
+    notes: List[str] = []
+    vol = features.get("volatility_ann")
+    trend = features.get("trend_sma20_50")
+
+    regime = "CHOPPY"
+    if isinstance(vol, (int, float)) and vol is not None and vol >= 0.45:
+        regime = "HIGH_VOL"
+        notes.append("Regime: HIGH_VOL (volatility high).")
+    elif isinstance(trend, (int, float)) and trend is not None and abs(trend) >= 0.03 and (vol is None or vol < 0.35):
+        regime = "TRENDING"
+        notes.append("Regime: TRENDING (trend strength strong).")
+    else:
+        regime = "CHOPPY"
+        notes.append("Regime: CHOPPY (trend not strong or mixed).")
+
+    # Dynamic thresholds by regime
+    thresholds = {"buy": 0.25, "sell": -0.25}  # baseline
+    if regime == "TRENDING":
+        thresholds = {"buy": 0.20, "sell": -0.20}
+    elif regime == "CHOPPY":
+        thresholds = {"buy": 0.35, "sell": -0.35}
+    elif regime == "HIGH_VOL":
+        thresholds = {"buy": 0.45, "sell": -0.45}
+
+    return regime, thresholds, notes
+
+
+def _score_signal(features: Dict[str, Any], regime: str) -> Tuple[float, float, List[str]]:
+    """
+    Produce:
+      - score in [-1, 1]
+      - confidence in [0, 1]
     """
     notes: List[str] = []
 
-    mom = 0.45 * _clamp(features.get("mom_21", 0.0) * 5.0, -1.0, 1.0)
-    trend = 0.30 * _clamp(features.get("trend_sma20_50", 0.0) * 10.0, -1.0, 1.0)
+    mom5 = features.get("mom_5")
+    mom21 = features.get("mom_21")
+    mom63 = features.get("mom_63")
+    trend = features.get("trend_sma20_50")
+    vol = features.get("volatility_ann")
+    rsi = features.get("rsi14")
+    volz = features.get("volume_z20")
 
-    # RSI: prefer 40-60; penalize extreme overbought/oversold
-    rsi = features.get("rsi14", 50.0)
-    rsi_centered = (rsi - 50.0) / 50.0  # [-1,+1]
-    rsi_term = 0.10 * _clamp(rsi_centered, -1.0, 1.0)
+    # Data quality factor: how many core features are available
+    core = [mom21, mom63, trend, vol, rsi]
+    available = sum(1 for x in core if isinstance(x, (int, float)) and x is not None)
+    data_quality = available / len(core)  # 0..1
 
-    # Volatility penalty: high vol reduces confidence/score slightly
-    vol = features.get("volatility_ann", 0.0)
-    vol_penalty = 0.15 * _clamp((vol - 0.25) / 0.50, 0.0, 1.0)  # start penalizing above ~25% ann vol
+    # Normalize / shape terms
+    def _tanh_scaled(x: float, scale: float) -> float:
+        return math.tanh(x * scale)
 
-    # Volume confirmation
-    volz = features.get("volume_z20", 0.0)
-    vol_confirm = 0.10 * _clamp(volz / 2.0, -1.0, 1.0)
+    score_raw = 0.0
+    w_sum = 0.0
 
-    raw = mom + trend + rsi_term + vol_confirm - vol_penalty
-    score = _clamp(raw, -1.0, 1.0)
+    # Momentum (medium/long are more stable)
+    if isinstance(mom21, (int, float)) and mom21 is not None:
+        score_raw += 1.2 * _tanh_scaled(float(mom21), 6.0)
+        w_sum += 1.2
+    if isinstance(mom63, (int, float)) and mom63 is not None:
+        score_raw += 1.5 * _tanh_scaled(float(mom63), 4.0)
+        w_sum += 1.5
+    if isinstance(mom5, (int, float)) and mom5 is not None:
+        # short-term is noisier: smaller weight
+        score_raw += 0.5 * _tanh_scaled(float(mom5), 8.0)
+        w_sum += 0.5
 
-    # Signal thresholds
-    if score >= 0.25:
-        signal = "BUY"
-    elif score <= -0.25:
-        signal = "SELL"
+    # Trend
+    if isinstance(trend, (int, float)) and trend is not None:
+        score_raw += 1.3 * _tanh_scaled(float(trend), 18.0)
+        w_sum += 1.3
+
+    # RSI mean-reversion tilt (below 50 slightly bullish, above 50 slightly bearish for entries)
+    if isinstance(rsi, (int, float)) and rsi is not None:
+        # map RSI 0..100 to centered -1..1 (50 -> 0)
+        rsi_center = (50.0 - float(rsi)) / 50.0
+        score_raw += 0.6 * _tanh_scaled(rsi_center, 2.5)
+        w_sum += 0.6
+
+    # Volume anomaly as confirmation (very light)
+    if isinstance(volz, (int, float)) and volz is not None:
+        score_raw += 0.2 * _tanh_scaled(float(volz), 0.8)
+        w_sum += 0.2
+
+    if w_sum == 0:
+        return 0.0, 0.0, ["Insufficient features to compute score."]
+
+    score = score_raw / w_sum  # already ~[-1, 1] due to tanh parts
+    score = float(_clamp(score, -1.0, 1.0))
+
+    # Confidence: abs(score) tempered by data quality and regime risk
+    conf = abs(score) * data_quality
+    if regime == "HIGH_VOL":
+        conf *= 0.65
+        notes.append("Confidence reduced due to HIGH_VOL regime.")
+    elif regime == "CHOPPY":
+        conf *= 0.80
+        notes.append("Confidence reduced due to CHOPPY regime.")
     else:
-        signal = "HOLD"
+        conf *= 1.00
 
-    # Confidence: how far from 0 plus volatility impact
-    base_conf = abs(score)
-    conf = _clamp(base_conf * (1.0 - _clamp(vol / 1.0, 0.0, 0.7)), 0.0, 1.0)
+    # Additional penalty if vol is extreme
+    if isinstance(vol, (int, float)) and vol is not None and float(vol) > 0.80:
+        conf *= 0.75
+        notes.append("Confidence reduced due to extremely high volatility.")
 
-    # Notes
-    if features.get("trend_sma20_50", 0.0) > 0:
-        notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
-    else:
-        notes.append("Short-term trend (SMA20 vs SMA50) is negative or flat.")
-
-    if rsi >= 70:
-        notes.append("RSI is high (potentially overbought).")
-    elif rsi <= 30:
-        notes.append("RSI is low (potentially oversold).")
-
-    if vol >= 0.40:
-        notes.append("Volatility is elevated; treat signal with caution.")
-
-    if volz >= 1.0:
-        notes.append("Volume is above recent average (confirmation).")
-    elif volz <= -1.0:
-        notes.append("Volume is below recent average (weak participation).")
-
-    return float(score), signal, float(conf), notes
+    conf = float(_clamp(conf, 0.0, 1.0))
+    return score, conf, notes
 
 
-def fetch_lookback_window(symbol: str, as_of: str, lookback: int) -> List[Candle]:
+def _signal_from_score(score: float, thresholds: Dict[str, float]) -> str:
+    buy_th = thresholds.get("buy", 0.25)
+    sell_th = thresholds.get("sell", -0.25)
+    if score >= buy_th:
+        return "BUY"
+    if score <= sell_th:
+        return "SELL"
+    return "HOLD"
+
+
+def _fetch_lookback_candles(symbol: str, as_of: str, lookback: int) -> Tuple[List[Candle], int, List[str]]:
     """
-    Fetch enough calendar days to reliably contain `lookback` trading days.
+    Fetch candles from market data API ending at as_of.
+    We over-fetch by calendar days because trading days are fewer than calendar days.
+    If lookback is bigger than what exists, we compute with what's available and return effective_lookback.
     """
-    if lookback < 20 or lookback > 2000:
-        raise HTTPException(status_code=400, detail="lookback must be between 20 and 2000.")
+    notes: List[str] = []
+    sym = symbol.upper().strip()
+    as_of_d = _parse_date(as_of)
 
-    asof = _parse_date(as_of)
+    # Over-fetch window: rough mapping trading->calendar days (252 trading ~ 365 calendar)
+    # Add buffer.
+    cal_days = int(max(30, lookback * 2))  # generous buffer
+    from_d = as_of_d - dt.timedelta(days=cal_days)
+    to_d = as_of_d
 
-    # Calendar buffer: ~1.6x trading days + 30 days padding
-    cal_days = int(lookback * 1.6) + 30
-    from_d = asof - dt.timedelta(days=cal_days)
+    candles = massive_fetch_daily_bars(sym, from_d.isoformat(), to_d.isoformat())
 
-    candles = massive_fetch_daily_bars(symbol, _date_to_str(from_d), _date_to_str(asof))
-    candles = _slice_as_of(candles, as_of)
-
-    if len(candles) < lookback:
+    # keep only <= as_of (defensive)
+    candles = [c for c in candles if _parse_date(c.timestamp) <= as_of_d]
+    if len(candles) < 20:
         raise HTTPException(
-            status_code=422,
-            detail=f"Not enough data to compute signal. Needed {lookback} bars <= {as_of}, got {len(candles)}.",
+            status_code=400,
+            detail=f"Not enough bars to compute signal. Need at least 20 bars <= {as_of}, got {len(candles)}.",
         )
 
-    return candles[-lookback:]
+    # Use last N bars available up to lookback
+    effective = min(lookback, len(candles))
+    if effective < lookback:
+        notes.append(f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.")
+
+    candles = candles[-effective:]
+    return candles, effective, notes
 
 
 # ------------------------------------------------------------------------------
@@ -496,7 +560,7 @@ def market_massive_bars(
         "symbol": symbol.upper(),
         "from_date": from_date,
         "to_date": to_date,
-        "data": [_model_dump(c) for c in candles],
+        "data": [c.model_dump() for c in candles],
     }
 
 
@@ -516,39 +580,53 @@ def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
     if req.data and len(req.data) > 0:
         candles = req.data
     else:
-        # Path B: fetch from Massive (Polygon legacy)
+        # Path B: fetch from Massive/Polygon
         if not (req.symbol and req.from_date and req.to_date):
             raise HTTPException(
                 status_code=400,
-                detail="Provide either `data` OR (`symbol`, `from_date`, `to_date`) to fetch from Massive.",
+                detail="Provide either `data` OR (`symbol`, `from_date`, `to_date`) to fetch from Massive/Polygon.",
             )
         candles = massive_fetch_daily_bars(req.symbol, req.from_date, req.to_date)
 
     summary = run_backtest_core(candles, req.include_equity_curve, req.include_returns)
-    return {"backtest_summary": _model_dump(summary)}
+    return {"backtest_summary": summary.model_dump(exclude_none=True)}
 
 
 @app.get("/signal")
 def signal(
     symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
-    as_of: str = Query(..., description="YYYY-MM-DD (signal computed using bars up to this date)"),
-    lookback: int = Query(252, description="Trading-day lookback window (default 252)"),
+    as_of: str = Query(..., description="YYYY-MM-DD (last date to include)"),
+    lookback: int = Query(252, ge=20, le=5000, description="Trading bars to use (auto-adjusts if not available)"),
 ) -> Dict[str, Any]:
-    window = fetch_lookback_window(symbol, as_of, lookback)
-    feats = compute_features(window)
-    score, sig, conf, notes = score_signal(feats)
+    candles, effective_lookback, fetch_notes = _fetch_lookback_candles(symbol, as_of, lookback)
 
-    out = SignalResponse(
-        symbol=symbol.upper(),
-        as_of=as_of,
-        lookback=lookback,
-        score=score,
-        signal=sig,
-        confidence=conf,
-        features=feats,
-        notes=notes,
-    )
-    return _model_dump(out)
+    features, feat_notes = _compute_features(candles)
+    regime, thresholds, regime_notes = _detect_regime(features)
+    score, confidence, score_notes = _score_signal(features, regime)
+    sig = _signal_from_score(score, thresholds)
+
+    notes = []
+    notes.extend(fetch_notes)
+    notes.extend(feat_notes)
+    notes.extend(regime_notes)
+    notes.extend(score_notes)
+
+    # remove None fields from features for cleaner output
+    clean_features = {k: v for k, v in features.items() if v is not None}
+
+    return {
+        "symbol": symbol.upper(),
+        "as_of": as_of,
+        "lookback": lookback,
+        "effective_lookback": effective_lookback,
+        "regime": regime,
+        "thresholds": thresholds,
+        "score": float(score),
+        "signal": sig,
+        "confidence": float(confidence),
+        "features": clean_features,
+        "notes": notes,
+    }
 
 
 @app.post("/run_scores")
