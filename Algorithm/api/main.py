@@ -36,6 +36,16 @@ def _railway_env() -> str:
     return _env("RAILWAY_ENVIRONMENT", "unknown") or "unknown"
 
 
+def _env_float(name: str, default: float) -> float:
+    v = _env(name)
+    if v is None:
+        return default
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
 # ------------------------------------------------------------------------------
 # Models
 # ------------------------------------------------------------------------------
@@ -116,11 +126,23 @@ class CalibrateRequest(BaseModel):
     min_trades_per_side: int = 15  # require enough BUY/SELL signals to be meaningful
 
 
+# NEW: Portfolio request model
+class PortfolioRequest(BaseModel):
+    symbols: List[str]
+    as_of: str
+    lookback: int = 252
+
+    # Optional knobs (can also be overridden via env vars)
+    max_weight: Optional[float] = None          # cap per position
+    hold_multiplier: Optional[float] = None     # HOLD gets smaller weight than BUY
+    min_confidence: Optional[float] = None      # ignore weak signals
+    allow_shorts: bool = False                  # default False (signals only; no short weights)
+
+
 # ------------------------------------------------------------------------------
 # Massive (Polygon legacy) REST API client
 # ------------------------------------------------------------------------------
 
-# Massive is the new brand name; keep POLYGON_* envs as backward-compatible fallbacks.
 MARKETDATA_BASE_URL = (
     _env("MASSIVE_BASE_URL")
     or _env("POLYGON_BASE_URL")
@@ -141,11 +163,6 @@ def _require_marketdata_key() -> str:
 
 
 def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[Candle]:
-    """
-    Aggregates (Daily):
-      GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}?adjusted=true&sort=asc&limit=50000&apiKey=...
-    Works on Massive, and still works on Polygon legacy domains.
-    """
     api_key = _require_marketdata_key()
     sym = symbol.upper().strip()
 
@@ -172,8 +189,6 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 
     candles: List[Candle] = []
     for r in results:
-        # aggregate fields:
-        # t = timestamp in ms, c = close, v = volume
         t_ms = r.get("t")
         c = r.get("c")
         v = r.get("v")
@@ -255,7 +270,6 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
 
     total_return = equity[-1] - 1.0
 
-    # Annualization (assume ~252 trading days)
     n = max(1, len(rets) - 1)
     ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
 
@@ -350,10 +364,6 @@ def compute_features(candles: List[Candle]) -> Dict[str, float]:
 
 
 def detect_regime(features: Dict[str, float]) -> str:
-    # Simple regime logic:
-    # - HIGH_VOL if vol is high
-    # - TRENDING if trend strength is strong
-    # - else CHOPPY
     vol = features.get("volatility_ann", 0.0)
     trend = abs(features.get("trend_sma20_50", 0.0))
 
@@ -365,31 +375,23 @@ def detect_regime(features: Dict[str, float]) -> str:
 
 
 def score_from_features(features: Dict[str, float]) -> Tuple[float, List[str]]:
-    """
-    Produces a score in [-1, +1] from a weighted blend of signals.
-    """
     notes: List[str] = []
 
-    # normalize RSI to [-1, +1] where 50 is neutral
     rsi = features["rsi14"]
     rsi_sig = _clamp((rsi - 50.0) / 25.0, -1.0, 1.0)
 
-    # momentum blend
     mom = 0.4 * features["mom_21"] + 0.6 * features["mom_63"]
     mom_sig = _clamp(mom / 0.25, -1.0, 1.0)
 
-    # trend
     trend_sig = _clamp(features["trend_sma20_50"] / 0.10, -1.0, 1.0)
     if features["trend_sma20_50"] > 0:
         notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
     elif features["trend_sma20_50"] < 0:
         notes.append("Short-term trend (SMA20 vs SMA50) is negative.")
 
-    # volume (contrarian small weight)
     volz = features["volume_z20"]
     vol_sig = _clamp(volz / 3.0, -1.0, 1.0)
 
-    # penalize extreme volatility slightly
     vola = features["volatility_ann"]
     vola_pen = _clamp((vola - 0.25) / 0.50, 0.0, 0.5)  # 0..0.5
 
@@ -419,7 +421,6 @@ def _load_calibration() -> Tuple[bool, Optional[Dict[str, Any]]]:
 
 
 def _thresholds_for_regime(regime: str, calibration: Optional[Dict[str, Any]]) -> Dict[str, float]:
-    # defaults
     defaults = {
         "TRENDING": {"buy": 0.2, "sell": -0.2},
         "CHOPPY": {"buy": 0.3, "sell": -0.3},
@@ -456,7 +457,6 @@ def _filter_upto(candles: List[Candle], as_of: str) -> List[Candle]:
 
 
 def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalResponse:
-    # Fetch enough historical bars (we fetch 2 years back to be safe, then filter)
     as_of_d = _parse_date(as_of)
     from_guess = (as_of_d - dt.timedelta(days=900)).isoformat()
     candles_all = massive_fetch_daily_bars(symbol, from_guess, as_of)
@@ -468,7 +468,6 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
             detail=f"Not enough data to compute signal. Need at least 30 bars <= {as_of}, got {len(candles_upto)}.",
         )
 
-    # Auto-lookback: use what we have up to requested
     effective = min(lookback, len(candles_upto))
     candles = candles_upto[-effective:]
 
@@ -480,14 +479,12 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     calibration_loaded, calibration = _load_calibration()
     thresholds = _thresholds_for_regime(regime, calibration)
 
-    # Base signal decision
     sig = "HOLD"
     if score >= thresholds["buy"]:
         sig = "BUY"
     elif score <= thresholds["sell"]:
         sig = "SELL"
 
-    # Confidence: absolute score, reduced in HIGH_VOL regime
     conf = abs(score)
     if regime == "HIGH_VOL":
         conf *= 0.65
@@ -552,7 +549,6 @@ def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int,
 
     rows: List[Dict[str, Any]] = []
     for i in range(len(candles_all)):
-        # need enough lookback behind i
         start = max(0, i - lookback + 1)
         window = candles_all[start:i + 1]
         if len(window) < 30:
@@ -587,18 +583,12 @@ def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int,
 
 
 def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_trades_per_side: int) -> Dict[str, Any]:
-    """
-    Very simple grid search per regime for buy/sell thresholds.
-    Maximizes average forward return of BUY minus SELL (on optimize horizon),
-    while enforcing minimum trades on each side.
-    """
     created = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     regimes = sorted(set(r["regime"] for r in rows))
     thresholds_by_regime: Dict[str, Dict[str, float]] = {}
     diagnostics: Dict[str, Any] = {}
 
-    # candidate thresholds
     buys = [0.15, 0.20, 0.25, 0.30, 0.35, 0.45]
     sells = [-0.15, -0.20, -0.25, -0.30, -0.35, -0.45]
 
@@ -625,13 +615,12 @@ def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_
                 buy_ret = _mean([float(r[key]) for r in buysig])
                 sell_ret = _mean([float(r[key]) for r in sellsig])
 
-                metric = buy_ret - sell_ret  # prefer BUY positive and SELL negative
+                metric = buy_ret - sell_ret
                 if best_metric is None or metric > best_metric:
                     best_metric = metric
                     best = {"buy": float(b), "sell": float(s), "metric": float(metric), "buy_n": len(buysig), "sell_n": len(sellsig)}
 
         if best is None:
-            # fallback defaults
             if reg == "TRENDING":
                 thresholds_by_regime[reg] = {"buy": 0.2, "sell": -0.2}
             elif reg == "CHOPPY":
@@ -650,6 +639,43 @@ def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_
         "thresholds_by_regime": thresholds_by_regime,
         "diagnostics": diagnostics,
     }
+
+
+# ------------------------------------------------------------------------------
+# NEW: Portfolio construction layer
+# ------------------------------------------------------------------------------
+
+def _portfolio_knobs(req: PortfolioRequest) -> Dict[str, float]:
+    max_w = req.max_weight if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+    hold_mult = req.hold_multiplier if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
+    min_conf = req.min_confidence if req.min_confidence is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
+
+    # sanity clamps
+    max_w = _clamp(float(max_w), 0.01, 1.0)
+    hold_mult = _clamp(float(hold_mult), 0.0, 1.0)
+    min_conf = _clamp(float(min_conf), 0.0, 1.0)
+    return {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf}
+
+
+def _raw_weight_from_signal(sig: Dict[str, Any], hold_mult: float, min_conf: float, allow_shorts: bool) -> float:
+    signal = (sig.get("signal") or "HOLD").upper()
+    conf = float(sig.get("confidence") or 0.0)
+    vola = float(sig.get("features", {}).get("volatility_ann") or sig.get("features", {}).get("volatility") or sig.get("volatility_ann") or 0.0)
+
+    # Filter weak / noisy outputs
+    if conf < min_conf:
+        return 0.0
+
+    # Volatility targeting: higher vol => lower size
+    vol_adj = 1.0 / (max(1e-6, vola))
+
+    if signal == "BUY":
+        return conf * vol_adj
+    if signal == "HOLD":
+        return conf * vol_adj * hold_mult
+    if signal == "SELL":
+        return (-conf * vol_adj) if allow_shorts else 0.0
+    return 0.0
 
 
 # ------------------------------------------------------------------------------
@@ -672,6 +698,7 @@ def root() -> Dict[str, Any]:
             "/run_scores",
             "/signal",
             "/signals",
+            "/portfolio_signals",
             "/walk_forward",
             "/calibrate",
             "/market/massive/bars",
@@ -706,7 +733,6 @@ def market_massive_bars(
 
 @app.get("/storage/massive/s3_config")
 def massive_s3_config() -> Dict[str, Any]:
-    # Never return secrets; just show whether they are set.
     return {
         "s3_endpoint": MASSIVE_S3_ENDPOINT,
         "access_key_set": bool(MASSIVE_S3_ACCESS_KEY_ID),
@@ -716,11 +742,9 @@ def massive_s3_config() -> Dict[str, Any]:
 
 @app.post("/run_backtest")
 def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
-    # Path A: user provided candles directly
     if req.data and len(req.data) > 0:
         candles = req.data
     else:
-        # Path B: fetch from Massive (Polygon legacy)
         if not (req.symbol and req.from_date and req.to_date):
             raise HTTPException(
                 status_code=400,
@@ -744,10 +768,6 @@ def signal(
 
 @app.post("/signals")
 def signals(req: SignalsRequest) -> Dict[str, Any]:
-    """
-    Batch signal endpoint.
-    Returns per-symbol results without failing the whole request if one symbol errors.
-    """
     results: Dict[str, Any] = {}
     errors: Dict[str, Any] = {}
 
@@ -773,6 +793,112 @@ def signals(req: SignalsRequest) -> Dict[str, Any]:
     }
 
 
+# NEW: Portfolio endpoint
+@app.post("/portfolio_signals")
+def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
+    knobs = _portfolio_knobs(req)
+    max_w = knobs["max_weight"]
+    hold_mult = knobs["hold_multiplier"]
+    min_conf = knobs["min_confidence"]
+
+    # Step 1: compute per-symbol signals (re-using your engine)
+    per: Dict[str, Any] = {}
+    errors: Dict[str, Any] = {}
+    for sym in req.symbols:
+        s = (sym or "").strip().upper()
+        if not s:
+            continue
+        try:
+            out = compute_signal_for_symbol(s, req.as_of, req.lookback).model_dump(exclude_none=True)
+            per[s] = out
+        except HTTPException as e:
+            errors[s] = {"status_code": e.status_code, "detail": e.detail}
+        except Exception as e:
+            errors[s] = {"status_code": 500, "detail": str(e)}
+
+    # Step 2: compute raw weights (confidence * 1/vol, HOLD dampened, SELL optional)
+    raw: Dict[str, float] = {}
+    for s, sig in per.items():
+        rw = _raw_weight_from_signal(sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=req.allow_shorts)
+        if rw != 0.0:
+            raw[s] = float(rw)
+
+    # Step 3: normalize to portfolio weights with caps
+    # If shorts disabled -> long-only normalization and remainder to cash.
+    portfolio: Dict[str, float] = {}
+    cash = 1.0
+
+    if not raw:
+        return {
+            "as_of": req.as_of,
+            "lookback": req.lookback,
+            "method": "confidence_vol_targeted",
+            "knobs": {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf, "allow_shorts": req.allow_shorts},
+            "portfolio": {},
+            "cash": 1.0,
+            "count_ok": len(per),
+            "count_error": len(errors),
+            "errors": errors,
+            "signals": per,
+            "meta": {"count_buy": 0, "count_hold": 0, "count_sell": 0},
+            "notes": ["No positions met min_confidence / signal criteria. 100% cash."],
+        }
+
+    if req.allow_shorts:
+        # If shorts allowed: normalize by gross exposure, keep net exposure and compute cash as 1 - net_long (clamped)
+        gross = sum(abs(v) for v in raw.values())
+        if gross <= 0:
+            gross = 1.0
+        for s, v in raw.items():
+            w = v / gross
+            # apply cap in absolute terms
+            w = _clamp(w, -max_w, max_w)
+            portfolio[s] = float(w)
+        net = sum(portfolio.values())
+        cash = float(_clamp(1.0 - max(net, 0.0), 0.0, 1.0))
+    else:
+        # Long-only: ignore negative raw (shouldn't exist), cap, renormalize, cash = leftover
+        long_raw = {s: v for s, v in raw.items() if v > 0}
+        total = sum(long_raw.values())
+        if total <= 0:
+            total = 1.0
+        tmp = {}
+        for s, v in long_raw.items():
+            tmp[s] = min(v / total, max_w)
+
+        # If caps caused sum < 1, redistribute remaining proportionally among uncapped
+        def _sum(d): return sum(d.values())
+        capped_sum = _sum(tmp)
+        if capped_sum > 0:
+            # renormalize to <=1
+            # if everything capped and sum < 1, keep cash
+            # else scale weights to sum to min(1, capped_sum)
+            scale = min(1.0, capped_sum) / capped_sum
+            for s, v in tmp.items():
+                portfolio[s] = float(v * scale)
+
+        cash = float(_clamp(1.0 - sum(portfolio.values()), 0.0, 1.0))
+
+    # Meta counts
+    count_buy = sum(1 for s in per.values() if (s.get("signal") == "BUY"))
+    count_hold = sum(1 for s in per.values() if (s.get("signal") == "HOLD"))
+    count_sell = sum(1 for s in per.values() if (s.get("signal") == "SELL"))
+
+    return {
+        "as_of": req.as_of,
+        "lookback": req.lookback,
+        "method": "confidence_vol_targeted",
+        "knobs": {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf, "allow_shorts": req.allow_shorts},
+        "portfolio": portfolio,
+        "cash": cash,
+        "count_ok": len(per),
+        "count_error": len(errors),
+        "errors": errors,
+        "signals": per,
+        "meta": {"count_buy": count_buy, "count_hold": count_hold, "count_sell": count_sell},
+    }
+
+
 @app.post("/walk_forward")
 def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
     rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
@@ -792,7 +918,6 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
     rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
     cal = calibrate_thresholds(rows, req.optimize_horizon, req.min_trades_per_side)
 
-    # build env var value
     env_payload = {
         "created_at_utc": cal["created_at_utc"],
         "symbol": req.symbol.upper(),
