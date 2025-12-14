@@ -8,7 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
 
 # ------------------------------------------------------------------------------
 # App + environment helpers
@@ -40,16 +41,18 @@ def _railway_env() -> str:
 # ------------------------------------------------------------------------------
 
 class Candle(BaseModel):
-    timestamp: str  # ISO date "YYYY-MM-DD"
+    timestamp: str  # ISO date "YYYY-MM-DD" (daily)
     close: float
     volume: Optional[float] = None
 
+    # optional extra features (supported for future use)
     fundamental: Optional[float] = None
     sentiment: Optional[float] = None
     crowd: Optional[float] = None
 
 
 class BacktestRequest(BaseModel):
+    # Either provide `data` OR provide (symbol + date range) to fetch from Massive (Polygon legacy)
     data: Optional[List[Candle]] = None
 
     symbol: Optional[str] = None
@@ -71,14 +74,36 @@ class BacktestSummary(BaseModel):
     returns: Optional[Dict[str, float]] = None
 
 
+class SignalResponse(BaseModel):
+    symbol: str
+    as_of: str
+    lookback: int
+    effective_lookback: int
+    regime: str
+    thresholds: Dict[str, float]
+    score: float
+    signal: str
+    confidence: float
+    features: Dict[str, float]
+    notes: List[str] = Field(default_factory=list)
+
+    # calibration diagnostics
+    calibration_loaded: bool = False
+    calibration_meta: Optional[Dict[str, Any]] = None
+
+
+class SignalsRequest(BaseModel):
+    symbols: List[str]
+    as_of: str
+    lookback: int = 252
+
+
 class WalkForwardRequest(BaseModel):
     symbol: str
-    from_date: str  # YYYY-MM-DD
-    to_date: str    # YYYY-MM-DD
+    from_date: str
+    to_date: str
     lookback: int = 252
-    horizons: List[int] = [5, 21, 63]
-    eval_start: Optional[str] = None
-    eval_end: Optional[str] = None
+    horizons: List[int] = Field(default_factory=lambda: [5, 21, 63])
 
 
 class CalibrateRequest(BaseModel):
@@ -86,31 +111,20 @@ class CalibrateRequest(BaseModel):
     from_date: str
     to_date: str
     lookback: int = 252
-    horizons: List[int] = [5, 21, 63]
-    optimize_horizon: int = 21  # pick which forward horizon to optimize
-    eval_start: Optional[str] = None
-    eval_end: Optional[str] = None
-
-    # grid search ranges
-    buy_min: float = 0.10
-    buy_max: float = 0.60
-    buy_step: float = 0.05
-
-    sell_min: float = -0.60
-    sell_max: float = -0.10
-    sell_step: float = 0.05
-
+    horizons: List[int] = Field(default_factory=lambda: [5, 21, 63])
+    optimize_horizon: int = 21
     min_trades_per_side: int = 15  # require enough BUY/SELL signals to be meaningful
 
 
 # ------------------------------------------------------------------------------
-# Market data (Polygon; "Massive" naming kept for backward compatibility)
+# Massive (Polygon legacy) REST API client
 # ------------------------------------------------------------------------------
 
+# Massive is the new brand name; keep POLYGON_* envs as backward-compatible fallbacks.
 MARKETDATA_BASE_URL = (
     _env("MASSIVE_BASE_URL")
     or _env("POLYGON_BASE_URL")
-    or "https://api.polygon.io"
+    or "https://api.massive.com"
 )
 
 MARKETDATA_API_KEY = _env("MASSIVE_API_KEY") or _env("POLYGON_API_KEY")
@@ -127,6 +141,11 @@ def _require_marketdata_key() -> str:
 
 
 def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[Candle]:
+    """
+    Aggregates (Daily):
+      GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}?adjusted=true&sort=asc&limit=50000&apiKey=...
+    Works on Massive, and still works on Polygon legacy domains.
+    """
     api_key = _require_marketdata_key()
     sym = symbol.upper().strip()
 
@@ -153,6 +172,8 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 
     candles: List[Candle] = []
     for r in results:
+        # aggregate fields:
+        # t = timestamp in ms, c = close, v = volume
         t_ms = r.get("t")
         c = r.get("c")
         v = r.get("v")
@@ -167,47 +188,12 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 
 
 # ------------------------------------------------------------------------------
-# Massive Flat Files (S3-compatible) config (NOT used yet)
+# Massive Flat Files (S3-compatible) config (keys come from env vars)
 # ------------------------------------------------------------------------------
 
 MASSIVE_S3_ENDPOINT = _env("MASSIVE_S3_ENDPOINT", "https://files.massive.com") or "https://files.massive.com"
 MASSIVE_S3_ACCESS_KEY_ID = _env("MASSIVE_S3_ACCESS_KEY_ID")
 MASSIVE_S3_SECRET_ACCESS_KEY = _env("MASSIVE_S3_SECRET_ACCESS_KEY")
-
-
-# ------------------------------------------------------------------------------
-# Calibration config (optional, stored in env as JSON)
-# ------------------------------------------------------------------------------
-
-CALIBRATION_ENV_NAME = "FTIP_CALIBRATION_JSON"
-
-
-def _load_calibration() -> Optional[Dict[str, Any]]:
-    raw = _env(CALIBRATION_ENV_NAME)
-    if not raw:
-        return None
-    try:
-        obj = json.loads(raw)
-        if isinstance(obj, dict):
-            return obj
-        return None
-    except Exception:
-        return None
-
-
-def _get_calibrated_thresholds(regime: str) -> Optional[Dict[str, float]]:
-    cal = _load_calibration()
-    if not cal:
-        return None
-    thresholds = (cal.get("thresholds_by_regime") or {})
-    t = thresholds.get(regime)
-    if not isinstance(t, dict):
-        return None
-    buy = t.get("buy")
-    sell = t.get("sell")
-    if isinstance(buy, (int, float)) and isinstance(sell, (int, float)):
-        return {"buy": float(buy), "sell": float(sell)}
-    return None
 
 
 # ------------------------------------------------------------------------------
@@ -226,14 +212,10 @@ def _pct_change(series: List[float]) -> List[float]:
     return out
 
 
-def _mean(values: List[float]) -> float:
-    return sum(values) / len(values) if values else 0.0
-
-
 def _std(values: List[float]) -> float:
     if len(values) < 2:
         return 0.0
-    mu = _mean(values)
+    mu = sum(values) / len(values)
     var = sum((x - mu) ** 2 for x in values) / (len(values) - 1)
     return math.sqrt(var)
 
@@ -250,19 +232,66 @@ def _max_drawdown(equity: List[float]) -> float:
     return mdd
 
 
-def _sma(values: List[float], window: int) -> Optional[float]:
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _mean(xs: List[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+# ------------------------------------------------------------------------------
+# Backtest engine (simple buy-and-hold placeholder)
+# ------------------------------------------------------------------------------
+
+def run_backtest_core(candles: List[Candle], include_equity: bool, include_returns: bool) -> BacktestSummary:
+    closes = [c.close for c in candles]
+    dates = [c.timestamp for c in candles]
+
+    rets = _pct_change(closes)  # daily returns
+    equity = [1.0]
+    for r in rets[1:]:
+        equity.append(equity[-1] * (1.0 + r))
+
+    total_return = equity[-1] - 1.0
+
+    # Annualization (assume ~252 trading days)
+    n = max(1, len(rets) - 1)
+    ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
+
+    vol = _std(rets[1:]) * math.sqrt(252.0) if len(rets) > 2 else 0.0
+    sharpe = (ann_return / vol) if vol > 0 else 0.0
+    mdd = _max_drawdown(equity)
+
+    out = BacktestSummary(
+        total_return=float(total_return),
+        annual_return=float(ann_return),
+        sharpe=float(sharpe),
+        max_drawdown=float(mdd),
+        volatility=float(vol),
+        equity_curve={d: float(equity[i]) for i, d in enumerate(dates)} if include_equity else None,
+        returns={d: float(rets[i]) for i, d in enumerate(dates)} if include_returns else None,
+    )
+    return out
+
+
+# ------------------------------------------------------------------------------
+# Feature engine + regime detection + thresholds
+# ------------------------------------------------------------------------------
+
+def _sma(values: List[float], window: int) -> float:
     if window <= 0 or len(values) < window:
-        return None
+        return float("nan")
     return _mean(values[-window:])
 
 
-def _rsi(values: List[float], window: int = 14) -> Optional[float]:
-    if len(values) < window + 1:
-        return None
-    gains: List[float] = []
-    losses: List[float] = []
-    for i in range(len(values) - window, len(values)):
-        chg = values[i] - values[i - 1]
+def _rsi(closes: List[float], period: int = 14) -> float:
+    if len(closes) < period + 1:
+        return 50.0
+    gains = []
+    losses = []
+    for i in range(len(closes) - period, len(closes)):
+        chg = closes[i] - closes[i - 1]
         if chg >= 0:
             gains.append(chg)
             losses.append(0.0)
@@ -272,450 +301,355 @@ def _rsi(values: List[float], window: int = 14) -> Optional[float]:
     avg_gain = _mean(gains)
     avg_loss = _mean(losses)
     if avg_loss == 0:
-        return 100.0
+        return 70.0
     rs = avg_gain / avg_loss
-    return 100.0 - (100.0 / (1.0 + rs))
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    return float(_clamp(rsi, 0.0, 100.0))
 
 
-def _zscore_last(values: List[float], window: int) -> Optional[float]:
-    if window <= 1 or len(values) < window:
-        return None
+def _zscore_last(values: List[float], window: int) -> float:
+    if len(values) < window or window < 2:
+        return 0.0
     w = values[-window:]
     mu = _mean(w)
     sd = _std(w)
     if sd == 0:
         return 0.0
-    return (w[-1] - mu) / sd
+    return float((w[-1] - mu) / sd)
 
 
-def _momentum(values: List[float], lookback: int) -> Optional[float]:
-    if lookback <= 0 or len(values) < lookback + 1:
-        return None
-    prev = values[-(lookback + 1)]
-    cur = values[-1]
-    if prev == 0:
-        return None
-    return (cur / prev) - 1.0
-
-
-def _annualized_vol(returns: List[float]) -> float:
-    if len(returns) < 2:
-        return 0.0
-    return _std(returns) * math.sqrt(252.0)
-
-
-# ------------------------------------------------------------------------------
-# Backtest engine (buy-and-hold placeholder)
-# ------------------------------------------------------------------------------
-
-def run_backtest_core(candles: List[Candle], include_equity: bool, include_returns: bool) -> BacktestSummary:
+def compute_features(candles: List[Candle]) -> Dict[str, float]:
     closes = [c.close for c in candles]
-    dates = [c.timestamp for c in candles]
+    vols = [float(c.volume or 0.0) for c in candles]
 
-    rets = _pct_change(closes)
-    equity = [1.0]
-    for r in rets[1:]:
-        equity.append(equity[-1] * (1.0 + r))
+    def mom(k: int) -> float:
+        if len(closes) < k + 1:
+            return 0.0
+        return float(closes[-1] / closes[-1 - k] - 1.0)
 
-    total_return = equity[-1] - 1.0
-    n = max(1, len(rets) - 1)
-    ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
+    r = _pct_change(closes)
+    vol_ann = _std(r[1:]) * math.sqrt(252.0) if len(r) > 2 else 0.0
 
-    vol = _annualized_vol(rets[1:]) if len(rets) > 2 else 0.0
-    sharpe = (ann_return / vol) if vol > 0 else 0.0
-    mdd = _max_drawdown(equity)
+    sma20 = _sma(closes, 20)
+    sma50 = _sma(closes, 50)
+    trend = 0.0
+    if not (math.isnan(sma20) or math.isnan(sma50)) and sma50 != 0:
+        trend = float((sma20 / sma50) - 1.0)
 
-    return BacktestSummary(
-        total_return=float(total_return),
-        annual_return=float(ann_return),
-        sharpe=float(sharpe),
-        max_drawdown=float(mdd),
-        volatility=float(vol),
-        equity_curve={d: float(equity[i]) for i, d in enumerate(dates)} if include_equity else None,
-        returns={d: float(rets[i]) for i, d in enumerate(dates)} if include_returns else None,
-    )
+    feat = {
+        "mom_5": mom(5),
+        "mom_21": mom(21),
+        "mom_63": mom(63),
+        "trend_sma20_50": trend,
+        "volatility_ann": float(vol_ann),
+        "rsi14": float(_rsi(closes, 14)),
+        "volume_z20": float(_zscore_last(vols, 20)),
+        "last_close": float(closes[-1]),
+    }
+    return feat
 
 
-# ------------------------------------------------------------------------------
-# Signal engine
-# ------------------------------------------------------------------------------
+def detect_regime(features: Dict[str, float]) -> str:
+    # Simple regime logic:
+    # - HIGH_VOL if vol is high
+    # - TRENDING if trend strength is strong
+    # - else CHOPPY
+    vol = features.get("volatility_ann", 0.0)
+    trend = abs(features.get("trend_sma20_50", 0.0))
 
-def _detect_regime(vol_ann: float, trend_strength: float) -> str:
-    if vol_ann >= 0.45:
+    if vol >= 0.45:
         return "HIGH_VOL"
-    if abs(trend_strength) >= 0.05:
+    if trend >= 0.05:
         return "TRENDING"
     return "CHOPPY"
 
 
-def _thresholds_for_regime(regime: str) -> Dict[str, float]:
-    # default thresholds
-    if regime == "HIGH_VOL":
-        return {"buy": 0.45, "sell": -0.45}
-    if regime == "TRENDING":
-        return {"buy": 0.20, "sell": -0.20}
-    return {"buy": 0.30, "sell": -0.30}
-
-
-def compute_signal_core(candles: List[Candle], as_of: str, lookback: int = 252) -> Dict[str, Any]:
+def score_from_features(features: Dict[str, float]) -> Tuple[float, List[str]]:
+    """
+    Produces a score in [-1, +1] from a weighted blend of signals.
+    """
     notes: List[str] = []
 
-    cutoff = dt.date.fromisoformat(as_of)
-    usable = [c for c in candles if dt.date.fromisoformat(c.timestamp) <= cutoff]
-    usable.sort(key=lambda c: c.timestamp)
+    # normalize RSI to [-1, +1] where 50 is neutral
+    rsi = features["rsi14"]
+    rsi_sig = _clamp((rsi - 50.0) / 25.0, -1.0, 1.0)
 
-    if len(usable) < 30:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Not enough data to compute signal. Need at least ~30 bars <= {as_of}, got {len(usable)}.",
-        )
+    # momentum blend
+    mom = 0.4 * features["mom_21"] + 0.6 * features["mom_63"]
+    mom_sig = _clamp(mom / 0.25, -1.0, 1.0)
 
-    effective_lookback = min(lookback, len(usable))
-    if effective_lookback < lookback:
-        notes.append(
-            f"Requested lookback={lookback}, but only {len(usable)} bars available by {as_of}. "
-            f"Using effective_lookback={effective_lookback}."
-        )
-
-    window = usable[-effective_lookback:]
-    closes = [c.close for c in window]
-    vols = [float(c.volume) if c.volume is not None else float("nan") for c in window]
-    vol_clean: List[float] = []
-    for v in vols:
-        vol_clean.append(0.0 if v != v else float(v))  # NaN -> 0
-
-    rets = _pct_change(closes)
-    rets_1 = rets[1:]
-
-    mom_5 = _momentum(closes, 5) or 0.0
-    mom_21 = _momentum(closes, 21) or 0.0
-    mom_63 = _momentum(closes, 63) or 0.0
-
-    sma20 = _sma(closes, 20)
-    sma50 = _sma(closes, 50)
-    trend_sma20_50 = 0.0
-    if sma20 is not None and sma50 is not None and sma50 != 0:
-        trend_sma20_50 = (sma20 / sma50) - 1.0
-
-    vol_ann = _annualized_vol(rets_1)
-
-    rsi14 = _rsi(closes, 14)
-    rsi14_val = float(rsi14) if rsi14 is not None else 50.0
-
-    volume_z20 = _zscore_last(vol_clean, 20)
-    volume_z20_val = float(volume_z20) if volume_z20 is not None else 0.0
-
-    last_close = float(closes[-1])
-
-    regime = _detect_regime(vol_ann, trend_sma20_50)
-
-    # thresholds: calibrated overrides default if provided
-    thresholds = _get_calibrated_thresholds(regime) or _thresholds_for_regime(regime)
-
-    rsi_component = (rsi14_val - 50.0) / 50.0
-    volz_component = max(-2.0, min(2.0, volume_z20_val)) / 2.0
-
-    # weights (keep constant for now; thresholds are what we calibrate first)
-    score = (
-        0.25 * mom_5 +
-        0.30 * mom_21 +
-        0.35 * mom_63 +
-        0.20 * trend_sma20_50 +
-        0.10 * rsi_component +
-        0.05 * volz_component
-    )
-    score = max(-1.0, min(1.0, float(score)))
-
-    confidence = abs(score)
-    if regime == "HIGH_VOL":
-        confidence *= 0.65
-        notes.append("Confidence reduced due to HIGH_VOL regime.")
-
-    signal = "HOLD"
-    if score >= thresholds["buy"]:
-        signal = "BUY"
-    elif score <= thresholds["sell"]:
-        signal = "SELL"
-
-    if trend_sma20_50 > 0:
+    # trend
+    trend_sig = _clamp(features["trend_sma20_50"] / 0.10, -1.0, 1.0)
+    if features["trend_sma20_50"] > 0:
         notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
-    elif trend_sma20_50 < 0:
+    elif features["trend_sma20_50"] < 0:
         notes.append("Short-term trend (SMA20 vs SMA50) is negative.")
 
-    if vol_ann >= 0.45:
-        notes.append("Volatility is elevated; treat signal with caution.")
+    # volume (contrarian small weight)
+    volz = features["volume_z20"]
+    vol_sig = _clamp(volz / 3.0, -1.0, 1.0)
 
-    notes.append(f"Regime: {regime}.")
-    if _get_calibrated_thresholds(regime) is not None:
+    # penalize extreme volatility slightly
+    vola = features["volatility_ann"]
+    vola_pen = _clamp((vola - 0.25) / 0.50, 0.0, 0.5)  # 0..0.5
+
+    raw = 0.45 * mom_sig + 0.30 * trend_sig + 0.20 * rsi_sig + 0.05 * vol_sig
+    score = _clamp(raw * (1.0 - vola_pen), -1.0, 1.0)
+
+    if vola >= 0.45:
+        notes.append("Volatility is elevated; treat signal with caution.")
+    return float(score), notes
+
+
+# ------------------------------------------------------------------------------
+# Calibration (optional) via env var
+# ------------------------------------------------------------------------------
+
+def _load_calibration() -> Tuple[bool, Optional[Dict[str, Any]]]:
+    s = _env("FTIP_CALIBRATION_JSON")
+    if not s:
+        return False, None
+    try:
+        obj = json.loads(s)
+        if not isinstance(obj, dict):
+            return False, None
+        return True, obj
+    except Exception:
+        return False, None
+
+
+def _thresholds_for_regime(regime: str, calibration: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    # defaults
+    defaults = {
+        "TRENDING": {"buy": 0.2, "sell": -0.2},
+        "CHOPPY": {"buy": 0.3, "sell": -0.3},
+        "HIGH_VOL": {"buy": 0.45, "sell": -0.45},
+    }
+    if not calibration:
+        return defaults.get(regime, {"buy": 0.3, "sell": -0.3})
+
+    thr_by_reg = calibration.get("thresholds_by_regime") or {}
+    if regime in thr_by_reg and isinstance(thr_by_reg[regime], dict):
+        b = float(thr_by_reg[regime].get("buy", defaults.get(regime, {"buy": 0.3})["buy"]))
+        s = float(thr_by_reg[regime].get("sell", defaults.get(regime, {"sell": -0.3})["sell"]))
+        return {"buy": b, "sell": s}
+
+    return defaults.get(regime, {"buy": 0.3, "sell": -0.3})
+
+
+# ------------------------------------------------------------------------------
+# Signal computation (single symbol)
+# ------------------------------------------------------------------------------
+
+def _parse_date(s: str) -> dt.date:
+    return dt.datetime.strptime(s, "%Y-%m-%d").date()
+
+
+def _filter_upto(candles: List[Candle], as_of: str) -> List[Candle]:
+    cutoff = _parse_date(as_of)
+    out = []
+    for c in candles:
+        d = _parse_date(c.timestamp)
+        if d <= cutoff:
+            out.append(c)
+    return out
+
+
+def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalResponse:
+    # Fetch enough historical bars (we fetch 2 years back to be safe, then filter)
+    as_of_d = _parse_date(as_of)
+    from_guess = (as_of_d - dt.timedelta(days=900)).isoformat()
+    candles_all = massive_fetch_daily_bars(symbol, from_guess, as_of)
+
+    candles_upto = _filter_upto(candles_all, as_of)
+    if len(candles_upto) < 30:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not enough data to compute signal. Need at least 30 bars <= {as_of}, got {len(candles_upto)}.",
+        )
+
+    # Auto-lookback: use what we have up to requested
+    effective = min(lookback, len(candles_upto))
+    candles = candles_upto[-effective:]
+
+    features = compute_features(candles)
+    regime = detect_regime(features)
+
+    score, notes = score_from_features(features)
+
+    calibration_loaded, calibration = _load_calibration()
+    thresholds = _thresholds_for_regime(regime, calibration)
+
+    # Base signal decision
+    sig = "HOLD"
+    if score >= thresholds["buy"]:
+        sig = "BUY"
+    elif score <= thresholds["sell"]:
+        sig = "SELL"
+
+    # Confidence: absolute score, reduced in HIGH_VOL regime
+    conf = abs(score)
+    if regime == "HIGH_VOL":
+        conf *= 0.65
+        notes.append("Confidence reduced due to HIGH_VOL regime.")
+    if effective < lookback:
+        notes.insert(0, f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.")
+
+    if regime == "TRENDING":
+        notes.append("Regime: TRENDING.")
+    elif regime == "CHOPPY":
+        notes.append("Regime: CHOPPY.")
+    else:
+        notes.append("Regime: HIGH_VOL.")
+
+    if calibration_loaded:
         notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON.")
 
-    features = {
-        "mom_5": float(mom_5),
-        "mom_21": float(mom_21),
-        "mom_63": float(mom_63),
-        "trend_sma20_50": float(trend_sma20_50),
-        "volatility_ann": float(vol_ann),
-        "rsi14": float(rsi14_val),
-        "volume_z20": float(volume_z20_val),
-        "last_close": float(last_close),
-    }
+    meta = None
+    if calibration_loaded and calibration:
+        meta = {
+            "optimize_horizon": calibration.get("optimize_horizon"),
+            "created_at_utc": calibration.get("created_at_utc"),
+            "symbol": calibration.get("symbol"),
+            "train_range": calibration.get("train_range"),
+        }
 
-    return {
-        "as_of": as_of,
-        "lookback": int(lookback),
-        "effective_lookback": int(effective_lookback),
-        "regime": regime,
-        "thresholds": thresholds,
-        "score": float(score),
-        "signal": signal,
-        "confidence": float(confidence),
-        "features": features,
-        "notes": notes,
-    }
+    return SignalResponse(
+        symbol=symbol.upper(),
+        as_of=as_of,
+        lookback=lookback,
+        effective_lookback=effective,
+        regime=regime,
+        thresholds=thresholds,
+        score=float(score),
+        signal=sig,
+        confidence=float(conf),
+        features={k: float(v) for k, v in features.items()},
+        notes=notes,
+        calibration_loaded=bool(calibration_loaded),
+        calibration_meta=meta,
+    )
 
 
 # ------------------------------------------------------------------------------
-# Walk-forward validation core
+# Walk-forward + Calibration endpoints (training helper)
 # ------------------------------------------------------------------------------
 
-def walk_forward_core(
-    candles: List[Candle],
-    lookback: int,
-    horizons: List[int],
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-) -> Dict[str, Any]:
-    if not candles or len(candles) < 80:
-        raise ValueError("Need more candles for walk-forward evaluation (recommend >= ~80).")
+def _forward_return(closes: List[float], idx: int, horizon: int) -> Optional[float]:
+    j = idx + horizon
+    if j >= len(closes):
+        return None
+    if closes[idx] == 0:
+        return None
+    return float(closes[j] / closes[idx] - 1.0)
 
-    if not horizons:
-        raise ValueError("horizons must be non-empty, e.g. [5, 21, 63].")
 
-    horizons = sorted(list(set(int(h) for h in horizons if int(h) > 0)))
-    max_h = max(horizons)
+def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int, horizons: List[int]) -> List[Dict[str, Any]]:
+    candles_all = massive_fetch_daily_bars(symbol, from_date, to_date)
 
-    candles = sorted(candles, key=lambda c: c.timestamp)
+    closes = [c.close for c in candles_all]
+    dates = [c.timestamp for c in candles_all]
 
-    sd = dt.date.fromisoformat(start_date) if start_date else dt.date.fromisoformat(candles[0].timestamp)
-    ed = dt.date.fromisoformat(end_date) if end_date else dt.date.fromisoformat(candles[-1].timestamp)
-
-    dates = [dt.date.fromisoformat(c.timestamp) for c in candles]
-
-    MIN_BARS_FOR_SIGNAL = 30
     rows: List[Dict[str, Any]] = []
-
-    for i in range(len(candles)):
-        day = dates[i]
-        if day < sd or day > ed:
+    for i in range(len(candles_all)):
+        # need enough lookback behind i
+        start = max(0, i - lookback + 1)
+        window = candles_all[start:i + 1]
+        if len(window) < 30:
             continue
 
-        if (i + 1) < MIN_BARS_FOR_SIGNAL:
-            continue
+        feats = compute_features(window)
+        regime = detect_regime(feats)
+        score, _notes = score_from_features(feats)
 
-        if i + max_h >= len(candles):
-            continue
+        cal_loaded, cal = _load_calibration()
+        thr = _thresholds_for_regime(regime, cal)
 
-        as_of = candles[i].timestamp
+        sig = "HOLD"
+        if score >= thr["buy"]:
+            sig = "BUY"
+        elif score <= thr["sell"]:
+            sig = "SELL"
 
-        try:
-            sig = compute_signal_core(candles[: i + 1], as_of=as_of, lookback=lookback)
-        except HTTPException:
-            continue
-
-        base_close = candles[i].close
-        fwd: Dict[str, float] = {}
-        for h in horizons:
-            fwd_ret = (candles[i + h].close / base_close) - 1.0 if base_close != 0 else 0.0
-            fwd[f"fwd_ret_{h}"] = float(fwd_ret)
-
-        rows.append({
-            "date": as_of,
-            "signal": sig["signal"],
-            "score": float(sig["score"]),
-            "confidence": float(sig["confidence"]),
-            "regime": sig["regime"],
-            **fwd,
-        })
-
-    if not rows:
-        return {
-            "rows_sample": [],
-            "row_count": 0,
-            "summary": {},
-            "by_regime": {},
-            "by_confidence_bucket": {},
-            "meta": {
-                "lookback": lookback,
-                "horizons": horizons,
-                "start_date": sd.isoformat(),
-                "end_date": ed.isoformat(),
-                "note": "No rows produced (date range too tight or not enough history/future).",
-            },
+        row = {
+            "date": dates[i],
+            "signal": sig,
+            "score": float(score),
+            "confidence": float(abs(score) * (0.65 if regime == "HIGH_VOL" else 1.0)),
+            "regime": regime,
         }
-
-    def _bucket(conf: float) -> str:
-        if conf >= 0.75:
-            return "0.75-1.00"
-        if conf >= 0.50:
-            return "0.50-0.75"
-        if conf >= 0.25:
-            return "0.25-0.50"
-        return "0.00-0.25"
-
-    def _init_stat() -> Dict[str, Any]:
-        return {
-            "count": 0,
-            "win_rate": {str(h): 0.0 for h in horizons},
-            "avg_return": {str(h): 0.0 for h in horizons},
-        }
-
-    def _update(stat: Dict[str, Any], row: Dict[str, Any]) -> None:
-        stat["count"] += 1
         for h in horizons:
-            r = float(row[f"fwd_ret_{h}"])
-            stat["avg_return"][str(h)] += r
-            if r > 0:
-                stat["win_rate"][str(h)] += 1.0
+            fr = _forward_return(closes, i, h)
+            row[f"fwd_ret_{h}"] = fr
+        rows.append(row)
 
-    def _finalize(stat: Dict[str, Any]) -> Dict[str, Any]:
-        n = stat["count"]
-        if n <= 0:
-            return stat
-        for h in horizons:
-            stat["avg_return"][str(h)] /= n
-            stat["win_rate"][str(h)] /= n
-        return stat
-
-    summary: Dict[str, Any] = {"BUY": _init_stat(), "HOLD": _init_stat(), "SELL": _init_stat()}
-    by_regime: Dict[str, Any] = {}
-    by_bucket: Dict[str, Any] = {}
-
-    for row in rows:
-        s = row["signal"]
-        _update(summary[s], row)
-
-        rg = row["regime"]
-        if rg not in by_regime:
-            by_regime[rg] = {"BUY": _init_stat(), "HOLD": _init_stat(), "SELL": _init_stat()}
-        _update(by_regime[rg][s], row)
-
-        b = _bucket(float(row["confidence"]))
-        if b not in by_bucket:
-            by_bucket[b] = {"BUY": _init_stat(), "HOLD": _init_stat(), "SELL": _init_stat()}
-        _update(by_bucket[b][s], row)
-
-    summary = {k: _finalize(v) for k, v in summary.items()}
-    by_regime = {rg: {k: _finalize(v) for k, v in per.items()} for rg, per in by_regime.items()}
-    by_bucket = {b: {k: _finalize(v) for k, v in per.items()} for b, per in by_bucket.items()}
-
-    head_n = 10
-    tail_n = 10
-    sample_rows = rows[:head_n] + (rows[-tail_n:] if len(rows) > head_n else [])
-
-    return {
-        "rows_sample": sample_rows,
-        "row_count": len(rows),
-        "summary": summary,
-        "by_regime": by_regime,
-        "by_confidence_bucket": by_bucket,
-        "meta": {
-            "lookback": lookback,
-            "horizons": horizons,
-            "start_date": sd.isoformat(),
-            "end_date": ed.isoformat(),
-        },
-        "rows": rows,  # internal use for calibration endpoint
-    }
+    return rows
 
 
-# ------------------------------------------------------------------------------
-# Calibration (grid-search thresholds by regime)
-# ------------------------------------------------------------------------------
+def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_trades_per_side: int) -> Dict[str, Any]:
+    """
+    Very simple grid search per regime for buy/sell thresholds.
+    Maximizes average forward return of BUY minus SELL (on optimize horizon),
+    while enforcing minimum trades on each side.
+    """
+    created = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
-def _frange(start: float, stop: float, step: float) -> List[float]:
-    if step <= 0:
-        return []
-    vals: List[float] = []
-    x = start
-    # include stop (within epsilon)
-    while x <= stop + 1e-12:
-        vals.append(round(float(x), 10))
-        x += step
-    return vals
+    regimes = sorted(set(r["regime"] for r in rows))
+    thresholds_by_regime: Dict[str, Dict[str, float]] = {}
+    diagnostics: Dict[str, Any] = {}
 
-
-def calibrate_thresholds_by_regime(
-    rows: List[Dict[str, Any]],
-    optimize_horizon: int,
-    buy_grid: List[float],
-    sell_grid: List[float],
-    min_trades: int,
-) -> Dict[str, Any]:
-    regimes = sorted(list({r["regime"] for r in rows}))
-    if not regimes:
-        raise ValueError("No regimes found in rows.")
+    # candidate thresholds
+    buys = [0.15, 0.20, 0.25, 0.30, 0.35, 0.45]
+    sells = [-0.15, -0.20, -0.25, -0.30, -0.35, -0.45]
 
     key = f"fwd_ret_{optimize_horizon}"
-    if key not in rows[0]:
-        raise ValueError(f"Rows do not contain {key}. Make sure horizons include {optimize_horizon}.")
 
-    out: Dict[str, Any] = {
-        "optimize_horizon": optimize_horizon,
-        "thresholds_by_regime": {},
-        "diagnostics": {},
-    }
-
-    for rg in regimes:
-        rg_rows = [r for r in rows if r["regime"] == rg]
-        if len(rg_rows) < (min_trades * 2):
-            out["thresholds_by_regime"][rg] = _thresholds_for_regime(rg)
-            out["diagnostics"][rg] = {
-                "note": f"Not enough rows in regime {rg} to calibrate robustly; using defaults.",
-                "row_count": len(rg_rows),
-            }
+    for reg in regimes:
+        rrows = [r for r in rows if r["regime"] == reg and r.get(key) is not None]
+        if not rrows:
             continue
 
-        best: Optional[Tuple[float, float, float]] = None  # (objective, buy, sell)
+        best = None
+        best_metric = None
 
-        for buy_th in buy_grid:
-            for sell_th in sell_grid:
-                if sell_th >= 0 or buy_th <= 0:
+        for b in buys:
+            for s in sells:
+                if s >= 0:
                     continue
-                if sell_th >= -0.05 and buy_th <= 0.05:
-                    continue
-                if sell_th >= buy_th:
-                    continue
+                buysig = [r for r in rrows if r["score"] >= b]
+                sellsig = [r for r in rrows if r["score"] <= s]
 
-                buys = [r for r in rg_rows if float(r["score"]) >= buy_th]
-                sells = [r for r in rg_rows if float(r["score"]) <= sell_th]
-
-                if len(buys) < min_trades or len(sells) < min_trades:
+                if len(buysig) < min_trades_per_side or len(sellsig) < min_trades_per_side:
                     continue
 
-                # objective: avg(fwd_ret) for BUY minus avg(fwd_ret) for SELL (SELL expects negative)
-                buy_avg = _mean([float(r[key]) for r in buys])
-                sell_avg = _mean([float(r[key]) for r in sells])
-                objective = buy_avg - sell_avg
+                buy_ret = _mean([float(r[key]) for r in buysig])
+                sell_ret = _mean([float(r[key]) for r in sellsig])
 
-                if best is None or objective > best[0]:
-                    best = (objective, float(buy_th), float(sell_th))
+                metric = buy_ret - sell_ret  # prefer BUY positive and SELL negative
+                if best_metric is None or metric > best_metric:
+                    best_metric = metric
+                    best = {"buy": float(b), "sell": float(s), "metric": float(metric), "buy_n": len(buysig), "sell_n": len(sellsig)}
 
         if best is None:
-            out["thresholds_by_regime"][rg] = _thresholds_for_regime(rg)
-            out["diagnostics"][rg] = {
-                "note": "No valid threshold pair met min_trades constraints; using defaults.",
-                "row_count": len(rg_rows),
-            }
-        else:
-            obj, buy_th, sell_th = best
-            out["thresholds_by_regime"][rg] = {"buy": buy_th, "sell": sell_th}
-            out["diagnostics"][rg] = {
-                "row_count": len(rg_rows),
-                "best_objective": obj,
-                "min_trades": min_trades,
-            }
+            # fallback defaults
+            if reg == "TRENDING":
+                thresholds_by_regime[reg] = {"buy": 0.2, "sell": -0.2}
+            elif reg == "CHOPPY":
+                thresholds_by_regime[reg] = {"buy": 0.3, "sell": -0.3}
+            else:
+                thresholds_by_regime[reg] = {"buy": 0.45, "sell": -0.45}
 
-    return out
+            diagnostics[reg] = {"note": "No valid threshold pair met min_trades constraints; using defaults.", "row_count": len(rrows)}
+        else:
+            thresholds_by_regime[reg] = {"buy": best["buy"], "sell": best["sell"]}
+            diagnostics[reg] = {"best": best, "row_count": len(rrows)}
+
+    return {
+        "created_at_utc": created,
+        "optimize_horizon": int(optimize_horizon),
+        "thresholds_by_regime": thresholds_by_regime,
+        "diagnostics": diagnostics,
+    }
 
 
 # ------------------------------------------------------------------------------
@@ -737,6 +671,7 @@ def root() -> Dict[str, Any]:
             "/run_backtest",
             "/run_scores",
             "/signal",
+            "/signals",
             "/walk_forward",
             "/calibrate",
             "/market/massive/bars",
@@ -766,16 +701,12 @@ def market_massive_bars(
     to_date: str = Query(..., description="YYYY-MM-DD"),
 ) -> Dict[str, Any]:
     candles = massive_fetch_daily_bars(symbol, from_date, to_date)
-    return {
-        "symbol": symbol.upper(),
-        "from_date": from_date,
-        "to_date": to_date,
-        "data": [c.model_dump() for c in candles],
-    }
+    return {"symbol": symbol.upper(), "from_date": from_date, "to_date": to_date, "data": [c.model_dump() for c in candles]}
 
 
 @app.get("/storage/massive/s3_config")
 def massive_s3_config() -> Dict[str, Any]:
+    # Never return secrets; just show whether they are set.
     return {
         "s3_endpoint": MASSIVE_S3_ENDPOINT,
         "access_key_set": bool(MASSIVE_S3_ACCESS_KEY_ID),
@@ -785,13 +716,15 @@ def massive_s3_config() -> Dict[str, Any]:
 
 @app.post("/run_backtest")
 def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
+    # Path A: user provided candles directly
     if req.data and len(req.data) > 0:
         candles = req.data
     else:
+        # Path B: fetch from Massive (Polygon legacy)
         if not (req.symbol and req.from_date and req.to_date):
             raise HTTPException(
                 status_code=400,
-                detail="Provide either `data` OR (`symbol`, `from_date`, `to_date`) to fetch from Polygon.",
+                detail="Provide either `data` OR (`symbol`, `from_date`, `to_date`) to fetch from Massive.",
             )
         candles = massive_fetch_daily_bars(req.symbol, req.from_date, req.to_date)
 
@@ -801,120 +734,85 @@ def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
 
 @app.get("/signal")
 def signal(
-    symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
+    symbol: str = Query(...),
     as_of: str = Query(..., description="YYYY-MM-DD"),
-    lookback: int = Query(252, ge=30, le=5000),
+    lookback: int = Query(252, ge=30, le=2000),
 ) -> Dict[str, Any]:
-    as_of_d = dt.date.fromisoformat(as_of)
-    from_d = as_of_d - dt.timedelta(days=max(lookback * 3, 365))
-    candles = massive_fetch_daily_bars(symbol, from_d.isoformat(), as_of_d.isoformat())
+    out = compute_signal_for_symbol(symbol, as_of, lookback)
+    return out.model_dump(exclude_none=True)
 
-    out = compute_signal_core(candles, as_of=as_of, lookback=lookback)
-    out["symbol"] = symbol.upper().strip()
 
-    cal = _load_calibration()
-    if cal:
-        out["calibration_loaded"] = True
-        out["calibration_meta"] = {
-            "optimize_horizon": cal.get("optimize_horizon"),
-            "created_at_utc": cal.get("created_at_utc"),
-            "symbol": cal.get("symbol"),
-            "train_range": cal.get("train_range"),
-        }
-    else:
-        out["calibration_loaded"] = False
+@app.post("/signals")
+def signals(req: SignalsRequest) -> Dict[str, Any]:
+    """
+    Batch signal endpoint.
+    Returns per-symbol results without failing the whole request if one symbol errors.
+    """
+    results: Dict[str, Any] = {}
+    errors: Dict[str, Any] = {}
 
-    return out
+    for sym in req.symbols:
+        s = (sym or "").strip().upper()
+        if not s:
+            continue
+        try:
+            out = compute_signal_for_symbol(s, req.as_of, req.lookback)
+            results[s] = out.model_dump(exclude_none=True)
+        except HTTPException as e:
+            errors[s] = {"status_code": e.status_code, "detail": e.detail}
+        except Exception as e:
+            errors[s] = {"status_code": 500, "detail": str(e)}
+
+    return {
+        "as_of": req.as_of,
+        "lookback": req.lookback,
+        "count_ok": len(results),
+        "count_error": len(errors),
+        "results": results,
+        "errors": errors,
+    }
 
 
 @app.post("/walk_forward")
 def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
-    sym = req.symbol.upper().strip()
-
-    if req.lookback < 30:
-        raise HTTPException(status_code=400, detail="lookback must be >= 30")
-    if not req.horizons:
-        raise HTTPException(status_code=400, detail="horizons must be non-empty")
-    if any(int(h) <= 0 for h in req.horizons):
-        raise HTTPException(status_code=400, detail="all horizons must be positive integers")
-
-    candles = massive_fetch_daily_bars(sym, req.from_date, req.to_date)
-
-    start = req.eval_start or req.from_date
-    end = req.eval_end or req.to_date
-
-    try:
-        result = walk_forward_core(
-            candles=candles,
-            lookback=int(req.lookback),
-            horizons=[int(h) for h in req.horizons],
-            start_date=start,
-            end_date=end,
-        )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # remove full rows to keep payload light
-    result.pop("rows", None)
-    result["symbol"] = sym
-    return result
+    rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
+    return {
+        "symbol": req.symbol.upper(),
+        "from_date": req.from_date,
+        "to_date": req.to_date,
+        "lookback": req.lookback,
+        "horizons": req.horizons,
+        "rows_sample": rows[:50],
+        "row_count": len(rows),
+    }
 
 
 @app.post("/calibrate")
 def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
-    sym = req.symbol.upper().strip()
+    rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
+    cal = calibrate_thresholds(rows, req.optimize_horizon, req.min_trades_per_side)
 
-    if req.lookback < 30:
-        raise HTTPException(status_code=400, detail="lookback must be >= 30")
-    if not req.horizons:
-        raise HTTPException(status_code=400, detail="horizons must be non-empty")
-    if req.optimize_horizon not in req.horizons:
-        raise HTTPException(status_code=400, detail="optimize_horizon must be included in horizons")
-
-    candles = massive_fetch_daily_bars(sym, req.from_date, req.to_date)
-
-    start = req.eval_start or req.from_date
-    end = req.eval_end or req.to_date
-
-    wf = walk_forward_core(
-        candles=candles,
-        lookback=int(req.lookback),
-        horizons=[int(h) for h in req.horizons],
-        start_date=start,
-        end_date=end,
-    )
-
-    rows = wf.get("rows") or []
-    if not rows:
-        raise HTTPException(status_code=400, detail="No walk-forward rows available to calibrate.")
-
-    buy_grid = _frange(req.buy_min, req.buy_max, req.buy_step)
-    sell_grid = _frange(req.sell_min, req.sell_max, req.sell_step)
-    if not buy_grid or not sell_grid:
-        raise HTTPException(status_code=400, detail="Invalid threshold grid parameters.")
-
-    cal = calibrate_thresholds_by_regime(
-        rows=rows,
-        optimize_horizon=int(req.optimize_horizon),
-        buy_grid=buy_grid,
-        sell_grid=sell_grid,
-        min_trades=int(req.min_trades_per_side),
-    )
-
-    payload = {
-        "created_at_utc": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
-        "symbol": sym,
-        "train_range": {"from_date": req.from_date, "to_date": req.to_date, "eval_start": start, "eval_end": end},
-        **cal,
+    # build env var value
+    env_payload = {
+        "created_at_utc": cal["created_at_utc"],
+        "symbol": req.symbol.upper(),
+        "train_range": {
+            "from_date": req.from_date,
+            "to_date": req.to_date,
+            "eval_start": req.from_date,
+            "eval_end": req.to_date,
+        },
+        "optimize_horizon": cal["optimize_horizon"],
+        "thresholds_by_regime": cal["thresholds_by_regime"],
+        "diagnostics": cal["diagnostics"],
     }
+    env_value = json.dumps(env_payload, separators=(",", ":"))
 
-    # also return a copy-pastable env string (single-line JSON)
-    env_json = json.dumps(payload, separators=(",", ":"))
     return {
-        "calibration": payload,
-        "env_var_name": CALIBRATION_ENV_NAME,
-        "env_var_value": env_json,
-        "next_step": f"Paste env_var_value into Railway Variable {CALIBRATION_ENV_NAME} then redeploy/restart.",
+        "calibration": env_payload,
+        "env_var_name": "FTIP_CALIBRATION_JSON",
+        "env_var_value": env_value,
+        "next_step": "Paste env_var_value into Railway Variable FTIP_CALIBRATION_JSON then redeploy/restart.",
     }
 
 
