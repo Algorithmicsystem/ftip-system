@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import os
 import math
+import json
 import datetime as dt
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
@@ -43,14 +44,12 @@ class Candle(BaseModel):
     close: float
     volume: Optional[float] = None
 
-    # optional extra features (not used yet in signal core)
     fundamental: Optional[float] = None
     sentiment: Optional[float] = None
     crowd: Optional[float] = None
 
 
 class BacktestRequest(BaseModel):
-    # Either provide `data` OR provide (symbol + date range) to fetch from Polygon
     data: Optional[List[Candle]] = None
 
     symbol: Optional[str] = None
@@ -77,10 +76,31 @@ class WalkForwardRequest(BaseModel):
     from_date: str  # YYYY-MM-DD
     to_date: str    # YYYY-MM-DD
     lookback: int = 252
-    horizons: List[int] = [5, 21, 63]  # trading bars
-    # Optional evaluation window inside [from_date, to_date]
-    eval_start: Optional[str] = None   # YYYY-MM-DD
-    eval_end: Optional[str] = None     # YYYY-MM-DD
+    horizons: List[int] = [5, 21, 63]
+    eval_start: Optional[str] = None
+    eval_end: Optional[str] = None
+
+
+class CalibrateRequest(BaseModel):
+    symbol: str
+    from_date: str
+    to_date: str
+    lookback: int = 252
+    horizons: List[int] = [5, 21, 63]
+    optimize_horizon: int = 21  # pick which forward horizon to optimize
+    eval_start: Optional[str] = None
+    eval_end: Optional[str] = None
+
+    # grid search ranges
+    buy_min: float = 0.10
+    buy_max: float = 0.60
+    buy_step: float = 0.05
+
+    sell_min: float = -0.60
+    sell_max: float = -0.10
+    sell_step: float = 0.05
+
+    min_trades_per_side: int = 15  # require enough BUY/SELL signals to be meaningful
 
 
 # ------------------------------------------------------------------------------
@@ -107,10 +127,6 @@ def _require_marketdata_key() -> str:
 
 
 def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[Candle]:
-    """
-    Polygon Aggregates (Daily):
-      GET /v2/aggs/ticker/{ticker}/range/1/day/{from}/{to}?adjusted=true&sort=asc&limit=50000&apiKey=...
-    """
     api_key = _require_marketdata_key()
     sym = symbol.upper().strip()
 
@@ -157,6 +173,41 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 MASSIVE_S3_ENDPOINT = _env("MASSIVE_S3_ENDPOINT", "https://files.massive.com") or "https://files.massive.com"
 MASSIVE_S3_ACCESS_KEY_ID = _env("MASSIVE_S3_ACCESS_KEY_ID")
 MASSIVE_S3_SECRET_ACCESS_KEY = _env("MASSIVE_S3_SECRET_ACCESS_KEY")
+
+
+# ------------------------------------------------------------------------------
+# Calibration config (optional, stored in env as JSON)
+# ------------------------------------------------------------------------------
+
+CALIBRATION_ENV_NAME = "FTIP_CALIBRATION_JSON"
+
+
+def _load_calibration() -> Optional[Dict[str, Any]]:
+    raw = _env(CALIBRATION_ENV_NAME)
+    if not raw:
+        return None
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+        return None
+    except Exception:
+        return None
+
+
+def _get_calibrated_thresholds(regime: str) -> Optional[Dict[str, float]]:
+    cal = _load_calibration()
+    if not cal:
+        return None
+    thresholds = (cal.get("thresholds_by_regime") or {})
+    t = thresholds.get(regime)
+    if not isinstance(t, dict):
+        return None
+    buy = t.get("buy")
+    sell = t.get("sell")
+    if isinstance(buy, (int, float)) and isinstance(sell, (int, float)):
+        return {"buy": float(buy), "sell": float(sell)}
+    return None
 
 
 # ------------------------------------------------------------------------------
@@ -254,7 +305,7 @@ def _annualized_vol(returns: List[float]) -> float:
 
 
 # ------------------------------------------------------------------------------
-# Backtest engine (buy-and-hold placeholder; still useful)
+# Backtest engine (buy-and-hold placeholder)
 # ------------------------------------------------------------------------------
 
 def run_backtest_core(candles: List[Candle], include_equity: bool, include_returns: bool) -> BacktestSummary:
@@ -274,7 +325,7 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
     sharpe = (ann_return / vol) if vol > 0 else 0.0
     mdd = _max_drawdown(equity)
 
-    out = BacktestSummary(
+    return BacktestSummary(
         total_return=float(total_return),
         annual_return=float(ann_return),
         sharpe=float(sharpe),
@@ -283,27 +334,22 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
         equity_curve={d: float(equity[i]) for i, d in enumerate(dates)} if include_equity else None,
         returns={d: float(rets[i]) for i, d in enumerate(dates)} if include_returns else None,
     )
-    return out
 
 
 # ------------------------------------------------------------------------------
-# Signal engine (core)
+# Signal engine
 # ------------------------------------------------------------------------------
 
-def _detect_regime(
-    closes: List[float],
-    returns: List[float],
-    vol_ann: float,
-    trend_strength: Optional[float],
-) -> str:
+def _detect_regime(vol_ann: float, trend_strength: float) -> str:
     if vol_ann >= 0.45:
         return "HIGH_VOL"
-    if trend_strength is not None and abs(trend_strength) >= 0.05:
+    if abs(trend_strength) >= 0.05:
         return "TRENDING"
     return "CHOPPY"
 
 
 def _thresholds_for_regime(regime: str) -> Dict[str, float]:
+    # default thresholds
     if regime == "HIGH_VOL":
         return {"buy": 0.45, "sell": -0.45}
     if regime == "TRENDING":
@@ -311,11 +357,7 @@ def _thresholds_for_regime(regime: str) -> Dict[str, float]:
     return {"buy": 0.30, "sell": -0.30}
 
 
-def compute_signal_core(
-    candles: List[Candle],
-    as_of: str,
-    lookback: int = 252,
-) -> Dict[str, Any]:
+def compute_signal_core(candles: List[Candle], as_of: str, lookback: int = 252) -> Dict[str, Any]:
     notes: List[str] = []
 
     cutoff = dt.date.fromisoformat(as_of)
@@ -365,12 +407,15 @@ def compute_signal_core(
 
     last_close = float(closes[-1])
 
-    regime = _detect_regime(closes, rets_1, vol_ann, trend_sma20_50)
-    thresholds = _thresholds_for_regime(regime)
+    regime = _detect_regime(vol_ann, trend_sma20_50)
+
+    # thresholds: calibrated overrides default if provided
+    thresholds = _get_calibrated_thresholds(regime) or _thresholds_for_regime(regime)
 
     rsi_component = (rsi14_val - 50.0) / 50.0
     volz_component = max(-2.0, min(2.0, volume_z20_val)) / 2.0
 
+    # weights (keep constant for now; thresholds are what we calibrate first)
     score = (
         0.25 * mom_5 +
         0.30 * mom_21 +
@@ -400,12 +445,9 @@ def compute_signal_core(
     if vol_ann >= 0.45:
         notes.append("Volatility is elevated; treat signal with caution.")
 
-    if regime == "TRENDING":
-        notes.append("Regime: TRENDING (trend strength strong).")
-    elif regime == "CHOPPY":
-        notes.append("Regime: CHOPPY (trend not strong; signals are less reliable).")
-    else:
-        notes.append("Regime: HIGH_VOL (volatility high).")
+    notes.append(f"Regime: {regime}.")
+    if _get_calibrated_thresholds(regime) is not None:
+        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON.")
 
     features = {
         "mom_5": float(mom_5),
@@ -582,7 +624,98 @@ def walk_forward_core(
             "start_date": sd.isoformat(),
             "end_date": ed.isoformat(),
         },
+        "rows": rows,  # internal use for calibration endpoint
     }
+
+
+# ------------------------------------------------------------------------------
+# Calibration (grid-search thresholds by regime)
+# ------------------------------------------------------------------------------
+
+def _frange(start: float, stop: float, step: float) -> List[float]:
+    if step <= 0:
+        return []
+    vals: List[float] = []
+    x = start
+    # include stop (within epsilon)
+    while x <= stop + 1e-12:
+        vals.append(round(float(x), 10))
+        x += step
+    return vals
+
+
+def calibrate_thresholds_by_regime(
+    rows: List[Dict[str, Any]],
+    optimize_horizon: int,
+    buy_grid: List[float],
+    sell_grid: List[float],
+    min_trades: int,
+) -> Dict[str, Any]:
+    regimes = sorted(list({r["regime"] for r in rows}))
+    if not regimes:
+        raise ValueError("No regimes found in rows.")
+
+    key = f"fwd_ret_{optimize_horizon}"
+    if key not in rows[0]:
+        raise ValueError(f"Rows do not contain {key}. Make sure horizons include {optimize_horizon}.")
+
+    out: Dict[str, Any] = {
+        "optimize_horizon": optimize_horizon,
+        "thresholds_by_regime": {},
+        "diagnostics": {},
+    }
+
+    for rg in regimes:
+        rg_rows = [r for r in rows if r["regime"] == rg]
+        if len(rg_rows) < (min_trades * 2):
+            out["thresholds_by_regime"][rg] = _thresholds_for_regime(rg)
+            out["diagnostics"][rg] = {
+                "note": f"Not enough rows in regime {rg} to calibrate robustly; using defaults.",
+                "row_count": len(rg_rows),
+            }
+            continue
+
+        best: Optional[Tuple[float, float, float]] = None  # (objective, buy, sell)
+
+        for buy_th in buy_grid:
+            for sell_th in sell_grid:
+                if sell_th >= 0 or buy_th <= 0:
+                    continue
+                if sell_th >= -0.05 and buy_th <= 0.05:
+                    continue
+                if sell_th >= buy_th:
+                    continue
+
+                buys = [r for r in rg_rows if float(r["score"]) >= buy_th]
+                sells = [r for r in rg_rows if float(r["score"]) <= sell_th]
+
+                if len(buys) < min_trades or len(sells) < min_trades:
+                    continue
+
+                # objective: avg(fwd_ret) for BUY minus avg(fwd_ret) for SELL (SELL expects negative)
+                buy_avg = _mean([float(r[key]) for r in buys])
+                sell_avg = _mean([float(r[key]) for r in sells])
+                objective = buy_avg - sell_avg
+
+                if best is None or objective > best[0]:
+                    best = (objective, float(buy_th), float(sell_th))
+
+        if best is None:
+            out["thresholds_by_regime"][rg] = _thresholds_for_regime(rg)
+            out["diagnostics"][rg] = {
+                "note": "No valid threshold pair met min_trades constraints; using defaults.",
+                "row_count": len(rg_rows),
+            }
+        else:
+            obj, buy_th, sell_th = best
+            out["thresholds_by_regime"][rg] = {"buy": buy_th, "sell": sell_th}
+            out["diagnostics"][rg] = {
+                "row_count": len(rg_rows),
+                "best_objective": obj,
+                "min_trades": min_trades,
+            }
+
+    return out
 
 
 # ------------------------------------------------------------------------------
@@ -605,6 +738,7 @@ def root() -> Dict[str, Any]:
             "/run_scores",
             "/signal",
             "/walk_forward",
+            "/calibrate",
             "/market/massive/bars",
             "/storage/massive/s3_config",
             "/docs",
@@ -677,6 +811,19 @@ def signal(
 
     out = compute_signal_core(candles, as_of=as_of, lookback=lookback)
     out["symbol"] = symbol.upper().strip()
+
+    cal = _load_calibration()
+    if cal:
+        out["calibration_loaded"] = True
+        out["calibration_meta"] = {
+            "optimize_horizon": cal.get("optimize_horizon"),
+            "created_at_utc": cal.get("created_at_utc"),
+            "symbol": cal.get("symbol"),
+            "train_range": cal.get("train_range"),
+        }
+    else:
+        out["calibration_loaded"] = False
+
     return out
 
 
@@ -691,10 +838,8 @@ def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
     if any(int(h) <= 0 for h in req.horizons):
         raise HTTPException(status_code=400, detail="all horizons must be positive integers")
 
-    # Fetch exactly the requested range from Polygon
     candles = massive_fetch_daily_bars(sym, req.from_date, req.to_date)
 
-    # Optional evaluation sub-window
     start = req.eval_start or req.from_date
     end = req.eval_end or req.to_date
 
@@ -709,8 +854,68 @@ def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # remove full rows to keep payload light
+    result.pop("rows", None)
     result["symbol"] = sym
     return result
+
+
+@app.post("/calibrate")
+def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
+    sym = req.symbol.upper().strip()
+
+    if req.lookback < 30:
+        raise HTTPException(status_code=400, detail="lookback must be >= 30")
+    if not req.horizons:
+        raise HTTPException(status_code=400, detail="horizons must be non-empty")
+    if req.optimize_horizon not in req.horizons:
+        raise HTTPException(status_code=400, detail="optimize_horizon must be included in horizons")
+
+    candles = massive_fetch_daily_bars(sym, req.from_date, req.to_date)
+
+    start = req.eval_start or req.from_date
+    end = req.eval_end or req.to_date
+
+    wf = walk_forward_core(
+        candles=candles,
+        lookback=int(req.lookback),
+        horizons=[int(h) for h in req.horizons],
+        start_date=start,
+        end_date=end,
+    )
+
+    rows = wf.get("rows") or []
+    if not rows:
+        raise HTTPException(status_code=400, detail="No walk-forward rows available to calibrate.")
+
+    buy_grid = _frange(req.buy_min, req.buy_max, req.buy_step)
+    sell_grid = _frange(req.sell_min, req.sell_max, req.sell_step)
+    if not buy_grid or not sell_grid:
+        raise HTTPException(status_code=400, detail="Invalid threshold grid parameters.")
+
+    cal = calibrate_thresholds_by_regime(
+        rows=rows,
+        optimize_horizon=int(req.optimize_horizon),
+        buy_grid=buy_grid,
+        sell_grid=sell_grid,
+        min_trades=int(req.min_trades_per_side),
+    )
+
+    payload = {
+        "created_at_utc": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+        "symbol": sym,
+        "train_range": {"from_date": req.from_date, "to_date": req.to_date, "eval_start": start, "eval_end": end},
+        **cal,
+    }
+
+    # also return a copy-pastable env string (single-line JSON)
+    env_json = json.dumps(payload, separators=(",", ":"))
+    return {
+        "calibration": payload,
+        "env_var_name": CALIBRATION_ENV_NAME,
+        "env_var_value": env_json,
+        "next_step": f"Paste env_var_value into Railway Variable {CALIBRATION_ENV_NAME} then redeploy/restart.",
+    }
 
 
 @app.post("/run_scores")
