@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import math
 import datetime as dt
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
@@ -16,9 +16,11 @@ from pydantic import BaseModel
 
 APP_NAME = "FTIP System API"
 
+
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
     v = os.getenv(name)
     return v if v not in (None, "") else default
+
 
 def _git_sha() -> str:
     return (
@@ -28,8 +30,18 @@ def _git_sha() -> str:
         or "unknown"
     )
 
+
 def _railway_env() -> str:
     return _env("RAILWAY_ENVIRONMENT", "unknown") or "unknown"
+
+
+def _model_dump(m: BaseModel, *, exclude_none: bool = True) -> Dict[str, Any]:
+    """
+    Compatibility helper: works on Pydantic v2 (model_dump) and v1 (dict).
+    """
+    if hasattr(m, "model_dump"):
+        return m.model_dump(exclude_none=exclude_none)  # type: ignore[attr-defined]
+    return m.dict(exclude_none=exclude_none)  # type: ignore[call-arg]
 
 
 # ------------------------------------------------------------------------------
@@ -70,6 +82,19 @@ class BacktestSummary(BaseModel):
     returns: Optional[Dict[str, float]] = None
 
 
+class SignalResponse(BaseModel):
+    symbol: str
+    as_of: str
+    lookback: int
+
+    score: float
+    signal: str  # "BUY", "SELL", "HOLD"
+    confidence: float  # 0..1
+
+    features: Dict[str, float]
+    notes: List[str]
+
+
 # ------------------------------------------------------------------------------
 # Massive (Polygon legacy) REST API client
 # ------------------------------------------------------------------------------
@@ -84,6 +109,7 @@ MARKETDATA_BASE_URL = (
 MARKETDATA_API_KEY = _env("MASSIVE_API_KEY") or _env("POLYGON_API_KEY")
 MARKETDATA_API_SECRET = _env("MASSIVE_API_SECRET") or _env("POLYGON_API_SECRET")  # optional
 
+
 def _require_marketdata_key() -> str:
     if not MARKETDATA_API_KEY:
         raise HTTPException(
@@ -91,6 +117,7 @@ def _require_marketdata_key() -> str:
             detail="MASSIVE_API_KEY (or POLYGON_API_KEY) is not set on the server. Add it in Railway Variables.",
         )
     return MARKETDATA_API_KEY
+
 
 def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[Candle]:
     """
@@ -150,7 +177,7 @@ MASSIVE_S3_SECRET_ACCESS_KEY = _env("MASSIVE_S3_SECRET_ACCESS_KEY")
 
 
 # ------------------------------------------------------------------------------
-# Simple backtest engine (your existing logic can be plugged in here later)
+# Math helpers
 # ------------------------------------------------------------------------------
 
 def _pct_change(series: List[float]) -> List[float]:
@@ -164,12 +191,18 @@ def _pct_change(series: List[float]) -> List[float]:
             out.append((cur / prev) - 1.0)
     return out
 
+
+def _mean(values: List[float]) -> float:
+    return sum(values) / len(values) if values else 0.0
+
+
 def _std(values: List[float]) -> float:
     if len(values) < 2:
         return 0.0
-    mu = sum(values) / len(values)
+    mu = _mean(values)
     var = sum((x - mu) ** 2 for x in values) / (len(values) - 1)
     return math.sqrt(var)
+
 
 def _max_drawdown(equity: List[float]) -> float:
     peak = equity[0] if equity else 1.0
@@ -182,8 +215,47 @@ def _max_drawdown(equity: List[float]) -> float:
             mdd = dd
     return mdd
 
+
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _safe_div(a: float, b: float, default: float = 0.0) -> float:
+    return a / b if b not in (0.0, -0.0) else default
+
+
+def _parse_date(s: str) -> dt.date:
+    try:
+        return dt.date.fromisoformat(s)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"Invalid date '{s}'. Use YYYY-MM-DD.")
+
+
+def _date_to_str(d: dt.date) -> str:
+    return d.isoformat()
+
+
+def _slice_as_of(candles: List[Candle], as_of: str) -> List[Candle]:
+    """
+    Candles are daily ISO strings. Keep <= as_of.
+    """
+    asof = _parse_date(as_of)
+    out: List[Candle] = []
+    for c in candles:
+        try:
+            d = _parse_date(c.timestamp)
+        except Exception:
+            continue
+        if d <= asof:
+            out.append(c)
+    return out
+
+
+# ------------------------------------------------------------------------------
+# Simple backtest engine (buy-and-hold placeholder)
+# ------------------------------------------------------------------------------
+
 def run_backtest_core(candles: List[Candle], include_equity: bool, include_returns: bool) -> BacktestSummary:
-    # Placeholder "strategy": buy-and-hold on close-to-close returns
     closes = [c.close for c in candles]
     dates = [c.timestamp for c in candles]
 
@@ -215,6 +287,166 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
 
 
 # ------------------------------------------------------------------------------
+# Feature engineering + scoring engine (signal-only; no broker execution)
+# ------------------------------------------------------------------------------
+
+def _sma(values: List[float], window: int) -> float:
+    if window <= 0 or len(values) < window:
+        return values[-1] if values else 0.0
+    return _mean(values[-window:])
+
+
+def _rsi_like(returns: List[float], window: int = 14) -> float:
+    """
+    Simple RSI-style oscillator in range [0,100].
+    Uses returns, not price deltas. Good enough as a baseline.
+    """
+    if len(returns) < window + 1:
+        return 50.0
+    rs = returns[-window:]
+    gains = [r for r in rs if r > 0]
+    losses = [-r for r in rs if r < 0]
+    avg_gain = _mean(gains) if gains else 0.0
+    avg_loss = _mean(losses) if losses else 0.0
+    if avg_loss == 0.0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rel = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rel))
+
+
+def _zscore(x: float, series: List[float]) -> float:
+    mu = _mean(series)
+    sd = _std(series)
+    if sd == 0.0:
+        return 0.0
+    return (x - mu) / sd
+
+
+def compute_features(candles: List[Candle]) -> Dict[str, float]:
+    closes = [c.close for c in candles]
+    vols = [float(c.volume) for c in candles if c.volume is not None]
+    returns = _pct_change(closes)
+
+    # Momentum features
+    mom_5 = _safe_div(closes[-1], closes[-6], 1.0) - 1.0 if len(closes) >= 6 else 0.0
+    mom_21 = _safe_div(closes[-1], closes[-22], 1.0) - 1.0 if len(closes) >= 22 else 0.0
+    mom_63 = _safe_div(closes[-1], closes[-64], 1.0) - 1.0 if len(closes) >= 64 else 0.0
+
+    sma_20 = _sma(closes, 20)
+    sma_50 = _sma(closes, 50)
+    trend_sma = _safe_div(sma_20, sma_50, 1.0) - 1.0 if sma_50 != 0 else 0.0
+
+    # Volatility (annualized)
+    vol_ann = _std(returns[1:]) * math.sqrt(252.0) if len(returns) > 2 else 0.0
+
+    # RSI-ish
+    rsi14 = _rsi_like(returns, 14)
+
+    # Volume zscore vs trailing (if volume exists)
+    vol_z = 0.0
+    if len(vols) >= 20:
+        last_v = vols[-1]
+        trailing = vols[-20:]
+        vol_z = _zscore(last_v, trailing)
+
+    return {
+        "mom_5": float(mom_5),
+        "mom_21": float(mom_21),
+        "mom_63": float(mom_63),
+        "trend_sma20_50": float(trend_sma),
+        "volatility_ann": float(vol_ann),
+        "rsi14": float(rsi14),
+        "volume_z20": float(vol_z),
+        "last_close": float(closes[-1]) if closes else 0.0,
+    }
+
+
+def score_signal(features: Dict[str, float]) -> Tuple[float, str, float, List[str]]:
+    """
+    Returns: (score, signal, confidence, notes)
+    score: roughly [-1, +1]
+    """
+    notes: List[str] = []
+
+    mom = 0.45 * _clamp(features.get("mom_21", 0.0) * 5.0, -1.0, 1.0)
+    trend = 0.30 * _clamp(features.get("trend_sma20_50", 0.0) * 10.0, -1.0, 1.0)
+
+    # RSI: prefer 40-60; penalize extreme overbought/oversold
+    rsi = features.get("rsi14", 50.0)
+    rsi_centered = (rsi - 50.0) / 50.0  # [-1,+1]
+    rsi_term = 0.10 * _clamp(rsi_centered, -1.0, 1.0)
+
+    # Volatility penalty: high vol reduces confidence/score slightly
+    vol = features.get("volatility_ann", 0.0)
+    vol_penalty = 0.15 * _clamp((vol - 0.25) / 0.50, 0.0, 1.0)  # start penalizing above ~25% ann vol
+
+    # Volume confirmation
+    volz = features.get("volume_z20", 0.0)
+    vol_confirm = 0.10 * _clamp(volz / 2.0, -1.0, 1.0)
+
+    raw = mom + trend + rsi_term + vol_confirm - vol_penalty
+    score = _clamp(raw, -1.0, 1.0)
+
+    # Signal thresholds
+    if score >= 0.25:
+        signal = "BUY"
+    elif score <= -0.25:
+        signal = "SELL"
+    else:
+        signal = "HOLD"
+
+    # Confidence: how far from 0 plus volatility impact
+    base_conf = abs(score)
+    conf = _clamp(base_conf * (1.0 - _clamp(vol / 1.0, 0.0, 0.7)), 0.0, 1.0)
+
+    # Notes
+    if features.get("trend_sma20_50", 0.0) > 0:
+        notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
+    else:
+        notes.append("Short-term trend (SMA20 vs SMA50) is negative or flat.")
+
+    if rsi >= 70:
+        notes.append("RSI is high (potentially overbought).")
+    elif rsi <= 30:
+        notes.append("RSI is low (potentially oversold).")
+
+    if vol >= 0.40:
+        notes.append("Volatility is elevated; treat signal with caution.")
+
+    if volz >= 1.0:
+        notes.append("Volume is above recent average (confirmation).")
+    elif volz <= -1.0:
+        notes.append("Volume is below recent average (weak participation).")
+
+    return float(score), signal, float(conf), notes
+
+
+def fetch_lookback_window(symbol: str, as_of: str, lookback: int) -> List[Candle]:
+    """
+    Fetch enough calendar days to reliably contain `lookback` trading days.
+    """
+    if lookback < 20 or lookback > 2000:
+        raise HTTPException(status_code=400, detail="lookback must be between 20 and 2000.")
+
+    asof = _parse_date(as_of)
+
+    # Calendar buffer: ~1.6x trading days + 30 days padding
+    cal_days = int(lookback * 1.6) + 30
+    from_d = asof - dt.timedelta(days=cal_days)
+
+    candles = massive_fetch_daily_bars(symbol, _date_to_str(from_d), _date_to_str(asof))
+    candles = _slice_as_of(candles, as_of)
+
+    if len(candles) < lookback:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Not enough data to compute signal. Needed {lookback} bars <= {as_of}, got {len(candles)}.",
+        )
+
+    return candles[-lookback:]
+
+
+# ------------------------------------------------------------------------------
 # FastAPI
 # ------------------------------------------------------------------------------
 
@@ -232,6 +464,7 @@ def root() -> Dict[str, Any]:
             "/run_all",
             "/run_backtest",
             "/run_scores",
+            "/signal",
             "/market/massive/bars",
             "/storage/massive/s3_config",
             "/docs",
@@ -259,7 +492,12 @@ def market_massive_bars(
     to_date: str = Query(..., description="YYYY-MM-DD"),
 ) -> Dict[str, Any]:
     candles = massive_fetch_daily_bars(symbol, from_date, to_date)
-    return {"symbol": symbol.upper(), "from_date": from_date, "to_date": to_date, "data": [c.model_dump() for c in candles]}
+    return {
+        "symbol": symbol.upper(),
+        "from_date": from_date,
+        "to_date": to_date,
+        "data": [_model_dump(c) for c in candles],
+    }
 
 
 @app.get("/storage/massive/s3_config")
@@ -287,7 +525,30 @@ def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
         candles = massive_fetch_daily_bars(req.symbol, req.from_date, req.to_date)
 
     summary = run_backtest_core(candles, req.include_equity_curve, req.include_returns)
-    return {"backtest_summary": summary.model_dump(exclude_none=True)}
+    return {"backtest_summary": _model_dump(summary)}
+
+
+@app.get("/signal")
+def signal(
+    symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
+    as_of: str = Query(..., description="YYYY-MM-DD (signal computed using bars up to this date)"),
+    lookback: int = Query(252, description="Trading-day lookback window (default 252)"),
+) -> Dict[str, Any]:
+    window = fetch_lookback_window(symbol, as_of, lookback)
+    feats = compute_features(window)
+    score, sig, conf, notes = score_signal(feats)
+
+    out = SignalResponse(
+        symbol=symbol.upper(),
+        as_of=as_of,
+        lookback=lookback,
+        score=score,
+        signal=sig,
+        confidence=conf,
+        features=feats,
+        notes=notes,
+    )
+    return _model_dump(out)
 
 
 @app.post("/run_scores")
