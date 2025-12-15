@@ -139,6 +139,37 @@ class PortfolioRequest(BaseModel):
     allow_shorts: bool = False                  # default False (signals only; no short weights)
 
 
+class PortfolioBacktestRequest(BaseModel):
+    symbols: List[str]
+    from_date: str  # YYYY-MM-DD
+    to_date: str    # YYYY-MM-DD
+    lookback: int = 252
+
+    # Rebalance + costs
+    rebalance_every: int = 5  # trading days (5 ≈ weekly)
+    trading_cost_bps: float = 5.0  # 5 bps = 0.05% per $ traded (round trip approx)
+    slippage_bps: float = 0.0
+
+    # Portfolio knobs (same behavior as /portfolio_signals)
+    max_weight: Optional[float] = None
+    hold_multiplier: Optional[float] = None
+    min_confidence: Optional[float] = None
+    allow_shorts: bool = False
+
+    include_equity_curve: bool = True
+
+
+class PortfolioBacktestResponse(BaseModel):
+    total_return: float
+    annual_return: float
+    sharpe: float
+    max_drawdown: float
+    volatility: float
+    turnover: float
+
+    equity_curve: Optional[Dict[str, float]] = None
+
+
 # ------------------------------------------------------------------------------
 # Massive (Polygon legacy) REST API client
 # ------------------------------------------------------------------------------
@@ -701,6 +732,184 @@ def _raw_weight_from_signal(sig: Dict[str, Any], hold_mult: float, min_conf: flo
         return (-conf * vol_adj) if allow_shorts else 0.0
     return 0.0
 
+def _daily_returns_from_closes(dates: List[str], closes: List[float]) -> Dict[str, float]:
+    # returns keyed by date (date has return from prev close -> this close)
+    out: Dict[str, float] = {}
+    for i in range(1, len(closes)):
+        prev = closes[i - 1]
+        cur = closes[i]
+        if prev == 0:
+            out[dates[i]] = 0.0
+        else:
+            out[dates[i]] = float(cur / prev - 1.0)
+    return out
+
+
+def _portfolio_weights_for_date(req: PortfolioBacktestRequest, as_of: str) -> Tuple[Dict[str, float], float]:
+    # Reuse your portfolio logic using the existing building blocks
+    preq = PortfolioRequest(
+        symbols=req.symbols,
+        as_of=as_of,
+        lookback=req.lookback,
+        max_weight=req.max_weight,
+        hold_multiplier=req.hold_multiplier,
+        min_confidence=req.min_confidence,
+        allow_shorts=req.allow_shorts,
+    )
+
+    knobs = _portfolio_knobs(preq)
+    max_w = knobs["max_weight"]
+    hold_mult = knobs["hold_multiplier"]
+    min_conf = knobs["min_confidence"]
+
+    per: Dict[str, Any] = {}
+    for sym in preq.symbols:
+        s = (sym or "").strip().upper()
+        if not s:
+            continue
+        out = compute_signal_for_symbol(s, preq.as_of, preq.lookback).model_dump(exclude_none=True)
+        per[s] = out
+
+    raw: Dict[str, float] = {}
+    for s, sig in per.items():
+        rw = _raw_weight_from_signal(sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=preq.allow_shorts)
+        if rw != 0.0:
+            raw[s] = float(rw)
+
+    if not raw:
+        return {}, 1.0
+
+    portfolio: Dict[str, float] = {}
+    cash = 1.0
+
+    if preq.allow_shorts:
+        gross = sum(abs(v) for v in raw.values()) or 1.0
+        for s, v in raw.items():
+            w = v / gross
+            w = _clamp(w, -max_w, max_w)
+            portfolio[s] = float(w)
+        net = sum(portfolio.values())
+        cash = float(_clamp(1.0 - max(net, 0.0), 0.0, 1.0))
+    else:
+        long_raw = {s: v for s, v in raw.items() if v > 0}
+        total = sum(long_raw.values()) or 1.0
+        tmp = {s: min(v / total, max_w) for s, v in long_raw.items()}
+
+        capped_sum = sum(tmp.values())
+        if capped_sum > 0:
+            scale = min(1.0, capped_sum) / capped_sum
+            portfolio = {s: float(v * scale) for s, v in tmp.items()}
+        cash = float(_clamp(1.0 - sum(portfolio.values()), 0.0, 1.0))
+
+    return portfolio, cash
+
+
+def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestResponse:
+    # 1) Fetch candles once per symbol (include extra buffer for lookback)
+    start_dt = _parse_date(req.from_date)
+    end_dt = _parse_date(req.to_date)
+    buffer_start = (start_dt - dt.timedelta(days=900)).isoformat()  # same logic as your signal fetch
+
+    candles_by_sym: Dict[str, List[Candle]] = {}
+    for sym in req.symbols:
+        s = (sym or "").strip().upper()
+        if not s:
+            continue
+        candles_by_sym[s] = massive_fetch_daily_bars(s, buffer_start, req.to_date)
+
+    # 2) Build common trading calendar (intersection of available dates within range)
+    dates_sets = []
+    for s, cs in candles_by_sym.items():
+        ds = [c.timestamp for c in cs if req.from_date <= c.timestamp <= req.to_date]
+        dates_sets.append(set(ds))
+
+    if not dates_sets:
+        return PortfolioBacktestResponse(
+            total_return=0.0, annual_return=0.0, sharpe=0.0, max_drawdown=0.0, volatility=0.0, turnover=0.0,
+            equity_curve={} if req.include_equity_curve else None
+        )
+
+    common_dates = sorted(set.intersection(*dates_sets))
+    if len(common_dates) < 2:
+        return PortfolioBacktestResponse(
+            total_return=0.0, annual_return=0.0, sharpe=0.0, max_drawdown=0.0, volatility=0.0, turnover=0.0,
+            equity_curve={} if req.include_equity_curve else None
+        )
+
+    # 3) Build daily return series per symbol keyed by date
+    rets_by_sym: Dict[str, Dict[str, float]] = {}
+    for s, cs in candles_by_sym.items():
+        ds = [c.timestamp for c in cs if c.timestamp in set(common_dates)]
+        closes = [c.close for c in cs if c.timestamp in set(common_dates)]
+        # Ensure sorted
+        paired = sorted(zip(ds, closes), key=lambda x: x[0])
+        ds2 = [p[0] for p in paired]
+        closes2 = [p[1] for p in paired]
+        rets_by_sym[s] = _daily_returns_from_closes(ds2, closes2)
+
+    # 4) Rebalance loop
+    cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
+
+    equity = 1.0
+    equity_curve: Dict[str, float] = {}
+    daily_port_rets: List[float] = []
+
+    weights: Dict[str, float] = {}
+    cash_w = 1.0
+    total_turnover = 0.0
+
+    # Use indices so “rebalance_every” counts trading days
+    for i, d in enumerate(common_dates):
+        if i == 0:
+            equity_curve[d] = equity
+            continue
+
+        # Rebalance at start of day i if schedule hit
+        if (i - 1) % max(1, int(req.rebalance_every)) == 0:
+            new_w, new_cash = _portfolio_weights_for_date(req, as_of=d)
+
+            # turnover = sum(abs(delta weights)) (cash included implicitly)
+            # We include only traded assets; cash change is the balancing item.
+            turnover = 0.0
+            syms = set(weights.keys()) | set(new_w.keys())
+            for s in syms:
+                turnover += abs(new_w.get(s, 0.0) - weights.get(s, 0.0))
+            # apply transaction cost on turnover
+            equity *= (1.0 - turnover * cost_rate)
+
+            total_turnover += turnover
+            weights = new_w
+            cash_w = new_cash
+
+        # Daily portfolio return (cash return = 0)
+        pr = 0.0
+        for s, w in weights.items():
+            pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
+
+        equity *= (1.0 + pr)
+        equity_curve[d] = equity
+        daily_port_rets.append(pr)
+
+    total_return = equity - 1.0
+
+    n = max(1, len(daily_port_rets))
+    ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
+
+    vol = _std(daily_port_rets) * math.sqrt(252.0) if len(daily_port_rets) > 2 else 0.0
+    sharpe = (ann_return / vol) if vol > 0 else 0.0
+
+    mdd = _max_drawdown(list(equity_curve.values()))
+
+    return PortfolioBacktestResponse(
+        total_return=float(total_return),
+        annual_return=float(ann_return),
+        sharpe=float(sharpe),
+        max_drawdown=float(mdd),
+        volatility=float(vol),
+        turnover=float(total_turnover),
+        equity_curve=equity_curve if req.include_equity_curve else None,
+    )
+
 
 def _normalize_long_only_with_caps(raw_pos: Dict[str, float], max_w: float) -> Tuple[Dict[str, float], float]:
     """
@@ -976,6 +1185,12 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
         "signals": per,
         "meta": {"count_buy": count_buy, "count_hold": count_hold, "count_sell": count_sell},
     }
+
+
+@app.post("/portfolio_backtest")
+def portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
+    out = backtest_portfolio(req)
+    return out.model_dump(exclude_none=True)
 
 
 @app.post("/walk_forward")
