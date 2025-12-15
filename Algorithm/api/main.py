@@ -126,7 +126,6 @@ class CalibrateRequest(BaseModel):
     min_trades_per_side: int = 15  # require enough BUY/SELL signals to be meaningful
 
 
-# NEW: Portfolio request model
 class PortfolioRequest(BaseModel):
     symbols: List[str]
     as_of: str
@@ -490,7 +489,10 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
         conf *= 0.65
         notes.append("Confidence reduced due to HIGH_VOL regime.")
     if effective < lookback:
-        notes.insert(0, f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.")
+        notes.insert(
+            0,
+            f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.",
+        )
 
     if regime == "TRENDING":
         notes.append("Regime: TRENDING.")
@@ -642,7 +644,7 @@ def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_
 
 
 # ------------------------------------------------------------------------------
-# NEW: Portfolio construction layer
+# Portfolio construction layer (FIXED cap redistribution)
 # ------------------------------------------------------------------------------
 
 def _portfolio_knobs(req: PortfolioRequest) -> Dict[str, float]:
@@ -650,7 +652,6 @@ def _portfolio_knobs(req: PortfolioRequest) -> Dict[str, float]:
     hold_mult = req.hold_multiplier if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
     min_conf = req.min_confidence if req.min_confidence is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
 
-    # sanity clamps
     max_w = _clamp(float(max_w), 0.01, 1.0)
     hold_mult = _clamp(float(hold_mult), 0.0, 1.0)
     min_conf = _clamp(float(min_conf), 0.0, 1.0)
@@ -660,13 +661,16 @@ def _portfolio_knobs(req: PortfolioRequest) -> Dict[str, float]:
 def _raw_weight_from_signal(sig: Dict[str, Any], hold_mult: float, min_conf: float, allow_shorts: bool) -> float:
     signal = (sig.get("signal") or "HOLD").upper()
     conf = float(sig.get("confidence") or 0.0)
-    vola = float(sig.get("features", {}).get("volatility_ann") or sig.get("features", {}).get("volatility") or sig.get("volatility_ann") or 0.0)
+    vola = float(
+        sig.get("features", {}).get("volatility_ann")
+        or sig.get("features", {}).get("volatility")
+        or sig.get("volatility_ann")
+        or 0.0
+    )
 
-    # Filter weak / noisy outputs
     if conf < min_conf:
         return 0.0
 
-    # Volatility targeting: higher vol => lower size
     vol_adj = 1.0 / (max(1e-6, vola))
 
     if signal == "BUY":
@@ -676,6 +680,82 @@ def _raw_weight_from_signal(sig: Dict[str, Any], hold_mult: float, min_conf: flo
     if signal == "SELL":
         return (-conf * vol_adj) if allow_shorts else 0.0
     return 0.0
+
+
+def _normalize_long_only_with_caps(raw_pos: Dict[str, float], max_w: float) -> Tuple[Dict[str, float], float]:
+    """
+    Correct long-only allocation:
+    - Start from proportional preferences (raw_pos)
+    - Apply per-name cap
+    - Redistribute leftover to uncapped names until done
+    """
+    items = {k: float(v) for k, v in raw_pos.items() if v > 0.0}
+    if not items:
+        return {}, 1.0
+
+    total = sum(items.values())
+    if total <= 0:
+        return {}, 1.0
+
+    pref = {k: v / total for k, v in items.items()}  # preferences sum to 1
+
+    final: Dict[str, float] = {k: 0.0 for k in pref.keys()}
+    active = set(pref.keys())
+    remaining = 1.0
+
+    for _ in range(10000):
+        if remaining <= 1e-12 or not active:
+            break
+
+        denom = sum(pref[k] for k in active)
+        if denom <= 0:
+            break
+
+        progressed = False
+        for k in list(active):
+            target = remaining * (pref[k] / denom)
+            room = max_w - final[k]
+            add = min(target, room)
+            if add > 0:
+                final[k] += add
+                remaining -= add
+                progressed = True
+            if final[k] >= max_w - 1e-12:
+                active.remove(k)
+
+        if not progressed:
+            break
+
+    # Filter tiny weights
+    final = {k: float(v) for k, v in final.items() if v > 1e-12}
+    cash = float(_clamp(1.0 - sum(final.values()), 0.0, 1.0))
+    return final, cash
+
+
+def _normalize_allow_shorts_with_caps(raw: Dict[str, float], max_w: float) -> Tuple[Dict[str, float], float]:
+    """
+    Shorts allowed:
+    - Normalize by gross exposure
+    - Cap abs(weight)
+    - Cash is based on net long exposure
+    """
+    if not raw:
+        return {}, 1.0
+
+    gross = sum(abs(v) for v in raw.values())
+    if gross <= 0:
+        return {}, 1.0
+
+    wts: Dict[str, float] = {}
+    for k, v in raw.items():
+        w = v / gross
+        w = _clamp(w, -max_w, max_w)
+        if abs(w) > 1e-12:
+            wts[k] = float(w)
+
+    net = sum(wts.values())
+    cash = float(_clamp(1.0 - max(net, 0.0), 0.0, 1.0))
+    return wts, cash
 
 
 # ------------------------------------------------------------------------------
@@ -728,7 +808,12 @@ def market_massive_bars(
     to_date: str = Query(..., description="YYYY-MM-DD"),
 ) -> Dict[str, Any]:
     candles = massive_fetch_daily_bars(symbol, from_date, to_date)
-    return {"symbol": symbol.upper(), "from_date": from_date, "to_date": to_date, "data": [c.model_dump() for c in candles]}
+    return {
+        "symbol": symbol.upper(),
+        "from_date": from_date,
+        "to_date": to_date,
+        "data": [c.model_dump() for c in candles],
+    }
 
 
 @app.get("/storage/massive/s3_config")
@@ -793,7 +878,6 @@ def signals(req: SignalsRequest) -> Dict[str, Any]:
     }
 
 
-# NEW: Portfolio endpoint
 @app.post("/portfolio_signals")
 def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
     knobs = _portfolio_knobs(req)
@@ -801,7 +885,7 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
     hold_mult = knobs["hold_multiplier"]
     min_conf = knobs["min_confidence"]
 
-    # Step 1: compute per-symbol signals (re-using your engine)
+    # Step 1: compute per-symbol signals
     per: Dict[str, Any] = {}
     errors: Dict[str, Any] = {}
     for sym in req.symbols:
@@ -816,24 +900,24 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
         except Exception as e:
             errors[s] = {"status_code": 500, "detail": str(e)}
 
-    # Step 2: compute raw weights (confidence * 1/vol, HOLD dampened, SELL optional)
+    # Step 2: raw weights
     raw: Dict[str, float] = {}
     for s, sig in per.items():
         rw = _raw_weight_from_signal(sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=req.allow_shorts)
         if rw != 0.0:
             raw[s] = float(rw)
 
-    # Step 3: normalize to portfolio weights with caps
-    # If shorts disabled -> long-only normalization and remainder to cash.
-    portfolio: Dict[str, float] = {}
-    cash = 1.0
-
     if not raw:
         return {
             "as_of": req.as_of,
             "lookback": req.lookback,
             "method": "confidence_vol_targeted",
-            "knobs": {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf, "allow_shorts": req.allow_shorts},
+            "knobs": {
+                "max_weight": max_w,
+                "hold_multiplier": hold_mult,
+                "min_confidence": min_conf,
+                "allow_shorts": req.allow_shorts,
+            },
             "portfolio": {},
             "cash": 1.0,
             "count_ok": len(per),
@@ -844,42 +928,12 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
             "notes": ["No positions met min_confidence / signal criteria. 100% cash."],
         }
 
+    # Step 3: normalize + caps (FIXED)
     if req.allow_shorts:
-        # If shorts allowed: normalize by gross exposure, keep net exposure and compute cash as 1 - net_long (clamped)
-        gross = sum(abs(v) for v in raw.values())
-        if gross <= 0:
-            gross = 1.0
-        for s, v in raw.items():
-            w = v / gross
-            # apply cap in absolute terms
-            w = _clamp(w, -max_w, max_w)
-            portfolio[s] = float(w)
-        net = sum(portfolio.values())
-        cash = float(_clamp(1.0 - max(net, 0.0), 0.0, 1.0))
+        portfolio, cash = _normalize_allow_shorts_with_caps(raw, max_w)
     else:
-        # Long-only: ignore negative raw (shouldn't exist), cap, renormalize, cash = leftover
-        long_raw = {s: v for s, v in raw.items() if v > 0}
-        total = sum(long_raw.values())
-        if total <= 0:
-            total = 1.0
-        tmp = {}
-        for s, v in long_raw.items():
-            tmp[s] = min(v / total, max_w)
+        portfolio, cash = _normalize_long_only_with_caps(raw, max_w)
 
-        # If caps caused sum < 1, redistribute remaining proportionally among uncapped
-        def _sum(d): return sum(d.values())
-        capped_sum = _sum(tmp)
-        if capped_sum > 0:
-            # renormalize to <=1
-            # if everything capped and sum < 1, keep cash
-            # else scale weights to sum to min(1, capped_sum)
-            scale = min(1.0, capped_sum) / capped_sum
-            for s, v in tmp.items():
-                portfolio[s] = float(v * scale)
-
-        cash = float(_clamp(1.0 - sum(portfolio.values()), 0.0, 1.0))
-
-    # Meta counts
     count_buy = sum(1 for s in per.values() if (s.get("signal") == "BUY"))
     count_hold = sum(1 for s in per.values() if (s.get("signal") == "HOLD"))
     count_sell = sum(1 for s in per.values() if (s.get("signal") == "SELL"))
@@ -888,7 +942,12 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
         "as_of": req.as_of,
         "lookback": req.lookback,
         "method": "confidence_vol_targeted",
-        "knobs": {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf, "allow_shorts": req.allow_shorts},
+        "knobs": {
+            "max_weight": max_w,
+            "hold_multiplier": hold_mult,
+            "min_confidence": min_conf,
+            "allow_shorts": req.allow_shorts,
+        },
         "portfolio": portfolio,
         "cash": cash,
         "count_ok": len(per),
