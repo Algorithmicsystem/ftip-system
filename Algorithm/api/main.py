@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import os
 import math
 import json
@@ -173,32 +174,51 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
         "apiKey": api_key,
     }
 
-    try:
-        resp = requests.get(url, params=params, timeout=60)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Market data request failed: {e}")
+    # Retry/backoff knobs (env overridable)
+    max_retries = int(_env("FTIP_MD_MAX_RETRIES", "4") or "4")
+    base_sleep = float(_env("FTIP_MD_RETRY_BASE_SLEEP", "2.0") or "2.0")  # seconds
 
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Market data error {resp.status_code}: {resp.text}")
-
-    js = resp.json()
-    results = js.get("results") or []
-    if not results:
-        raise HTTPException(status_code=404, detail=f"No bars returned for {sym} in range.")
-
-    candles: List[Candle] = []
-    for r in results:
-        t_ms = r.get("t")
-        c = r.get("c")
-        v = r.get("v")
-        if t_ms is None or c is None:
+    last_err = None
+    for attempt in range(max_retries + 1):
+        try:
+            resp = requests.get(url, params=params, timeout=60)
+        except Exception as e:
+            last_err = f"Market data request failed: {e}"
+            # small backoff for network errors too
+            time.sleep(base_sleep * (2 ** attempt))
             continue
-        day = dt.datetime.utcfromtimestamp(t_ms / 1000.0).date().isoformat()
-        candles.append(Candle(timestamp=day, close=float(c), volume=float(v) if v is not None else None))
 
-    if not candles:
-        raise HTTPException(status_code=404, detail=f"Returned empty/invalid candles for {sym}.")
-    return candles
+        # If rate limited, backoff + retry
+        if resp.status_code == 429:
+            last_err = f"Market data rate-limited 429: {resp.text}"
+            sleep_s = base_sleep * (2 ** attempt)
+            time.sleep(sleep_s)
+            continue
+
+        if resp.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Market data error {resp.status_code}: {resp.text}")
+
+        js = resp.json()
+        results = js.get("results") or []
+        if not results:
+            raise HTTPException(status_code=404, detail=f"No bars returned for {sym} in range.")
+
+        candles: List[Candle] = []
+        for r in results:
+            t_ms = r.get("t")
+            c = r.get("c")
+            v = r.get("v")
+            if t_ms is None or c is None:
+                continue
+            day = dt.datetime.utcfromtimestamp(t_ms / 1000.0).date().isoformat()
+            candles.append(Candle(timestamp=day, close=float(c), volume=float(v) if v is not None else None))
+
+        if not candles:
+            raise HTTPException(status_code=404, detail=f"Returned empty/invalid candles for {sym}.")
+        return candles
+
+    # If we exhausted retries
+    raise HTTPException(status_code=502, detail=last_err or "Market data failed after retries.")
 
 
 # ------------------------------------------------------------------------------
