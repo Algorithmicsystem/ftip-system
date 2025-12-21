@@ -97,6 +97,10 @@ class SignalResponse(BaseModel):
     confidence: float
     features: Dict[str, float]
     notes: List[str] = Field(default_factory=list)
+    score_mode: str = "base"  # "base" or "stacked"
+    base_score: Optional[float] = None
+    stacked_score: Optional[float] = None
+    stacked_meta: Optional[Dict[str, Any]] = None
 
     # calibration diagnostics
     calibration_loaded: bool = False
@@ -438,6 +442,108 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
 # Feature engine + regime detection + thresholds
 # ------------------------------------------------------------------------------
 
+def _env_csv_floats(name: str, default: List[float]) -> List[float]:
+    """
+    Parse env var like "0.15,0.35,0.50" into [0.15,0.35,0.50].
+    Falls back to default on any parse issue.
+    """
+    raw = _env(name)
+    if not raw:
+        return default
+    try:
+        parts = [p.strip() for p in raw.split(",")]
+        vals = [float(p) for p in parts if p != ""]
+        if len(vals) != len(default):
+            return default
+        return vals
+    except Exception:
+        return default
+
+
+def _stack_weights_for_regime(regime: str) -> Dict[str, float]:
+    """
+    Returns weights for short/mid/long components.
+    Order: [short, mid, long]
+    Tunable in Railway with:
+      FTIP_STACK_W_TRENDING="0.15,0.35,0.50"
+      FTIP_STACK_W_CHOPPY="0.45,0.35,0.20"
+      FTIP_STACK_W_HIGH_VOL="0.20,0.40,0.40"
+    """
+    w_tr = _env_csv_floats("FTIP_STACK_W_TRENDING", [0.15, 0.35, 0.50])
+    w_ch = _env_csv_floats("FTIP_STACK_W_CHOPPY", [0.45, 0.35, 0.20])
+    w_hv = _env_csv_floats("FTIP_STACK_W_HIGH_VOL", [0.20, 0.40, 0.40])
+
+    if regime == "TRENDING":
+        w = w_tr
+    elif regime == "HIGH_VOL":
+        w = w_hv
+    else:
+        w = w_ch
+
+    # normalize to sum=1 (safety)
+    s = sum(w) if sum(w) != 0 else 1.0
+    return {"short": float(w[0] / s), "mid": float(w[1] / s), "long": float(w[2] / s)}
+
+
+def _score_components_from_features(features: Dict[str, float]) -> Dict[str, float]:
+    """
+    Three horizon components in [-1, 1].
+    Uses already-computed features: mom_5, mom_21, mom_63, trend_sma20_50, rsi14, volume_z20, volatility_ann.
+    """
+    rsi = float(features.get("rsi14", 50.0))
+    rsi_sig = _clamp((rsi - 50.0) / 25.0, -1.0, 1.0)
+
+    mom5 = float(features.get("mom_5", 0.0))
+    mom21 = float(features.get("mom_21", 0.0))
+    mom63 = float(features.get("mom_63", 0.0))
+    trend = float(features.get("trend_sma20_50", 0.0))
+
+    # Convert to bounded signals
+    mom5_sig = _clamp(mom5 / 0.10, -1.0, 1.0)     # faster scale
+    mom21_sig = _clamp(mom21 / 0.20, -1.0, 1.0)
+    mom63_sig = _clamp(mom63 / 0.30, -1.0, 1.0)
+
+    trend_sig = _clamp(trend / 0.10, -1.0, 1.0)
+
+    # Short: fast momentum + RSI tilt
+    short = _clamp(0.70 * mom5_sig + 0.30 * rsi_sig, -1.0, 1.0)
+
+    # Mid: intermediate momentum + trend
+    mid = _clamp(0.60 * mom21_sig + 0.40 * trend_sig, -1.0, 1.0)
+
+    # Long: slow momentum + trend (slightly more trend)
+    long = _clamp(0.55 * mom63_sig + 0.45 * trend_sig, -1.0, 1.0)
+
+    return {"short": float(short), "mid": float(mid), "long": float(long)}
+
+
+def stacked_score_from_features(features: Dict[str, float], regime: str) -> Tuple[float, Dict[str, Any]]:
+    """
+    Produces a final stacked score in [-1, 1], plus diagnostics.
+    Applies the same volatility penalty concept as your base scorer.
+    """
+    comps = _score_components_from_features(features)
+    w = _stack_weights_for_regime(regime)
+
+    raw = (
+        w["short"] * comps["short"] +
+        w["mid"]   * comps["mid"] +
+        w["long"]  * comps["long"]
+    )
+
+    vola = float(features.get("volatility_ann", 0.0))
+    vola_pen = _clamp((vola - 0.25) / 0.50, 0.0, 0.5)  # 0..0.5
+    score = _clamp(raw * (1.0 - vola_pen), -1.0, 1.0)
+
+    meta = {
+        "stack_weights": w,
+        "components": comps,
+        "vola_penalty": float(vola_pen),
+        "raw_before_vol_penalty": float(raw),
+    }
+    return float(score), meta
+
+
 def _sma(values: List[float], window: int) -> float:
     if window <= 0 or len(values) < window:
         return float("nan")
@@ -604,6 +710,7 @@ def _filter_upto(candles: List[Candle], as_of: str) -> List[Candle]:
 def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalResponse:
     as_of_d = _parse_date(as_of)
     from_guess = (as_of_d - dt.timedelta(days=900)).isoformat()
+
     candles_all = massive_fetch_daily_bars(symbol, from_guess, as_of)
 
     candles_upto = _filter_upto(candles_all, as_of)
@@ -619,8 +726,25 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     features = compute_features(candles)
     regime = detect_regime(features)
 
-    score, notes = score_from_features(features)
+    # --- Base score (legacy) ---
+    base_score, notes = score_from_features(features)
 
+    # --- NEW: Multi-horizon stacked score ---
+    stack_score, stack_meta = stacked_score_from_features(features, regime)
+
+    # Choose which score is the official "score"
+    score_mode = (_env("FTIP_SCORE_MODE", "stacked") or "stacked").strip().lower()
+    if score_mode not in ("base", "stacked"):
+        score_mode = "stacked"
+
+    if score_mode == "stacked":
+        score = float(stack_score)
+        notes.append("Score mode: STACKED (multi-horizon).")
+    else:
+        score = float(base_score)
+        notes.append("Score mode: BASE (legacy).")
+
+    # Calibration thresholds (still apply to whatever 'score' we use)
     calibration_loaded, calibration = _load_calibration()
     thresholds = _thresholds_for_regime(regime, calibration)
 
@@ -634,6 +758,7 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     if regime == "HIGH_VOL":
         conf *= 0.65
         notes.append("Confidence reduced due to HIGH_VOL regime.")
+
     if effective < lookback:
         notes.insert(
             0,
@@ -673,6 +798,11 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
         notes=notes,
         calibration_loaded=bool(calibration_loaded),
         calibration_meta=meta,
+        # NEW diagnostic fields
+        score_mode="stacked" if score_mode == "stacked" else "base",
+        base_score=float(base_score),
+        stacked_score=float(stack_score),
+        stacked_meta=stack_meta,
     )
 
 
@@ -766,15 +896,24 @@ def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int,
     dates = [c.timestamp for c in candles_all]
 
     rows: List[Dict[str, Any]] = []
+
+    score_mode = (_env("FTIP_SCORE_MODE", "stacked") or "stacked").strip().lower()
+    if score_mode not in ("base", "stacked"):
+        score_mode = "stacked"
+
     for i in range(len(candles_all)):
         start = max(0, i - lookback + 1)
-        window = candles_all[start:i + 1]
+        window = candles_all[start : i + 1]
         if len(window) < 30:
             continue
 
         feats = compute_features(window)
         regime = detect_regime(feats)
-        score, _notes = score_from_features(feats)
+
+        base_score, _notes = score_from_features(feats)
+        stack_score, _stack_meta = stacked_score_from_features(feats, regime)
+
+        score = float(stack_score) if score_mode == "stacked" else float(base_score)
 
         cal_loaded, cal = _load_calibration()
         thr = _thresholds_for_regime(regime, cal)
@@ -792,9 +931,11 @@ def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int,
             "confidence": float(abs(score) * (0.65 if regime == "HIGH_VOL" else 1.0)),
             "regime": regime,
         }
+
         for h in horizons:
             fr = _forward_return(closes, i, h)
             row[f"fwd_ret_{h}"] = fr
+
         rows.append(row)
 
     return rows
