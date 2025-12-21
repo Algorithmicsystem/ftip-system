@@ -158,6 +158,10 @@ class PortfolioBacktestRequest(BaseModel):
 
     include_equity_curve: bool = True
 
+    # Turnover controls (realism)
+    min_trade_delta: float = 0.01          # deadband: ignore changes < 1%
+    max_turnover_per_rebalance: float = 0.20  # cap turnover at 20% per rebalance
+
 
 class PortfolioBacktestResponse(BaseModel):
     total_return: float
@@ -303,6 +307,90 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 def _mean(xs: List[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
+
+def _clean_small(x: float, eps: float = 1e-12) -> float:
+    return 0.0 if abs(x) < eps else float(x)
+
+def _apply_deadband(old_w: Dict[str, float], new_w: Dict[str, float], min_delta: float) -> Dict[str, float]:
+    """Zero-out tiny trades: if |new-old| < min_delta, keep old."""
+    out: Dict[str, float] = {}
+    syms = set(old_w.keys()) | set(new_w.keys())
+    for s in syms:
+        ow = float(old_w.get(s, 0.0))
+        nw = float(new_w.get(s, 0.0))
+        if abs(nw - ow) < float(min_delta):
+            if abs(ow) > 0:
+                out[s] = ow
+        else:
+            if abs(nw) > 0:
+                out[s] = nw
+    return out
+
+def _cap_turnover(old_w: Dict[str, float], target_w: Dict[str, float], max_turnover: float) -> Dict[str, float]:
+    """
+    Scale deltas so sum(|delta|) <= max_turnover.
+    Turnover here is sum abs(delta weights) across assets.
+    """
+    if max_turnover <= 0:
+        return old_w.copy()
+
+    syms = set(old_w.keys()) | set(target_w.keys())
+    deltas: Dict[str, float] = {}
+    turnover = 0.0
+    for s in syms:
+        d = float(target_w.get(s, 0.0)) - float(old_w.get(s, 0.0))
+        deltas[s] = d
+        turnover += abs(d)
+
+    if turnover <= float(max_turnover) or turnover <= 1e-15:
+        return target_w
+
+    scale = float(max_turnover) / turnover
+    out: Dict[str, float] = {}
+    for s in syms:
+        ow = float(old_w.get(s, 0.0))
+        nw = ow + deltas[s] * scale
+        if abs(nw) > 0:
+            out[s] = float(nw)
+    return out
+
+def _normalize_long_only(weights: Dict[str, float], max_weight: float) -> Tuple[Dict[str, float], float]:
+    """
+    Long-only normalization + cap. Returns (weights, cash).
+    Ensures sum(weights) <= 1 and each weight <= max_weight.
+    """
+    # keep only positive (long-only)
+    w = {s: float(v) for s, v in weights.items() if float(v) > 0.0}
+
+    if not w:
+        return {}, 1.0
+
+    # normalize to 1 first
+    s0 = sum(w.values())
+    if s0 <= 0:
+        return {}, 1.0
+    for s in list(w.keys()):
+        w[s] = w[s] / s0
+
+    # apply cap
+    max_w = float(_clamp(float(max_weight), 0.01, 1.0))
+    w = {s: min(v, max_w) for s, v in w.items()}
+
+    # after capping, weights sum may be < 1 => keep cash
+    s1 = sum(w.values())
+    if s1 <= 0:
+        return {}, 1.0
+
+    # rescale capped weights to their own sum (so we don't artificially shrink)
+    # BUT do NOT force them to 1.0, because cap may intentionally leave cash.
+    # Keep as-is: cash = 1 - s1.
+    cash = float(_clamp(1.0 - s1, 0.0, 1.0))
+
+    # clean tiny floats
+    w = {s: _clean_small(v) for s, v in w.items() if abs(v) > 1e-12}
+    cash = _clean_small(cash)
+
+    return w, cash
 
 
 # ------------------------------------------------------------------------------
@@ -1092,48 +1180,60 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # ------------------------------------------------------------
     # 6) Rebalance loop
     # ------------------------------------------------------------
-    cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
+cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
 
-    equity = 1.0
-    equity_curve: Dict[str, float] = {}
-    daily_port_rets: List[float] = []
+equity = 1.0
+equity_curve: Dict[str, float] = {}
+daily_port_rets: List[float] = []
 
-    weights: Dict[str, float] = {}
-    cash_w = 1.0
-    total_turnover = 0.0
+weights: Dict[str, float] = {}
+cash_w = 1.0
+total_turnover = 0.0
 
-    reb_every = max(1, int(req.rebalance_every))
+reb_every = max(1, int(req.rebalance_every))
 
-    for i, d in enumerate(common_dates):
-        if i == 0:
-            equity_curve[d] = equity
-            continue
-
-        # Rebalance on schedule
-        if (i - 1) % reb_every == 0:
-            new_w, new_cash = _portfolio_weights_for_date_cached(as_of=d)
-
-            # turnover (assets only)
-            turnover = 0.0
-            syms = set(weights.keys()) | set(new_w.keys())
-            for s in syms:
-                turnover += abs(new_w.get(s, 0.0) - weights.get(s, 0.0))
-
-            # apply costs on turnover
-            equity *= (1.0 - turnover * cost_rate)
-
-            total_turnover += turnover
-            weights = new_w
-            cash_w = new_cash  # tracked, not used in return (cash return = 0)
-
-        # Daily portfolio return (cash return = 0)
-        pr = 0.0
-        for s, w in weights.items():
-            pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
-
-        equity *= (1.0 + pr)
+for i, d in enumerate(common_dates):
+    if i == 0:
         equity_curve[d] = equity
-        daily_port_rets.append(pr)
+        continue
+
+    # Rebalance on schedule
+    if (i - 1) % reb_every == 0:
+        # 1) target weights from cached signal engine
+        target_w, target_cash = _portfolio_weights_for_date_cached(as_of=d)
+
+        # 2) deadband: ignore tiny changes to reduce churn
+        min_delta = float(getattr(req, "min_trade_delta", 0.01))
+        target_w = _apply_deadband(weights, target_w, min_delta=min_delta)
+
+        # 3) turnover cap: scale changes so sum(|delta|) <= max_turnover_per_rebalance
+        max_t = float(getattr(req, "max_turnover_per_rebalance", 0.20))
+        capped_w = _cap_turnover(weights, target_w, max_turnover=max_t)
+
+        # 4) normalize + cap again (long-only) and recompute cash
+        capped_w, capped_cash = _normalize_long_only(capped_w, max_weight=float(req.max_weight))
+
+        # 5) turnover (assets only) for trading costs
+        turnover = 0.0
+        syms = set(weights.keys()) | set(capped_w.keys())
+        for s in syms:
+            turnover += abs(float(capped_w.get(s, 0.0)) - float(weights.get(s, 0.0)))
+
+        # apply costs on turnover
+        equity *= (1.0 - turnover * cost_rate)
+
+        total_turnover += turnover
+        weights = capped_w
+        cash_w = capped_cash  # tracked, not used in return (cash return = 0)
+
+    # Daily portfolio return (cash return = 0)
+    pr = 0.0
+    for s, w in weights.items():
+        pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
+
+    equity *= (1.0 + pr)
+    equity_curve[d] = equity
+    daily_port_rets.append(pr)
 
     # ------------------------------------------------------------
     # 7) Stats
