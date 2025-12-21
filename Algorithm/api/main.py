@@ -973,7 +973,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # 1) Fetch candles once per symbol (include extra buffer)
     # ------------------------------------------------------------
     start_dt = _parse_date(req.from_date)
-    end_dt = _parse_date(req.to_date)
 
     # Buffer: use max(900 days, lookback*4) to be safe for early days
     warmup_days = max(900, int(req.lookback) * 4)
@@ -1001,7 +1000,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # 2) Build common trading calendar within [from_date, to_date]
     # ------------------------------------------------------------
     date_sets: List[set] = []
-    for s, cs in candles_by_sym.items():
+    for _s, cs in candles_by_sym.items():
         ds = {c.timestamp for c in cs if req.from_date <= c.timestamp <= req.to_date}
         if ds:
             date_sets.append(ds)
@@ -1035,8 +1034,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # 3) Build daily return series per symbol keyed by date
     # ------------------------------------------------------------
     rets_by_sym: Dict[str, Dict[str, float]] = {}
-    closes_by_sym_by_date: Dict[str, Dict[str, float]] = {}
-
     for s, cs in candles_by_sym.items():
         pairs = [(c.timestamp, c.close) for c in cs if c.timestamp in common_dates_set]
         pairs.sort(key=lambda x: x[0])
@@ -1045,32 +1042,26 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
         ds2 = [p[0] for p in pairs]
         closes2 = [p[1] for p in pairs]
-
         rets_by_sym[s] = _daily_returns_from_closes(ds2, closes2)
-        closes_by_sym_by_date[s] = {d: float(c) for d, c in zip(ds2, closes2)}
 
     # ------------------------------------------------------------
-    # 4) Helper: compute per-symbol signal using CACHED candles
-    #    (no API calls, no rate-limits)
+    # 4) Offline signal from cached candles (no API calls)
     # ------------------------------------------------------------
     def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optional[Dict[str, Any]]:
-        # Use pre-fetched candles, filter up to as_of
         cs_all = candles_by_sym.get(symbol, [])
         if not cs_all:
             return None
 
-        # Keep candles <= as_of
         cutoff = _parse_date(as_of)
         cs_upto: List[Candle] = []
         for c in cs_all:
             try:
-                d = _parse_date(c.timestamp)
+                d0 = _parse_date(c.timestamp)
             except Exception:
                 continue
-            if d <= cutoff:
+            if d0 <= cutoff:
                 cs_upto.append(c)
 
-        # If not enough history yet, return None (we'll stay in cash)
         if len(cs_upto) < 30:
             return None
 
@@ -1095,7 +1086,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             conf *= 0.65
             notes.append("Confidence reduced due to HIGH_VOL regime.")
 
-        # Minimal dict shape compatible with _raw_weight_from_signal()
         return {
             "symbol": symbol,
             "as_of": as_of,
@@ -1112,29 +1102,25 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         }
 
     # ------------------------------------------------------------
-    # 5) Helper: compute portfolio weights for a given as_of date
-    #    (same logic as /portfolio_signals, but fully offline)
+    # 5) Offline portfolio weights for a given date
     # ------------------------------------------------------------
     def _portfolio_weights_for_date_cached(as_of: str) -> Tuple[Dict[str, float], float]:
         # knobs: request overrides env
-        max_w = float(req.max_weight) if getattr(req, "max_weight", None) is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
-        hold_mult = float(req.hold_multiplier) if getattr(req, "hold_multiplier", None) is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
-        min_conf = float(req.min_confidence) if getattr(req, "min_confidence", None) is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
-        allow_shorts = bool(getattr(req, "allow_shorts", False))
+        max_w = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+        hold_mult = float(req.hold_multiplier) if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
+        min_conf = float(req.min_confidence) if req.min_confidence is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
+        allow_shorts = bool(req.allow_shorts)
 
-        # clamps
         max_w = _clamp(max_w, 0.01, 1.0)
         hold_mult = _clamp(hold_mult, 0.0, 1.0)
         min_conf = _clamp(min_conf, 0.0, 1.0)
 
-        # compute per-symbol signals
         per: Dict[str, Any] = {}
         for s in candles_by_sym.keys():
             sig = _compute_signal_from_cached(s, as_of, int(req.lookback))
             if sig is not None:
                 per[s] = sig
 
-        # raw weights
         raw: Dict[str, float] = {}
         for s, sig in per.items():
             rw = _raw_weight_from_signal(sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=allow_shorts)
@@ -1142,101 +1128,78 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 raw[s] = float(rw)
 
         if not raw:
-            return {}, 1.0  # all cash
-
-        portfolio: Dict[str, float] = {}
+            return {}, 1.0
 
         if allow_shorts:
-            gross = sum(abs(v) for v in raw.values()) or 1.0
-            for s, v in raw.items():
-                w = v / gross
-                w = _clamp(w, -max_w, max_w)
-                portfolio[s] = float(w)
-
-            net_long = sum(w for w in portfolio.values() if w > 0)
-            cash = float(_clamp(1.0 - net_long, 0.0, 1.0))
-
-            # ensure exact-ish accounting
-            # (do not renormalize short portfolios; cash is residual)
+            portfolio, cash = _normalize_allow_shorts_with_caps(raw, max_w)
             return portfolio, cash
 
-        # long-only
-        long_raw = {s: v for s, v in raw.items() if v > 0}
-        total = sum(long_raw.values()) or 1.0
-
-        # initial weights with cap
-        tmp = {s: min(v / total, max_w) for s, v in long_raw.items()}
-
-        # scale so sum(tmp) <= 1 (keeps cash leftover)
-        ssum = sum(tmp.values())
-        if ssum > 0:
-            scale = min(1.0, ssum) / ssum
-            for s, v in tmp.items():
-                portfolio[s] = float(v * scale)
-
-        cash = float(_clamp(1.0 - sum(portfolio.values()), 0.0, 1.0))
+        portfolio, cash = _normalize_long_only_with_caps(raw, max_w)
         return portfolio, cash
 
     # ------------------------------------------------------------
-    # 6) Rebalance loop
+    # 6) Rebalance loop  (THIS MUST STAY INDENTED INSIDE FUNCTION)
     # ------------------------------------------------------------
-cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
+    cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
 
-equity = 1.0
-equity_curve: Dict[str, float] = {}
-daily_port_rets: List[float] = []
+    equity = 1.0
+    equity_curve: Dict[str, float] = {}
+    daily_port_rets: List[float] = []
 
-weights: Dict[str, float] = {}
-cash_w = 1.0
-total_turnover = 0.0
+    weights: Dict[str, float] = {}
+    total_turnover = 0.0
 
-reb_every = max(1, int(req.rebalance_every))
+    reb_every = max(1, int(req.rebalance_every))
 
-for i, d in enumerate(common_dates):
-    if i == 0:
+    # Use a stable max_w for normalization (handles None)
+    max_w_for_caps = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+    max_w_for_caps = _clamp(max_w_for_caps, 0.01, 1.0)
+
+    for i, d in enumerate(common_dates):
+        if i == 0:
+            equity_curve[d] = equity
+            continue
+
+        # Rebalance on schedule
+        if (i - 1) % reb_every == 0:
+            target_w, _target_cash = _portfolio_weights_for_date_cached(as_of=d)
+
+            # deadband: ignore tiny changes to reduce churn
+            min_delta = float(req.min_trade_delta)
+            target_w = _apply_deadband(weights, target_w, min_delta=min_delta)
+
+            # turnover cap: scale changes so sum(|delta|) <= max_turnover_per_rebalance
+            max_t = float(req.max_turnover_per_rebalance)
+            capped_w = _cap_turnover(weights, target_w, max_turnover=max_t)
+
+            # normalize and cap, recompute cash (long-only normalization)
+            # If you later enable allow_shorts for backtest, we can branch here,
+            # but right now you're running long-only.
+            capped_w, _capped_cash = _normalize_long_only(capped_w, max_weight=max_w_for_caps)
+
+            # turnover (assets only) for trading costs
+            turnover = 0.0
+            syms = set(weights.keys()) | set(capped_w.keys())
+            for s in syms:
+                turnover += abs(float(capped_w.get(s, 0.0)) - float(weights.get(s, 0.0)))
+
+            # apply costs on turnover
+            equity *= (1.0 - turnover * cost_rate)
+
+            total_turnover += turnover
+            weights = capped_w
+
+        # Daily portfolio return (cash return = 0)
+        pr = 0.0
+        for s, w in weights.items():
+            pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
+
+        equity *= (1.0 + pr)
         equity_curve[d] = equity
-        continue
-
-    # Rebalance on schedule
-    if (i - 1) % reb_every == 0:
-        # 1) target weights from cached signal engine
-        target_w, target_cash = _portfolio_weights_for_date_cached(as_of=d)
-
-        # 2) deadband: ignore tiny changes to reduce churn
-        min_delta = float(getattr(req, "min_trade_delta", 0.01))
-        target_w = _apply_deadband(weights, target_w, min_delta=min_delta)
-
-        # 3) turnover cap: scale changes so sum(|delta|) <= max_turnover_per_rebalance
-        max_t = float(getattr(req, "max_turnover_per_rebalance", 0.20))
-        capped_w = _cap_turnover(weights, target_w, max_turnover=max_t)
-
-        # 4) normalize + cap again (long-only) and recompute cash
-        capped_w, capped_cash = _normalize_long_only(capped_w, max_weight=float(req.max_weight))
-
-        # 5) turnover (assets only) for trading costs
-        turnover = 0.0
-        syms = set(weights.keys()) | set(capped_w.keys())
-        for s in syms:
-            turnover += abs(float(capped_w.get(s, 0.0)) - float(weights.get(s, 0.0)))
-
-        # apply costs on turnover
-        equity *= (1.0 - turnover * cost_rate)
-
-        total_turnover += turnover
-        weights = capped_w
-        cash_w = capped_cash  # tracked, not used in return (cash return = 0)
-
-    # Daily portfolio return (cash return = 0)
-    pr = 0.0
-    for s, w in weights.items():
-        pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
-
-    equity *= (1.0 + pr)
-    equity_curve[d] = equity
-    daily_port_rets.append(pr)
+        daily_port_rets.append(pr)
 
     # ------------------------------------------------------------
-    # 7) Stats
+    # 7) Stats (AFTER the loop)
     # ------------------------------------------------------------
     total_return = equity - 1.0
 
