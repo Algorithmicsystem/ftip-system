@@ -159,8 +159,12 @@ class PortfolioBacktestRequest(BaseModel):
     include_equity_curve: bool = True
 
     # Turnover controls (realism)
-    min_trade_delta: float = 0.01          # deadband: ignore changes < 1%
+    min_trade_delta: float = 0.01             # deadband: ignore changes < 1%
     max_turnover_per_rebalance: float = 0.20  # cap turnover at 20% per rebalance
+
+    # Audit controls (prove no-lookahead)
+    audit_no_lookahead: bool = False
+    audit_max_rows: int = 50
 
 
 class PortfolioBacktestResponse(BaseModel):
@@ -172,6 +176,9 @@ class PortfolioBacktestResponse(BaseModel):
     turnover: float
 
     equity_curve: Optional[Dict[str, float]] = None
+
+    # Optional audit payload
+    audit: Optional[Dict[str, Any]] = None
 
 
 # ------------------------------------------------------------------------------
@@ -1030,6 +1037,11 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
     common_dates_set = set(common_dates)
 
+    # --- Audit tracking (no-lookahead proof) ---
+    audit_rows: List[Dict[str, Any]] = []
+    audit_violations = 0
+    common_dates_set = set(common_dates)  # reuse (speed)
+
     # ------------------------------------------------------------
     # 3) Build daily return series per symbol keyed by date
     # ------------------------------------------------------------
@@ -1140,6 +1152,8 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # ------------------------------------------------------------
     # 6) Rebalance loop  (THIS MUST STAY INDENTED INSIDE FUNCTION)
     # ------------------------------------------------------------
+    # 6) Rebalance loop  (THIS MUST STAY INDENTED INSIDE FUNCTION)
+    # ------------------------------------------------------------
     cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
 
     equity = 1.0
@@ -1152,17 +1166,58 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     reb_every = max(1, int(req.rebalance_every))
 
     # Use a stable max_w for normalization (handles None)
-    max_w_for_caps = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+    max_w_for_caps = float(req.max_weight) if req.max_weight is not None else _env_float(
+        "FTIP_PORTFOLIO_MAX_WEIGHT", 0.30
+    )
     max_w_for_caps = _clamp(max_w_for_caps, 0.01, 1.0)
+
+    # --- Audit tracking (safe guard if you didn't define earlier) ---
+    # (Recommended: define these once earlier in the function right after common_dates creation.)
+    if "audit_rows" not in locals():
+        audit_rows: List[Dict[str, Any]] = []
+    if "audit_violations" not in locals():
+        audit_violations = 0
+
+    # Precompute per-symbol available candle timestamps (SORTED) for audit lookups.
+    # We sort to make the `break` logic correct.
+    ts_by_sym: Dict[str, List[str]] = {}
+    for s, cs in candles_by_sym.items():
+        ts_by_sym[s] = sorted([c.timestamp for c in cs])
+
+    # Optional speed: list of symbols once
+    syms_all = list(candles_by_sym.keys())
 
     for i, d in enumerate(common_dates):
         if i == 0:
             equity_curve[d] = equity
             continue
 
-        # Rebalance on schedule
+        # Rebalance on schedule (weights apply starting this day)
         if (i - 1) % reb_every == 0:
             target_w, _target_cash = _portfolio_weights_for_date_cached(as_of=d)
+
+            # --- Audit: verify no lookahead (only if enabled) ---
+            if bool(req.audit_no_lookahead):
+                row = {"rebalance_date": d, "per_symbol_last_candle": {}}
+
+                for sym in syms_all:
+                    last_ok = None
+                    for t in ts_by_sym.get(sym, []):
+                        if t <= d:
+                            last_ok = t
+                        else:
+                            break
+
+                    row["per_symbol_last_candle"][sym] = last_ok
+
+                    # Violation = missing history (None) OR candle timestamp somehow > rebalance date
+                    if last_ok is None:
+                        audit_violations += 1
+                    elif last_ok > d:
+                        audit_violations += 1
+
+                if len(audit_rows) < int(req.audit_max_rows):
+                    audit_rows.append(row)
 
             # deadband: ignore tiny changes to reduce churn
             min_delta = float(req.min_trade_delta)
@@ -1173,8 +1228,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             capped_w = _cap_turnover(weights, target_w, max_turnover=max_t)
 
             # normalize and cap, recompute cash (long-only normalization)
-            # If you later enable allow_shorts for backtest, we can branch here,
-            # but right now you're running long-only.
             capped_w, _capped_cash = _normalize_long_only(capped_w, max_weight=max_w_for_caps)
 
             # turnover (assets only) for trading costs
@@ -1211,6 +1264,14 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
     mdd = _max_drawdown(list(equity_curve.values()))
 
+    audit_payload = None
+    if bool(req.audit_no_lookahead):
+        audit_payload = {
+            "violations_count": int(audit_violations),
+            "rows_sample": audit_rows,
+            "note": "Each row shows the last candle timestamp <= rebalance_date per symbol. Missing (None) means insufficient history at that rebalance.",
+        }
+
     return PortfolioBacktestResponse(
         total_return=float(total_return),
         annual_return=float(ann_return),
@@ -1219,6 +1280,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         volatility=float(vol),
         turnover=float(total_turnover),
         equity_curve=equity_curve if req.include_equity_curve else None,
+        audit=audit_payload,
     )
 
 
