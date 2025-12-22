@@ -47,6 +47,41 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _load_calibration_for_symbol(symbol: str) -> tuple[bool, dict | None]:
+    """
+    Loads per-symbol calibration from FTIP_CALIBRATION_JSON_MAP if present.
+    Falls back to FTIP_CALIBRATION_JSON (legacy single calibration).
+    Returns: (loaded, calibration_dict_or_None)
+    """
+    sym = (symbol or "").strip().upper()
+
+    # 1) Try map-based calibration
+    raw_map = _env("FTIP_CALIBRATION_JSON_MAP")
+    if raw_map:
+        try:
+            m = json.loads(raw_map)
+            if isinstance(m, dict):
+                if sym in m and isinstance(m[sym], dict):
+                    return True, m[sym]
+                if "DEFAULT" in m and isinstance(m["DEFAULT"], dict):
+                    return True, m["DEFAULT"]
+        except Exception:
+            # ignore parse errors and fall through to legacy
+            pass
+
+    # 2) Legacy single calibration
+    raw_single = _env("FTIP_CALIBRATION_JSON")
+    if raw_single:
+        try:
+            cal = json.loads(raw_single)
+            if isinstance(cal, dict):
+                return True, cal
+        except Exception:
+            return False, None
+
+    return False, None
+
+
 # ------------------------------------------------------------------------------
 # Models
 # ------------------------------------------------------------------------------
@@ -60,6 +95,38 @@ class Candle(BaseModel):
     fundamental: Optional[float] = None
     sentiment: Optional[float] = None
     crowd: Optional[float] = None
+
+
+# ---------------------------------------------------------------------------
+# Simple in-memory candle cache (reduces 429 + speeds backtests/calibration)
+# Keyed by (symbol, from_date, to_date)
+# ---------------------------------------------------------------------------
+_CANDLE_CACHE: dict[tuple[str, str, str], tuple[float, list[Candle]]] = {}
+_CANDLE_CACHE_TTL_SEC = 20 * 60  # 20 minutes
+
+def _cache_get(key: tuple[str, str, str]) -> list[Candle] | None:
+    now = time.time()
+    item = _CANDLE_CACHE.get(key)
+    if not item:
+        return None
+    ts, val = item
+    if (now - ts) > _CANDLE_CACHE_TTL_SEC:
+        _CANDLE_CACHE.pop(key, None)
+        return None
+    return val
+
+def _cache_set(key: tuple[str, str, str], val: list[Candle]) -> None:
+    _CANDLE_CACHE[key] = (time.time(), val)
+
+def massive_fetch_daily_bars_cached(symbol: str, from_date: str, to_date: str) -> list[Candle]:
+    s = (symbol or "").strip().upper()
+    key = (s, from_date, to_date)
+    hit = _cache_get(key)
+    if hit is not None:
+        return hit
+    bars = massive_fetch_daily_bars(s, from_date, to_date)  # <-- IMPORTANT: call the real fetcher
+    _cache_set(key, bars)
+    return bars
 
 
 class BacktestRequest(BaseModel):
@@ -711,7 +778,7 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     as_of_d = _parse_date(as_of)
     from_guess = (as_of_d - dt.timedelta(days=900)).isoformat()
 
-    candles_all = massive_fetch_daily_bars(symbol, from_guess, as_of)
+    candles_all = massive_fetch_daily_bars_cached(symbol, from_guess, as_of)
 
     candles_upto = _filter_upto(candles_all, as_of)
     if len(candles_upto) < 30:
@@ -745,7 +812,7 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
         notes.append("Score mode: BASE (legacy).")
 
     # Calibration thresholds (still apply to whatever 'score' we use)
-    calibration_loaded, calibration = _load_calibration()
+    calibration_loaded, calibration = _load_calibration_for_symbol(symbol)
     thresholds = _thresholds_for_regime(regime, calibration)
 
     sig = "HOLD"
@@ -890,7 +957,7 @@ def _forward_return(closes: List[float], idx: int, horizon: int) -> Optional[flo
 
 
 def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int, horizons: List[int]) -> List[Dict[str, Any]]:
-    candles_all = massive_fetch_daily_bars(symbol, from_date, to_date)
+    candles_all = massive_fetch_daily_bars_cached(symbol, from_date, to_date)
 
     closes = [c.close for c in candles_all]
     dates = [c.timestamp for c in candles_all]
@@ -1131,7 +1198,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         s = (sym or "").strip().upper()
         if not s:
             continue
-        candles_by_sym[s] = massive_fetch_daily_bars(s, buffer_start, req.to_date)
+        candles_by_sym[s] = massive_fetch_daily_bars_cached(s, buffer_start, req.to_date)
 
     if not candles_by_sym:
         return PortfolioBacktestResponse(
