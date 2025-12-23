@@ -1824,8 +1824,23 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
 
 @app.post("/portfolio_backtest")
 def portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
-    out = backtest_portfolio(req)
     return out.model_dump(exclude_none=True)
+out = backtest_portfolio(req)
+if out is None:
+    raise HTTPException(status_code=500, detail="portfolio_backtest returned None")
+return out.model_dump(exclude_none=True)
+
+# Absolute safety return (should never trigger)
+return PortfolioBacktestResponse(
+    total_return=0.0,
+    annual_return=0.0,
+    sharpe=0.0,
+    max_drawdown=0.0,
+    volatility=0.0,
+    turnover=0.0,
+    equity_curve={} if req.include_equity_curve else None,
+    audit=None,
+)
 
 
 @app.post("/walk_forward")
