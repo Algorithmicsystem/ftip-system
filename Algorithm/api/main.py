@@ -875,7 +875,12 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     )
 
 
-def compute_signal_for_symbol_from_candles(symbol: str, as_of: str, lookback: int, candles_all: List[Candle]) -> SignalResponse:
+def compute_signal_for_symbol_from_candles(
+    symbol: str,
+    as_of: str,
+    lookback: int,
+    candles_all: List[Candle]
+) -> SignalResponse:
     candles_upto = _filter_upto(candles_all, as_of)
 
     if len(candles_upto) < 30:
@@ -890,9 +895,23 @@ def compute_signal_for_symbol_from_candles(symbol: str, as_of: str, lookback: in
     features = compute_features(candles)
     regime = detect_regime(features)
 
-    score, notes = score_from_features(features)
+    # --- scoring (base vs stacked) ---
+    score_mode = (_env("FTIP_SCORE_MODE", "stacked") or "stacked").strip().lower()
+    if score_mode not in ("base", "stacked"):
+        score_mode = "stacked"
 
-    calibration_loaded, calibration = _load_calibration()
+    base_score, notes = score_from_features(features)
+    stack_score, stack_meta = stacked_score_from_features(features, regime)
+
+    if score_mode == "stacked":
+        score = float(stack_score)
+        notes.append("Score mode: STACKED (multi-horizon).")
+    else:
+        score = float(base_score)
+        notes.append("Score mode: BASE (legacy).")
+
+    # --- per-symbol calibration (MAP first, then single fallback) ---
+    calibration_loaded, calibration = _load_calibration_for_symbol(symbol)
     thresholds = _thresholds_for_regime(regime, calibration)
 
     sig = "HOLD"
@@ -907,7 +926,10 @@ def compute_signal_for_symbol_from_candles(symbol: str, as_of: str, lookback: in
         notes.append("Confidence reduced due to HIGH_VOL regime.")
 
     if effective < lookback:
-        notes.insert(0, f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.")
+        notes.insert(
+            0,
+            f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.",
+        )
 
     if regime == "TRENDING":
         notes.append("Regime: TRENDING.")
@@ -917,7 +939,7 @@ def compute_signal_for_symbol_from_candles(symbol: str, as_of: str, lookback: in
         notes.append("Regime: HIGH_VOL.")
 
     if calibration_loaded:
-        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON.")
+        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
 
     meta = None
     if calibration_loaded and calibration:
@@ -942,6 +964,11 @@ def compute_signal_for_symbol_from_candles(symbol: str, as_of: str, lookback: in
         notes=notes,
         calibration_loaded=bool(calibration_loaded),
         calibration_meta=meta,
+        # diagnostics (consistent with /signal)
+        score_mode="stacked" if score_mode == "stacked" else "base",
+        base_score=float(base_score),
+        stacked_score=float(stack_score),
+        stacked_meta=stack_meta,
     )
 
 
@@ -1269,59 +1296,89 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # ------------------------------------------------------------
     # 4) Offline signal from cached candles (no API calls)
     # ------------------------------------------------------------
-    def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optional[Dict[str, Any]]:
-        cs_all = candles_by_sym.get(symbol, [])
-        if not cs_all:
-            return None
+def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optional[Dict[str, Any]]:
+    cs_all = candles_by_sym.get(symbol, [])
+    if not cs_all:
+        return None
 
-        cutoff = _parse_date(as_of)
-        cs_upto: List[Candle] = []
-        for c in cs_all:
-            try:
-                d0 = _parse_date(c.timestamp)
-            except Exception:
-                continue
-            if d0 <= cutoff:
-                cs_upto.append(c)
+    cutoff = _parse_date(as_of)
+    cs_upto: List[Candle] = []
+    for c in cs_all:
+        try:
+            d0 = _parse_date(c.timestamp)
+        except Exception:
+            continue
+        if d0 <= cutoff:
+            cs_upto.append(c)
 
-        if len(cs_upto) < 30:
-            return None
+    if len(cs_upto) < 30:
+        return None
 
-        eff = min(int(lookback), len(cs_upto))
-        window = cs_upto[-eff:]
+    eff = min(int(lookback), len(cs_upto))
+    window = cs_upto[-eff:]
 
-        feats = compute_features(window)
-        regime = detect_regime(feats)
-        score, notes = score_from_features(feats)
+    feats = compute_features(window)
+    regime = detect_regime(feats)
 
-        cal_loaded, cal = _load_calibration()
-        thr = _thresholds_for_regime(regime, cal)
+    # --- scoring (base vs stacked) ---
+    score_mode = (_env("FTIP_SCORE_MODE", "stacked") or "stacked").strip().lower()
+    if score_mode not in ("base", "stacked"):
+        score_mode = "stacked"
 
-        sig = "HOLD"
-        if score >= thr["buy"]:
-            sig = "BUY"
-        elif score <= thr["sell"]:
-            sig = "SELL"
+    base_score, notes = score_from_features(feats)
+    stack_score, stack_meta = stacked_score_from_features(feats, regime)
 
-        conf = abs(score)
-        if regime == "HIGH_VOL":
-            conf *= 0.65
-            notes.append("Confidence reduced due to HIGH_VOL regime.")
+    if score_mode == "stacked":
+        score = float(stack_score)
+        notes.append("Score mode: STACKED (multi-horizon).")
+    else:
+        score = float(base_score)
+        notes.append("Score mode: BASE (legacy).")
 
-        return {
-            "symbol": symbol,
-            "as_of": as_of,
-            "lookback": int(lookback),
-            "effective_lookback": int(eff),
-            "regime": regime,
-            "thresholds": thr,
-            "score": float(score),
-            "signal": sig,
-            "confidence": float(conf),
-            "features": {k: float(v) for k, v in feats.items()},
-            "notes": notes,
-            "calibration_loaded": bool(cal_loaded),
-        }
+    # --- per-symbol calibration (MAP first, then single fallback) ---
+    cal_loaded, cal = _load_calibration_for_symbol(symbol)
+    thr = _thresholds_for_regime(regime, cal)
+
+    sig = "HOLD"
+    if score >= thr["buy"]:
+        sig = "BUY"
+    elif score <= thr["sell"]:
+        sig = "SELL"
+
+    conf = abs(score)
+    if regime == "HIGH_VOL":
+        conf *= 0.65
+        notes.append("Confidence reduced due to HIGH_VOL regime.")
+
+    if regime == "TRENDING":
+        notes.append("Regime: TRENDING.")
+    elif regime == "CHOPPY":
+        notes.append("Regime: CHOPPY.")
+    else:
+        notes.append("Regime: HIGH_VOL.")
+
+    if cal_loaded:
+        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
+
+    return {
+        "symbol": symbol,
+        "as_of": as_of,
+        "lookback": int(lookback),
+        "effective_lookback": int(eff),
+        "regime": regime,
+        "thresholds": thr,
+        "score": float(score),
+        "signal": sig,
+        "confidence": float(conf),
+        "features": {k: float(v) for k, v in feats.items()},
+        "notes": notes,
+        "calibration_loaded": bool(cal_loaded),
+        # diagnostics (optional but helpful)
+        "score_mode": "stacked" if score_mode == "stacked" else "base",
+        "base_score": float(base_score),
+        "stacked_score": float(stack_score),
+        "stacked_meta": stack_meta,
+    }
 
     # ------------------------------------------------------------
     # 5) Offline portfolio weights for a given date
