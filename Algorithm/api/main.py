@@ -1217,8 +1217,8 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     # 1) Fetch candles once per symbol (include extra buffer)
     # ------------------------------------------------------------
     start_dt = _parse_date(req.from_date)
+    end_dt = _parse_date(req.to_date)
 
-    # Buffer: use max(900 days, lookback*4) to be safe for early days
     warmup_days = max(900, int(req.lookback) * 4)
     buffer_start = (start_dt - dt.timedelta(days=warmup_days)).isoformat()
 
@@ -1227,6 +1227,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         s = (sym or "").strip().upper()
         if not s:
             continue
+        # Use cached fetch to reduce rate limits + speed
         candles_by_sym[s] = massive_fetch_daily_bars_cached(s, buffer_start, req.to_date)
 
     if not candles_by_sym:
@@ -1238,6 +1239,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             volatility=0.0,
             turnover=0.0,
             equity_curve={} if req.include_equity_curve else None,
+            audit=None,
         )
 
     # ------------------------------------------------------------
@@ -1258,6 +1260,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             volatility=0.0,
             turnover=0.0,
             equity_curve={} if req.include_equity_curve else None,
+            audit=None,
         )
 
     common_dates = sorted(set.intersection(*date_sets))
@@ -1270,19 +1273,21 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             volatility=0.0,
             turnover=0.0,
             equity_curve={} if req.include_equity_curve else None,
+            audit=None,
         )
 
     common_dates_set = set(common_dates)
 
-    # --- Audit tracking (no-lookahead proof) ---
+    # --- Audit tracking (prove no-lookahead) ---
     audit_rows: List[Dict[str, Any]] = []
     audit_violations = 0
-    common_dates_set = set(common_dates)  # reuse (speed)
 
     # ------------------------------------------------------------
     # 3) Build daily return series per symbol keyed by date
     # ------------------------------------------------------------
     rets_by_sym: Dict[str, Dict[str, float]] = {}
+    closes_by_sym_by_date: Dict[str, Dict[str, float]] = {}
+
     for s, cs in candles_by_sym.items():
         pairs = [(c.timestamp, c.close) for c in cs if c.timestamp in common_dates_set]
         pairs.sort(key=lambda x: x[0])
@@ -1291,114 +1296,77 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
         ds2 = [p[0] for p in pairs]
         closes2 = [p[1] for p in pairs]
-        rets_by_sym[s] = _daily_returns_from_closes(ds2, closes2)
+
+        closes_by_sym_by_date[s] = {d: float(px) for d, px in zip(ds2, closes2)}
+
+        rmap: Dict[str, float] = {}
+        for i in range(1, len(ds2)):
+            prev = float(closes2[i - 1])
+            cur = float(closes2[i])
+            r = (cur / prev) - 1.0 if prev > 0 else 0.0
+            rmap[ds2[i]] = float(r)
+        rets_by_sym[s] = rmap
+
+    if not rets_by_sym:
+        return PortfolioBacktestResponse(
+            total_return=0.0,
+            annual_return=0.0,
+            sharpe=0.0,
+            max_drawdown=0.0,
+            volatility=0.0,
+            turnover=0.0,
+            equity_curve={} if req.include_equity_curve else None,
+            audit=None,
+        )
 
     # ------------------------------------------------------------
-    # 4) Offline signal from cached candles (no API calls)
+    # 4) Cached candle cutoff helper for audit + weights
     # ------------------------------------------------------------
-def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optional[Dict[str, Any]]:
-    cs_all = candles_by_sym.get(symbol, [])
-    if not cs_all:
-        return None
-
-    cutoff = _parse_date(as_of)
-    cs_upto: List[Candle] = []
-    for c in cs_all:
-        try:
-            d0 = _parse_date(c.timestamp)
-        except Exception:
-            continue
-        if d0 <= cutoff:
-            cs_upto.append(c)
-
-    if len(cs_upto) < 30:
-        return None
-
-    eff = min(int(lookback), len(cs_upto))
-    window = cs_upto[-eff:]
-
-    feats = compute_features(window)
-    regime = detect_regime(feats)
-
-    # --- scoring (base vs stacked) ---
-    score_mode = (_env("FTIP_SCORE_MODE", "stacked") or "stacked").strip().lower()
-    if score_mode not in ("base", "stacked"):
-        score_mode = "stacked"
-
-    base_score, notes = score_from_features(feats)
-    stack_score, stack_meta = stacked_score_from_features(feats, regime)
-
-    if score_mode == "stacked":
-        score = float(stack_score)
-        notes.append("Score mode: STACKED (multi-horizon).")
-    else:
-        score = float(base_score)
-        notes.append("Score mode: BASE (legacy).")
-
-    # --- per-symbol calibration (MAP first, then single fallback) ---
-    cal_loaded, cal = _load_calibration_for_symbol(symbol)
-    thr = _thresholds_for_regime(regime, cal)
-
-    sig = "HOLD"
-    if score >= thr["buy"]:
-        sig = "BUY"
-    elif score <= thr["sell"]:
-        sig = "SELL"
-
-    conf = abs(score)
-    if regime == "HIGH_VOL":
-        conf *= 0.65
-        notes.append("Confidence reduced due to HIGH_VOL regime.")
-
-    if regime == "TRENDING":
-        notes.append("Regime: TRENDING.")
-    elif regime == "CHOPPY":
-        notes.append("Regime: CHOPPY.")
-    else:
-        notes.append("Regime: HIGH_VOL.")
-
-    if cal_loaded:
-        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
-
-    return {
-        "symbol": symbol,
-        "as_of": as_of,
-        "lookback": int(lookback),
-        "effective_lookback": int(eff),
-        "regime": regime,
-        "thresholds": thr,
-        "score": float(score),
-        "signal": sig,
-        "confidence": float(conf),
-        "features": {k: float(v) for k, v in feats.items()},
-        "notes": notes,
-        "calibration_loaded": bool(cal_loaded),
-        # diagnostics (optional but helpful)
-        "score_mode": "stacked" if score_mode == "stacked" else "base",
-        "base_score": float(base_score),
-        "stacked_score": float(stack_score),
-        "stacked_meta": stack_meta,
-    }
+    def _last_candle_date_upto(symbol: str, as_of: str) -> Optional[str]:
+        cs_all = candles_by_sym.get(symbol, [])
+        if not cs_all:
+            return None
+        cutoff = _parse_date(as_of)
+        last = None
+        for c in cs_all:
+            try:
+                d0 = _parse_date(c.timestamp)
+            except Exception:
+                continue
+            if d0 <= cutoff:
+                last = c.timestamp
+        return last
 
     # ------------------------------------------------------------
-    # 5) Offline portfolio weights for a given date
+    # 5) Portfolio weights engine (cached candles -> cached signal path)
     # ------------------------------------------------------------
     def _portfolio_weights_for_date_cached(as_of: str) -> Tuple[Dict[str, float], float]:
-        # knobs: request overrides env
-        max_w = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
-        hold_mult = float(req.hold_multiplier) if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
-        min_conf = float(req.min_confidence) if req.min_confidence is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
-        allow_shorts = bool(req.allow_shorts)
-
-        max_w = _clamp(max_w, 0.01, 1.0)
-        hold_mult = _clamp(hold_mult, 0.0, 1.0)
-        min_conf = _clamp(min_conf, 0.0, 1.0)
-
+        # Build signals using the cached candle universe (NO extra API calls)
         per: Dict[str, Any] = {}
-        for s in candles_by_sym.keys():
-            sig = _compute_signal_from_cached(s, as_of, int(req.lookback))
-            if sig is not None:
-                per[s] = sig
+        for sym in req.symbols:
+            s = (sym or "").strip().upper()
+            if not s:
+                continue
+            out = _compute_signal_from_cached(s, as_of, int(req.lookback))
+            if out:
+                per[s] = out
+
+        # Use same knobs behavior as /portfolio_signals
+        knobs = _portfolio_knobs(
+            PortfolioRequest(
+                symbols=req.symbols,
+                as_of=as_of,
+                lookback=req.lookback,
+                max_weight=req.max_weight,
+                hold_multiplier=req.hold_multiplier,
+                min_confidence=req.min_confidence,
+                allow_shorts=req.allow_shorts,
+            )
+        )
+        max_w = float(knobs["max_weight"])
+        hold_mult = float(knobs["hold_multiplier"])
+        min_conf = float(knobs["min_confidence"])
+        allow_shorts = bool(req.allow_shorts)
 
         raw: Dict[str, float] = {}
         for s, sig in per.items():
@@ -1409,15 +1377,16 @@ def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optio
         if not raw:
             return {}, 1.0
 
+        # normalize + caps (use your existing helpers)
         if allow_shorts:
             portfolio, cash = _normalize_allow_shorts_with_caps(raw, max_w)
-            return portfolio, cash
+        else:
+            portfolio, cash = _normalize_long_only_with_caps(raw, max_w)
 
-        portfolio, cash = _normalize_long_only_with_caps(raw, max_w)
         return portfolio, cash
 
     # ------------------------------------------------------------
-    # 6) Rebalance loop  (MUST stay indented inside function)
+    # 6) Rebalance loop (THIS MUST BE INDENTED INSIDE THE FUNCTION)
     # ------------------------------------------------------------
     cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
 
@@ -1426,120 +1395,89 @@ def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optio
     daily_port_rets: List[float] = []
 
     weights: Dict[str, float] = {}
+    cash_w = 1.0
     total_turnover = 0.0
 
     reb_every = max(1, int(req.rebalance_every))
-
-    # Stable cap for normalization
-    max_w_for_caps = (
-        float(req.max_weight)
-        if req.max_weight is not None
-        else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
-    )
-    max_w_for_caps = _clamp(max_w_for_caps, 0.01, 1.0)
-
-    # Precompute candle timestamps per symbol (for audit)
-    ts_by_sym: Dict[str, List[str]] = {
-        s: [c.timestamp for c in cs] for s, cs in candles_by_sym.items()
-    }
 
     for i, d in enumerate(common_dates):
         if i == 0:
             equity_curve[d] = equity
             continue
 
-        # ---------- Rebalance ----------
+        # Rebalance on schedule
         if (i - 1) % reb_every == 0:
-            target_w, _ = _portfolio_weights_for_date_cached(as_of=d)
+            # 1) target weights from cached signal engine
+            target_w, target_cash = _portfolio_weights_for_date_cached(as_of=d)
 
-            # ---- Audit: no lookahead ----
-            if req.audit_no_lookahead:
-                row = {"rebalance_date": d, "per_symbol_last_candle": {}}
-                for sym, ts in ts_by_sym.items():
-                    last_ok = None
-                    for t in ts:
-                        if t <= d:
-                            last_ok = t
-                        else:
-                            break
-                    row["per_symbol_last_candle"][sym] = last_ok
-                    if last_ok is None or last_ok > d:
-                        audit_violations += 1
+            # --- Audit: prove no-lookahead (last candle date must be <= rebalance date) ---
+            if bool(getattr(req, "audit_no_lookahead", False)):
+                per_last: Dict[str, Any] = {}
+                for sym in req.symbols:
+                    s = (sym or "").strip().upper()
+                    if not s:
+                        continue
+                    last_c = _last_candle_date_upto(s, d)
+                    if last_c:
+                        per_last[s] = last_c
+                        if last_c > d:
+                            audit_violations += 1
 
-                if len(audit_rows) < int(req.audit_max_rows):
-                    audit_rows.append(row)
+                if len(audit_rows) < int(getattr(req, "audit_max_rows", 50) or 50):
+                    audit_rows.append({"rebalance_date": d, "per_symbol_last_candle": per_last})
 
-            # ---- Deadband ----
-            target_w = _apply_deadband(
-                weights, target_w, min_delta=float(req.min_trade_delta)
-            )
+            # 2) deadband
+            min_delta = float(getattr(req, "min_trade_delta", 0.01))
+            target_w = _apply_deadband(weights, target_w, min_delta=min_delta)
 
-            # ---- Turnover cap ----
-            capped_w = _cap_turnover(
-                weights,
-                target_w,
-                max_turnover=float(req.max_turnover_per_rebalance),
-            )
+            # 3) turnover cap
+            max_t = float(getattr(req, "max_turnover_per_rebalance", 0.20))
+            capped_w = _cap_turnover(weights, target_w, max_turnover=max_t)
 
-            # ---- Normalize + cap ----
-            capped_w, _ = _normalize_long_only(
-                capped_w, max_weight=max_w_for_caps
-            )
+            # 4) normalize + cap again (long-only)
+            capped_w, capped_cash = _normalize_long_only(capped_w, max_weight=float(req.max_weight))
 
-            # ---- Apply trading costs ----
-            turnover = sum(
-                abs(capped_w.get(s, 0.0) - weights.get(s, 0.0))
-                for s in set(weights) | set(capped_w)
-            )
+            # 5) turnover (assets only) for trading costs
+            turnover = 0.0
+            syms = set(weights.keys()) | set(capped_w.keys())
+            for s in syms:
+                turnover += abs(float(capped_w.get(s, 0.0)) - float(weights.get(s, 0.0)))
 
             equity *= (1.0 - turnover * cost_rate)
+
             total_turnover += turnover
             weights = capped_w
+            cash_w = capped_cash  # tracked (cash return assumed 0)
 
-        # ---------- Daily return ----------
-        pr = sum(
-            float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
-            for s, w in weights.items()
-        )
+        # Daily portfolio return
+        pr = 0.0
+        for s, w in weights.items():
+            pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
 
         equity *= (1.0 + pr)
         equity_curve[d] = equity
         daily_port_rets.append(pr)
 
     # ------------------------------------------------------------
-    # 7) Stats
+    # 7) Stats + return (MUST ALWAYS RETURN A RESPONSE)
     # ------------------------------------------------------------
     total_return = equity - 1.0
-
     n = max(1, len(daily_port_rets))
-    annual_return = (1.0 + total_return) ** (252.0 / n) - 1.0
-
-    volatility = (
-        _std(daily_port_rets) * math.sqrt(252.0)
-        if len(daily_port_rets) > 2
-        else 0.0
-    )
-
-    sharpe = (annual_return / volatility) if volatility > 0 else 0.0
-    max_dd = _max_drawdown(list(equity_curve.values()))
+    ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
+    vol = _std(daily_port_rets) * math.sqrt(252.0) if len(daily_port_rets) > 2 else 0.0
+    sharpe = (ann_return / vol) if vol > 0 else 0.0
+    mdd = _max_drawdown(list(equity_curve.values()))
 
     audit_payload = None
-    if req.audit_no_lookahead:
-        audit_payload = {
-            "violations_count": int(audit_violations),
-            "rows_sample": audit_rows,
-            "note": (
-                "Each row shows the last candle timestamp <= rebalance_date "
-                "per symbol. None indicates insufficient history."
-            ),
-        }
+    if bool(getattr(req, "audit_no_lookahead", False)):
+        audit_payload = {"violations_count": int(audit_violations), "rows_sample": audit_rows}
 
     return PortfolioBacktestResponse(
         total_return=float(total_return),
-        annual_return=float(annual_return),
+        annual_return=float(ann_return),
         sharpe=float(sharpe),
-        max_drawdown=float(max_dd),
-        volatility=float(volatility),
+        max_drawdown=float(mdd),
+        volatility=float(vol),
         turnover=float(total_turnover),
         equity_curve=equity_curve if req.include_equity_curve else None,
         audit=audit_payload,
@@ -1825,11 +1763,9 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
 @app.post("/portfolio_backtest")
 def portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
     out = backtest_portfolio(req)
-
-    # Guard: never let None pass through (prevents None.model_dump crash)
     if out is None:
+        # Should never happen, but keeps the API honest.
         raise HTTPException(status_code=500, detail="portfolio_backtest returned None")
-
     return out.model_dump(exclude_none=True)
 
 
