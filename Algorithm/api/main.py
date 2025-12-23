@@ -47,37 +47,39 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _load_calibration_for_symbol(symbol: str) -> tuple[bool, dict | None]:
+def _load_calibration_for_symbol(symbol: Optional[str]) -> tuple[bool, Optional[dict]]:
     """
-    Loads per-symbol calibration from FTIP_CALIBRATION_JSON_MAP if present.
-    Falls back to FTIP_CALIBRATION_JSON (legacy single calibration).
-    Returns: (loaded, calibration_dict_or_None)
+    Loads calibration thresholds.
+    Priority:
+      1) FTIP_CALIBRATION_JSON_MAP (per-symbol)
+      2) FTIP_CALIBRATION_JSON (single fallback)
     """
     sym = (symbol or "").strip().upper()
 
-    # 1) Try map-based calibration
+    # 1) Try per-symbol map
     raw_map = _env("FTIP_CALIBRATION_JSON_MAP")
     if raw_map:
         try:
             m = json.loads(raw_map)
             if isinstance(m, dict):
-                if sym in m and isinstance(m[sym], dict):
+                if sym and sym in m and isinstance(m[sym], dict):
                     return True, m[sym]
+                # optional default entry
                 if "DEFAULT" in m and isinstance(m["DEFAULT"], dict):
                     return True, m["DEFAULT"]
         except Exception:
-            # ignore parse errors and fall through to legacy
+            # map present but invalid JSON → ignore and fallback
             pass
 
-    # 2) Legacy single calibration
-    raw_single = _env("FTIP_CALIBRATION_JSON")
-    if raw_single:
+    # 2) Fallback: single calibration
+    raw_one = _env("FTIP_CALIBRATION_JSON")
+    if raw_one:
         try:
-            cal = json.loads(raw_single)
+            cal = json.loads(raw_one)
             if isinstance(cal, dict):
                 return True, cal
         except Exception:
-            return False, None
+            pass
 
     return False, None
 
@@ -982,7 +984,7 @@ def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int,
 
         score = float(stack_score) if score_mode == "stacked" else float(base_score)
 
-        cal_loaded, cal = _load_calibration()
+        cal_loaded, cal = _load_calibration_for_symbol(symbol)
         thr = _thresholds_for_regime(regime, cal)
 
         sig = "HOLD"
@@ -1808,7 +1810,32 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
         "env_var_name": "FTIP_CALIBRATION_JSON",
         "env_var_value": env_value,
         "next_step": "Paste env_var_value into Railway Variable FTIP_CALIBRATION_JSON then redeploy/restart.",
+        "env_var_name_map": env_var_name_map,
+        "env_var_value_map": env_var_value_map,
+        "next_step_map": "Paste env_var_value_map into Railway Variable FTIP_CALIBRATION_JSON_MAP then redeploy/restart.",
+
     }
+
+    # ------------------------------------------------------------
+    # Phase 3: Build FTIP_CALIBRATION_JSON_MAP (per-symbol map)
+    # ------------------------------------------------------------
+    sym = (req.symbol or "").strip().upper()
+
+    existing_map: dict = {}
+    raw_map = _env("FTIP_CALIBRATION_JSON_MAP")
+    if raw_map:
+        try:
+            tmp = json.loads(raw_map)
+            if isinstance(tmp, dict):
+                existing_map = tmp
+        except Exception:
+            existing_map = {}
+
+    # overwrite ONLY this symbol
+    existing_map[sym] = calibration
+
+    env_var_name_map = "FTIP_CALIBRATION_JSON_MAP"
+    env_var_value_map = json.dumps(existing_map, separators=(",", ":"))
 
 
 @app.post("/run_scores")
