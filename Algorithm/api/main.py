@@ -842,7 +842,7 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
         notes.append("Regime: HIGH_VOL.")
 
     if calibration_loaded:
-        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON.")
+        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
 
     meta = None
     if calibration_loaded and calibration:
@@ -1805,17 +1805,6 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
     }
     env_value = json.dumps(env_payload, separators=(",", ":"))
 
-    return {
-        "calibration": env_payload,
-        "env_var_name": "FTIP_CALIBRATION_JSON",
-        "env_var_value": env_value,
-        "next_step": "Paste env_var_value into Railway Variable FTIP_CALIBRATION_JSON then redeploy/restart.",
-        "env_var_name_map": env_var_name_map,
-        "env_var_value_map": env_var_value_map,
-        "next_step_map": "Paste env_var_value_map into Railway Variable FTIP_CALIBRATION_JSON_MAP then redeploy/restart.",
-
-    }
-
     # ------------------------------------------------------------
     # Phase 3: Build FTIP_CALIBRATION_JSON_MAP (per-symbol map)
     # ------------------------------------------------------------
@@ -1831,11 +1820,22 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
         except Exception:
             existing_map = {}
 
-    # overwrite ONLY this symbol
-    existing_map[sym] = calibration
+    # overwrite ONLY this symbol with the NEW calibration payload
+    existing_map[sym] = env_payload
 
     env_var_name_map = "FTIP_CALIBRATION_JSON_MAP"
     env_var_value_map = json.dumps(existing_map, separators=(",", ":"))
+
+    return {
+        "calibration": env_payload,
+        "env_var_name": "FTIP_CALIBRATION_JSON",
+        "env_var_value": env_value,
+        "next_step": "Paste env_var_value into Railway Variable FTIP_CALIBRATION_JSON then redeploy/restart.",
+
+        "env_var_name_map": env_var_name_map,
+        "env_var_value_map": env_var_value_map,
+        "next_step_map": "Paste env_var_value_map into Railway Variable FTIP_CALIBRATION_JSON_MAP then redeploy/restart.",
+    }
 
 
 @app.post("/run_scores")
