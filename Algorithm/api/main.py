@@ -5,6 +5,7 @@ import time
 import math
 import json
 import datetime as dt
+from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -58,6 +59,208 @@ def _env_float(name: str, default: float) -> float:
 
 def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
+
+
+# =============================================================================
+# Phase 4: Prosperity DB (Railway Postgres) - SAFE feature-flagged persistence
+# =============================================================================
+
+# NOTE: To enable DB, set in Railway Variables:
+#   DATABASE_URL=postgresql://...
+#   FTIP_DB_ENABLED=1
+# Optional:
+#   FTIP_DB_REQUIRED=1   (fail startup if DB cannot init)
+# This file will run even without psycopg installed as long as DB is disabled.
+
+DB_ENABLED = (_env("FTIP_DB_ENABLED", "0") or "0") == "1"
+DB_REQUIRED = (_env("FTIP_DB_REQUIRED", "0") or "0") == "1"
+DATABASE_URL = _env("DATABASE_URL")
+
+_psycopg_pool_ok = False
+_db_pool = None
+
+try:
+    # psycopg3 pool
+    from psycopg_pool import ConnectionPool  # type: ignore
+
+    _psycopg_pool_ok = True
+except Exception:
+    ConnectionPool = None  # type: ignore
+    _psycopg_pool_ok = False
+
+
+def _db_init_pool() -> None:
+    """
+    Initializes DB pool if enabled and possible.
+    Never crashes the service unless FTIP_DB_REQUIRED=1.
+    """
+    global _db_pool
+    if not DB_ENABLED:
+        return
+
+    if not DATABASE_URL:
+        if DB_REQUIRED:
+            raise RuntimeError("DB enabled but DATABASE_URL not set.")
+        return
+
+    if not _psycopg_pool_ok:
+        if DB_REQUIRED:
+            raise RuntimeError("DB enabled but psycopg_pool is not installed.")
+        return
+
+    if _db_pool is None:
+        # small pool; Railway is fine with 1..5
+        _db_pool = ConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=5, open=True)
+
+
+@contextmanager
+def db_conn():
+    """
+    Yields a psycopg connection or None if DB disabled/unavailable.
+    """
+    if not DB_ENABLED or _db_pool is None:
+        yield None
+        return
+    try:
+        with _db_pool.connection() as conn:
+            yield conn
+    except Exception:
+        # Don't crash request handlers from DB transient errors
+        yield None
+
+
+def _db_exec_safe(sql: str, params: Tuple[Any, ...]) -> None:
+    """
+    Best-effort DB write helper. Never raises to callers.
+    """
+    with db_conn() as conn:
+        if conn is None:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+
+def db_insert_signal_run(as_of: str, lookback: int, score_mode: str) -> Optional[str]:
+    with db_conn() as conn:
+        if conn is None:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO signal_run (as_of_date, lookback, score_mode, version_sha, env)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    as_of,
+                    int(lookback),
+                    score_mode,
+                    _git_sha(),
+                    json.dumps({"railway_environment": _railway_env()}),
+                ),
+            )
+            run_id = cur.fetchone()[0]
+            conn.commit()
+            return str(run_id)
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return None
+
+
+def db_insert_signal_observation(run_id: str, obs: Dict[str, Any]) -> None:
+    _db_exec_safe(
+        """
+        INSERT INTO signal_observation
+          (run_id, symbol, regime, signal, score, confidence, thresholds, features, notes, calibration_meta)
+        VALUES
+          (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb)
+        ON CONFLICT (run_id, symbol)
+        DO UPDATE SET
+          regime=EXCLUDED.regime,
+          signal=EXCLUDED.signal,
+          score=EXCLUDED.score,
+          confidence=EXCLUDED.confidence,
+          thresholds=EXCLUDED.thresholds,
+          features=EXCLUDED.features,
+          notes=EXCLUDED.notes,
+          calibration_meta=EXCLUDED.calibration_meta
+        """,
+        (
+            run_id,
+            (obs.get("symbol") or "").strip().upper(),
+            obs.get("regime") or "UNKNOWN",
+            obs.get("signal") or "HOLD",
+            float(obs.get("score") or 0.0),
+            float(obs.get("confidence") or 0.0),
+            json.dumps(obs.get("thresholds") or {}),
+            json.dumps(obs.get("features") or {}),
+            json.dumps(obs.get("notes") or []),
+            json.dumps(obs.get("calibration_meta")),
+        ),
+    )
+
+
+def db_insert_portfolio_backtest(req_obj: Any, out_obj: Any) -> None:
+    """
+    Persist portfolio backtest summary + audit.
+    Never raises.
+    """
+    payload = out_obj.model_dump(exclude_none=True) if hasattr(out_obj, "model_dump") else dict(out_obj)
+    audit = payload.get("audit")
+
+    _db_exec_safe(
+        """
+        INSERT INTO portfolio_backtest_run
+          (from_date, to_date, lookback, rebalance_every, trading_cost_bps, slippage_bps,
+           max_weight, min_trade_delta, max_turnover_per_rebalance, allow_shorts,
+           score_mode, symbols, result, audit, version_sha)
+        VALUES
+          (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s)
+        """,
+        (
+            req_obj.from_date,
+            req_obj.to_date,
+            int(req_obj.lookback),
+            int(req_obj.rebalance_every),
+            float(req_obj.trading_cost_bps),
+            float(req_obj.slippage_bps),
+            float(req_obj.max_weight) if req_obj.max_weight is not None else None,
+            float(req_obj.min_trade_delta),
+            float(req_obj.max_turnover_per_rebalance),
+            bool(req_obj.allow_shorts),
+            _score_mode(),
+            json.dumps(req_obj.symbols),
+            json.dumps(payload),
+            json.dumps(audit) if audit is not None else None,
+            _git_sha(),
+        ),
+    )
+
+
+def db_insert_calibration_snapshot(symbol: str, payload: Dict[str, Any]) -> None:
+    _db_exec_safe(
+        """
+        INSERT INTO calibration_snapshot (symbol, payload, source, version_sha)
+        VALUES (%s, %s::jsonb, %s, %s)
+        """,
+        (
+            (symbol or "").strip().upper(),
+            json.dumps(payload),
+            "api_calibrate",
+            _git_sha(),
+        ),
+    )
 
 
 # =============================================================================
@@ -246,6 +449,14 @@ class PortfolioBacktestResponse(BaseModel):
 
     equity_curve: Optional[Dict[str, float]] = None
     audit: Optional[Dict[str, Any]] = None
+
+
+# --- Phase 4: Universe models (Top 1,000, etc.) ---
+class UniverseUpsertRequest(BaseModel):
+    as_of_date: str
+    name: str = "TOP1000_US"
+    source: str = "manual_seed"
+    symbols: List[str]  # ordered best -> worst
 
 
 # =============================================================================
@@ -751,7 +962,6 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     )
 
 
-# --- UPDATED (you asked for this) ---
 def compute_signal_for_symbol_from_candles(
     symbol: str,
     as_of: str,
@@ -1188,7 +1398,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
         mode = _score_mode()
 
-        # ---- UPDATED (you asked for this): cached/offline signal uses stacked + per-symbol calibration ----
         def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optional[Dict[str, Any]]:
             cs_all = candles_by_sym.get(symbol, [])
             if not cs_all:
@@ -1269,7 +1478,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 "calibration_meta": meta,
             }
 
-        # Weights for date from cached signals
         def _weights_for_date(as_of: str) -> Tuple[Dict[str, float], float]:
             max_w = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
             hold_mult = float(req.hold_multiplier) if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
@@ -1316,7 +1524,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         total_turnover = 0.0
         reb_every = max(1, int(req.rebalance_every))
 
-        # stable max weight for final normalization
         max_w_caps = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
         max_w_caps = _clamp(max_w_caps, 0.01, 1.0)
 
@@ -1325,11 +1532,9 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 equity_curve[d] = equity
                 continue
 
-            # --- rebalance on schedule (use d as "as_of") ---
             if (i - 1) % reb_every == 0:
                 target_w, _cash = _weights_for_date(as_of=d)
 
-                # Audit: ensure last candle <= rebalance date
                 if req.audit_no_lookahead:
                     row = {"rebalance_date": d, "per_symbol_last_candle": {}}
                     for sym, ts in ts_by_sym.items():
@@ -1345,11 +1550,9 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                     if len(audit_rows) < int(req.audit_max_rows):
                         audit_rows.append(row)
 
-                # Deadband then turnover cap
                 target_w = _apply_deadband(weights, target_w, min_delta=float(req.min_trade_delta))
                 capped_w = _cap_turnover(weights, target_w, max_turnover=float(req.max_turnover_per_rebalance))
 
-                # Final normalization (ensure long-only weights sum<=1 and per-name cap)
                 if req.allow_shorts:
                     capped_w, _cash2 = _normalize_allow_shorts_with_caps(capped_w, max_w_caps)
                 else:
@@ -1364,7 +1567,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 total_turnover += turnover
                 weights = dict(capped_w)
 
-            # Daily return
             pr = 0.0
             for s, w in weights.items():
                 pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
@@ -1403,7 +1605,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     except HTTPException:
         raise
     except Exception as e:
-        # if anything unexpected happens, return a readable error
         raise HTTPException(status_code=500, detail=f"portfolio_backtest crash: {type(e).__name__}: {e}")
 
 
@@ -1414,11 +1615,19 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 app = FastAPI(title=APP_NAME, version="1.0.0")
 
 
+@app.on_event("startup")
+def _startup() -> None:
+    # DB pool init (safe)
+    _db_init_pool()
+
+
 @app.get("/")
 def root() -> Dict[str, Any]:
     return {
         "name": APP_NAME,
         "status": "ok",
+        "db_enabled": bool(DB_ENABLED),
+        "db_pool_ready": bool(_db_pool is not None),
         "endpoints": [
             "/health",
             "/version",
@@ -1430,6 +1639,8 @@ def root() -> Dict[str, Any]:
             "/calibrate",
             "/run_backtest",
             "/market/massive/bars",
+            "/universe/upsert",
+            "/universe/top",
             "/docs",
         ],
     }
@@ -1495,6 +1706,12 @@ def signals(req: SignalsRequest) -> Dict[str, Any]:
         except Exception as e:
             errors[s] = {"status_code": 500, "detail": str(e)}
 
+    # ---- Phase 4: persist signal run + observations (best-effort) ----
+    run_id = db_insert_signal_run(req.as_of, req.lookback, _score_mode())
+    if run_id:
+        for _sym, payload in results.items():
+            db_insert_signal_observation(run_id, payload)
+
     return {
         "as_of": req.as_of,
         "lookback": req.lookback,
@@ -1502,6 +1719,8 @@ def signals(req: SignalsRequest) -> Dict[str, Any]:
         "count_error": len(errors),
         "results": results,
         "errors": errors,
+        "persisted": bool(run_id is not None),
+        "signal_run_id": run_id,
     }
 
 
@@ -1566,7 +1785,11 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
 
 @app.post("/portfolio_backtest")
 def portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
-    out = backtest_portfolio(req)  # backtest_portfolio never returns None; raises HTTPException on failure
+    out = backtest_portfolio(req)  # never returns None; raises HTTPException on failure
+
+    # ---- Phase 4: persist portfolio backtest (best-effort) ----
+    db_insert_portfolio_backtest(req, out)
+
     return out.model_dump(exclude_none=True)
 
 
@@ -1589,7 +1812,6 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
     rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
     cal_core = calibrate_thresholds(rows, req.optimize_horizon, req.min_trades_per_side)
 
-    # Build single calibration payload (same schema as before)
     env_payload = {
         "created_at_utc": cal_core["created_at_utc"],
         "symbol": req.symbol.upper(),
@@ -1605,7 +1827,6 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
     }
     env_value = json.dumps(env_payload, separators=(",", ":"))
 
-    # Build/merge symbol map payload (Phase 3 map)
     sym = (req.symbol or "").strip().upper()
     existing_map: Dict[str, Any] = {}
     raw_map = _env("FTIP_CALIBRATION_JSON_MAP")
@@ -1617,8 +1838,11 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
         except Exception:
             existing_map = {}
 
-    existing_map[sym] = env_payload  # store full payload per symbol
+    existing_map[sym] = env_payload
     env_var_value_map = json.dumps(existing_map, separators=(",", ":"))
+
+    # ---- Phase 4: persist calibration snapshot (best-effort) ----
+    db_insert_calibration_snapshot(sym, env_payload)
 
     return {
         "calibration": env_payload,
@@ -1629,3 +1853,96 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
         "env_var_value_map": env_var_value_map,
         "next_step_map": "Paste env_var_value_map into Railway Variable FTIP_CALIBRATION_JSON_MAP then redeploy/restart.",
     }
+
+
+# =============================================================================
+# Phase 4: Universe endpoints (Top 1,000)
+# =============================================================================
+
+@app.post("/universe/upsert")
+def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    syms = [(s or "").strip().upper() for s in (req.symbols or [])]
+    syms = [s for s in syms if s]
+    if not syms:
+        raise HTTPException(status_code=400, detail="symbols list is empty.")
+
+    with db_conn() as conn:
+        if conn is None:
+            raise HTTPException(status_code=500, detail="DB pool not available (psycopg missing or DATABASE_URL invalid).")
+
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO universe_snapshot (as_of_date, name, source)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (as_of_date, name)
+                DO UPDATE SET source=EXCLUDED.source
+                RETURNING id
+                """,
+                (req.as_of_date, req.name, req.source),
+            )
+            snapshot_id = cur.fetchone()[0]
+
+            cur.execute("DELETE FROM universe_member WHERE snapshot_id=%s", (snapshot_id,))
+
+            rows = [(snapshot_id, s, i) for i, s in enumerate(syms, start=1)]
+            cur.executemany(
+                "INSERT INTO universe_member (snapshot_id, symbol, rank) VALUES (%s,%s,%s)",
+                rows,
+            )
+            conn.commit()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
+
+    return {"status": "ok", "as_of_date": req.as_of_date, "name": req.name, "count": len(syms)}
+
+
+@app.get("/universe/top")
+def universe_top(
+    as_of_date: str = Query(..., description="YYYY-MM-DD"),
+    name: str = Query("TOP1000_US"),
+    limit: int = Query(1000, ge=1, le=5000),
+) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    with db_conn() as conn:
+        if conn is None:
+            raise HTTPException(status_code=500, detail="DB pool not available (psycopg missing or DATABASE_URL invalid).")
+
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT id FROM universe_snapshot WHERE as_of_date=%s AND name=%s",
+                (as_of_date, name),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Universe snapshot not found.")
+
+            sid = row[0]
+            cur.execute(
+                """
+                SELECT symbol, rank
+                FROM universe_member
+                WHERE snapshot_id=%s
+                ORDER BY rank ASC
+                LIMIT %s
+                """,
+                (sid, int(limit)),
+            )
+            items = [{"symbol": r[0], "rank": int(r[1])} for r in cur.fetchall()]
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"universe_top failed: {type(e).__name__}: {e}")
+
+    return {"as_of_date": as_of_date, "name": name, "count": len(items), "items": items}
