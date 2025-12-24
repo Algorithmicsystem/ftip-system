@@ -1651,6 +1651,27 @@ def health() -> Dict[str, Any]:
     return {"status": "ok"}
 
 
+@app.get("/db/health")
+def db_health() -> Dict[str, Any]:
+    if not _env("FTIP_DB_ENABLED"):
+        return {"status": "disabled", "db_enabled": False}
+
+    db_url = _env("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=500, detail="DATABASE_URL is not set")
+
+    try:
+        import psycopg
+        with psycopg.connect(db_url, connect_timeout=5) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1;")
+                one = cur.fetchone()
+        return {"status": "ok", "db_enabled": True, "select_1": one[0]}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"db_health failed: {type(e).__name__}: {e}")
+
+
+
 @app.get("/version")
 def version() -> Dict[str, Any]:
     return {"railway_git_commit_sha": _git_sha(), "railway_environment": _railway_env()}
