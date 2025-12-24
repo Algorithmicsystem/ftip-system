@@ -13,3 +13,4 @@ httpx<1,>=0.23.0
 openai>=1.0.0
 itsdangerous>=2.1.2
 requests
+psycopg[binary,pool]==3.2.9
