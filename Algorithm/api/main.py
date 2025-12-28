@@ -5,12 +5,13 @@ import time
 import math
 import json
 import datetime as dt
-from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
+
+from api import db
 
 # =============================================================================
 # App + environment helpers
@@ -70,145 +71,78 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 #   FTIP_DB_ENABLED=1
 # Optional:
 #   FTIP_DB_REQUIRED=1   (fail startup if DB cannot init)
-# This file will run even without psycopg installed as long as DB is disabled.
 
-DB_ENABLED = (_env("FTIP_DB_ENABLED", "0") or "0") == "1"
+DB_ENABLED = db.db_enabled()
 DB_REQUIRED = (_env("FTIP_DB_REQUIRED", "0") or "0") == "1"
-DATABASE_URL = _env("DATABASE_URL")
-
-_psycopg_pool_ok = False
-_db_pool = None
-
-try:
-    # psycopg3 pool
-    from psycopg_pool import ConnectionPool  # type: ignore
-
-    _psycopg_pool_ok = True
-except Exception:
-    ConnectionPool = None  # type: ignore
-    _psycopg_pool_ok = False
 
 
-def _db_init_pool() -> None:
-    """
-    Initializes DB pool if enabled and possible.
-    Never crashes the service unless FTIP_DB_REQUIRED=1.
-    """
-    global _db_pool
+def _db_pool_ready() -> bool:
     if not DB_ENABLED:
-        return
-
-    if not DATABASE_URL:
-        if DB_REQUIRED:
-            raise RuntimeError("DB enabled but DATABASE_URL not set.")
-        return
-
-    if not _psycopg_pool_ok:
-        if DB_REQUIRED:
-            raise RuntimeError("DB enabled but psycopg_pool is not installed.")
-        return
-
-    if _db_pool is None:
-        # small pool; Railway is fine with 1..5
-        _db_pool = ConnectionPool(conninfo=DATABASE_URL, min_size=1, max_size=5, open=True)
-
-
-@contextmanager
-def db_conn():
-    """
-    Yields a psycopg connection or None if DB disabled/unavailable.
-    """
-    if not DB_ENABLED or _db_pool is None:
-        yield None
-        return
+        return False
     try:
-        with _db_pool.connection() as conn:
-            yield conn
+        db.get_pool()
+        return True
     except Exception:
-        # Don't crash request handlers from DB transient errors
-        yield None
-
-
-def _db_exec_safe(sql: str, params: Tuple[Any, ...]) -> None:
-    """
-    Best-effort DB write helper. Never raises to callers.
-    """
-    with db_conn() as conn:
-        if conn is None:
-            return
-        try:
-            cur = conn.cursor()
-            cur.execute(sql, params)
-            conn.commit()
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
+        return False
 
 
 def db_insert_signal_run(as_of: str, lookback: int, score_mode: str) -> Optional[str]:
-    with db_conn() as conn:
-        if conn is None:
-            return None
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO signal_run (as_of_date, lookback, score_mode, version_sha, env)
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (
-                    as_of,
-                    int(lookback),
-                    score_mode,
-                    _git_sha(),
-                    json.dumps({"railway_environment": _railway_env()}),
-                ),
-            )
-            run_id = cur.fetchone()[0]
-            conn.commit()
-            return str(run_id)
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            return None
+    try:
+        row = db.exec1(
+            """
+            INSERT INTO signal_run (as_of_date, lookback, score_mode, version_sha, env)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                as_of,
+                int(lookback),
+                score_mode,
+                _git_sha(),
+                json.dumps({"railway_environment": _railway_env()}),
+            ),
+        )
+        if row:
+            return str(row[0])
+    except Exception:
+        return None
+    return None
 
 
 def db_insert_signal_observation(run_id: str, obs: Dict[str, Any]) -> None:
-    _db_exec_safe(
-        """
-        INSERT INTO signal_observation
-          (run_id, symbol, regime, signal, score, confidence, thresholds, features, notes, calibration_meta)
-        VALUES
-          (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb)
-        ON CONFLICT (run_id, symbol)
-        DO UPDATE SET
-          regime=EXCLUDED.regime,
-          signal=EXCLUDED.signal,
-          score=EXCLUDED.score,
-          confidence=EXCLUDED.confidence,
-          thresholds=EXCLUDED.thresholds,
-          features=EXCLUDED.features,
-          notes=EXCLUDED.notes,
-          calibration_meta=EXCLUDED.calibration_meta
-        """,
-        (
-            run_id,
-            (obs.get("symbol") or "").strip().upper(),
-            obs.get("regime") or "UNKNOWN",
-            obs.get("signal") or "HOLD",
-            float(obs.get("score") or 0.0),
-            float(obs.get("confidence") or 0.0),
-            json.dumps(obs.get("thresholds") or {}),
-            json.dumps(obs.get("features") or {}),
-            json.dumps(obs.get("notes") or []),
-            json.dumps(obs.get("calibration_meta")),
-        ),
-    )
+    try:
+        db.exec1(
+            """
+            INSERT INTO signal_observation
+              (run_id, symbol, regime, signal, score, confidence, thresholds, features, notes, calibration_meta)
+            VALUES
+              (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb)
+            ON CONFLICT (run_id, symbol)
+            DO UPDATE SET
+              regime=EXCLUDED.regime,
+              signal=EXCLUDED.signal,
+              score=EXCLUDED.score,
+              confidence=EXCLUDED.confidence,
+              thresholds=EXCLUDED.thresholds,
+              features=EXCLUDED.features,
+              notes=EXCLUDED.notes,
+              calibration_meta=EXCLUDED.calibration_meta
+            """,
+            (
+                run_id,
+                (obs.get("symbol") or "").strip().upper(),
+                obs.get("regime") or "UNKNOWN",
+                obs.get("signal") or "HOLD",
+                float(obs.get("score") or 0.0),
+                float(obs.get("confidence") or 0.0),
+                json.dumps(obs.get("thresholds") or {}),
+                json.dumps(obs.get("features") or {}),
+                json.dumps(obs.get("notes") or []),
+                json.dumps(obs.get("calibration_meta")),
+            ),
+        )
+    except Exception:
+        return
 
 
 def db_insert_portfolio_backtest(req_obj: Any, out_obj: Any) -> None:
@@ -219,16 +153,134 @@ def db_insert_portfolio_backtest(req_obj: Any, out_obj: Any) -> None:
     payload = out_obj.model_dump(exclude_none=True) if hasattr(out_obj, "model_dump") else dict(out_obj)
     audit = payload.get("audit")
 
-    _db_exec_safe(
+    try:
+        db.exec1(
+            """
+            INSERT INTO portfolio_backtest_run
+              (from_date, to_date, lookback, rebalance_every, trading_cost_bps, slippage_bps,
+               max_weight, min_trade_delta, max_turnover_per_rebalance, allow_shorts,
+               score_mode, symbols, result, audit, version_sha)
+            VALUES
+              (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s)
+            """,
+            (
+                req_obj.from_date,
+                req_obj.to_date,
+                int(req_obj.lookback),
+                int(req_obj.rebalance_every),
+                float(req_obj.trading_cost_bps),
+                float(req_obj.slippage_bps),
+                float(req_obj.max_weight) if req_obj.max_weight is not None else None,
+                float(req_obj.min_trade_delta),
+                float(req_obj.max_turnover_per_rebalance),
+                bool(req_obj.allow_shorts),
+                _score_mode(),
+                json.dumps(req_obj.symbols),
+                json.dumps(payload),
+                json.dumps(audit) if audit is not None else None,
+                _git_sha(),
+            ),
+        )
+    except Exception:
+        return
+
+
+def db_insert_calibration_snapshot(symbol: str, payload: Dict[str, Any]) -> None:
+    try:
+        db.exec1(
+            """
+            INSERT INTO calibration_snapshot (symbol, payload, source, version_sha)
+            VALUES (%s, %s::jsonb, %s, %s)
+            """,
+            (
+                (symbol or "").strip().upper(),
+                json.dumps(payload),
+                "api_calibrate",
+                _git_sha(),
+            ),
+        )
+    except Exception:
+        return
+
+
+SIGNAL_UPSERT_SQL = """
+INSERT INTO signals (
+  symbol, as_of, lookback, regime, score, signal, confidence, thresholds,
+  features, notes, score_mode, base_score, stacked_score, stacked_meta,
+  calibration_loaded, calibration_meta
+)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+ON CONFLICT (symbol, as_of, lookback, score_mode)
+DO UPDATE SET
+  regime=EXCLUDED.regime,
+  score=EXCLUDED.score,
+  signal=EXCLUDED.signal,
+  confidence=EXCLUDED.confidence,
+  thresholds=EXCLUDED.thresholds,
+  features=EXCLUDED.features,
+  notes=EXCLUDED.notes,
+  score_mode=EXCLUDED.score_mode,
+  base_score=EXCLUDED.base_score,
+  stacked_score=EXCLUDED.stacked_score,
+  stacked_meta=EXCLUDED.stacked_meta,
+  calibration_loaded=EXCLUDED.calibration_loaded,
+  calibration_meta=EXCLUDED.calibration_meta
+RETURNING id, (xmax = 0) AS inserted
+"""
+
+
+def _signal_upsert_params(sig: SignalResponse) -> Tuple[Any, ...]:
+    try:
+        as_of_date = dt.date.fromisoformat(sig.as_of)
+    except Exception:
+        as_of_date = sig.as_of
+
+    return (
+        (sig.symbol or "").strip().upper(),
+        as_of_date,
+        int(sig.lookback),
+        sig.regime,
+        float(sig.score),
+        sig.signal,
+        float(sig.confidence),
+        sig.thresholds or {},
+        sig.features or {},
+        sig.notes or [],
+        sig.score_mode,
+        sig.base_score,
+        sig.stacked_score,
+        sig.stacked_meta,
+        sig.calibration_loaded,
+        sig.calibration_meta,
+    )
+
+
+def persist_signal_record(sig: SignalResponse) -> Tuple[bool, Optional[int]]:
+    row = db.exec1(SIGNAL_UPSERT_SQL, _signal_upsert_params(sig))
+    if not row:
+        return False, None
+    inserted = bool(row[1]) if len(row) > 1 else False
+    return inserted, int(row[0])
+
+
+def persist_portfolio_backtest_record(req_obj: Any, out_obj: Any) -> Optional[int]:
+    audit = getattr(out_obj, "audit", None)
+    equity_curve = getattr(out_obj, "equity_curve", None)
+
+    row = db.exec1(
         """
-        INSERT INTO portfolio_backtest_run
-          (from_date, to_date, lookback, rebalance_every, trading_cost_bps, slippage_bps,
-           max_weight, min_trade_delta, max_turnover_per_rebalance, allow_shorts,
-           score_mode, symbols, result, audit, version_sha)
+        INSERT INTO portfolio_backtests (
+            symbols, from_date, to_date, lookback, rebalance_every, trading_cost_bps,
+            slippage_bps, max_weight, min_trade_delta, max_turnover_per_rebalance,
+            allow_shorts, total_return, annual_return, sharpe, max_drawdown, volatility,
+            turnover, audit, equity_curve
+        )
         VALUES
-          (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s)
+        (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        RETURNING id
         """,
         (
+            req_obj.symbols,
             req_obj.from_date,
             req_obj.to_date,
             int(req_obj.lookback),
@@ -239,28 +291,17 @@ def db_insert_portfolio_backtest(req_obj: Any, out_obj: Any) -> None:
             float(req_obj.min_trade_delta),
             float(req_obj.max_turnover_per_rebalance),
             bool(req_obj.allow_shorts),
-            _score_mode(),
-            json.dumps(req_obj.symbols),
-            json.dumps(payload),
-            json.dumps(audit) if audit is not None else None,
-            _git_sha(),
+            float(out_obj.total_return),
+            float(out_obj.annual_return),
+            float(out_obj.sharpe),
+            float(out_obj.max_drawdown),
+            float(out_obj.volatility),
+            float(out_obj.turnover),
+            audit,
+            equity_curve,
         ),
     )
-
-
-def db_insert_calibration_snapshot(symbol: str, payload: Dict[str, Any]) -> None:
-    _db_exec_safe(
-        """
-        INSERT INTO calibration_snapshot (symbol, payload, source, version_sha)
-        VALUES (%s, %s::jsonb, %s, %s)
-        """,
-        (
-            (symbol or "").strip().upper(),
-            json.dumps(payload),
-            "api_calibrate",
-            _git_sha(),
-        ),
-    )
+    return int(row[0]) if row else None
 
 
 # =============================================================================
@@ -380,6 +421,23 @@ class SignalsRequest(BaseModel):
     symbols: List[str]
     as_of: str
     lookback: int = 252
+
+
+class SaveSignalRequest(BaseModel):
+    symbol: str
+    as_of: str
+    lookback: int = 252
+
+
+class SaveSignalsRequest(BaseModel):
+    symbols: List[str]
+    as_of: str
+    lookback: int = 252
+
+
+class DbUniverseUpsertRequest(BaseModel):
+    symbols: List[str]
+    source: Optional[str] = None
 
 
 class WalkForwardRequest(BaseModel):
@@ -1617,8 +1675,13 @@ app = FastAPI(title=APP_NAME, version="1.0.0")
 
 @app.on_event("startup")
 def _startup() -> None:
-    # DB pool init (safe)
-    _db_init_pool()
+    if db.db_enabled():
+        try:
+            db.ensure_schema()
+        except Exception as e:
+            if DB_REQUIRED:
+                raise
+            print(f"[startup] ensure_schema failed: {e}")
 
 
 @app.get("/")
@@ -1627,9 +1690,16 @@ def root() -> Dict[str, Any]:
         "name": APP_NAME,
         "status": "ok",
         "db_enabled": bool(DB_ENABLED),
-        "db_pool_ready": bool(_db_pool is not None),
+        "db_pool_ready": _db_pool_ready(),
         "endpoints": [
             "/health",
+            "/db/health",
+            "/db/save_signal",
+            "/db/save_signals",
+            "/db/save_portfolio_backtest",
+            "/db/universe/load_default",
+            "/db/universe/upsert",
+            "/db/universe",
             "/version",
             "/signal",
             "/signals",
@@ -1653,22 +1723,190 @@ def health() -> Dict[str, Any]:
 
 @app.get("/db/health")
 def db_health() -> Dict[str, Any]:
-    if not _env("FTIP_DB_ENABLED"):
+    if not db.db_enabled():
         return {"status": "disabled", "db_enabled": False}
 
-    db_url = _env("DATABASE_URL")
-    if not db_url:
-        raise HTTPException(status_code=500, detail="DATABASE_URL is not set")
-
     try:
-        import psycopg
-        with psycopg.connect(db_url, connect_timeout=5) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1;")
-                one = cur.fetchone()
-        return {"status": "ok", "db_enabled": True, "select_1": one[0]}
+        row = db.fetch1("SELECT 1")
+        return {"status": "ok", "db_enabled": True, "select_1": row[0] if row else None}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"db_health failed: {type(e).__name__}: {e}")
+
+
+@app.post("/db/save_signal")
+def db_save_signal(req: SaveSignalRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        sig = compute_signal_for_symbol(req.symbol, req.as_of, req.lookback)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"compute_signal failed: {type(e).__name__}: {e}")
+
+    try:
+        inserted, row_id = persist_signal_record(sig)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"save_signal failed: {type(e).__name__}: {e}")
+
+    return {
+        "status": "ok",
+        "inserted": bool(inserted),
+        "id": row_id,
+        "key": {
+            "symbol": sig.symbol,
+            "as_of": sig.as_of,
+            "lookback": sig.lookback,
+            "score_mode": sig.score_mode,
+        },
+    }
+
+
+@app.post("/db/save_signals")
+def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    results: Dict[str, Any] = {}
+    errors: Dict[str, Any] = {}
+    inserted_count = 0
+    updated_count = 0
+
+    for sym in req.symbols:
+        s = (sym or "").strip().upper()
+        if not s:
+            continue
+        try:
+            sig = compute_signal_for_symbol(s, req.as_of, req.lookback)
+        except HTTPException as e:
+            errors[s] = {"status_code": e.status_code, "detail": e.detail}
+            continue
+        except Exception as e:
+            errors[s] = {"status_code": 500, "detail": str(e)}
+            continue
+
+        try:
+            inserted, row_id = persist_signal_record(sig)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"save_signals failed on {s}: {type(e).__name__}: {e}")
+
+        results[s] = {
+            "id": row_id,
+            "inserted": bool(inserted),
+            "score_mode": sig.score_mode,
+            "as_of": sig.as_of,
+            "lookback": sig.lookback,
+        }
+        if inserted:
+            inserted_count += 1
+        else:
+            updated_count += 1
+
+    return {
+        "status": "ok",
+        "as_of": req.as_of,
+        "lookback": req.lookback,
+        "count_ok": len(results),
+        "count_error": len(errors),
+        "inserted": inserted_count,
+        "updated": updated_count,
+        "results": results,
+        "errors": errors,
+    }
+
+
+@app.post("/db/save_portfolio_backtest")
+def db_save_portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        out = backtest_portfolio(req)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"backtest_portfolio failed: {type(e).__name__}: {e}")
+
+    try:
+        row_id = persist_portfolio_backtest_record(req, out)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"save_portfolio_backtest failed: {type(e).__name__}: {e}")
+
+    return {"status": "ok", "id": row_id, "perf": out.model_dump(exclude_none=True)}
+
+
+DEFAULT_PROSPERITY_UNIVERSE = [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "TSLA",
+    "GOOGL",
+    "META",
+    "BRK.B",
+    "JPM",
+    "XOM",
+]
+
+
+@app.post("/db/universe/load_default")
+def db_universe_load_default() -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        pool = db.get_pool()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB pool not available: {e}")
+
+    try:
+        with pool.connection(timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+                params = [(sym, True, "default_top1000_seed") for sym in DEFAULT_PROSPERITY_UNIVERSE]
+                cur.executemany(
+                    """
+                    INSERT INTO prosperity_universe(symbol, active, source)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (symbol)
+                    DO UPDATE SET active=EXCLUDED.active, source=EXCLUDED.source
+                    """,
+                    params,
+                )
+                conn.commit()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe_load_default failed: {type(e).__name__}: {e}")
+
+    return {"status": "ok", "upserted": len(DEFAULT_PROSPERITY_UNIVERSE)}
+
+
+@app.post("/db/universe/upsert")
+def db_universe_upsert(req: DbUniverseUpsertRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        received, upserted = db.upsert_universe(req.symbols, req.source)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
+
+    return {"status": "ok", "received": received, "upserted": upserted}
+
+
+@app.get("/db/universe")
+def db_universe(active_only: bool = Query(True, description="Return only active symbols")) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        symbols = db.get_universe(active_only=active_only)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe query failed: {type(e).__name__}: {e}")
+
+    return {"count": len(symbols), "symbols": symbols}
 
 
 
@@ -1890,38 +2128,39 @@ def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
     if not syms:
         raise HTTPException(status_code=400, detail="symbols list is empty.")
 
-    with db_conn() as conn:
-        if conn is None:
-            raise HTTPException(status_code=500, detail="DB pool not available (psycopg missing or DATABASE_URL invalid).")
+    try:
+        pool = db.get_pool()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB pool not available: {e}")
 
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                INSERT INTO universe_snapshot (as_of_date, name, source)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (as_of_date, name)
-                DO UPDATE SET source=EXCLUDED.source
-                RETURNING id
-                """,
-                (req.as_of_date, req.name, req.source),
-            )
-            snapshot_id = cur.fetchone()[0]
+    try:
+        with pool.connection(timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+                cur.execute(
+                    """
+                    INSERT INTO universe_snapshot (as_of_date, name, source)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (as_of_date, name)
+                    DO UPDATE SET source=EXCLUDED.source
+                    RETURNING id
+                    """,
+                    (req.as_of_date, req.name, req.source),
+                )
+                snapshot_id = cur.fetchone()[0]
 
-            cur.execute("DELETE FROM universe_member WHERE snapshot_id=%s", (snapshot_id,))
+                cur.execute("DELETE FROM universe_member WHERE snapshot_id=%s", (snapshot_id,))
 
-            rows = [(snapshot_id, s, i) for i, s in enumerate(syms, start=1)]
-            cur.executemany(
-                "INSERT INTO universe_member (snapshot_id, symbol, rank) VALUES (%s,%s,%s)",
-                rows,
-            )
-            conn.commit()
-        except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
+                rows = [(snapshot_id, s, i) for i, s in enumerate(syms, start=1)]
+                cur.executemany(
+                    "INSERT INTO universe_member (snapshot_id, symbol, rank) VALUES (%s,%s,%s)",
+                    rows,
+                )
+                conn.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
 
     return {"status": "ok", "as_of_date": req.as_of_date, "name": req.name, "count": len(syms)}
 
@@ -1935,35 +2174,38 @@ def universe_top(
     if not DB_ENABLED:
         raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
 
-    with db_conn() as conn:
-        if conn is None:
-            raise HTTPException(status_code=500, detail="DB pool not available (psycopg missing or DATABASE_URL invalid).")
+    try:
+        pool = db.get_pool()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB pool not available: {e}")
 
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT id FROM universe_snapshot WHERE as_of_date=%s AND name=%s",
-                (as_of_date, name),
-            )
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(status_code=404, detail="Universe snapshot not found.")
+    try:
+        with pool.connection(timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+                cur.execute(
+                    "SELECT id FROM universe_snapshot WHERE as_of_date=%s AND name=%s",
+                    (as_of_date, name),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(status_code=404, detail="Universe snapshot not found.")
 
-            sid = row[0]
-            cur.execute(
-                """
-                SELECT symbol, rank
-                FROM universe_member
-                WHERE snapshot_id=%s
-                ORDER BY rank ASC
-                LIMIT %s
-                """,
-                (sid, int(limit)),
-            )
-            items = [{"symbol": r[0], "rank": int(r[1])} for r in cur.fetchall()]
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"universe_top failed: {type(e).__name__}: {e}")
+                sid = row[0]
+                cur.execute(
+                    """
+                    SELECT symbol, rank
+                    FROM universe_member
+                    WHERE snapshot_id=%s
+                    ORDER BY rank ASC
+                    LIMIT %s
+                    """,
+                    (sid, int(limit)),
+                )
+                items = [{"symbol": r[0], "rank": int(r[1])} for r in cur.fetchall()]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe_top failed: {type(e).__name__}: {e}")
 
     return {"as_of_date": as_of_date, "name": name, "count": len(items), "items": items}
