@@ -24,6 +24,16 @@ curl -X POST http://localhost:8000/db/save_signal \
 
 Each call should return HTTP 200 with JSON payloads when the database is reachable.
 
+## Copy/paste safe zsh commands
+
+When using zsh, enable `setopt interactivecomments` before copy/pasting any of the sample commands so inline `#` comments are ignored correctly:
+
+```bash
+setopt interactivecomments
+```
+
+If you see `command not found: #`, re-run the command above and try again.
+
 ## Prosperity DB v1
 
 Prosperity DB adds a durable research warehouse (Postgres) for caching market data, features, and signals. Enable it with:
@@ -44,6 +54,12 @@ curl -X POST http://localhost:8000/prosperity/snapshot/run \
   -H "Content-Type: application/json" \
   -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
 curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
+```
+
+To run a local end-to-end smoke check that exercises the prosperity endpoints:
+
+```bash
+bash tools/smoke_prosperity.sh
 ```
 
 ## Assistant / Narrator (Phase 5)

@@ -5,14 +5,22 @@ import time
 import math
 import json
 import datetime as dt
+import json
+import logging
+import os
+import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
 from api import db
+from api.db import DBError
 from api.assistant.routes import router as assistant_router
 from api.migrations import runner as migrations_runner
 from api.prosperity.routes import router as prosperity_router
@@ -22,6 +30,9 @@ from api.prosperity.routes import router as prosperity_router
 # =============================================================================
 
 APP_NAME = "FTIP System API"
+logger = logging.getLogger("ftip.api")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -1752,6 +1763,93 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 # =============================================================================
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
+
+
+def _trace_id_from_request(request: Request) -> str:
+    trace_id = getattr(request.state, "trace_id", None)
+    if not trace_id:
+        trace_id = uuid.uuid4().hex
+        request.state.trace_id = trace_id
+    return trace_id
+
+
+@app.middleware("http")
+async def add_trace_id(request: Request, call_next):
+    trace_id = request.headers.get("x-trace-id") or uuid.uuid4().hex
+    request.state.trace_id = trace_id
+    start = time.perf_counter()
+    logger.info(
+        "request.start",
+        extra={"path": request.url.path, "method": request.method, "trace_id": trace_id},
+    )
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        logger.exception("request.unhandled", extra={"path": request.url.path, "trace_id": trace_id})
+        raise
+
+    duration_ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Trace-Id"] = trace_id
+    logger.info(
+        "request.end",
+        extra={
+            "path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": round(duration_ms, 2),
+            "trace_id": trace_id,
+        },
+    )
+    return response
+
+
+@app.exception_handler(DBError)
+async def db_exception_handler(request: Request, exc: DBError):
+    trace_id = _trace_id_from_request(request)
+    logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": {"type": "database_error", "message": str(exc), "trace_id": trace_id}, "trace_id": trace_id},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    trace_id = _trace_id_from_request(request)
+    payload: Dict[str, Any] = {
+        "error": {"type": "http_error", "message": str(exc.detail), "trace_id": trace_id},
+        "detail": exc.detail,
+        "trace_id": trace_id,
+    }
+    return JSONResponse(status_code=exc.status_code, content=payload)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    trace_id = _trace_id_from_request(request)
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "type": "validation_error",
+                "message": exc.errors(),
+                "trace_id": trace_id,
+            },
+            "trace_id": trace_id,
+        },
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    trace_id = _trace_id_from_request(request)
+    logger.exception("unhandled.error", extra={"trace_id": trace_id})
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"type": exc.__class__.__name__, "message": str(exc), "trace_id": trace_id}, "trace_id": trace_id},
+    )
+
+
 app.include_router(assistant_router, prefix="/assistant")
 app.include_router(prosperity_router, prefix="/prosperity")
 
@@ -1765,7 +1863,7 @@ def _startup() -> None:
         except Exception as e:
             if DB_REQUIRED:
                 raise
-            print(f"[startup] ensure_schema failed: {e}")
+            logger.warning("[startup] ensure_schema failed", extra={"error": str(e)})
 
 
 @app.get("/")

@@ -23,7 +23,7 @@ class BarsIngestBulkRequest(BaseModel):
     from_date: date
     to_date: date
     force_refresh: bool = False
-    concurrency: int = 3
+    concurrency: int = Field(3, ge=1)
 
 
 class BarsResponse(BaseModel):
@@ -44,12 +44,12 @@ class SignalsComputeRequest(FeaturesComputeRequest):
 
 
 class SnapshotRunRequest(BaseModel):
-    symbols: Optional[List[str]] = None
+    symbols: Optional[List[str]] = Field(default=None, min_length=1)
     from_date: date
     to_date: date
     as_of_date: date
-    lookback: int = 252
-    concurrency: int = 3
+    lookback: int = Field(252, ge=5, le=5000)
+    concurrency: int = Field(3, ge=1)
     force_refresh: bool = False
 
 

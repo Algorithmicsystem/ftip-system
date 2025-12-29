@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterable, List, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Sequence
 
 import psycopg
+from psycopg import OperationalError
 from psycopg_pool import ConnectionPool
 
 from api import config
@@ -13,6 +15,14 @@ from api import config
 logger = logging.getLogger(__name__)
 
 _POOL: Optional[ConnectionPool] = None
+
+
+class DBError(Exception):
+    """Raised when a database operation fails in a controlled, user-facing way."""
+
+    def __init__(self, message: str, *, status_code: int = 503):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 # ---------------------------------------------------------------------------
@@ -68,9 +78,23 @@ def get_pool() -> ConnectionPool:
 @contextmanager
 def with_connection():
     pool = get_pool()
-    with pool.connection(timeout=10) as conn:
-        with conn.cursor() as cur:
-            yield conn, cur
+    max_retries = config.env_int("FTIP_DB_MAX_RETRIES", 2)
+    attempt = 0
+    backoff = 0.25
+
+    while True:
+        try:
+            with pool.connection(timeout=10) as conn:
+                with conn.cursor() as cur:
+                    set_statement_timeout(cur, config.env_int("FTIP_DB_STATEMENT_TIMEOUT_MS", 10_000))
+                    yield conn, cur
+                    return
+        except OperationalError as exc:  # pragma: no cover - exercised in integration
+            attempt += 1
+            if attempt > max_retries:
+                raise DBError(f"database unavailable: {exc}") from exc
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 2.0)
 
 
 def _clamp_timeout_ms(timeout_ms: int, *, default: int = 5000) -> int:
@@ -93,21 +117,36 @@ def set_statement_timeout(cur: Any, timeout_ms: int, *, local: bool = True) -> i
 # ---------------------------------------------------------------------------
 
 def safe_execute(sql: str, params: Sequence[Any] | None = None) -> None:
-    with with_connection() as (conn, cur):
-        cur.execute(sql, params or ())
-        conn.commit()
+    try:
+        with with_connection() as (conn, cur):
+            cur.execute(sql, params or ())
+            conn.commit()
+    except DBError:
+        raise
+    except psycopg.Error as exc:
+        raise DBError(f"database error during execute: {exc}") from exc
 
 
 def safe_fetchall(sql: str, params: Sequence[Any] | None = None) -> List[Sequence[Any]]:
-    with with_connection() as (_conn, cur):
-        cur.execute(sql, params or ())
-        return list(cur.fetchall())
+    try:
+        with with_connection() as (_conn, cur):
+            cur.execute(sql, params or ())
+            return list(cur.fetchall())
+    except DBError:
+        raise
+    except psycopg.Error as exc:
+        raise DBError(f"database error during fetchall: {exc}") from exc
 
 
 def safe_fetchone(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
-    with with_connection() as (_conn, cur):
-        cur.execute(sql, params or ())
-        return cur.fetchone()
+    try:
+        with with_connection() as (_conn, cur):
+            cur.execute(sql, params or ())
+            return cur.fetchone()
+    except DBError:
+        raise
+    except psycopg.Error as exc:
+        raise DBError(f"database error during fetchone: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -115,15 +154,20 @@ def safe_fetchone(sql: str, params: Sequence[Any] | None = None) -> Optional[Seq
 # ---------------------------------------------------------------------------
 
 def exec1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
-    with with_connection() as (conn, cur):
-        cur.execute(sql, params or ())
-        row = None
-        try:
-            row = cur.fetchone()
-        except psycopg.ProgrammingError:
+    try:
+        with with_connection() as (conn, cur):
+            cur.execute(sql, params or ())
             row = None
-        conn.commit()
-        return row
+            try:
+                row = cur.fetchone()
+            except psycopg.ProgrammingError:
+                row = None
+            conn.commit()
+            return row
+    except DBError:
+        raise
+    except psycopg.Error as exc:
+        raise DBError(f"database error during exec1: {exc}") from exc
 
 
 def fetch1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
@@ -306,6 +350,135 @@ def ensure_schema() -> None:
         """,
         """CREATE INDEX IF NOT EXISTS idx_signals_symbol_asof ON signals(symbol, as_of)""",
         """CREATE INDEX IF NOT EXISTS idx_portfolio_backtests_range ON portfolio_backtests(from_date, to_date)""",
+        # Prosperity warehouse
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_universe (
+            symbol TEXT PRIMARY KEY,
+            name TEXT,
+            exchange TEXT,
+            asset_type TEXT,
+            active BOOLEAN DEFAULT TRUE,
+            metadata JSONB,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_daily_bars (
+            symbol TEXT REFERENCES prosperity_universe(symbol),
+            date DATE NOT NULL,
+            open DOUBLE PRECISION,
+            high DOUBLE PRECISION,
+            low DOUBLE PRECISION,
+            close DOUBLE PRECISION NOT NULL,
+            adj_close DOUBLE PRECISION,
+            volume DOUBLE PRECISION,
+            source TEXT NOT NULL,
+            raw JSONB,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (symbol, date)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_features_daily (
+            symbol TEXT NOT NULL,
+            as_of_date DATE NOT NULL,
+            lookback INT NOT NULL,
+            mom_5 DOUBLE PRECISION,
+            mom_21 DOUBLE PRECISION,
+            mom_63 DOUBLE PRECISION,
+            trend_sma20_50 DOUBLE PRECISION,
+            volatility_ann DOUBLE PRECISION,
+            rsi14 DOUBLE PRECISION,
+            volume_z20 DOUBLE PRECISION,
+            last_close DOUBLE PRECISION,
+            regime TEXT,
+            features_hash TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (symbol, as_of_date, lookback)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_signals_daily (
+            symbol TEXT NOT NULL,
+            as_of_date DATE NOT NULL,
+            lookback INT NOT NULL,
+            score_mode TEXT NOT NULL,
+            score DOUBLE PRECISION,
+            base_score DOUBLE PRECISION,
+            stacked_score DOUBLE PRECISION,
+            thresholds JSONB NOT NULL,
+            signal TEXT NOT NULL,
+            confidence DOUBLE PRECISION,
+            regime TEXT,
+            calibration_meta JSONB,
+            notes JSONB,
+            signal_hash TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (symbol, as_of_date, lookback, score_mode)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_backtest_runs (
+            run_id UUID PRIMARY KEY,
+            kind TEXT NOT NULL,
+            request JSONB NOT NULL,
+            response JSONB NOT NULL,
+            started_at TIMESTAMPTZ,
+            finished_at TIMESTAMPTZ,
+            status TEXT NOT NULL,
+            error TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_calibrations (
+            symbol TEXT NOT NULL,
+            created_at_utc TEXT,
+            payload JSONB NOT NULL,
+            optimize_horizon INT,
+            train_range JSONB,
+            calibration_hash TEXT,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (symbol, calibration_hash)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_events (
+            id UUID PRIMARY KEY,
+            event_type TEXT,
+            symbol TEXT,
+            payload JSONB,
+            created_at TIMESTAMPTZ DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_snapshots (
+            id BIGSERIAL PRIMARY KEY,
+            started_at TIMESTAMPTZ DEFAULT now(),
+            finished_at TIMESTAMPTZ,
+            status TEXT NOT NULL DEFAULT 'pending',
+            request JSONB,
+            result JSONB,
+            error TEXT
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_schema_meta (
+            version INT NOT NULL DEFAULT 1,
+            applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            details TEXT,
+            PRIMARY KEY (version)
+        )
+        """,
+        """CREATE INDEX IF NOT EXISTS idx_prosperity_signals_symbol_asof ON prosperity_signals_daily(symbol, as_of_date)""",
+        """CREATE INDEX IF NOT EXISTS idx_prosperity_features_symbol_asof ON prosperity_features_daily(symbol, as_of_date)""",
+        """CREATE INDEX IF NOT EXISTS idx_prosperity_bars_symbol_date ON prosperity_daily_bars(symbol, date)""",
     ]
 
     for stmt in statements:
@@ -326,4 +499,5 @@ __all__ = [
     "exec1",
     "fetch1",
     "fetchall",
+    "DBError",
 ]
