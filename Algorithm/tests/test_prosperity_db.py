@@ -1,6 +1,8 @@
 import datetime as dt
 from types import SimpleNamespace
 
+from typing import Any
+
 import api.db as db
 from api.prosperity import ingest
 
@@ -14,7 +16,6 @@ class DummyCandle:
 
 def test_apply_migrations_safe_when_disabled(monkeypatch):
     monkeypatch.setattr(db.config, "db_enabled", lambda: False)
-    monkeypatch.setattr(db.config, "migrations_auto", lambda: False)
     # Should no-op without raising
     db.apply_migrations()
 
@@ -27,10 +28,11 @@ def test_hash_helper_stable():
 
 
 def test_compute_features_uses_as_of(monkeypatch):
-    calls = {}
+    calls: dict[str, Any] = {}
+    recorded_sql: list[str] = []
 
     def fake_fetch(sql, params):
-        # return three rows; as_of_date should clamp to the last entry
+        # return three rows; as_of should clamp to the last entry
         return [
             (dt.date(2024, 1, 1), 1.0, 10.0),
             (dt.date(2024, 1, 2), 2.0, 11.0),
@@ -48,11 +50,16 @@ def test_compute_features_uses_as_of(monkeypatch):
 
     monkeypatch.setattr("api.main.compute_features", fake_compute)
     monkeypatch.setattr("api.main.detect_regime", fake_regime)
-    monkeypatch.setattr(db, "safe_execute", lambda *args, **kwargs: None)
+
+    def _record_sql(sql: str, params=None):
+        recorded_sql.append(sql)
+
+    monkeypatch.setattr(db, "safe_execute", _record_sql)
 
     res = ingest.compute_and_store_features("AAPL", dt.date(2024, 1, 3), 2)
     assert res["stored"] is True
     assert calls["candles"][-1].timestamp == "2024-01-03"
+    assert any("as_of" in stmt for stmt in recorded_sql)
 
 
 def test_ingest_identifies_missing(monkeypatch):

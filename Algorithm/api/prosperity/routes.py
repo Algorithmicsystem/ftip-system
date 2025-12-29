@@ -42,6 +42,22 @@ async def health() -> HealthResponse:
     )
 
 
+@router.post("/bootstrap")
+async def bootstrap(request: Request):
+    token = config.env("PROSPERITY_ADMIN_TOKEN")
+    if token and request.headers.get("x-admin-token") != token:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    if not db.db_enabled():
+        return {"status": "ok", "db_enabled": False, "migrated": False, "versions": []}
+
+    from api import migrations
+
+    versions = migrations.ensure_schema()
+    db.ensure_schema()
+    return {"status": "ok", "db_enabled": True, "migrated": bool(versions), "versions": versions}
+
+
 @router.post("/universe/upsert")
 async def universe_upsert(req: UniverseUpsertRequest):
     _require_db_enabled(write=True)
@@ -175,7 +191,10 @@ async def snapshot_run(req: SnapshotRunRequest, request: Request):
 @router.get("/latest/signal")
 async def latest_signal(symbol: str, lookback: int = 252):
     _require_db_enabled(read=True)
-    res = query.latest_signal(symbol.upper(), lookback)
+    try:
+        res = query.latest_signal(symbol.upper(), lookback)
+    except db.DBError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if not res:
         raise HTTPException(status_code=404, detail="not found")
     return res
@@ -184,7 +203,10 @@ async def latest_signal(symbol: str, lookback: int = 252):
 @router.get("/latest/features")
 async def latest_features(symbol: str, lookback: int = 252):
     _require_db_enabled(read=True)
-    res = query.latest_features(symbol.upper(), lookback)
+    try:
+        res = query.latest_features(symbol.upper(), lookback)
+    except db.DBError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if not res:
         raise HTTPException(status_code=404, detail="not found")
     return res

@@ -19,10 +19,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
-from api import db
+from api import db, migrations
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
-from api.migrations import runner as migrations_runner
 from api.prosperity.routes import router as prosperity_router
 
 # =============================================================================
@@ -1858,8 +1857,10 @@ app.include_router(prosperity_router, prefix="/prosperity")
 def _startup() -> None:
     if db.db_enabled():
         try:
+            applied = migrations.ensure_schema()
             db.ensure_schema()
-            migrations_runner.apply_migrations()
+            if applied:
+                logger.info("[startup] applied migrations", extra={"versions": applied})
         except Exception as e:
             if DB_REQUIRED:
                 raise
