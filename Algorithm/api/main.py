@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
 from api import db
+from api.assistant.routes import router as assistant_router
+from api.migrations import runner as migrations_runner
 
 # =============================================================================
 # App + environment helpers
@@ -1711,6 +1713,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 # =============================================================================
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
+app.include_router(assistant_router, prefix="/assistant")
 
 
 @app.on_event("startup")
@@ -1718,6 +1721,7 @@ def _startup() -> None:
     if db.db_enabled():
         try:
             db.ensure_schema()
+            migrations_runner.apply_migrations()
         except Exception as e:
             if DB_REQUIRED:
                 raise
@@ -1751,6 +1755,11 @@ def root() -> Dict[str, Any]:
             "/universe/upsert",
             "/universe/top",
             "/docs",
+            "/assistant/health",
+            "/assistant/chat",
+            "/assistant/explain/signal",
+            "/assistant/explain/backtest",
+            "/assistant/title_session",
         ],
     }
 

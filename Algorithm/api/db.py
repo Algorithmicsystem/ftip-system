@@ -1,25 +1,21 @@
-import os
 from contextlib import contextmanager
 from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
+from api import config
+
 
 _POOL: Optional[ConnectionPool] = None
 
 
-def _env(name: str, default: Optional[str] = None) -> Optional[str]:
-    v = os.getenv(name)
-    return v if v not in (None, "") else default
-
-
 def db_enabled() -> bool:
-    return (_env("FTIP_DB_ENABLED", "0") or "0") == "1"
+    return config.db_enabled()
 
 
 def _db_url() -> str:
-    url = _env("DATABASE_URL")
+    url = config.env("DATABASE_URL")
     if not url:
         raise RuntimeError("DATABASE_URL is required when FTIP_DB_ENABLED=1")
     return url
@@ -34,7 +30,7 @@ def get_pool() -> ConnectionPool:
         raise RuntimeError("Database is disabled (set FTIP_DB_ENABLED=1 to enable)")
 
     try:
-        max_size = int(_env("FTIP_DB_POOL_MAX", "5") or "5")
+        max_size = int(config.env("FTIP_DB_POOL_MAX", "5") or "5")
     except Exception:
         max_size = 5
 
