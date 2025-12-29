@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
+from psycopg.types.json import Json
 
 from api import db
 
@@ -207,9 +208,9 @@ SIGNAL_UPSERT_SQL = """
 INSERT INTO signals (
   symbol, as_of, lookback, regime, score, signal, confidence, thresholds,
   features, notes, score_mode, base_score, stacked_score, stacked_meta,
-  calibration_loaded, calibration_meta
+  calibration_loaded, calibration_meta, raw_signal_payload
 )
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 ON CONFLICT (symbol, as_of, lookback, score_mode)
 DO UPDATE SET
   regime=EXCLUDED.regime,
@@ -224,7 +225,8 @@ DO UPDATE SET
   stacked_score=EXCLUDED.stacked_score,
   stacked_meta=EXCLUDED.stacked_meta,
   calibration_loaded=EXCLUDED.calibration_loaded,
-  calibration_meta=EXCLUDED.calibration_meta
+  calibration_meta=EXCLUDED.calibration_meta,
+  raw_signal_payload=EXCLUDED.raw_signal_payload
 RETURNING id, (xmax = 0) AS inserted
 """
 
@@ -235,6 +237,8 @@ def _signal_upsert_params(sig: SignalResponse) -> Tuple[Any, ...]:
     except Exception:
         as_of_date = sig.as_of
 
+    raw_payload = sig.model_dump(exclude_none=False)
+
     return (
         (sig.symbol or "").strip().upper(),
         as_of_date,
@@ -243,15 +247,16 @@ def _signal_upsert_params(sig: SignalResponse) -> Tuple[Any, ...]:
         float(sig.score),
         sig.signal,
         float(sig.confidence),
-        sig.thresholds or {},
-        sig.features or {},
-        sig.notes or [],
+        Json(sig.thresholds or {}),
+        Json(sig.features or {}),
+        Json(sig.notes or []),
         sig.score_mode,
         sig.base_score,
         sig.stacked_score,
-        sig.stacked_meta,
+        Json(sig.stacked_meta) if sig.stacked_meta is not None else None,
         sig.calibration_loaded,
-        sig.calibration_meta,
+        Json(sig.calibration_meta) if sig.calibration_meta is not None else None,
+        Json(raw_payload),
     )
 
 
@@ -280,7 +285,7 @@ def persist_portfolio_backtest_record(req_obj: Any, out_obj: Any) -> Optional[in
         RETURNING id
         """,
         (
-            req_obj.symbols,
+            Json(req_obj.symbols),
             req_obj.from_date,
             req_obj.to_date,
             int(req_obj.lookback),
@@ -297,8 +302,8 @@ def persist_portfolio_backtest_record(req_obj: Any, out_obj: Any) -> Optional[in
             float(out_obj.max_drawdown),
             float(out_obj.volatility),
             float(out_obj.turnover),
-            audit,
-            equity_curve,
+            Json(audit) if audit is not None else None,
+            Json(equity_curve) if equity_curve is not None else None,
         ),
     )
     return int(row[0]) if row else None
@@ -1874,12 +1879,14 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
 
     saved_count = 0
     error_count = 0
+    skipped_count = 0
     errors: Dict[str, str] = {}
     sleep_ms = max(0, _env_int("FTIP_SNAPSHOT_SLEEP_MS", 0))
 
     for sym in symbols:
         s = (sym or "").strip().upper()
         if not s:
+            skipped_count += 1
             continue
 
         try:
@@ -1909,6 +1916,7 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
         "lookback": req.lookback,
         "universe_count": len(symbols),
         "saved_count": saved_count,
+        "skipped_count": skipped_count,
         "error_count": error_count,
         "errors": errors,
     }

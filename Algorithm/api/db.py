@@ -131,10 +131,49 @@ def ensure_schema() -> None:
             stacked_meta JSONB,
             calibration_loaded BOOLEAN,
             calibration_meta JSONB,
+            raw_signal_payload JSONB,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             UNIQUE(symbol, as_of, lookback, score_mode)
         )
         """,
+        # Ensure JSONB columns remain JSONB even if pre-existing
+        """ALTER TABLE IF EXISTS signals ALTER COLUMN thresholds TYPE JSONB USING thresholds::jsonb""",
+        """ALTER TABLE IF EXISTS signals ALTER COLUMN features TYPE JSONB USING features::jsonb""",
+        """ALTER TABLE IF EXISTS signals ALTER COLUMN notes TYPE JSONB USING notes::jsonb""",
+        """ALTER TABLE IF EXISTS signals ALTER COLUMN calibration_meta TYPE JSONB USING calibration_meta::jsonb""",
+        """ALTER TABLE IF EXISTS signals ADD COLUMN IF NOT EXISTS raw_signal_payload JSONB""",
+        """
+        CREATE TABLE IF NOT EXISTS signal_run (
+            id BIGSERIAL PRIMARY KEY,
+            as_of_date DATE NOT NULL,
+            lookback INT NOT NULL,
+            score_mode TEXT NOT NULL,
+            version_sha TEXT,
+            env JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS signal_observation (
+            run_id BIGINT NOT NULL REFERENCES signal_run(id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL,
+            regime TEXT,
+            signal TEXT,
+            score DOUBLE PRECISION,
+            confidence DOUBLE PRECISION,
+            thresholds JSONB,
+            features JSONB,
+            notes JSONB,
+            calibration_meta JSONB,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            PRIMARY KEY (run_id, symbol)
+        )
+        """,
+        # Ensure JSONB integrity for signal observations
+        """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN thresholds TYPE JSONB USING thresholds::jsonb""",
+        """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN features TYPE JSONB USING features::jsonb""",
+        """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN notes TYPE JSONB USING notes::jsonb""",
+        """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN calibration_meta TYPE JSONB USING calibration_meta::jsonb""",
         """
         CREATE TABLE IF NOT EXISTS portfolio_backtests (
             id BIGSERIAL PRIMARY KEY,
