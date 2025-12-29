@@ -197,9 +197,14 @@ def upsert_universe(symbols: Iterable[str], source: Optional[str] = None) -> Tup
     return received, len(syms)
 
 
-def get_universe(active_only: bool = True) -> List[str]:
+def get_universe(active_only: bool = True, limit: int = 1000) -> List[str]:
     if not db_enabled():
         raise RuntimeError("Database is disabled (set FTIP_DB_ENABLED=1 to enable)")
+
+    try:
+        limit_val = max(1, min(int(limit), 5000))
+    except Exception:
+        limit_val = 1000
 
     pool = get_pool()
     with pool.connection(timeout=10) as conn:
@@ -212,8 +217,9 @@ def get_universe(active_only: bool = True) -> List[str]:
                     FROM prosperity_universe
                     WHERE active = TRUE
                     ORDER BY symbol ASC
-                    LIMIT 1000
-                    """
+                    LIMIT %s
+                    """,
+                    (limit_val,),
                 )
             else:
                 cur.execute(
@@ -221,8 +227,9 @@ def get_universe(active_only: bool = True) -> List[str]:
                     SELECT symbol
                     FROM prosperity_universe
                     ORDER BY symbol ASC
-                    LIMIT 1000
-                    """
+                    LIMIT %s
+                    """,
+                    (limit_val,),
                 )
             rows = cur.fetchall() or []
     return [r[0] for r in rows]
