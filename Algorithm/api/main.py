@@ -1392,6 +1392,9 @@ def _daily_returns_from_closes(dates: List[str], closes: List[float]) -> Dict[st
 def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestResponse:
     # ---- absolute safety: never return None ----
     try:
+        min_symbols = max(1, _env_int("FTIP_PORTFOLIO_MIN_SYMBOLS", 2))
+        skipped_symbols: List[Dict[str, Any]] = []
+
         start_dt = _parse_date(req.from_date)
         warmup_days = max(900, int(req.lookback) * 4)
         buffer_start = (start_dt - dt.timedelta(days=warmup_days)).isoformat()
@@ -1402,9 +1405,32 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             s = (sym or "").strip().upper()
             if not s:
                 continue
-            candles_by_sym[s] = massive_fetch_daily_bars_cached(s, buffer_start, req.to_date)
+            try:
+                bars = massive_fetch_daily_bars_cached(s, buffer_start, req.to_date)
+                if not bars:
+                    raise ValueError("No market data returned")
+                candles_by_sym[s] = bars
+            except HTTPException as e:
+                skipped_symbols.append({
+                    "symbol": s,
+                    "reason": f"HTTP {e.status_code}: {e.detail}",
+                })
+            except Exception as e:
+                skipped_symbols.append({"symbol": s, "reason": f"{type(e).__name__}: {e}"})
+
+        audit_info: Dict[str, Any] = {}
+        if skipped_symbols:
+            audit_info["skipped_symbols"] = skipped_symbols
 
         if not candles_by_sym:
+            raise HTTPException(status_code=502, detail="All symbols failed to fetch market data.")
+
+        if len(candles_by_sym) < min_symbols:
+            note = (
+                f"Only {len(candles_by_sym)} symbols fetched successfully; "
+                f"minimum required is {min_symbols}."
+            )
+            audit_info.setdefault("notes", []).append(note)
             return PortfolioBacktestResponse(
                 total_return=0.0,
                 annual_return=0.0,
@@ -1413,7 +1439,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 volatility=0.0,
                 turnover=0.0,
                 equity_curve={} if req.include_equity_curve else None,
-                audit=None,
+                audit=audit_info or None,
             )
 
         # Common calendar intersection within requested range
@@ -1432,7 +1458,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 volatility=0.0,
                 turnover=0.0,
                 equity_curve={} if req.include_equity_curve else None,
-                audit=None,
+                audit=audit_info or None,
             )
 
         common_dates = sorted(set.intersection(*date_sets))
@@ -1445,7 +1471,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 volatility=0.0,
                 turnover=0.0,
                 equity_curve={} if req.include_equity_curve else None,
-                audit=None,
+                audit=audit_info or None,
             )
 
         common_set = set(common_dates)
@@ -1648,13 +1674,15 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         sharpe = (annual_return / volatility) if volatility > 0 else 0.0
         max_dd = _max_drawdown(list(equity_curve.values()))
 
-        audit_payload = None
+        audit_payload: Dict[str, Any] = dict(audit_info)
         if req.audit_no_lookahead:
-            audit_payload = {
-                "violations_count": int(audit_violations),
-                "rows_sample": audit_rows,
-                "note": "Each row shows the last candle timestamp <= rebalance_date per symbol.",
-            }
+            audit_payload.update(
+                {
+                    "violations_count": int(audit_violations),
+                    "rows_sample": audit_rows,
+                    "note": "Each row shows the last candle timestamp <= rebalance_date per symbol.",
+                }
+            )
 
         return PortfolioBacktestResponse(
             total_return=float(total_return),
@@ -1664,7 +1692,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             volatility=float(volatility),
             turnover=float(total_turnover),
             equity_curve=equity_curve if req.include_equity_curve else None,
-            audit=audit_payload,
+            audit=audit_payload or None,
         )
 
     except HTTPException:
