@@ -3,6 +3,7 @@ import os
 import uuid
 
 import pytest
+from psycopg.types.json import Json
 
 from api import db
 
@@ -39,15 +40,15 @@ def test_ensure_schema_and_insert_signal() -> None:
             1.23,
             "BUY",
             0.9,
-            {"hi": 1},
-            {"feature": 2.0},
-            ["note"],
+            Json({"hi": 1}),
+            Json({"feature": 2.0}),
+            Json(["note"]),
             "stacked",
             0.5,
             0.5,
-            {"stack": True},
+            Json({"stack": True}),
             True,
-            {"cal": "yes"},
+            Json({"cal": "yes"}),
         ),
     )
 
