@@ -170,13 +170,15 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
         """,
         (sym, as_of_date),
     )
-    if len(rows) < lookback:
-        raise HTTPException(status_code=400, detail="insufficient bars for lookback")
     from api.main import Candle, compute_signal_for_symbol_from_candles, _score_mode  # type: ignore
 
-    candles = [Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None) for r in rows[-lookback:]]
-    signal_payload = compute_signal_for_symbol_from_candles(sym, candles, lookback)
-    signal_hash = _hash_dict(signal_payload)
+    candles_all = [
+        Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None)
+        for r in rows
+    ]
+    signal_payload = compute_signal_for_symbol_from_candles(sym, as_of_date.isoformat(), lookback, candles_all)
+    signal_dict = signal_payload.model_dump()
+    signal_hash = _hash_dict(signal_dict)
     score_mode = _score_mode()
 
     db.safe_execute(
@@ -199,25 +201,25 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
             sym,
             as_of_date,
             lookback,
-            signal_payload.get("score"),
-            signal_payload.get("signal"),
-            json.dumps(signal_payload.get("thresholds")),
-            signal_payload.get("regime"),
-            signal_payload.get("confidence"),
-            json.dumps(signal_payload.get("notes")),
-            json.dumps(signal_payload.get("features")),
+            signal_dict.get("score"),
+            signal_dict.get("signal"),
+            json.dumps(signal_dict.get("thresholds")),
+            signal_dict.get("regime"),
+            signal_dict.get("confidence"),
+            json.dumps(signal_dict.get("notes")),
+            json.dumps(signal_dict.get("features")),
             json.dumps(
                 {
                     "score_mode": score_mode,
-                    "base_score": signal_payload.get("base_score"),
-                    "stacked_score": signal_payload.get("stacked_score"),
-                    "calibration_meta": signal_payload.get("calibration_meta"),
+                    "base_score": signal_dict.get("base_score"),
+                    "stacked_score": signal_dict.get("stacked_score"),
+                    "calibration_meta": signal_dict.get("calibration_meta"),
                     "signal_hash": signal_hash,
                 }
             ),
         ),
     )
-    return signal_payload
+    return signal_dict
 
 
 def ingest_bars_bulk(symbols: List[str], from_date: dt.date, to_date: dt.date, *, concurrency: int = 3, force_refresh: bool = False) -> Dict[str, Any]:

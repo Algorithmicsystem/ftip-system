@@ -52,7 +52,7 @@ Example calls:
 curl http://localhost:8000/prosperity/health
 curl -X POST http://localhost:8000/prosperity/snapshot/run \
   -H "Content-Type: application/json" \
-  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
+  -d '{"symbols":["AAPL","MSFT","GOOGL","AMZN","NVDA"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
 curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
 ```
 
