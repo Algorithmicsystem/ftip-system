@@ -36,10 +36,10 @@ def fetch_bars(symbol: str, from_date: dt.date, to_date: dt.date) -> List[Dict[s
 def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
-        SELECT symbol, as_of_date, lookback, score_mode, score, signal, regime, thresholds, confidence
+        SELECT symbol, as_of, lookback, score, signal, regime, thresholds, confidence, notes, features, meta
         FROM prosperity_signals_daily
         WHERE symbol=%s AND lookback=%s
-        ORDER BY as_of_date DESC
+        ORDER BY as_of DESC
         LIMIT 1
         """,
         (symbol, lookback),
@@ -48,24 +48,26 @@ def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
         return None
     return {
         "symbol": row[0],
-        "as_of_date": row[1].isoformat(),
+        "as_of": row[1].isoformat(),
         "lookback": row[2],
-        "score_mode": row[3],
-        "score": row[4],
-        "signal": row[5],
-        "regime": row[6],
-        "thresholds": row[7],
-        "confidence": row[8],
+        "score": row[3],
+        "signal": row[4],
+        "regime": row[5],
+        "thresholds": row[6],
+        "confidence": row[7],
+        "notes": row[8],
+        "features": row[9],
+        "meta": row[10],
     }
 
 
 def latest_features(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
-        SELECT symbol, as_of_date, lookback, mom_5, mom_21, mom_63, trend_sma20_50, volatility_ann, rsi14, volume_z20, last_close, regime
+        SELECT symbol, as_of, lookback, features, meta
         FROM prosperity_features_daily
         WHERE symbol=%s AND lookback=%s
-        ORDER BY as_of_date DESC
+        ORDER BY as_of DESC
         LIMIT 1
         """,
         (symbol, lookback),
@@ -74,15 +76,8 @@ def latest_features(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
         return None
     return {
         "symbol": row[0],
-        "as_of_date": row[1].isoformat(),
+        "as_of": row[1].isoformat(),
         "lookback": row[2],
-        "mom_5": row[3],
-        "mom_21": row[4],
-        "mom_63": row[5],
-        "trend_sma20_50": row[6],
-        "volatility_ann": row[7],
-        "rsi14": row[8],
-        "volume_z20": row[9],
-        "last_close": row[10],
-        "regime": row[11],
+        "features": row[3],
+        "meta": row[4],
     }

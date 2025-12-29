@@ -20,7 +20,7 @@ def _enable_db_flags(monkeypatch: pytest.MonkeyPatch) -> None:
 def client(monkeypatch: pytest.MonkeyPatch):
     # Avoid touching a real database in unit tests
     monkeypatch.setattr(db, "ensure_schema", lambda: None)
-    monkeypatch.setattr(migrations.runner, "apply_migrations", lambda: None)
+    monkeypatch.setattr(migrations, "ensure_schema", lambda: [])
     with TestClient(app) as client:
         yield client
 
@@ -56,11 +56,12 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     def fake_features(symbol: str, as_of_date: dt.date, lookback: int):
         payload = {
             "symbol": symbol,
-            "as_of_date": as_of_date.isoformat(),
+            "as_of": as_of_date.isoformat(),
             "lookback": lookback,
             "stored": True,
             "features": {"mom_5": 0.1},
             "regime": "TEST",
+            "meta": {"regime": "TEST"},
         }
         features_store[symbol] = payload
         return payload
@@ -68,14 +69,15 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     def fake_signal(symbol: str, as_of_date: dt.date, lookback: int):
         payload = {
             "symbol": symbol,
-            "as_of_date": as_of_date.isoformat(),
+            "as_of": as_of_date.isoformat(),
             "lookback": lookback,
-            "score_mode": "stacked",
             "score": 0.5,
             "signal": "BUY",
             "regime": "TEST",
             "thresholds": {},
             "confidence": 0.7,
+            "notes": {},
+            "meta": {"score_mode": "stacked"},
         }
         signals_store[symbol] = payload
         return payload
@@ -108,4 +110,16 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
 
     feat_res = client.get("/prosperity/latest/features", params={"symbol": "AAPL", "lookback": 5})
     assert feat_res.status_code == 200
-    assert feat_res.json()["regime"] == "TEST"
+    assert feat_res.json()["meta"]["regime"] == "TEST"
+
+
+def test_latest_endpoints_return_404(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    _enable_db_flags(monkeypatch)
+    monkeypatch.setattr(query, "latest_signal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(query, "latest_features", lambda *_args, **_kwargs: None)
+
+    sig_res = client.get("/prosperity/latest/signal", params={"symbol": "MSFT", "lookback": 10})
+    feat_res = client.get("/prosperity/latest/features", params={"symbol": "MSFT", "lookback": 10})
+
+    assert sig_res.status_code == 404
+    assert feat_res.status_code == 404

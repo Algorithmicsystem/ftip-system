@@ -130,46 +130,30 @@ def compute_and_store_features(symbol: str, as_of_date: dt.date, lookback: int) 
     candles = [Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None) for r in window]
     feats = compute_features(candles)
     regime = detect_regime(feats)
-    payload = {**feats, "regime": regime, "as_of_date": as_of_date.isoformat(), "lookback": int(lookback)}
+    payload = {**feats, "regime": regime, "as_of": as_of_date.isoformat(), "lookback": int(lookback)}
     features_hash = _hash_dict(payload)
 
     db.safe_execute(
         """
         INSERT INTO prosperity_features_daily(
-            symbol, as_of_date, lookback, mom_5, mom_21, mom_63, trend_sma20_50, volatility_ann, rsi14, volume_z20, last_close, regime, features_hash
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        ON CONFLICT(symbol, as_of_date, lookback) DO UPDATE SET
-            mom_5=EXCLUDED.mom_5,
-            mom_21=EXCLUDED.mom_21,
-            mom_63=EXCLUDED.mom_63,
-            trend_sma20_50=EXCLUDED.trend_sma20_50,
-            volatility_ann=EXCLUDED.volatility_ann,
-            rsi14=EXCLUDED.rsi14,
-            volume_z20=EXCLUDED.volume_z20,
-            last_close=EXCLUDED.last_close,
-            regime=EXCLUDED.regime,
-            features_hash=EXCLUDED.features_hash,
+            symbol, as_of, lookback, features, meta
+        ) VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
+        ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
+            features=EXCLUDED.features,
+            meta=EXCLUDED.meta,
             updated_at=now()
         """,
         (
             sym,
             as_of_date,
             lookback,
-            feats.get("mom_5"),
-            feats.get("mom_21"),
-            feats.get("mom_63"),
-            feats.get("trend_sma20_50"),
-            feats.get("volatility_ann"),
-            feats.get("rsi14"),
-            feats.get("volume_z20"),
-            feats.get("last_close"),
-            regime,
-            features_hash,
+            json.dumps(feats),
+            json.dumps({"regime": regime, "features_hash": features_hash}),
         ),
     )
     return {
         "symbol": sym,
-        "as_of_date": as_of_date.isoformat(),
+        "as_of": as_of_date.isoformat(),
         "lookback": lookback,
         "stored": True,
         "features": feats,
@@ -198,36 +182,39 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
     db.safe_execute(
         """
         INSERT INTO prosperity_signals_daily(
-            symbol, as_of_date, lookback, score_mode, score, base_score, stacked_score, thresholds, signal, confidence, regime, calibration_meta, notes, signal_hash
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s::jsonb,%s::jsonb,%s)
-        ON CONFLICT(symbol, as_of_date, lookback, score_mode) DO UPDATE SET
+            symbol, as_of, lookback, score, signal, thresholds, regime, confidence, notes, features, meta
+        ) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+        ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
             score=EXCLUDED.score,
-            base_score=EXCLUDED.base_score,
-            stacked_score=EXCLUDED.stacked_score,
-            thresholds=EXCLUDED.thresholds,
             signal=EXCLUDED.signal,
-            confidence=EXCLUDED.confidence,
+            thresholds=EXCLUDED.thresholds,
             regime=EXCLUDED.regime,
-            calibration_meta=EXCLUDED.calibration_meta,
+            confidence=EXCLUDED.confidence,
             notes=EXCLUDED.notes,
-            signal_hash=EXCLUDED.signal_hash,
+            features=EXCLUDED.features,
+            meta=EXCLUDED.meta,
             updated_at=now()
         """,
         (
             sym,
             as_of_date,
             lookback,
-            score_mode,
             signal_payload.get("score"),
-            signal_payload.get("base_score"),
-            signal_payload.get("stacked_score"),
-            json.dumps(signal_payload.get("thresholds")),
             signal_payload.get("signal"),
-            signal_payload.get("confidence"),
+            json.dumps(signal_payload.get("thresholds")),
             signal_payload.get("regime"),
-            json.dumps(signal_payload.get("calibration_meta")),
+            signal_payload.get("confidence"),
             json.dumps(signal_payload.get("notes")),
-            signal_hash,
+            json.dumps(signal_payload.get("features")),
+            json.dumps(
+                {
+                    "score_mode": score_mode,
+                    "base_score": signal_payload.get("base_score"),
+                    "stacked_score": signal_payload.get("stacked_score"),
+                    "calibration_meta": signal_payload.get("calibration_meta"),
+                    "signal_hash": signal_hash,
+                }
+            ),
         ),
     )
     return signal_payload

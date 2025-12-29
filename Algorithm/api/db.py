@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Iterable, List, Optional, Sequence
 
 import psycopg
@@ -182,62 +181,11 @@ def fetchall(sql: str, params: Sequence[Any] | None = None) -> Iterable[Sequence
 # Migrations
 # ---------------------------------------------------------------------------
 
-MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
-
-
-def _load_migration_statements(path: Path) -> List[str]:
-    sql = path.read_text()
-    statements = []
-    for stmt in sql.split(";"):
-        cleaned = stmt.strip()
-        if cleaned:
-            statements.append(cleaned)
-    return statements
-
 
 def apply_migrations() -> None:
-    if not db_enabled() or not config.migrations_auto():
-        return
+    from api import migrations
 
-    pool = get_pool()
-    paths = sorted(MIGRATIONS_DIR.glob("*.sql"))
-    if not paths:
-        logger.info("[migrations] no migration files found")
-        return
-
-    with pool.connection(timeout=10) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS prosperity_schema_migrations (
-                    name TEXT PRIMARY KEY,
-                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-                )
-                """
-            )
-            conn.commit()
-
-    for path in paths:
-        name = path.name
-        with pool.connection(timeout=10) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT 1 FROM prosperity_schema_migrations WHERE name=%s",
-                    (name,),
-                )
-                if cur.fetchone():
-                    continue
-                statements = _load_migration_statements(path)
-                logger.info("[migrations] applying %s (%d statements)", name, len(statements))
-                for stmt in statements:
-                    cur.execute(stmt)
-                cur.execute(
-                    "INSERT INTO prosperity_schema_migrations(name) VALUES(%s)",
-                    (name,),
-                )
-            conn.commit()
-
-    logger.info("[migrations] completed")
+    migrations.ensure_schema()
 
 
 # ---------------------------------------------------------------------------
@@ -247,20 +195,11 @@ def apply_migrations() -> None:
 def ensure_schema() -> None:
     if not db_enabled():
         return
-    # Legacy tables for existing endpoints
+    from api import migrations
+
+    migrations.ensure_schema()
+
     statements = [
-        """
-        CREATE TABLE IF NOT EXISTS prosperity_universe (
-            symbol TEXT PRIMARY KEY,
-            name TEXT,
-            exchange TEXT,
-            asset_type TEXT,
-            active BOOLEAN DEFAULT TRUE,
-            metadata JSONB,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            updated_at TIMESTAMPTZ DEFAULT now()
-        )
-        """,
         """
         CREATE TABLE IF NOT EXISTS signals (
             id BIGSERIAL PRIMARY KEY,
@@ -322,7 +261,6 @@ def ensure_schema() -> None:
         """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN thresholds TYPE JSONB USING thresholds::jsonb""",
         """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN features TYPE JSONB USING features::jsonb""",
         """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN notes TYPE JSONB USING notes::jsonb""",
-        """ALTER TABLE IF EXISTS signal_observation ALTER COLUMN calibration_meta TYPE JSONB USING calibration_meta::jsonb""",
         """
         CREATE TABLE IF NOT EXISTS portfolio_backtests (
             id BIGSERIAL PRIMARY KEY,
@@ -350,77 +288,6 @@ def ensure_schema() -> None:
         """,
         """CREATE INDEX IF NOT EXISTS idx_signals_symbol_asof ON signals(symbol, as_of)""",
         """CREATE INDEX IF NOT EXISTS idx_portfolio_backtests_range ON portfolio_backtests(from_date, to_date)""",
-        # Prosperity warehouse
-        """
-        CREATE TABLE IF NOT EXISTS prosperity_universe (
-            symbol TEXT PRIMARY KEY,
-            name TEXT,
-            exchange TEXT,
-            asset_type TEXT,
-            active BOOLEAN DEFAULT TRUE,
-            metadata JSONB,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            updated_at TIMESTAMPTZ DEFAULT now()
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS prosperity_daily_bars (
-            symbol TEXT REFERENCES prosperity_universe(symbol),
-            date DATE NOT NULL,
-            open DOUBLE PRECISION,
-            high DOUBLE PRECISION,
-            low DOUBLE PRECISION,
-            close DOUBLE PRECISION NOT NULL,
-            adj_close DOUBLE PRECISION,
-            volume DOUBLE PRECISION,
-            source TEXT NOT NULL,
-            raw JSONB,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            updated_at TIMESTAMPTZ DEFAULT now(),
-            PRIMARY KEY (symbol, date)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS prosperity_features_daily (
-            symbol TEXT NOT NULL,
-            as_of_date DATE NOT NULL,
-            lookback INT NOT NULL,
-            mom_5 DOUBLE PRECISION,
-            mom_21 DOUBLE PRECISION,
-            mom_63 DOUBLE PRECISION,
-            trend_sma20_50 DOUBLE PRECISION,
-            volatility_ann DOUBLE PRECISION,
-            rsi14 DOUBLE PRECISION,
-            volume_z20 DOUBLE PRECISION,
-            last_close DOUBLE PRECISION,
-            regime TEXT,
-            features_hash TEXT,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            updated_at TIMESTAMPTZ DEFAULT now(),
-            PRIMARY KEY (symbol, as_of_date, lookback)
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS prosperity_signals_daily (
-            symbol TEXT NOT NULL,
-            as_of_date DATE NOT NULL,
-            lookback INT NOT NULL,
-            score_mode TEXT NOT NULL,
-            score DOUBLE PRECISION,
-            base_score DOUBLE PRECISION,
-            stacked_score DOUBLE PRECISION,
-            thresholds JSONB NOT NULL,
-            signal TEXT NOT NULL,
-            confidence DOUBLE PRECISION,
-            regime TEXT,
-            calibration_meta JSONB,
-            notes JSONB,
-            signal_hash TEXT,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            updated_at TIMESTAMPTZ DEFAULT now(),
-            PRIMARY KEY (symbol, as_of_date, lookback, score_mode)
-        )
-        """,
         """
         CREATE TABLE IF NOT EXISTS prosperity_backtest_runs (
             run_id UUID PRIMARY KEY,
@@ -476,9 +343,6 @@ def ensure_schema() -> None:
             PRIMARY KEY (version)
         )
         """,
-        """CREATE INDEX IF NOT EXISTS idx_prosperity_signals_symbol_asof ON prosperity_signals_daily(symbol, as_of_date)""",
-        """CREATE INDEX IF NOT EXISTS idx_prosperity_features_symbol_asof ON prosperity_features_daily(symbol, as_of_date)""",
-        """CREATE INDEX IF NOT EXISTS idx_prosperity_bars_symbol_date ON prosperity_daily_bars(symbol, date)""",
     ]
 
     for stmt in statements:
