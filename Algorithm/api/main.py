@@ -435,6 +435,13 @@ class SaveSignalsRequest(BaseModel):
     lookback: int = 252
 
 
+class RunSnapshotRequest(BaseModel):
+    as_of: str
+    lookback: int = Field(252, ge=30, le=2000)
+    active_only: bool = True
+    limit: int = Field(1000, ge=1, le=5000)
+
+
 class WalkForwardRequest(BaseModel):
     symbol: str
     from_date: str
@@ -1696,6 +1703,7 @@ def root() -> Dict[str, Any]:
             "/db/health",
             "/db/save_signal",
             "/db/save_signals",
+            "/db/run_snapshot",
             "/db/save_portfolio_backtest",
             "/db/universe/load_default",
             "/version",
@@ -1810,6 +1818,70 @@ def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
         "inserted": inserted_count,
         "updated": updated_count,
         "results": results,
+        "errors": errors,
+    }
+
+
+@app.post("/db/run_snapshot")
+def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        db.get_pool()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB pool not available: {e}")
+
+    try:
+        limit_val = max(1, min(int(req.limit), 5000))
+    except Exception:
+        limit_val = 1000
+
+    try:
+        symbols = db.get_universe(active_only=req.active_only, limit=limit_val)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load universe: {type(e).__name__}: {e}")
+
+    saved_count = 0
+    error_count = 0
+    errors: Dict[str, str] = {}
+    sleep_ms = max(0, _env_int("FTIP_SNAPSHOT_SLEEP_MS", 0))
+
+    for sym in symbols:
+        s = (sym or "").strip().upper()
+        if not s:
+            continue
+
+        try:
+            sig = compute_signal_for_symbol(s, req.as_of, req.lookback)
+            inserted, row_id = persist_signal_record(sig)
+            if row_id is None:
+                error_count += 1
+                if len(errors) < 25:
+                    errors[s] = "persist_signal_record returned no id"
+            else:
+                saved_count += 1
+        except HTTPException as e:
+            error_count += 1
+            if len(errors) < 25:
+                errors[s] = str(e.detail)
+        except Exception as e:
+            error_count += 1
+            if len(errors) < 25:
+                errors[s] = f"{type(e).__name__}: {e}"
+
+        if sleep_ms > 0:
+            time.sleep(float(sleep_ms) / 1000.0)
+
+    return {
+        "status": "ok",
+        "as_of": req.as_of,
+        "lookback": req.lookback,
+        "universe_count": len(symbols),
+        "saved_count": saved_count,
+        "error_count": error_count,
         "errors": errors,
     }
 
