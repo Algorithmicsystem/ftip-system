@@ -1989,7 +1989,7 @@ def db_universe_load_default() -> Dict[str, Any]:
     try:
         with pool.connection(timeout=10) as conn:
             with conn.cursor() as cur:
-                cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+                db.set_statement_timeout(cur, 5000)
                 params = [(sym, True, "default_top1000_seed") for sym in DEFAULT_PROSPERITY_UNIVERSE]
                 cur.executemany(
                     """
@@ -2234,7 +2234,7 @@ def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
     try:
         with pool.connection(timeout=10) as conn:
             with conn.cursor() as cur:
-                cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+                db.set_statement_timeout(cur, 5000)
                 cur.execute(
                     """
                     INSERT INTO universe_snapshot (as_of_date, name, source)
@@ -2280,7 +2280,7 @@ def universe_top(
     try:
         with pool.connection(timeout=10) as conn:
             with conn.cursor() as cur:
-                cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+                db.set_statement_timeout(cur, 5000)
                 cur.execute(
                     "SELECT id FROM universe_snapshot WHERE as_of_date=%s AND name=%s",
                     (as_of_date, name),
