@@ -512,6 +512,11 @@ class UniverseUpsertRequest(BaseModel):
     symbols: List[str]  # ordered best -> worst
 
 
+class UniverseDbUpsertRequest(BaseModel):
+    symbols: List[str]
+    source: Optional[str] = "manual"
+
+
 # =============================================================================
 # Simple in-memory candle cache (reduces 429 + speeds backtests/calibration)
 # =============================================================================
@@ -1841,6 +1846,34 @@ DEFAULT_PROSPERITY_UNIVERSE = [
     "JPM",
     "XOM",
 ]
+
+
+@app.post("/db/universe/upsert")
+def db_universe_upsert(req: UniverseDbUpsertRequest) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        received, upserted = db.upsert_universe(req.symbols, req.source)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
+
+    return {"status": "ok", "received": received, "upserted": upserted}
+
+
+@app.get("/db/universe")
+def db_universe(active_only: bool = Query(True)) -> Dict[str, Any]:
+    if not DB_ENABLED:
+        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+
+    try:
+        symbols = db.get_universe(active_only=active_only)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"universe_get failed: {type(e).__name__}: {e}")
+
+    return {"count": len(symbols), "symbols": symbols}
 
 
 @app.post("/db/universe/load_default")
