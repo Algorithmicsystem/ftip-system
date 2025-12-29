@@ -1,6 +1,6 @@
 import os
 from contextlib import contextmanager
-from typing import Any, Iterable, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 import psycopg
 from psycopg_pool import ConnectionPool
@@ -153,4 +153,77 @@ def ensure_schema() -> None:
             for stmt in statements:
                 cur.execute(stmt)
             conn.commit()
+
+
+def _normalize_symbols(symbols: Iterable[str]) -> List[str]:
+    syms: List[str] = []
+    for s in symbols:
+        norm = (s or "").strip().upper()
+        if norm:
+            syms.append(norm)
+    return syms
+
+
+def upsert_universe(symbols: Iterable[str], source: Optional[str] = None) -> Tuple[int, int]:
+    if not db_enabled():
+        raise RuntimeError("Database is disabled (set FTIP_DB_ENABLED=1 to enable)")
+
+    symbols_list = list(symbols or [])
+    received = len(symbols_list)
+    syms = _normalize_symbols(symbols_list)
+    if len(syms) == 0:
+        raise ValueError("symbols list is empty")
+    if len(syms) > 1000:
+        raise ValueError("symbols list exceeds maximum of 1000")
+
+    src = (source or "manual").strip() or "manual"
+
+    pool = get_pool()
+    with pool.connection(timeout=10) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+            params = [(sym, True, src) for sym in syms]
+            cur.executemany(
+                """
+                INSERT INTO prosperity_universe(symbol, active, source)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (symbol)
+                DO UPDATE SET active=EXCLUDED.active, source=EXCLUDED.source
+                """,
+                params,
+            )
+            conn.commit()
+
+    return received, len(syms)
+
+
+def get_universe(active_only: bool = True) -> List[str]:
+    if not db_enabled():
+        raise RuntimeError("Database is disabled (set FTIP_DB_ENABLED=1 to enable)")
+
+    pool = get_pool()
+    with pool.connection(timeout=10) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+            if active_only:
+                cur.execute(
+                    """
+                    SELECT symbol
+                    FROM prosperity_universe
+                    WHERE active = TRUE
+                    ORDER BY symbol ASC
+                    LIMIT 1000
+                    """
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT symbol
+                    FROM prosperity_universe
+                    ORDER BY symbol ASC
+                    LIMIT 1000
+                    """
+                )
+            rows = cur.fetchall() or []
+    return [r[0] for r in rows]
 
