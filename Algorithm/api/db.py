@@ -48,12 +48,30 @@ def get_pool() -> ConnectionPool:
     return _POOL
 
 
+def _clamp_timeout_ms(timeout_ms: int, *, default: int = 5000) -> int:
+    try:
+        parsed = int(timeout_ms)
+    except Exception:
+        parsed = default
+
+    return max(1000, min(parsed, 120_000))
+
+
+def set_statement_timeout(cur: Any, timeout_ms: int, *, local: bool = True) -> int:
+    """Set (local) statement timeout using an inline, validated integer."""
+
+    ms = _clamp_timeout_ms(timeout_ms)
+    scope = "LOCAL " if local else ""
+    cur.execute(f"SET {scope}statement_timeout TO {ms}")
+    return ms
+
+
 @contextmanager
 def _with_cursor(timeout_ms: int = 5000):
     pool = get_pool()
     with pool.connection(timeout=10) as conn:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout TO %s", (timeout_ms,))
+            set_statement_timeout(cur, timeout_ms)
             yield conn, cur
 
 
@@ -149,7 +167,7 @@ def ensure_schema() -> None:
     pool = get_pool()
     with pool.connection(timeout=10) as conn:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+            set_statement_timeout(cur, 5000)
             for stmt in statements:
                 cur.execute(stmt)
             conn.commit()
@@ -181,7 +199,7 @@ def upsert_universe(symbols: Iterable[str], source: Optional[str] = None) -> Tup
     pool = get_pool()
     with pool.connection(timeout=10) as conn:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+            set_statement_timeout(cur, 5000)
             params = [(sym, True, src) for sym in syms]
             cur.executemany(
                 """
@@ -209,7 +227,7 @@ def get_universe(active_only: bool = True, limit: int = 1000) -> List[str]:
     pool = get_pool()
     with pool.connection(timeout=10) as conn:
         with conn.cursor() as cur:
-            cur.execute("SET LOCAL statement_timeout TO %s", (5000,))
+            set_statement_timeout(cur, 5000)
             if active_only:
                 cur.execute(
                     """
