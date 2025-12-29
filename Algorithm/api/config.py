@@ -38,6 +38,14 @@ def db_enabled() -> bool:
     return env_bool("FTIP_DB_ENABLED", False)
 
 
+def db_write_enabled() -> bool:
+    return env_bool("FTIP_DB_WRITE_ENABLED", True)
+
+
+def db_read_enabled() -> bool:
+    return env_bool("FTIP_DB_READ_ENABLED", True)
+
+
 def db_required() -> bool:
     return env_bool("FTIP_DB_REQUIRED", False)
 
