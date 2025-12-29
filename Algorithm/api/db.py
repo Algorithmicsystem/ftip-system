@@ -1,17 +1,34 @@
+from __future__ import annotations
+
+import logging
 from contextlib import contextmanager
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from pathlib import Path
+from typing import Any, Callable, Iterable, List, Optional, Sequence
 
 import psycopg
 from psycopg_pool import ConnectionPool
 
 from api import config
 
+logger = logging.getLogger(__name__)
 
 _POOL: Optional[ConnectionPool] = None
 
 
+# ---------------------------------------------------------------------------
+# Environment helpers
+# ---------------------------------------------------------------------------
+
 def db_enabled() -> bool:
     return config.db_enabled()
+
+
+def db_write_enabled() -> bool:
+    return config.db_write_enabled()
+
+
+def db_read_enabled() -> bool:
+    return config.db_read_enabled()
 
 
 def _db_url() -> str:
@@ -20,6 +37,10 @@ def _db_url() -> str:
         raise RuntimeError("DATABASE_URL is required when FTIP_DB_ENABLED=1")
     return url
 
+
+# ---------------------------------------------------------------------------
+# Pool + helpers
+# ---------------------------------------------------------------------------
 
 def get_pool() -> ConnectionPool:
     global _POOL
@@ -44,35 +65,57 @@ def get_pool() -> ConnectionPool:
     return _POOL
 
 
+@contextmanager
+def with_connection():
+    pool = get_pool()
+    with pool.connection(timeout=10) as conn:
+        with conn.cursor() as cur:
+            yield conn, cur
+
+
 def _clamp_timeout_ms(timeout_ms: int, *, default: int = 5000) -> int:
     try:
         parsed = int(timeout_ms)
     except Exception:
         parsed = default
-
     return max(1000, min(parsed, 120_000))
 
 
 def set_statement_timeout(cur: Any, timeout_ms: int, *, local: bool = True) -> int:
-    """Set (local) statement timeout using an inline, validated integer."""
-
     ms = _clamp_timeout_ms(timeout_ms)
     scope = "LOCAL " if local else ""
     cur.execute(f"SET {scope}statement_timeout TO {ms}")
     return ms
 
 
-@contextmanager
-def _with_cursor(timeout_ms: int = 5000):
-    pool = get_pool()
-    with pool.connection(timeout=10) as conn:
-        with conn.cursor() as cur:
-            set_statement_timeout(cur, timeout_ms)
-            yield conn, cur
+# ---------------------------------------------------------------------------
+# Safe execution helpers
+# ---------------------------------------------------------------------------
 
+def safe_execute(sql: str, params: Sequence[Any] | None = None) -> None:
+    with with_connection() as (conn, cur):
+        cur.execute(sql, params or ())
+        conn.commit()
+
+
+def safe_fetchall(sql: str, params: Sequence[Any] | None = None) -> List[Sequence[Any]]:
+    with with_connection() as (_conn, cur):
+        cur.execute(sql, params or ())
+        return list(cur.fetchall())
+
+
+def safe_fetchone(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
+    with with_connection() as (_conn, cur):
+        cur.execute(sql, params or ())
+        return cur.fetchone()
+
+
+# ---------------------------------------------------------------------------
+# Backwards-compatible helpers (used across codebase)
+# ---------------------------------------------------------------------------
 
 def exec1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
-    with _with_cursor() as (conn, cur):
+    with with_connection() as (conn, cur):
         cur.execute(sql, params or ())
         row = None
         try:
@@ -84,28 +127,94 @@ def exec1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[An
 
 
 def fetch1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
-    with _with_cursor() as (_conn, cur):
-        cur.execute(sql, params or ())
-        return cur.fetchone()
+    return safe_fetchone(sql, params)
 
 
 def fetchall(sql: str, params: Sequence[Any] | None = None) -> Iterable[Sequence[Any]]:
-    with _with_cursor() as (_conn, cur):
-        cur.execute(sql, params or ())
-        return cur.fetchall()
+    return safe_fetchall(sql, params)
 
+
+# ---------------------------------------------------------------------------
+# Migrations
+# ---------------------------------------------------------------------------
+
+MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+
+
+def _load_migration_statements(path: Path) -> List[str]:
+    sql = path.read_text()
+    statements = []
+    for stmt in sql.split(";"):
+        cleaned = stmt.strip()
+        if cleaned:
+            statements.append(cleaned)
+    return statements
+
+
+def apply_migrations() -> None:
+    if not db_enabled() or not config.migrations_auto():
+        return
+
+    pool = get_pool()
+    paths = sorted(MIGRATIONS_DIR.glob("*.sql"))
+    if not paths:
+        logger.info("[migrations] no migration files found")
+        return
+
+    with pool.connection(timeout=10) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS prosperity_schema_migrations (
+                    name TEXT PRIMARY KEY,
+                    applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+            conn.commit()
+
+    for path in paths:
+        name = path.name
+        with pool.connection(timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM prosperity_schema_migrations WHERE name=%s",
+                    (name,),
+                )
+                if cur.fetchone():
+                    continue
+                statements = _load_migration_statements(path)
+                logger.info("[migrations] applying %s (%d statements)", name, len(statements))
+                for stmt in statements:
+                    cur.execute(stmt)
+                cur.execute(
+                    "INSERT INTO prosperity_schema_migrations(name) VALUES(%s)",
+                    (name,),
+                )
+            conn.commit()
+
+    logger.info("[migrations] completed")
+
+
+# ---------------------------------------------------------------------------
+# Simple schema bootstrap (legacy) to keep compatibility
+# ---------------------------------------------------------------------------
 
 def ensure_schema() -> None:
     if not db_enabled():
         return
-
+    # Legacy tables for existing endpoints
     statements = [
         """
         CREATE TABLE IF NOT EXISTS prosperity_universe (
             symbol TEXT PRIMARY KEY,
-            active BOOLEAN NOT NULL DEFAULT TRUE,
-            source TEXT,
-            added_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            name TEXT,
+            exchange TEXT,
+            asset_type TEXT,
+            active BOOLEAN DEFAULT TRUE,
+            metadata JSONB,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now()
         )
         """,
         """
@@ -199,91 +308,22 @@ def ensure_schema() -> None:
         """CREATE INDEX IF NOT EXISTS idx_portfolio_backtests_range ON portfolio_backtests(from_date, to_date)""",
     ]
 
-    pool = get_pool()
-    with pool.connection(timeout=10) as conn:
-        with conn.cursor() as cur:
-            set_statement_timeout(cur, 5000)
-            for stmt in statements:
-                cur.execute(stmt)
-            conn.commit()
+    for stmt in statements:
+        safe_execute(stmt)
 
 
-def _normalize_symbols(symbols: Iterable[str]) -> List[str]:
-    syms: List[str] = []
-    for s in symbols:
-        norm = (s or "").strip().upper()
-        if norm:
-            syms.append(norm)
-    return syms
-
-
-def upsert_universe(symbols: Iterable[str], source: Optional[str] = None) -> Tuple[int, int]:
-    if not db_enabled():
-        raise RuntimeError("Database is disabled (set FTIP_DB_ENABLED=1 to enable)")
-
-    symbols_list = list(symbols or [])
-    received = len(symbols_list)
-    syms = _normalize_symbols(symbols_list)
-    if len(syms) == 0:
-        raise ValueError("symbols list is empty")
-    if len(syms) > 1000:
-        raise ValueError("symbols list exceeds maximum of 1000")
-
-    src = (source or "manual").strip() or "manual"
-
-    pool = get_pool()
-    with pool.connection(timeout=10) as conn:
-        with conn.cursor() as cur:
-            set_statement_timeout(cur, 5000)
-            params = [(sym, True, src) for sym in syms]
-            cur.executemany(
-                """
-                INSERT INTO prosperity_universe(symbol, active, source)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (symbol)
-                DO UPDATE SET active=EXCLUDED.active, source=EXCLUDED.source
-                """,
-                params,
-            )
-            conn.commit()
-
-    return received, len(syms)
-
-
-def get_universe(active_only: bool = True, limit: int = 1000) -> List[str]:
-    if not db_enabled():
-        raise RuntimeError("Database is disabled (set FTIP_DB_ENABLED=1 to enable)")
-
-    try:
-        limit_val = max(1, min(int(limit), 5000))
-    except Exception:
-        limit_val = 1000
-
-    pool = get_pool()
-    with pool.connection(timeout=10) as conn:
-        with conn.cursor() as cur:
-            set_statement_timeout(cur, 5000)
-            if active_only:
-                cur.execute(
-                    """
-                    SELECT symbol
-                    FROM prosperity_universe
-                    WHERE active = TRUE
-                    ORDER BY symbol ASC
-                    LIMIT %s
-                    """,
-                    (limit_val,),
-                )
-            else:
-                cur.execute(
-                    """
-                    SELECT symbol
-                    FROM prosperity_universe
-                    ORDER BY symbol ASC
-                    LIMIT %s
-                    """,
-                    (limit_val,),
-                )
-            rows = cur.fetchall() or []
-    return [r[0] for r in rows]
-
+__all__ = [
+    "db_enabled",
+    "db_write_enabled",
+    "db_read_enabled",
+    "get_pool",
+    "with_connection",
+    "safe_execute",
+    "safe_fetchall",
+    "safe_fetchone",
+    "apply_migrations",
+    "ensure_schema",
+    "exec1",
+    "fetch1",
+    "fetchall",
+]

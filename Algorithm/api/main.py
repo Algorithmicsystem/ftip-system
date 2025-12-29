@@ -15,6 +15,7 @@ from psycopg.types.json import Json
 from api import db
 from api.assistant.routes import router as assistant_router
 from api.migrations import runner as migrations_runner
+from api.prosperity.routes import router as prosperity_router
 
 # =============================================================================
 # App + environment helpers
@@ -642,6 +643,44 @@ def massive_fetch_daily_bars_cached(symbol: str, from_date: str, to_date: str) -
     hit = _cache_get(key)
     if hit is not None:
         return hit
+
+    # Prefer DB cache when enabled
+    try:
+        if db.db_enabled() and db.db_read_enabled():
+            import datetime as _dt
+            from api.prosperity import ingest as prosperity_ingest
+
+            start_d = _dt.date.fromisoformat(from_date)
+            end_d = _dt.date.fromisoformat(to_date)
+            rows = db.safe_fetchall(
+                """
+                SELECT date, close, volume FROM prosperity_daily_bars
+                WHERE symbol=%s AND date BETWEEN %s AND %s ORDER BY date ASC
+                """,
+                (s, start_d, end_d),
+            )
+            have_dates = {r[0] for r in rows}
+            missing = []
+            cur = start_d
+            while cur <= end_d:
+                if cur not in have_dates:
+                    missing.append(cur)
+                cur += _dt.timedelta(days=1)
+
+            if missing and db.db_write_enabled():
+                prosperity_ingest.ingest_bars(s, start_d, end_d)
+                rows = db.safe_fetchall(
+                    "SELECT date, close, volume FROM prosperity_daily_bars WHERE symbol=%s AND date BETWEEN %s AND %s ORDER BY date ASC",
+                    (s, start_d, end_d),
+                )
+
+            if rows:
+                bars = [Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None) for r in rows]
+                _cache_set(key, bars)
+                return bars
+    except Exception:
+        pass
+
     bars = massive_fetch_daily_bars(s, from_date, to_date)
     _cache_set(key, bars)
     return bars
@@ -1714,6 +1753,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
 app.include_router(assistant_router, prefix="/assistant")
+app.include_router(prosperity_router, prefix="/prosperity")
 
 
 @app.on_event("startup")

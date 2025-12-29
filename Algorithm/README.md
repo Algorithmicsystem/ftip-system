@@ -24,6 +24,28 @@ curl -X POST http://localhost:8000/db/save_signal \
 
 Each call should return HTTP 200 with JSON payloads when the database is reachable.
 
+## Prosperity DB v1
+
+Prosperity DB adds a durable research warehouse (Postgres) for caching market data, features, and signals. Enable it with:
+
+```bash
+export FTIP_DB_ENABLED=1
+export DATABASE_URL=postgresql://user:pass@host:5432/ftip
+export FTIP_DB_WRITE_ENABLED=1
+export FTIP_DB_READ_ENABLED=1
+export FTIP_MIGRATIONS_AUTO=1
+```
+
+Example calls:
+
+```bash
+curl http://localhost:8000/prosperity/health
+curl -X POST http://localhost:8000/prosperity/snapshot/run \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
+curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
+```
+
 ## Assistant / Narrator (Phase 5)
 
 Environment variables:
