@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api import config, db
 from api.prosperity import ingest, query
+from api.prosperity.strategy_graph import router as strategy_graph_router
 from api.prosperity.models import (
     BarsIngestBulkRequest,
     BarsIngestRequest,
@@ -22,6 +23,8 @@ from api.prosperity.models import (
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+router.include_router(strategy_graph_router, prefix="/strategy_graph")
 
 
 def _require_db_enabled(write: bool = False, read: bool = False) -> None:
@@ -128,6 +131,7 @@ async def snapshot_run(req: SnapshotRunRequest, request: Request):
 
     timings: Dict[str, float] = {}
     rows_written = {"signals": 0, "features": 0}
+    strategy_graph_rows = {"strategies": 0, "ensembles": 0}
     symbols_ok: List[str] = []
     symbols_failed: List[Dict[str, str]] = []
 
@@ -161,6 +165,64 @@ async def snapshot_run(req: SnapshotRunRequest, request: Request):
             except Exception as exc:
                 errors.append(f"signals: {exc}")
 
+        if not errors and req.compute_strategy_graph:
+            try:
+                from api.main import Candle
+                bars = query.fetch_bars(sym, req.from_date, req.as_of_date)
+                candles = [
+                    Candle(
+                        timestamp=b["date"],
+                        close=float(b["close"]),
+                        volume=float(b["volume"]) if b.get("volume") is not None else None,
+                    )
+                    for b in bars
+                ]
+                from ftip.strategy_graph import compute_strategy_graph
+                from api.prosperity.strategy_graph_db import upsert_ensemble_row, upsert_strategy_rows
+
+                res = compute_strategy_graph(sym, req.as_of_date, req.lookback, candles)
+                strat_rows = []
+                for strat in res.get("strategies", []):
+                    strat_rows.append(
+                        {
+                            "symbol": sym,
+                            "as_of_date": req.as_of_date,
+                            "lookback": req.lookback,
+                            "strategy_id": strat.get("strategy_id"),
+                            "strategy_version": strat.get("version"),
+                            "regime": res.get("regime"),
+                            "raw_score": strat.get("raw_score"),
+                            "normalized_score": strat.get("normalized_score"),
+                            "signal": strat.get("signal"),
+                            "confidence": strat.get("confidence"),
+                            "rationale": strat.get("rationale"),
+                            "feature_contributions": strat.get("feature_contributions"),
+                            "meta": {"regime_meta": res.get("regime_meta")},
+                        }
+                    )
+                strategy_graph_rows["strategies"] += upsert_strategy_rows(strat_rows)
+                ens = res.get("ensemble") or {}
+                upsert_ensemble_row(
+                    {
+                        "symbol": sym,
+                        "as_of_date": req.as_of_date,
+                        "lookback": req.lookback,
+                        "regime": res.get("regime"),
+                        "ensemble_method": ens.get("ensemble_method"),
+                        "final_signal": ens.get("final_signal"),
+                        "final_score": ens.get("final_score"),
+                        "final_confidence": ens.get("final_confidence"),
+                        "thresholds": ens.get("thresholds"),
+                        "risk_overlay_applied": ens.get("risk_overlay_applied"),
+                        "strategies_used": ens.get("strategies_used"),
+                        "audit": res.get("audit"),
+                        "hashes": res.get("hashes"),
+                    }
+                )
+                strategy_graph_rows["ensembles"] += 1
+            except Exception as exc:
+                errors.append(f"strategy_graph: {exc}")
+
         duration = time.time() - sym_start
         if errors:
             symbols_failed.append({"symbol": sym, "reason": "; ".join(errors)})
@@ -175,15 +237,19 @@ async def snapshot_run(req: SnapshotRunRequest, request: Request):
 
     timings["total"] = time.time() - t0
 
+    result_payload = {
+        "symbols_ok": symbols_ok,
+        "symbols_failed": symbols_failed,
+        "rows_written": rows_written,
+    }
+    if req.compute_strategy_graph:
+        result_payload["strategy_graph_rows"] = strategy_graph_rows
+
     return {
         "status": "ok",
         "trace_id": trace_id,
         "requested": requested,
-        "result": {
-            "symbols_ok": symbols_ok,
-            "symbols_failed": symbols_failed,
-            "rows_written": rows_written,
-        },
+        "result": result_payload,
         "timings": timings,
     }
 

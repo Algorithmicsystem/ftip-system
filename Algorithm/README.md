@@ -24,6 +24,31 @@ curl -X POST http://localhost:8000/db/save_signal \
 
 Each call should return HTTP 200 with JSON payloads when the database is reachable.
 
+## Strategy Graph Engine v1
+
+The Strategy Graph Engine computes multi-strategy signals, ensembles them, and records audit metadata.
+
+Run a daily computation across symbols:
+
+```bash
+curl -X POST http://localhost:8000/prosperity/strategy_graph/run \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
+```
+
+Fetch the latest ensemble or per-strategy breakdown:
+
+```bash
+curl "http://localhost:8000/prosperity/strategy_graph/latest/ensemble?symbol=AAPL&lookback=252"
+curl "http://localhost:8000/prosperity/strategy_graph/latest/strategies?symbol=AAPL&lookback=252"
+```
+
+To smoke test locally, run:
+
+```bash
+bash tools/smoke_strategy_graph.sh
+```
+
 ## Copy/paste safe zsh commands
 
 When using zsh, enable `setopt interactivecomments` before copy/pasting any of the sample commands so inline `#` comments are ignored correctly:

@@ -166,8 +166,61 @@ def _migration_prosperity_core(cur: Any) -> None:
     cur.execute("CREATE INDEX IF NOT EXISTS idx_prosperity_bars_symbol_date ON prosperity_daily_bars(symbol, date DESC)")
 
 
+def _migration_strategy_graph(cur: Any) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_strategy_signals_daily (
+            symbol TEXT NOT NULL,
+            as_of_date DATE NOT NULL,
+            lookback INT NOT NULL,
+            strategy_id TEXT NOT NULL,
+            strategy_version TEXT NOT NULL,
+            regime TEXT,
+            raw_score DOUBLE PRECISION,
+            normalized_score DOUBLE PRECISION,
+            signal TEXT,
+            confidence DOUBLE PRECISION,
+            rationale JSONB,
+            feature_contributions JSONB,
+            meta JSONB,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (symbol, as_of_date, lookback, strategy_id, strategy_version)
+        )
+        """
+    )
+    _ensure_column(cur, "prosperity_strategy_signals_daily", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
+    _ensure_column(cur, "prosperity_strategy_signals_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prosperity_ensemble_signals_daily (
+            symbol TEXT NOT NULL,
+            as_of_date DATE NOT NULL,
+            lookback INT NOT NULL,
+            regime TEXT,
+            ensemble_method TEXT,
+            final_signal TEXT,
+            final_score DOUBLE PRECISION,
+            final_confidence DOUBLE PRECISION,
+            thresholds JSONB,
+            risk_overlay_applied BOOLEAN,
+            strategies_used JSONB,
+            audit JSONB,
+            hashes JSONB,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now(),
+            PRIMARY KEY (symbol, as_of_date, lookback)
+        )
+        """
+    )
+    _ensure_column(cur, "prosperity_ensemble_signals_daily", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
+    _ensure_column(cur, "prosperity_ensemble_signals_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
+    ("002_strategy_graph", _migration_strategy_graph),
 ]
 
 

@@ -51,6 +51,7 @@ class SnapshotRunRequest(BaseModel):
     lookback: int = Field(252, ge=5, le=5000)
     concurrency: int = Field(3, ge=1)
     force_refresh: bool = False
+    compute_strategy_graph: bool = False
 
 
 class HealthResponse(BaseModel):
