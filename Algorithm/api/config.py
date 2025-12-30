@@ -59,7 +59,7 @@ def llm_enabled() -> bool:
 
 
 def openai_api_key() -> Optional[str]:
-    return env("OpenAI_ftip-system") or env("OPENAI_API_KEY")
+    return env("OPENAI_API_KEY") or env("OpenAI_ftip-system")
 
 
 def llm_model() -> str:

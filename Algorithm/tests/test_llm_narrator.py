@@ -26,7 +26,7 @@ def test_narrator_signal_missing_key(monkeypatch):
     }
     resp = client.post("/narrator/signal", json=payload)
     assert resp.status_code == 503
-    assert resp.json().get("detail", {}).get("trace_id")
+    assert resp.json().get("trace_id")
 
 
 def test_narrator_signal_uses_disclaimer(monkeypatch):

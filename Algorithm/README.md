@@ -93,14 +93,26 @@ curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
 
 Each call should return HTTP 200 with the latest signal containing `score_mode`.
 
-Prosperity endpoints require an API key when `FTIP_API_KEYS` is set. Configure a comma-separated list of keys and include the header `X-FTIP-API-Key` on every `/prosperity/*` request:
+Prosperity endpoints require an API key when any of the following are set (merged + trimmed in this order):
+
+- `FTIP_API_KEY`
+- `FTIP_API_KEYS` (comma-separated)
+- `FTIP_API_KEY_PRIMARY`
+
+If no keys are provided, auth is disabled for local development. When keys are set, include the header `X-FTIP-API-Key` (or `Authorization: Bearer <key>`) on every `/prosperity/*` request. Check the status safely with `/auth/status` (requires a key unless `FTIP_AUTH_STATUS_PUBLIC=1`).
 
 ```bash
-export FTIP_API_KEYS="demo-key"
+export FTIP_API_KEY="demo-key"
 export BASE=http://localhost:8000
 export KEY=demo-key
 
 bash scripts/phase2_verify.sh
+```
+
+Production verification (after setting Railway variables):
+
+```
+BASE="https://ftip-system-production.up.railway.app" KEY="cfotwin-dev-2025-12-29" ./scripts/phase2_verify.sh
 ```
 
 To run a local end-to-end smoke check that exercises the prosperity endpoints:
@@ -149,7 +161,7 @@ Environment variables (LLM feature-flagged by default):
 
 ```bash
 export FTIP_LLM_ENABLED=1               # enable the narrator endpoints (default is 0)
-export OPENAI_API_KEY=sk-...            # or set OpenAI_ftip-system
+export OPENAI_API_KEY=sk-...            # required (legacy OpenAI_ftip-system still supported)
 export FTIP_LLM_MODEL=gpt-4o-mini       # optional override
 export FTIP_LLM_MAX_TOKENS=700          # optional override
 export FTIP_LLM_TEMPERATURE=0.2         # optional override

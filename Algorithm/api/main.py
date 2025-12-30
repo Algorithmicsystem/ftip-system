@@ -1767,6 +1767,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
 security.add_cors_middleware(app)
+security.log_auth_config(logger)
 
 
 @app.middleware("http")
@@ -1797,7 +1798,8 @@ async def security_and_tracing_middleware(request: Request, call_next):
         if exc.status_code == 401:
             response = security.unauthorized_response(trace_id)
         else:
-            response = security.json_error_response("http_error", str(exc.detail), trace_id, exc.status_code)
+            detail_msg = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+            response = security.json_error_response("http_error", detail_msg, trace_id, exc.status_code)
     except RequestValidationError as exc:
         response = security.json_error_response("validation_error", str(exc), trace_id, 422)
     except Exception as exc:  # pragma: no cover - defensive
@@ -1829,7 +1831,8 @@ async def db_exception_handler(request: Request, exc: DBError):
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     trace_id = security.trace_id_from_request(request)
-    return security.json_error_response("http_error", str(exc.detail), trace_id, exc.status_code)
+    detail_msg = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+    return security.json_error_response("http_error", detail_msg, trace_id, exc.status_code)
 
 
 @app.exception_handler(RequestValidationError)
@@ -1907,6 +1910,18 @@ def root() -> Dict[str, Any]:
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {"status": "ok"}
+
+
+@app.get("/auth/status")
+async def auth_status(request: Request) -> Dict[str, Any]:
+    trace_id = security.trace_id_from_request(request)
+    if security.auth_enabled() and not security.auth_status_public():
+        try:
+            security.validate_api_key(request)
+        except HTTPException:
+            return security.unauthorized_response(trace_id)
+
+    return security.auth_status_payload()
 
 
 @app.get("/db/health")
