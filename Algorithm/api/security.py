@@ -5,7 +5,7 @@ import uuid
 from collections import deque
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import Request
+from fastapi import Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 
@@ -84,31 +84,47 @@ def json_error_response(err_type: str, message: str, trace_id: str, status_code:
     return JSONResponse(status_code=status_code, content=payload, headers={"X-Trace-Id": trace_id})
 
 
+def unauthorized_response(trace_id: str) -> JSONResponse:
+    return JSONResponse(status_code=401, content={"detail": "unauthorized"}, headers={"X-Trace-Id": trace_id})
+
+
+def _validate_api_key(provided: Optional[str], request: Optional[Request] = None) -> str:
+    keys = get_api_keys()
+    key = (provided or "").strip()
+    if not key or key not in keys:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if request is not None:
+        request.state.api_key = key
+    return key
+
+
+def require_prosperity_api_key(
+    request: Request, x_ftip_api_key: Optional[str] = Header(default=None, convert_underscores=False)
+) -> str:
+    return _validate_api_key(x_ftip_api_key, request)
+
+
 def require_api_key_if_needed(request: Request, trace_id: str) -> Optional[JSONResponse]:
     path = request.url.path
     method = request.method.upper()
     public_docs = allow_public_docs()
-    if path in {"/health", "/version", "/db/health", "/prosperity/health"}:
+    if path in {"/health", "/version", "/db/health"}:
         return None
     if public_docs and method == "GET" and path in {"/docs", "/openapi.json"}:
         return None
     if not path.startswith("/prosperity"):
         return None
 
-    keys = get_api_keys()
-    provided = request.headers.get("X-FTIP-API-Key")
-    if not provided:
-        return json_error_response("auth_error", "missing API key", trace_id, 401)
-    if provided not in keys:
-        return json_error_response("auth_error", "invalid API key", trace_id, 401)
-
-    request.state.api_key = provided
+    try:
+        _validate_api_key(request.headers.get("X-FTIP-API-Key"), request)
+    except HTTPException:
+        return unauthorized_response(trace_id)
     return None
 
 
 def enforce_rate_limit(request: Request, limiter: RateLimiter, trace_id: str) -> Optional[JSONResponse]:
     path = request.url.path
-    if path in {"/health", "/version", "/db/health", "/prosperity/health"}:
+    if path in {"/health", "/version", "/db/health"}:
         return None
 
     key = getattr(request.state, "api_key", None)

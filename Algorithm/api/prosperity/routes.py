@@ -5,9 +5,9 @@ import logging
 import time
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from api import config, db
+from api import config, db, security
 from api.ops import metrics_tracker
 from api.prosperity import ingest, query
 from api.prosperity.narrator import router as narrator_router
@@ -23,7 +23,7 @@ from api.prosperity.models import (
     UniverseUpsertRequest,
 )
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(security.require_prosperity_api_key)])
 logger = logging.getLogger(__name__)
 
 router.include_router(strategy_graph_router, prefix="/strategy_graph")
@@ -288,3 +288,103 @@ async def latest_features(symbol: str, lookback: int = 252):
     if not res:
         raise HTTPException(status_code=404, detail="not found")
     return res
+
+
+@router.get("/graph/strategy")
+async def strategy_graph(symbol: str, lookback: int = 252, days: int = 365):
+    _require_db_enabled(read=True)
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        raise HTTPException(status_code=400, detail="symbol required")
+    window_days = max(1, int(days))
+
+    try:
+        latest_row = db.safe_fetchone(
+            """
+            SELECT max(as_of)
+            FROM prosperity_signals_daily
+            WHERE symbol=%s AND lookback=%s
+            """,
+            (sym, lookback),
+        )
+    except db.DBError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    latest_as_of = latest_row[0] if latest_row else None
+    if latest_as_of is None:
+        raise HTTPException(status_code=404, detail="not found")
+
+    window_start = latest_as_of - dt.timedelta(days=window_days)
+
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT as_of, signal, score, regime, confidence
+            FROM prosperity_signals_daily
+            WHERE symbol=%s AND lookback=%s AND as_of BETWEEN %s AND %s
+            ORDER BY as_of ASC
+            """,
+            (sym, lookback, window_start, latest_as_of),
+        )
+    except db.DBError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="not found")
+
+    nodes: Dict[str, int] = {}
+    edges: Dict[tuple[str, str], int] = {}
+    series: List[Dict[str, Any]] = []
+
+    for as_of, signal, score, regime, confidence in rows:
+        sig = (signal or "UNKNOWN").upper()
+        nodes[sig] = nodes.get(sig, 0) + 1
+        series.append(
+            {
+                "as_of": as_of.isoformat(),
+                "signal": sig,
+                "score": float(score) if score is not None else None,
+                "regime": regime,
+                "confidence": confidence,
+            }
+        )
+
+    for idx in range(len(rows) - 1):
+        from_sig = (rows[idx][1] or "UNKNOWN").upper()
+        to_sig = (rows[idx + 1][1] or "UNKNOWN").upper()
+        edges[(from_sig, to_sig)] = edges.get((from_sig, to_sig), 0) + 1
+
+    nodes_list = [{"id": key, "count": count} for key, count in sorted(nodes.items())]
+    edges_list = [
+        {"from": pair[0], "to": pair[1], "count": count} for pair, count in sorted(edges.items())
+    ]
+
+    return {
+        "symbol": sym,
+        "lookback": lookback,
+        "window": {"days": window_days, "from": window_start.isoformat(), "to": latest_as_of.isoformat()},
+        "nodes": nodes_list,
+        "edges": edges_list,
+        "series_sample": series[:50],
+    }
+
+
+@router.get("/graph/universe")
+async def graph_universe():
+    _require_db_enabled(read=True)
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT u.symbol, COUNT(s.as_of) AS row_count
+            FROM prosperity_universe u
+            LEFT JOIN prosperity_signals_daily s ON s.symbol = u.symbol
+            WHERE u.active = TRUE
+            GROUP BY u.symbol
+            ORDER BY u.symbol ASC
+            """
+        )
+    except db.DBError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    data = [{"symbol": row[0], "rows": int(row[1]) if row[1] is not None else 0} for row in rows]
+    return {"symbols": data}

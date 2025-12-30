@@ -1794,7 +1794,10 @@ async def security_and_tracing_middleware(request: Request, call_next):
         logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
         response = security.json_error_response("database_error", str(exc), trace_id, exc.status_code)
     except HTTPException as exc:
-        response = security.json_error_response("http_error", str(exc.detail), trace_id, exc.status_code)
+        if exc.status_code == 401:
+            response = security.unauthorized_response(trace_id)
+        else:
+            response = security.json_error_response("http_error", str(exc.detail), trace_id, exc.status_code)
     except RequestValidationError as exc:
         response = security.json_error_response("validation_error", str(exc), trace_id, 422)
     except Exception as exc:  # pragma: no cover - defensive

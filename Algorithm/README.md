@@ -93,6 +93,16 @@ curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
 
 Each call should return HTTP 200 with the latest signal containing `score_mode`.
 
+Prosperity endpoints require an API key when `FTIP_API_KEYS` is set. Configure a comma-separated list of keys and include the header `X-FTIP-API-Key` on every `/prosperity/*` request:
+
+```bash
+export FTIP_API_KEYS="demo-key"
+export BASE=http://localhost:8000
+export KEY=demo-key
+
+bash scripts/phase2_verify.sh
+```
+
 To run a local end-to-end smoke check that exercises the prosperity endpoints:
 
 ```bash
