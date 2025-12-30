@@ -107,3 +107,40 @@ curl -X POST http://localhost:8000/assistant/explain/signal \
 ```
 
 The narrator is safety-first and should never provide financial advice. It explains what the model computed, which thresholds were used, and what calibration metadata was present.
+
+## FTIP Narrator (OpenAI)
+
+Environment variables:
+
+```bash
+export FTIP_LLM_ENABLED=1
+export OpenAI_ftip-system=sk-...   # preferred
+# or export OPENAI_API_KEY=sk-...
+export FTIP_OPENAI_MODEL=gpt-4o-mini  # optional override
+```
+
+Signal narration example:
+
+```bash
+curl -X POST http://localhost:8000/narrator/signal \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"AAPL","as_of":"2024-12-31","lookback":252,"include_features":true,"include_db_history_days":30,"style":"memo"}'
+```
+
+Portfolio narration with optional backtest:
+
+```bash
+curl -X POST http://localhost:8000/narrator/portfolio \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-12-31","lookback":252,"rebalance_every":5,"max_weight":0.5,"style":"memo","include_backtest":true}'
+```
+
+Ask questions constrained to FTIP context:
+
+```bash
+curl -X POST http://localhost:8000/narrator/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Why is AAPL a BUY?","symbols":["AAPL"],"as_of":"2024-12-31","lookback":252}'
+```
+
+Set the Railway variable `OpenAI_ftip-system` so production can reach the OpenAI API.
