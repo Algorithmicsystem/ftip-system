@@ -135,37 +135,34 @@ The narrator is safety-first and should never provide financial advice. It expla
 
 ## FTIP Narrator (OpenAI)
 
-Environment variables:
+Environment variables (LLM feature-flagged by default):
 
 ```bash
-export FTIP_LLM_ENABLED=1
-export OpenAI_ftip-system=sk-...   # preferred
-# or export OPENAI_API_KEY=sk-...
-export FTIP_OPENAI_MODEL=gpt-4o-mini  # optional override
+export FTIP_LLM_ENABLED=1               # enable the narrator endpoints (default is 0)
+export OPENAI_API_KEY=sk-...            # or set OpenAI_ftip-system
+export FTIP_LLM_MODEL=gpt-4o-mini       # optional override
+export FTIP_LLM_MAX_TOKENS=700          # optional override
+export FTIP_LLM_TEMPERATURE=0.2         # optional override
 ```
 
-Signal narration example:
+Health check:
 
 ```bash
-curl -X POST http://localhost:8000/narrator/signal \
+curl "http://localhost:8000/prosperity/narrator/health"
+```
+
+Explain a symbol using DB-grounded context (strategy graph ensemble + strategies + features + latest signal):
+
+```bash
+curl "http://localhost:8000/prosperity/narrator/explain?symbol=AAPL&as_of_date=2024-12-31&lookback=252"
+```
+
+Ask system or comparative symbol questions (returns 404 if DB context is missing):
+
+```bash
+curl -X POST http://localhost:8000/prosperity/narrator/ask \
   -H "Content-Type: application/json" \
-  -d '{"symbol":"AAPL","as_of":"2024-12-31","lookback":252,"include_features":true,"include_db_history_days":30,"style":"memo"}'
+  -d '{"question":"Why is AAPL a BUY?","symbols":["AAPL","MSFT"],"as_of_date":"2024-12-31","lookback":252}'
 ```
 
-Portfolio narration with optional backtest:
-
-```bash
-curl -X POST http://localhost:8000/narrator/portfolio \
-  -H "Content-Type: application/json" \
-  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-12-31","lookback":252,"rebalance_every":5,"max_weight":0.5,"style":"memo","include_backtest":true}'
-```
-
-Ask questions constrained to FTIP context:
-
-```bash
-curl -X POST http://localhost:8000/narrator/ask \
-  -H "Content-Type: application/json" \
-  -d '{"question":"Why is AAPL a BUY?","symbols":["AAPL"],"as_of":"2024-12-31","lookback":252}'
-```
-
-Set the Railway variable `OpenAI_ftip-system` so production can reach the OpenAI API.
+Recommended flow: bootstrap the DB, run `/prosperity/strategy_graph/run` to populate ensembles, then call `/prosperity/narrator/explain` for narration. The narrator refuses to answer when DB context is missing and always returns a trace ID for auditing.

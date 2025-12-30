@@ -124,6 +124,37 @@ def latest_ensemble(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     }
 
 
+def ensemble_as_of(symbol: str, lookback: int, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
+    row = db.safe_fetchone(
+        """
+        SELECT symbol, as_of_date, lookback, regime, ensemble_method, final_signal, final_score,
+               final_confidence, thresholds, risk_overlay_applied, strategies_used, audit, hashes
+        FROM prosperity_ensemble_signals_daily
+        WHERE symbol=%s AND lookback=%s AND as_of_date<=%s
+        ORDER BY as_of_date DESC
+        LIMIT 1
+        """,
+        (symbol, lookback, as_of_date),
+    )
+    if not row:
+        return None
+    return {
+        "symbol": row[0],
+        "as_of_date": row[1].isoformat(),
+        "lookback": row[2],
+        "regime": row[3],
+        "ensemble_method": row[4],
+        "final_signal": row[5],
+        "final_score": row[6],
+        "final_confidence": row[7],
+        "thresholds": row[8],
+        "risk_overlay_applied": row[9],
+        "strategies_used": row[10],
+        "audit": row[11],
+        "hashes": row[12],
+    }
+
+
 def latest_strategies(symbol: str, lookback: int) -> List[Dict[str, Any]]:
     rows = db.safe_fetchall(
         """
@@ -158,4 +189,45 @@ def latest_strategies(symbol: str, lookback: int) -> List[Dict[str, Any]]:
     return out
 
 
-__all__ = ["upsert_strategy_rows", "upsert_ensemble_row", "latest_ensemble", "latest_strategies"]
+def strategies_as_of(symbol: str, lookback: int, as_of_date: dt.date) -> List[Dict[str, Any]]:
+    rows = db.safe_fetchall(
+        """
+        SELECT symbol, as_of_date, lookback, strategy_id, strategy_version, regime, raw_score, normalized_score,
+               signal, confidence, rationale, feature_contributions, meta
+        FROM prosperity_strategy_signals_daily
+        WHERE symbol=%s AND lookback=%s AND as_of_date<=%s
+        ORDER BY as_of_date DESC
+        LIMIT 25
+        """,
+        (symbol, lookback, as_of_date),
+    )
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        out.append(
+            {
+                "symbol": r[0],
+                "as_of_date": r[1].isoformat(),
+                "lookback": r[2],
+                "strategy_id": r[3],
+                "strategy_version": r[4],
+                "regime": r[5],
+                "raw_score": r[6],
+                "normalized_score": r[7],
+                "signal": r[8],
+                "confidence": r[9],
+                "rationale": r[10],
+                "feature_contributions": r[11],
+                "meta": r[12],
+            }
+        )
+    return out
+
+
+__all__ = [
+    "upsert_strategy_rows",
+    "upsert_ensemble_row",
+    "latest_ensemble",
+    "latest_strategies",
+    "ensemble_as_of",
+    "strategies_as_of",
+]
