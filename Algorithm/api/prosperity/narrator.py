@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from api import config, db
 from api.llm import client as llm_client
+from api.ops import metrics_tracker
 from api.prosperity import query
 from api.prosperity.strategy_graph_db import (
     ensemble_as_of,
@@ -299,6 +300,8 @@ async def narrator_explain(request: Request, symbol: str, as_of_date: dt.date, l
     signal = context.get("signal")
     grounding = _build_grounding(context["symbol"], ensemble, strategies, features, signal)
 
+    metrics_tracker.record_narrator_call()
+
     return NarratorExplainResponse(
         symbol=context["symbol"],
         as_of_date=as_of_date,
@@ -351,6 +354,8 @@ async def narrator_ask(payload: NarratorAskRequest, request: Request) -> Narrato
         "symbols": [ctx.get("symbol") for ctx in contexts],
         "trace_id": trace_id,
     }
+
+    metrics_tracker.record_narrator_call()
 
     return NarratorAskResponse(
         answer=reply,

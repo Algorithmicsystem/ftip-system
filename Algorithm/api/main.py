@@ -19,11 +19,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
-from api import db, migrations
+from api import db, migrations, security
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
 from api.llm.routes import router as llm_router
 from api.prosperity.routes import router as prosperity_router
+from api.ops import metrics_tracker, router as ops_router
 
 # =============================================================================
 # App + environment helpers
@@ -89,6 +90,8 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 DB_ENABLED = db.db_enabled()
 DB_REQUIRED = (_env("FTIP_DB_REQUIRED", "0") or "0") == "1"
+RATE_LIMIT_RPM = _env_int("FTIP_RATE_LIMIT_RPM", 60)
+rate_limiter = security.RateLimiter(RATE_LIMIT_RPM)
 
 
 def _db_pool_ready() -> bool:
@@ -1763,31 +1766,40 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 # =============================================================================
 
 app = FastAPI(title=APP_NAME, version="1.0.0")
-
-
-def _trace_id_from_request(request: Request) -> str:
-    trace_id = getattr(request.state, "trace_id", None)
-    if not trace_id:
-        trace_id = uuid.uuid4().hex
-        request.state.trace_id = trace_id
-    return trace_id
+security.add_cors_middleware(app)
 
 
 @app.middleware("http")
-async def add_trace_id(request: Request, call_next):
-    trace_id = request.headers.get("x-trace-id") or uuid.uuid4().hex
-    request.state.trace_id = trace_id
+async def security_and_tracing_middleware(request: Request, call_next):
+    trace_id = security.trace_id_from_request(request)
     start = time.perf_counter()
     logger.info(
         "request.start",
         extra={"path": request.url.path, "method": request.method, "trace_id": trace_id},
     )
 
+    auth_error = security.require_api_key_if_needed(request, trace_id)
+    if auth_error:
+        metrics_tracker.record_request(request.url.path, auth_error.status_code)
+        return auth_error
+
+    rate_limit_error = security.enforce_rate_limit(request, rate_limiter, trace_id)
+    if rate_limit_error:
+        metrics_tracker.record_request(request.url.path, rate_limit_error.status_code)
+        return rate_limit_error
+
     try:
         response = await call_next(request)
-    except Exception:
-        logger.exception("request.unhandled", extra={"path": request.url.path, "trace_id": trace_id})
-        raise
+    except DBError as exc:
+        logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
+        response = security.json_error_response("database_error", str(exc), trace_id, exc.status_code)
+    except HTTPException as exc:
+        response = security.json_error_response("http_error", str(exc.detail), trace_id, exc.status_code)
+    except RequestValidationError as exc:
+        response = security.json_error_response("validation_error", str(exc), trace_id, 422)
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("unhandled.error", extra={"trace_id": trace_id})
+        response = security.json_error_response(exc.__class__.__name__, str(exc), trace_id, 500)
 
     duration_ms = (time.perf_counter() - start) * 1000
     response.headers["X-Trace-Id"] = trace_id
@@ -1800,59 +1812,40 @@ async def add_trace_id(request: Request, call_next):
             "trace_id": trace_id,
         },
     )
+    metrics_tracker.record_request(request.url.path, response.status_code)
     return response
 
 
 @app.exception_handler(DBError)
 async def db_exception_handler(request: Request, exc: DBError):
-    trace_id = _trace_id_from_request(request)
+    trace_id = security.trace_id_from_request(request)
     logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": {"type": "database_error", "message": str(exc), "trace_id": trace_id}, "trace_id": trace_id},
-    )
+    return security.json_error_response("database_error", str(exc), trace_id, exc.status_code)
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
-    trace_id = _trace_id_from_request(request)
-    payload: Dict[str, Any] = {
-        "error": {"type": "http_error", "message": str(exc.detail), "trace_id": trace_id},
-        "detail": exc.detail,
-        "trace_id": trace_id,
-    }
-    return JSONResponse(status_code=exc.status_code, content=payload)
+    trace_id = security.trace_id_from_request(request)
+    return security.json_error_response("http_error", str(exc.detail), trace_id, exc.status_code)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    trace_id = _trace_id_from_request(request)
-    return JSONResponse(
-        status_code=422,
-        content={
-            "error": {
-                "type": "validation_error",
-                "message": exc.errors(),
-                "trace_id": trace_id,
-            },
-            "trace_id": trace_id,
-        },
-    )
+    trace_id = security.trace_id_from_request(request)
+    return security.json_error_response("validation_error", str(exc), trace_id, 422)
 
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    trace_id = _trace_id_from_request(request)
+    trace_id = security.trace_id_from_request(request)
     logger.exception("unhandled.error", extra={"trace_id": trace_id})
-    return JSONResponse(
-        status_code=500,
-        content={"error": {"type": exc.__class__.__name__, "message": str(exc), "trace_id": trace_id}, "trace_id": trace_id},
-    )
+    return security.json_error_response(exc.__class__.__name__, str(exc), trace_id, 500)
 
 
 app.include_router(assistant_router, prefix="/assistant")
 app.include_router(llm_router)
 app.include_router(prosperity_router, prefix="/prosperity")
+app.include_router(ops_router)
 
 
 @app.on_event("startup")

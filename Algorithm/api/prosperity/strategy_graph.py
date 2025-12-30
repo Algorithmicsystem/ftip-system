@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from api import config, db
+from api.ops import metrics_tracker
 from api.prosperity import ingest, query
 from api.prosperity.strategy_graph_db import (
     latest_ensemble,
@@ -150,8 +151,17 @@ async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
             logger.exception("strategy_graph.run.failed", extra={"symbol": sym, "trace_id": trace_id})
             continue
 
+    status = "ok" if not symbols_failed else "partial"
+    metrics_tracker.record_run(
+        "strategy_graph",
+        trace_id,
+        status,
+        timings=timings,
+        rows_written={"strategies": rows_written.get("strategies"), "ensembles": rows_written.get("ensembles")},
+    )
+
     return {
-        "status": "ok" if not symbols_failed else "partial",
+        "status": status,
         "trace_id": trace_id,
         "requested": requested,
         "result": {
