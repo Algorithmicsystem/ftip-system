@@ -211,7 +211,7 @@ async def narrator_portfolio(req: NarratorPortfolioRequest, request: Request) ->
     )
 
 
-@router.post("/narrator/ask", response_model=NarratorAskResponse)
+@router.post("/narrator/ask/legacy", response_model=NarratorAskResponse)
 async def narrator_ask(req: NarratorAskRequest, request: Request) -> NarratorAskResponse:
     trace_id = _trace_id(request)
     _ensure_api_key(trace_id)
