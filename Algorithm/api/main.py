@@ -22,6 +22,7 @@ from psycopg.types.json import Json
 from api import db, migrations
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
+from api.llm.routes import router as llm_router
 from api.prosperity.routes import router as prosperity_router
 
 # =============================================================================
@@ -1850,6 +1851,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(assistant_router, prefix="/assistant")
+app.include_router(llm_router)
 app.include_router(prosperity_router, prefix="/prosperity")
 
 
@@ -1899,6 +1901,9 @@ def root() -> Dict[str, Any]:
             "/assistant/explain/signal",
             "/assistant/explain/backtest",
             "/assistant/title_session",
+            "/narrator/signal",
+            "/narrator/portfolio",
+            "/narrator/ask",
         ],
     }
 

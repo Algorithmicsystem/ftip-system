@@ -66,6 +66,67 @@ def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     }
 
 
+def signal_as_of(symbol: str, lookback: int, as_of: dt.date) -> Optional[Dict[str, Any]]:
+    row = db.safe_fetchone(
+        """
+        SELECT symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, regime, thresholds, confidence,
+               notes, features, calibration_meta, meta, signal_hash
+        FROM prosperity_signals_daily
+        WHERE symbol=%s AND lookback=%s AND as_of<=%s
+        ORDER BY as_of DESC
+        LIMIT 1
+        """,
+        (symbol, lookback, as_of),
+    )
+    if not row:
+        return None
+    return {
+        "symbol": row[0],
+        "as_of": row[1].isoformat(),
+        "lookback": row[2],
+        "score_mode": row[3],
+        "score": row[4],
+        "base_score": row[5],
+        "stacked_score": row[6],
+        "signal": row[7],
+        "regime": row[8],
+        "thresholds": row[9],
+        "confidence": row[10],
+        "notes": row[11],
+        "features": row[12],
+        "calibration_meta": row[13],
+        "meta": row[14],
+        "signal_hash": row[15],
+    }
+
+
+def signal_history(symbol: str, lookback: int, as_of: dt.date, window_days: int) -> List[Dict[str, Any]]:
+    cutoff = as_of - dt.timedelta(days=max(0, window_days))
+    rows = db.safe_fetchall(
+        """
+        SELECT as_of, score_mode, score, signal, regime, thresholds, confidence
+        FROM prosperity_signals_daily
+        WHERE symbol=%s AND lookback=%s AND as_of BETWEEN %s AND %s
+        ORDER BY as_of DESC
+        """,
+        (symbol, lookback, cutoff, as_of),
+    )
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        out.append(
+            {
+                "as_of": row[0].isoformat(),
+                "score_mode": row[1],
+                "score": row[2],
+                "signal": row[3],
+                "regime": row[4],
+                "thresholds": row[5],
+                "confidence": row[6],
+            }
+        )
+    return out
+
+
 def latest_features(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
@@ -76,6 +137,28 @@ def latest_features(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
         LIMIT 1
         """,
         (symbol, lookback),
+    )
+    if not row:
+        return None
+    return {
+        "symbol": row[0],
+        "as_of": row[1].isoformat(),
+        "lookback": row[2],
+        "features": row[3],
+        "meta": row[4],
+    }
+
+
+def features_as_of(symbol: str, lookback: int, as_of: dt.date) -> Optional[Dict[str, Any]]:
+    row = db.safe_fetchone(
+        """
+        SELECT symbol, as_of, lookback, features, meta
+        FROM prosperity_features_daily
+        WHERE symbol=%s AND lookback=%s AND as_of<=%s
+        ORDER BY as_of DESC
+        LIMIT 1
+        """,
+        (symbol, lookback, as_of),
     )
     if not row:
         return None
