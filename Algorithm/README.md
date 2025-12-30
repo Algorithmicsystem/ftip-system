@@ -117,7 +117,7 @@ BASE="https://ftip-system-production.up.railway.app" KEY="cfotwin-dev-2025-12-29
 
 ## Phase 3 narrator verification
 
-Run the official checklist to validate the narrator endpoints and auth (requires `BASE` and `KEY`):
+Set `FTIP_API_KEY` (or `FTIP_API_KEYS`) and `OPENAI_API_KEY` on Railway, then run the official checklist to validate the narrator endpoints and auth (requires `BASE` and `KEY`, using the `X-FTIP-API-Key` header):
 
 ```bash
 BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase3_verify.sh
