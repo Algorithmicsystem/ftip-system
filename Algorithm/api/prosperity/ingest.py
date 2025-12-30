@@ -179,44 +179,66 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
     signal_payload = compute_signal_for_symbol_from_candles(sym, as_of_date.isoformat(), lookback, candles_all)
     signal_dict = signal_payload.model_dump()
     signal_hash = _hash_dict(signal_dict)
-    score_mode = _score_mode()
+
+    preferred_score_mode = signal_dict.get("score_mode")
+    calibration_meta = signal_dict.get("calibration_meta") or {}
+    if not preferred_score_mode:
+        preferred_score_mode = calibration_meta.get("score_mode")
+    if not preferred_score_mode:
+        notes = signal_dict.get("notes") or []
+        preferred_score_mode = "stacked" if any(isinstance(n, str) and "STACKED" in n.upper() for n in notes) else None
+    score_mode = preferred_score_mode or _score_mode() or "single"
+
+    base_score = signal_dict.get("base_score")
+    if base_score is None:
+        base_score = calibration_meta.get("base_score")
+    if base_score is None:
+        base_score = signal_dict.get("score")
+
+    stacked_score = signal_dict.get("stacked_score")
+    thresholds = signal_dict.get("thresholds") or {}
+    notes = signal_dict.get("notes") or []
+    features = signal_dict.get("features") or {}
+    meta = signal_dict.get("meta") or {}
 
     db.safe_execute(
         """
         INSERT INTO prosperity_signals_daily(
-            symbol, as_of, lookback, score, signal, thresholds, regime, confidence, notes, features, meta
-        ) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+            symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, thresholds, regime, confidence, notes, features, calibration_meta, meta, signal_hash
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s)
         ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
+            score_mode=EXCLUDED.score_mode,
             score=EXCLUDED.score,
+            base_score=EXCLUDED.base_score,
+            stacked_score=EXCLUDED.stacked_score,
             signal=EXCLUDED.signal,
             thresholds=EXCLUDED.thresholds,
             regime=EXCLUDED.regime,
             confidence=EXCLUDED.confidence,
             notes=EXCLUDED.notes,
             features=EXCLUDED.features,
+            calibration_meta=EXCLUDED.calibration_meta,
             meta=EXCLUDED.meta,
+            signal_hash=EXCLUDED.signal_hash,
             updated_at=now()
         """,
         (
             sym,
             as_of_date,
             lookback,
+            score_mode,
             signal_dict.get("score"),
+            base_score,
+            stacked_score,
             signal_dict.get("signal"),
-            json.dumps(signal_dict.get("thresholds")),
+            json.dumps(thresholds),
             signal_dict.get("regime"),
             signal_dict.get("confidence"),
-            json.dumps(signal_dict.get("notes")),
-            json.dumps(signal_dict.get("features")),
-            json.dumps(
-                {
-                    "score_mode": score_mode,
-                    "base_score": signal_dict.get("base_score"),
-                    "stacked_score": signal_dict.get("stacked_score"),
-                    "calibration_meta": signal_dict.get("calibration_meta"),
-                    "signal_hash": signal_hash,
-                }
-            ),
+            json.dumps(notes),
+            json.dumps(features),
+            json.dumps(calibration_meta),
+            json.dumps(meta),
+            signal_hash,
         ),
     )
     return signal_dict

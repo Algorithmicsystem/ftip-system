@@ -1,4 +1,5 @@
 import datetime as dt
+import os
 from typing import Dict, List
 
 import pytest
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 from api import db
 from api import migrations
 from api.prosperity import ingest, query
-from api.main import app
+from api.main import SignalResponse, app
 
 
 def _enable_db_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -123,3 +124,87 @@ def test_latest_endpoints_return_404(monkeypatch: pytest.MonkeyPatch, client: Te
 
     assert sig_res.status_code == 404
     assert feat_res.status_code == 404
+
+
+@pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
+def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    os.environ.setdefault("FTIP_DB_ENABLED", "1")
+    os.environ.setdefault("FTIP_DB_WRITE_ENABLED", "1")
+    os.environ.setdefault("FTIP_DB_READ_ENABLED", "1")
+
+    from api import db, migrations
+    from api.main import app
+
+    migrations.ensure_schema()
+    db.ensure_schema()
+
+    symbol = f"APX{dt.datetime.utcnow().timestamp():.0f}"[:8]
+    as_of = dt.date(2024, 2, 5)
+    lookback = 10
+
+    db.safe_execute("DELETE FROM prosperity_daily_bars WHERE symbol=%s", (symbol,))
+    db.safe_execute("DELETE FROM prosperity_signals_daily WHERE symbol=%s", (symbol,))
+    db.safe_execute("DELETE FROM prosperity_features_daily WHERE symbol=%s", (symbol,))
+
+    def _fake_bars(sym: str, from_date: dt.date, to_date: dt.date, **_kwargs):
+        for day in [from_date + dt.timedelta(days=i) for i in range((to_date - from_date).days + 1)]:
+            db.safe_execute(
+                """
+                INSERT INTO prosperity_daily_bars(symbol, date, close, volume, source)
+                VALUES (%s,%s,%s,%s,%s)
+                ON CONFLICT(symbol, date) DO UPDATE SET close=EXCLUDED.close, volume=EXCLUDED.volume
+                """,
+                (sym, day, 100.0, 10_000, "test"),
+            )
+        return {"inserted": 1, "updated": 0}
+
+    def _fake_features(sym: str, as_of_date: dt.date, lookback_val: int):
+        db.safe_execute(
+            """
+            INSERT INTO prosperity_features_daily(symbol, as_of, lookback, features, meta)
+            VALUES (%s,%s,%s,%s::jsonb,%s::jsonb)
+            ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET features=EXCLUDED.features, meta=EXCLUDED.meta
+            """,
+            (sym, as_of_date, lookback_val, "{}", "{}"),
+        )
+        return {"symbol": sym, "as_of": as_of_date.isoformat(), "lookback": lookback_val, "features": {}, "regime": None, "stored": True, "meta": {}}
+
+    def _fake_signal(sym: str, as_of_date: dt.date, lookback_val: int):
+        return ingest.compute_and_store_signal(sym, as_of_date, lookback_val)
+
+    monkeypatch.setattr(ingest, "ingest_bars", _fake_bars)
+    monkeypatch.setattr(ingest, "compute_and_store_features", _fake_features)
+    monkeypatch.setattr("api.main.compute_signal_for_symbol_from_candles", lambda *args, **kwargs: SignalResponse(
+        symbol=kwargs.get("symbol") or args[0],
+        as_of=kwargs.get("as_of") or args[1],
+        lookback=kwargs.get("lookback_val") or args[2],
+        effective_lookback=lookback,
+        regime="TRENDING",
+        thresholds={"buy": 1.0, "sell": -1.0},
+        score=0.4,
+        base_score=0.4,
+        stacked_score=0.4,
+        signal="BUY",
+        confidence=0.6,
+        features={"foo": 1.0},
+        notes=["Score mode: STACKED"],
+        calibration_meta={"score_mode": "stacked", "base_score": 0.4},
+    ))
+
+    with TestClient(app) as client:
+        res = client.post(
+            "/prosperity/snapshot/run",
+            json={
+                "symbols": [symbol],
+                "from_date": as_of.isoformat(),
+                "to_date": as_of.isoformat(),
+                "as_of_date": as_of.isoformat(),
+                "lookback": lookback,
+                "concurrency": 2,
+            },
+        )
+
+        assert res.status_code == 200
+        sig_res = client.get("/prosperity/latest/signal", params={"symbol": symbol, "lookback": lookback})
+        assert sig_res.status_code == 200
+        assert sig_res.json().get("score_mode") == "stacked"
