@@ -74,8 +74,24 @@ def llm_max_retries() -> int:
     return env_int("FTIP_LLM_MAX_RETRIES", 2)
 
 
+def llm_max_tokens() -> int:
+    return env_int("FTIP_LLM_MAX_TOKENS", 700)
+
+
+def llm_temperature() -> float:
+    return env_float("FTIP_LLM_TEMPERATURE", 0.2)
+
+
 def assistant_rate_limit() -> int:
     return env_int("FTIP_ASSISTANT_RATE_LIMIT", 30)
+
+
+def narrator_rate_limit() -> int:
+    return env_int("FTIP_NARRATOR_RATE_LIMIT", 30)
+
+
+def narrator_rate_window_seconds() -> int:
+    return env_int("FTIP_NARRATOR_RATE_WINDOW_SECONDS", 600)
 
 
 def safe_dict() -> dict[str, Any]:

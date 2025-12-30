@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 
 from api import config, db
 from api.prosperity import ingest, query
+from api.prosperity.narrator import router as narrator_router
 from api.prosperity.strategy_graph import router as strategy_graph_router
 from api.prosperity.models import (
     BarsIngestBulkRequest,
@@ -25,6 +26,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 router.include_router(strategy_graph_router, prefix="/strategy_graph")
+router.include_router(narrator_router, prefix="/narrator")
 
 
 def _require_db_enabled(write: bool = False, read: bool = False) -> None:

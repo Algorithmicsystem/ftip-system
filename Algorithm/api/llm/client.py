@@ -32,16 +32,16 @@ class LLMClient:
         self,
         messages: List[ChatCompletionMessageParam],
         *,
-        max_tokens: int = 400,
+        max_tokens: int = None,
         model: Optional[str] = None,
-        temperature: float = 0.4,
+        temperature: float = None,
     ) -> Tuple[str, str, Dict[str, Optional[int]]]:
         try:
             resp = self._client.chat.completions.create(
                 model=model or config.llm_model(),
                 messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
+                max_tokens=max_tokens if max_tokens is not None else config.llm_max_tokens(),
+                temperature=temperature if temperature is not None else config.llm_temperature(),
                 response_format={"type": "text"},
             )
             reply = resp.choices[0].message.content or ""
@@ -73,9 +73,9 @@ class LLMClient:
 def complete_chat(
     messages: List[ChatCompletionMessageParam],
     *,
-    max_tokens: int = 500,
+    max_tokens: Optional[int] = None,
     model: Optional[str] = None,
-    temperature: float = 0.4,
+    temperature: Optional[float] = None,
     trace_id: Optional[str] = None,
 ) -> Tuple[str, str, Dict[str, Optional[int]]]:
     client = LLMClient(trace_id)
