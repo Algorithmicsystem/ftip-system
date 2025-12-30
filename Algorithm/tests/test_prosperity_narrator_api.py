@@ -51,7 +51,7 @@ def test_explain_not_found_when_missing(monkeypatch):
     client = TestClient(app)
     resp = client.get("/prosperity/narrator/explain", params={"symbol": "AAPL", "as_of_date": "2024-01-31", "lookback": 252})
     assert resp.status_code == 404
-    assert "trace_id" in resp.json().get("detail", {})
+    assert resp.json().get("trace_id")
 
 
 def test_explain_ok_when_context_present(monkeypatch):

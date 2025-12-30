@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 def _missing_key_exc(trace_id: Optional[str]) -> HTTPException:
     detail = {
-        "message": "OpenAI API key not configured. Set OpenAI_ftip-system or OPENAI_API_KEY.",
+        "message": "OpenAI API key not configured. Set OPENAI_API_KEY (legacy OpenAI_ftip-system is supported as a fallback).",
         "trace_id": trace_id,
     }
     return HTTPException(status_code=503, detail=detail)

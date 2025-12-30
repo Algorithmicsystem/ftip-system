@@ -50,7 +50,7 @@ def test_chat_missing_api_key(monkeypatch):
     client = TestClient(app)
     resp = client.post("/assistant/chat", json={"message": "hi"})
     assert resp.status_code == 500
-    assert "LLM API key not configured" in resp.json()["detail"]
+    assert "LLM API key not configured" in resp.json()["error"]["message"]
 
 
 def test_storage_memory_roundtrip():
