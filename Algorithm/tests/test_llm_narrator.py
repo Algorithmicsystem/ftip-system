@@ -90,7 +90,7 @@ def test_narrator_ask_returns_citations(monkeypatch):
 
     client = TestClient(app)
     resp = client.post(
-        "/narrator/ask",
+        "/narrator/ask/legacy",
         json={
             "question": "Why is AAPL a BUY?",
             "symbols": ["AAPL"],

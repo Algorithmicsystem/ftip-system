@@ -194,7 +194,9 @@ def require_api_key_if_needed(request: Request, trace_id: str) -> Optional[JSONR
     if public_docs and method == "GET" and path in {"/docs", "/openapi.json"}:
         return None
 
-    if not path.startswith("/prosperity") and path != "/auth/status":
+    protected_prefixes = ("/prosperity", "/narrator")
+
+    if not path.startswith(protected_prefixes) and path != "/auth/status":
         return None
 
     if not auth_enabled():

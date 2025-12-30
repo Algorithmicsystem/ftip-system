@@ -115,6 +115,16 @@ Production verification (after setting Railway variables):
 BASE="https://ftip-system-production.up.railway.app" KEY="cfotwin-dev-2025-12-29" ./scripts/phase2_verify.sh
 ```
 
+## Phase 3 narrator verification
+
+Run the official checklist to validate the narrator endpoints and auth (requires `BASE` and `KEY`):
+
+```bash
+BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase3_verify.sh
+```
+
+The script confirms `/health` and `/version` remain public, `/narrator/health` is locked down without the key, and `/narrator/ask` + `/narrator/explain-signal` return narrated responses when the OpenAI API key is configured.
+
 To run a local end-to-end smoke check that exercises the prosperity endpoints:
 
 ```bash
