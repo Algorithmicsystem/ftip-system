@@ -1,39 +1,47 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -e
 
-BASE=${BASE:-http://localhost:8000}
-KEY=${KEY:-demo-key}
+BASE="${BASE:-https://ftip-system-production.up.railway.app}"
+KEY="${KEY:-}"
 
-print_head() {
-  local label="$1"
-  local cmd="$2"
-  echo "${label}" && eval "${cmd} | head"
-}
+echo "== health/version =="
+curl -s "$BASE/health" ; echo
+curl -s "$BASE/version" ; echo
 
-echo "1) Core health/version endpoints"
-for path in /health /version; do
-  code=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}${path}")
-  echo "   ${path} -> HTTP ${code}"
-done
+echo
+echo "== prosperity health (no key, should be 401) =="
+curl -s -i "$BASE/prosperity/health" | head -n 5 ; echo
 
-echo "\n2) Prosperity health should be protected (no key)"
-unauth_status=$(curl -s -o /dev/null -w "%{http_code}" "${BASE}/prosperity/health")
-echo "   /prosperity/health (no key) -> HTTP ${unauth_status}"
+echo
+echo "== prosperity health (with key, should be 200) =="
+curl -s -H "X-FTIP-API-Key: $KEY" "$BASE/prosperity/health" ; echo
 
-echo "\n3) Prosperity health with API key"
-auth_status=$(curl -s -o /dev/null -w "%{http_code}" -H "X-FTIP-API-Key: ${KEY}" "${BASE}/prosperity/health")
-echo "   /prosperity/health (with key) -> HTTP ${auth_status}"
-
-payload='{"symbols":["AAPL","MSFT","NVDA","AMZN","TSLA"],"from_date":"2024-01-01","to_date":"2024-01-05","as_of_date":"2024-01-05","lookback":252}'
-
-echo "\n4) Run snapshot for five symbols"
-curl -s -X POST "${BASE}/prosperity/snapshot/run" \
+echo
+echo "== run snapshot =="
+curl -s -X POST "$BASE/prosperity/snapshot/run" \
   -H "Content-Type: application/json" \
-  -H "X-FTIP-API-Key: ${KEY}" \
-  -d "${payload}" | head
+  -H "X-FTIP-API-Key: $KEY" \
+  -d '{
+    "symbols":["AAPL","MSFT","NVDA","AMZN","TSLA"],
+    "from_date":"2023-01-01",
+    "to_date":"2024-12-31",
+    "as_of_date":"2024-12-31",
+    "lookback":252,
+    "concurrency":3
+  }' | head -c 1200 ; echo
 
-echo "\n5) Latest signal for AAPL"
-print_head "   latest signal" "curl -s -H 'X-FTIP-API-Key: ${KEY}' '${BASE}/prosperity/latest/signal?symbol=AAPL&lookback=252'"
+echo
+echo "== latest signal =="
+curl -s -H "X-FTIP-API-Key: $KEY" \
+  "$BASE/prosperity/latest/signal?symbol=AAPL&lookback=252" | head -c 1200 ; echo
 
-echo "\n6) Strategy graph sample for AAPL"
-print_head "   strategy graph" "curl -s -H 'X-FTIP-API-Key: ${KEY}' '${BASE}/prosperity/graph/strategy?symbol=AAPL&lookback=252&days=365'"
+echo
+echo "== strategy graph =="
+curl -s -H "X-FTIP-API-Key: $KEY" \
+  "$BASE/prosperity/graph/strategy?symbol=AAPL&lookback=252&days=365" | head -c 1200 ; echo
+
+echo
+echo "== universe graph =="
+curl -s -H "X-FTIP-API-Key: $KEY" \
+  "$BASE/prosperity/graph/universe" | head -c 1200 ; echo
+
