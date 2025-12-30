@@ -166,3 +166,44 @@ curl -X POST http://localhost:8000/prosperity/narrator/ask \
 ```
 
 Recommended flow: bootstrap the DB, run `/prosperity/strategy_graph/run` to populate ensembles, then call `/prosperity/narrator/explain` for narration. The narrator refuses to answer when DB context is missing and always returns a trace ID for auditing.
+## Phase 3 Production Hardening
+
+Set the new production guardrails before shipping:
+
+```bash
+export FTIP_API_KEYS="prod-api-key-1,prod-api-key-2"   # or FTIP_API_KEYS_JSON='["key1","key2"]'
+export FTIP_PUBLIC_DOCS=0                               # set to 1 to expose /docs + /openapi.json without a key
+export FTIP_ALLOWED_ORIGINS="https://cfotwin.ca,https://www.cfotwin.ca"  # CORS allow-list
+export FTIP_RATE_LIMIT_RPM=120                          # requests per minute per API key/IP
+```
+
+On Railway, set the custom domain under **Settings → Domains** to `cfotwin.ca` (and `www.cfotwin.ca` if you want the www alias)
+after adding the DNS records in Cloudflare. No secrets should be hardcoded; rely on Railway environment variables.
+
+Copy/paste friendly curl examples (include the required API key header for prosperity endpoints):
+
+```bash
+API_KEY=prod-api-key-1
+BASE="https://cfotwin.ca"  # or your preview URL
+
+curl -H "X-FTIP-API-Key: ${API_KEY}" "${BASE}/prosperity/narrator/health"
+curl -H "X-FTIP-API-Key: ${API_KEY}" "${BASE}/prosperity/strategy_graph/latest/ensemble?symbol=AAPL&lookback=252"
+curl -H "X-FTIP-API-Key: ${API_KEY}" -X POST "${BASE}/prosperity/snapshot/run" \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["AAPL"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
+```
+
+Operational endpoints (no secrets) for observability:
+
+```bash
+curl "${BASE}/ops/domain"     # shows allowed origins + base URL
+curl "${BASE}/ops/metrics"    # JSON counters (requests, rate-limit hits, narrator calls, etc.)
+curl "${BASE}/ops/last_runs"  # recent snapshot/strategy_graph executions
+```
+
+To run the phase 3 verifier locally against a running server:
+
+```bash
+BASE_URL=http://localhost:8000 API_KEY=${API_KEY} bash scripts/verify_phase3.sh
+```
+

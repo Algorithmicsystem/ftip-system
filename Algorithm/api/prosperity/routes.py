@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, HTTPException, Request
 
 from api import config, db
+from api.ops import metrics_tracker
 from api.prosperity import ingest, query
 from api.prosperity.narrator import router as narrator_router
 from api.prosperity.strategy_graph import router as strategy_graph_router
@@ -247,8 +248,17 @@ async def snapshot_run(req: SnapshotRunRequest, request: Request):
     if req.compute_strategy_graph:
         result_payload["strategy_graph_rows"] = strategy_graph_rows
 
+    status = "ok" if not symbols_failed else "partial"
+    metrics_tracker.record_run(
+        "snapshot",
+        trace_id,
+        status,
+        timings=timings,
+        rows_written={"signals": rows_written.get("signals"), "features": rows_written.get("features")},
+    )
+
     return {
-        "status": "ok",
+        "status": status,
         "trace_id": trace_id,
         "requested": requested,
         "result": result_payload,
