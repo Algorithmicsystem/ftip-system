@@ -56,6 +56,18 @@ curl -X POST http://localhost:8000/prosperity/snapshot/run \
 curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
 ```
 
+To smoke test the snapshot->latest round trip on a fresh database, run:
+
+```bash
+curl -X POST http://localhost:8000/prosperity/bootstrap
+curl -X POST http://localhost:8000/prosperity/snapshot/run \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["AAPL"],"from_date":"2024-01-01","to_date":"2024-01-05","as_of_date":"2024-01-05","lookback":252}'
+curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
+```
+
+Each call should return HTTP 200 with the latest signal containing `score_mode`.
+
 To run a local end-to-end smoke check that exercises the prosperity endpoints:
 
 ```bash

@@ -36,7 +36,7 @@ def fetch_bars(symbol: str, from_date: dt.date, to_date: dt.date) -> List[Dict[s
 def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
-        SELECT symbol, as_of, lookback, score, signal, regime, thresholds, confidence, notes, features, meta
+        SELECT symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, regime, thresholds, confidence, notes, features, calibration_meta, meta, signal_hash
         FROM prosperity_signals_daily
         WHERE symbol=%s AND lookback=%s
         ORDER BY as_of DESC
@@ -50,14 +50,19 @@ def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
         "symbol": row[0],
         "as_of": row[1].isoformat(),
         "lookback": row[2],
-        "score": row[3],
-        "signal": row[4],
-        "regime": row[5],
-        "thresholds": row[6],
-        "confidence": row[7],
-        "notes": row[8],
-        "features": row[9],
-        "meta": row[10],
+        "score_mode": row[3],
+        "score": row[4],
+        "base_score": row[5],
+        "stacked_score": row[6],
+        "signal": row[7],
+        "regime": row[8],
+        "thresholds": row[9],
+        "confidence": row[10],
+        "notes": row[11],
+        "features": row[12],
+        "calibration_meta": row[13],
+        "meta": row[14],
+        "signal_hash": row[15],
     }
 
 
