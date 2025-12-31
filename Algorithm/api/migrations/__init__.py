@@ -238,41 +238,39 @@ def _migration_job_metadata(cur: Any) -> None:
         """
         CREATE TABLE IF NOT EXISTS ftip_job_runs (
             run_id UUID PRIMARY KEY,
-            job_name TEXT NOT NULL,
+            job_name TEXT,
             as_of_date DATE,
-            started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            started_at TIMESTAMPTZ DEFAULT now(),
             finished_at TIMESTAMPTZ,
             status TEXT,
-            requested JSONB,
+            requested JSONB DEFAULT '{}'::jsonb,
             result JSONB,
             error TEXT,
-            lock_owner TEXT NOT NULL DEFAULT 'unknown',
+            lock_owner TEXT,
             lock_acquired_at TIMESTAMPTZ,
             lock_expires_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ DEFAULT now()
         )
         """
     )
-    _ensure_column(cur, "ftip_job_runs", "job_name", "IF NOT EXISTS job_name TEXT NOT NULL")
+    _ensure_column(cur, "ftip_job_runs", "job_name", "IF NOT EXISTS job_name TEXT")
     _ensure_column(cur, "ftip_job_runs", "as_of_date", "IF NOT EXISTS as_of_date DATE")
-    _ensure_column(cur, "ftip_job_runs", "started_at", "IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+    _ensure_column(cur, "ftip_job_runs", "started_at", "IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT now()")
     _ensure_column(cur, "ftip_job_runs", "finished_at", "IF NOT EXISTS finished_at TIMESTAMPTZ")
     _ensure_column(cur, "ftip_job_runs", "status", "IF NOT EXISTS status TEXT")
-    _ensure_column(cur, "ftip_job_runs", "requested", "IF NOT EXISTS requested JSONB")
+    _ensure_column(cur, "ftip_job_runs", "requested", "IF NOT EXISTS requested JSONB DEFAULT '{}'::jsonb")
     _ensure_column(cur, "ftip_job_runs", "result", "IF NOT EXISTS result JSONB")
     _ensure_column(cur, "ftip_job_runs", "error", "IF NOT EXISTS error TEXT")
-    _ensure_column(cur, "ftip_job_runs", "lock_owner", "IF NOT EXISTS lock_owner TEXT NOT NULL DEFAULT 'unknown'")
+    _ensure_column(cur, "ftip_job_runs", "lock_owner", "IF NOT EXISTS lock_owner TEXT")
     _ensure_column(cur, "ftip_job_runs", "lock_acquired_at", "IF NOT EXISTS lock_acquired_at TIMESTAMPTZ")
     _ensure_column(cur, "ftip_job_runs", "lock_expires_at", "IF NOT EXISTS lock_expires_at TIMESTAMPTZ")
-    _ensure_column(cur, "ftip_job_runs", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-    _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+    _ensure_column(cur, "ftip_job_runs", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
+    _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
 
-    cur.execute("DROP INDEX IF EXISTS ftip_job_runs_active_idx")
-    cur.execute("DROP INDEX IF EXISTS ftip_job_runs_active_uq")
     cur.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_idx
+        CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_job
         ON ftip_job_runs(job_name)
         WHERE finished_at IS NULL
         """
@@ -404,19 +402,19 @@ def _verify_job_run_schema(cur: Any) -> None:
         JOIN pg_index i ON t.oid = i.indrelid
         JOIN pg_class idx ON idx.oid = i.indexrelid
         WHERE t.relname = 'ftip_job_runs'
-          AND idx.relname = 'ftip_job_runs_active_idx'
+          AND idx.relname = 'ftip_job_runs_active_job'
     """
     )
     index_row = cur.fetchone()
     if not index_row:
-        raise RuntimeError("database_schema_missing: ftip_job_runs_active_idx")
+        raise RuntimeError("database_schema_missing: ftip_job_runs_active_job")
 
     is_unique, index_def, predicate = index_row
     predicate = predicate or ""
     index_def = index_def or ""
     if not is_unique or "(job_name)" not in index_def or "finished_at IS NULL" not in predicate:
         raise RuntimeError(
-            "ftip_job_runs_active_idx must be a unique partial index on job_name where finished_at IS NULL"
+            "ftip_job_runs_active_job must be a unique partial index on job_name where finished_at IS NULL"
         )
 
 

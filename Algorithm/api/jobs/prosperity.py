@@ -134,35 +134,32 @@ def _acquire_job_lock(
                 job_name,
                 as_of_date,
                 started_at,
-                status,
                 requested,
                 lock_owner,
                 lock_acquired_at,
                 lock_expires_at,
+                status,
                 created_at,
-                updated_at
+                updated_at,
+                finished_at
             )
             VALUES (
                 %s,
                 %s,
                 %s,
                 now(),
-                'IN_PROGRESS',
                 %s::jsonb,
                 %s,
                 now(),
                 now() + (%s || ' seconds')::interval,
+                'IN_PROGRESS',
                 now(),
-                now()
+                now(),
+                NULL
             )
             ON CONFLICT (job_name) WHERE finished_at IS NULL
             DO NOTHING
-            RETURNING
-                run_id,
-                started_at,
-                lock_owner,
-                lock_acquired_at,
-                lock_expires_at
+            RETURNING run_id
             """,
             (
                 run_id,
@@ -175,16 +172,35 @@ def _acquire_job_lock(
         )
         inserted = cur.fetchone()
         if inserted:
-            inserted_run_id, started_at, owner, lock_acquired_at, lock_expires_at = inserted
+            inserted_run_id = inserted[0]
+            cur.execute(
+                """
+                SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
+                FROM ftip_job_runs
+                WHERE run_id = %s
+                LIMIT 1
+                """,
+                (inserted_run_id,),
+            )
+            inserted_row = cur.fetchone()
             conn.commit()
+            if inserted_row:
+                inserted_run_id, started_at, owner, lock_acquired_at, lock_expires_at = inserted_row
+                return True, {
+                    "run_id": str(inserted_run_id),
+                    "started_at": started_at.isoformat() if started_at else None,
+                    "lock_owner": owner,
+                    "lock_acquired_at": lock_acquired_at.isoformat()
+                    if lock_acquired_at
+                    else None,
+                    "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                }
             return True, {
                 "run_id": str(inserted_run_id),
-                "started_at": started_at.isoformat() if started_at else None,
-                "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat()
-                if lock_acquired_at
-                else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "started_at": None,
+                "lock_owner": None,
+                "lock_acquired_at": None,
+                "lock_expires_at": None,
             }
 
         cur.execute(
@@ -192,7 +208,7 @@ def _acquire_job_lock(
             SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
             FROM ftip_job_runs
             WHERE job_name = %s AND finished_at IS NULL
-            FOR UPDATE
+            LIMIT 1
             """,
             (job_name,),
         )
