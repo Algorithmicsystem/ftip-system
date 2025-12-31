@@ -7,10 +7,12 @@ BEGIN
         started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         finished_at TIMESTAMPTZ,
         status TEXT,
-        requested JSONB,
+        requested JSONB NOT NULL DEFAULT '{}'::jsonb,
         result JSONB,
         error TEXT,
         lock_owner TEXT NOT NULL DEFAULT 'unknown',
+        lock_acquired_at TIMESTAMPTZ,
+        lock_expires_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
@@ -18,21 +20,9 @@ BEGIN
     ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS job_name TEXT;
     ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN job_name DROP NOT NULL;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN job_name SET NOT NULL;
-
-    ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS as_of_date DATE;
     ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN started_at DROP DEFAULT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN started_at SET DEFAULT now();
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN started_at SET NOT NULL;
-
     ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
     ALTER TABLE IF EXISTS ftip_job_runs
@@ -43,30 +33,35 @@ BEGIN
         ADD COLUMN IF NOT EXISTS result JSONB;
     ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS error TEXT;
-
     ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS lock_owner TEXT;
     ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN lock_owner DROP DEFAULT;
+        ADD COLUMN IF NOT EXISTS lock_acquired_at TIMESTAMPTZ;
     ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN lock_owner SET DEFAULT 'unknown';
-
+        ADD COLUMN IF NOT EXISTS lock_expires_at TIMESTAMPTZ;
     ALTER TABLE IF EXISTS ftip_job_runs
         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
     ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN created_at DROP DEFAULT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN created_at SET DEFAULT now();
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN created_at SET NOT NULL;
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+
+    UPDATE ftip_job_runs SET created_at = now() WHERE created_at IS NULL;
+    UPDATE ftip_job_runs SET updated_at = now() WHERE updated_at IS NULL;
+    UPDATE ftip_job_runs SET requested = '{}'::jsonb WHERE requested IS NULL;
+    UPDATE ftip_job_runs SET as_of_date = CURRENT_DATE WHERE as_of_date IS NULL;
+    UPDATE ftip_job_runs SET lock_owner = 'unknown' WHERE lock_owner IS NULL;
+    UPDATE ftip_job_runs SET started_at = now() WHERE started_at IS NULL;
 
     ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN updated_at DROP DEFAULT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ALTER COLUMN updated_at SET DEFAULT now();
-    ALTER TABLE IF EXISTS ftip_job_runs
+        ALTER COLUMN job_name SET NOT NULL,
+        ALTER COLUMN started_at SET DEFAULT now(),
+        ALTER COLUMN started_at SET NOT NULL,
+        ALTER COLUMN requested SET DEFAULT '{}'::jsonb,
+        ALTER COLUMN requested SET NOT NULL,
+        ALTER COLUMN lock_owner SET DEFAULT 'unknown',
+        ALTER COLUMN lock_owner SET NOT NULL,
+        ALTER COLUMN created_at SET DEFAULT now(),
+        ALTER COLUMN created_at SET NOT NULL,
+        ALTER COLUMN updated_at SET DEFAULT now(),
         ALTER COLUMN updated_at SET NOT NULL;
 
     IF NOT EXISTS (

@@ -366,6 +366,8 @@ def _verify_job_run_schema(cur: Any) -> None:
         "result",
         "error",
         "lock_owner",
+        "lock_acquired_at",
+        "lock_expires_at",
         "created_at",
         "updated_at",
     }
