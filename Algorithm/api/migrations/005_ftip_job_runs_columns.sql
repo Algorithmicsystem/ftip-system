@@ -18,38 +18,43 @@ BEGIN
     );
 
     ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS job_name TEXT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS as_of_date DATE;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS status TEXT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS requested JSONB;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS result JSONB;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS error TEXT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS lock_owner TEXT;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS lock_acquired_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS lock_expires_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
-        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ;
-    ALTER TABLE IF EXISTS ftip_job_runs
+        ADD COLUMN IF NOT EXISTS job_name TEXT,
+        ADD COLUMN IF NOT EXISTS as_of_date DATE,
+        ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS status TEXT,
+        ADD COLUMN IF NOT EXISTS requested JSONB,
+        ADD COLUMN IF NOT EXISTS result JSONB,
+        ADD COLUMN IF NOT EXISTS error TEXT,
+        ADD COLUMN IF NOT EXISTS lock_owner TEXT,
+        ADD COLUMN IF NOT EXISTS lock_acquired_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS lock_expires_at TIMESTAMPTZ,
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ,
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
-    UPDATE ftip_job_runs SET created_at = now() WHERE created_at IS NULL;
-    UPDATE ftip_job_runs SET updated_at = now() WHERE updated_at IS NULL;
-    UPDATE ftip_job_runs SET requested = '{}'::jsonb WHERE requested IS NULL;
-    UPDATE ftip_job_runs SET as_of_date = CURRENT_DATE WHERE as_of_date IS NULL;
-    UPDATE ftip_job_runs SET lock_owner = 'unknown' WHERE lock_owner IS NULL;
-    UPDATE ftip_job_runs SET started_at = now() WHERE started_at IS NULL;
+    UPDATE ftip_job_runs
+    SET created_at = COALESCE(created_at, started_at, now())
+    WHERE created_at IS NULL;
+
+    UPDATE ftip_job_runs
+    SET updated_at = COALESCE(updated_at, started_at, now())
+    WHERE updated_at IS NULL;
+
+    UPDATE ftip_job_runs
+    SET requested = '{}'::jsonb
+    WHERE requested IS NULL;
+
+    UPDATE ftip_job_runs
+    SET as_of_date = COALESCE(as_of_date, CURRENT_DATE)
+    WHERE as_of_date IS NULL;
+
+    UPDATE ftip_job_runs
+    SET lock_owner = COALESCE(lock_owner, 'unknown')
+    WHERE lock_owner IS NULL;
+
+    UPDATE ftip_job_runs
+    SET started_at = COALESCE(started_at, now())
+    WHERE started_at IS NULL;
 
     ALTER TABLE IF EXISTS ftip_job_runs
         ALTER COLUMN job_name SET NOT NULL,
@@ -64,16 +69,9 @@ BEGIN
         ALTER COLUMN updated_at SET DEFAULT now(),
         ALTER COLUMN updated_at SET NOT NULL;
 
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_indexes
-        WHERE schemaname = ANY (current_schemas(false))
-          AND tablename = 'ftip_job_runs'
-          AND indexname = 'ftip_job_runs_active_idx'
-    ) THEN
-        CREATE UNIQUE INDEX ftip_job_runs_active_idx
-            ON ftip_job_runs(job_name)
-            WHERE status = 'IN_PROGRESS';
-    END IF;
+    DROP INDEX IF EXISTS ftip_job_runs_active_idx;
+    CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_idx
+        ON ftip_job_runs(job_name)
+        WHERE finished_at IS NULL;
 END;
 $$;
