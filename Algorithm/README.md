@@ -170,6 +170,44 @@ The script confirms:
 - `/prosperity/snapshot/run` can compute enough bars for a 252-day lookback and writes at least one `signals` row.
 - `/narrator/portfolio` returns valid numeric performance fields when `include_backtest` is both `false` and `true`.
 
+## Phase 6 verification (Production snapshot job)
+
+Set the Railway variables to control the daily snapshot job runner:
+
+```
+FTIP_DB_ENABLED=1
+FTIP_DB_WRITE_ENABLED=1
+FTIP_DB_READ_ENABLED=1
+FTIP_MIGRATIONS_AUTO=1
+FTIP_API_KEY=your-api-key
+FTIP_UNIVERSE="AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B"
+FTIP_LOOKBACK=252
+FTIP_SNAPSHOT_WINDOW_DAYS=365
+FTIP_SNAPSHOT_CONCURRENCY=3
+# Optional: prune old rows
+FTIP_RETENTION_DAYS=730
+```
+
+Trigger the protected job endpoint manually:
+
+```bash
+curl -X POST "${BASE:-http://localhost:8000}/jobs/prosperity/daily-snapshot" \
+  -H "X-FTIP-API-Key: ${KEY}"
+```
+
+Then fetch the latest artifacts:
+
+```bash
+curl "${BASE:-http://localhost:8000}/prosperity/latest/signal?symbol=AAPL&lookback=252" -H "X-FTIP-API-Key: ${KEY}"
+curl "${BASE:-http://localhost:8000}/prosperity/graph/strategy?symbol=AAPL&lookback=252&days=365" -H "X-FTIP-API-Key: ${KEY}"
+```
+
+To validate production (or local) deployments end-to-end, run:
+
+```bash
+BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase6_verify.sh
+```
+
 ## Assistant / Narrator (Phase 5)
 
 Environment variables:
