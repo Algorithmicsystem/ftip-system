@@ -83,6 +83,7 @@ def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
 
     assert first.status_code == 200
     assert second.status_code == 409
+    assert second.json().get("error") == "locked"
     assert lock_calls and lock_calls[0]["ttl"] == 1200
 
 
