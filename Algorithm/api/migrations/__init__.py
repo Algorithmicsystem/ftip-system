@@ -301,7 +301,9 @@ def ensure_schema() -> List[str]:
     pool = db.get_pool()
     applied: List[str] = []
 
+    # Ensure bookkeeping table exists and is committed before we try to read from it
     with pool.connection(timeout=10) as conn:
+        conn.autocommit = True
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -311,7 +313,6 @@ def ensure_schema() -> List[str]:
                 )
                 """
             )
-            conn.commit()
 
     with pool.connection(timeout=10) as conn:
         with conn.cursor() as cur:
@@ -321,19 +322,67 @@ def ensure_schema() -> List[str]:
                 logger.info("[migrations] another instance is applying migrations; skipping")
                 return applied
 
-            cur.execute("SELECT version FROM schema_migrations")
-            existing = {row[0] for row in cur.fetchall()}
-            for version, migration in MIGRATIONS:
-                if version in existing:
-                    continue
-                logger.info("[migrations] applying %s", version)
-                migration(cur)
-                cur.execute("INSERT INTO schema_migrations(version) VALUES (%s)", (version,))
-                applied.append(version)
-            conn.commit()
-            cur.execute("SELECT pg_advisory_unlock(87123)")
+            try:
+                cur.execute("SELECT version FROM schema_migrations")
+                existing = {row[0] for row in cur.fetchall()}
+                for version, migration in MIGRATIONS:
+                    if version in existing:
+                        continue
+                    logger.info("[migrations] applying %s", version)
+                    try:
+                        migration(cur)
+                        cur.execute(
+                            "INSERT INTO schema_migrations(version) VALUES (%s)",
+                            (version,),
+                        )
+                        conn.commit()
+                        applied.append(version)
+                    except Exception:
+                        conn.rollback()
+                        logger.exception("[migrations] failed applying %s", version)
+                        raise
+
+                _verify_job_run_schema(cur)
+                conn.commit()
+            finally:
+                try:
+                    cur.execute("SELECT pg_advisory_unlock(87123)")
+                    conn.commit()
+                except Exception:
+                    logger.exception("[migrations] failed to release advisory lock")
 
     return applied
+
+
+def _verify_job_run_schema(cur: Any) -> None:
+    required_columns = {
+        "run_id",
+        "job_name",
+        "as_of_date",
+        "started_at",
+        "finished_at",
+        "status",
+        "requested",
+        "result",
+        "error",
+        "lock_owner",
+        "created_at",
+        "updated_at",
+    }
+
+    cur.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'ftip_job_runs'
+        """
+    )
+    existing = {row[0] for row in cur.fetchall()}
+    missing = sorted(required_columns - existing)
+    if missing:
+        raise RuntimeError(
+            "ftip_job_runs schema is missing required columns: " + ", ".join(missing)
+        )
 
 
 __all__ = [
