@@ -1867,9 +1867,8 @@ def _startup() -> None:
             if applied:
                 logger.info("[startup] applied migrations", extra={"versions": applied})
         except Exception as e:
-            if DB_REQUIRED:
-                raise
-            logger.warning("[startup] ensure_schema failed", extra={"error": str(e)})
+            logger.error("[startup] ensure_schema failed", exc_info=True, extra={"error": str(e)})
+            raise
 
 
 @app.get("/")

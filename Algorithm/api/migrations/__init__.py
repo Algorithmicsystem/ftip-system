@@ -268,9 +268,11 @@ def _migration_job_metadata(cur: Any) -> None:
     _ensure_column(cur, "ftip_job_runs", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()")
     _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
 
+    cur.execute("DROP INDEX IF EXISTS ftip_job_runs_active_idx")
+    cur.execute("DROP INDEX IF EXISTS ftip_job_runs_active_uq")
     cur.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_uq
+        CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_idx
         ON ftip_job_runs(job_name)
         WHERE finished_at IS NULL
         """
@@ -402,19 +404,19 @@ def _verify_job_run_schema(cur: Any) -> None:
         JOIN pg_index i ON t.oid = i.indrelid
         JOIN pg_class idx ON idx.oid = i.indexrelid
         WHERE t.relname = 'ftip_job_runs'
-          AND idx.relname = 'ftip_job_runs_active_uq'
-        """
+          AND idx.relname = 'ftip_job_runs_active_idx'
+    """
     )
     index_row = cur.fetchone()
     if not index_row:
-        raise RuntimeError("database_schema_missing: ftip_job_runs_active_uq")
+        raise RuntimeError("database_schema_missing: ftip_job_runs_active_idx")
 
     is_unique, index_def, predicate = index_row
     predicate = predicate or ""
     index_def = index_def or ""
     if not is_unique or "(job_name)" not in index_def or "finished_at IS NULL" not in predicate:
         raise RuntimeError(
-            "ftip_job_runs_active_uq must be a unique partial index on job_name where finished_at IS NULL"
+            "ftip_job_runs_active_idx must be a unique partial index on job_name where finished_at IS NULL"
         )
 
 
