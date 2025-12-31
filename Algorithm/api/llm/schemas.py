@@ -39,7 +39,7 @@ class NarratorPortfolioResponse(BaseModel):
     narrative: str
     bullets: List[str]
     disclaimer: str
-    performance: Optional[Dict[str, float]] = None
+    performance: Dict[str, float] = Field(default_factory=dict)
 
 
 class NarratorAskRequest(BaseModel):

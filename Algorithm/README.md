@@ -151,6 +151,25 @@ The script confirms:
 - `/narrator/explain-strategy-graph` returns a narrated graph with nodes.
 - `/narrator/diagnose` reports a clean bill of health for auth, DB, migrations, and latest signals.
 
+## Phase 5 verification (Narrator portfolio)
+
+Phase 5 hardens the narrator portfolio endpoint so it always returns valid JSON, even when a backtest is skipped. After setting `FTIP_API_KEY` (or `FTIP_API_KEYS`) and `OPENAI_API_KEY`, run the official script to validate Railway or local deployments:
+
+```bash
+# Local example
+BASE="http://localhost:8000" KEY="demo-key" ./scripts/phase5_verify.sh
+
+# Production example (Railway)
+BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase5_verify.sh
+```
+
+The script confirms:
+
+- `/health` and `/version` stay public.
+- `/narrator/health` rejects missing API keys and succeeds with the key.
+- `/prosperity/snapshot/run` can compute enough bars for a 252-day lookback and writes at least one `signals` row.
+- `/narrator/portfolio` returns valid numeric performance fields when `include_backtest` is both `false` and `true`.
+
 ## Assistant / Narrator (Phase 5)
 
 Environment variables:
