@@ -33,28 +33,28 @@ BEGIN
         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
 
     UPDATE ftip_job_runs
-    SET created_at = COALESCE(created_at, started_at, now())
+    SET created_at = COALESCE(created_at, now())
     WHERE created_at IS NULL;
 
     UPDATE ftip_job_runs
-    SET updated_at = COALESCE(updated_at, started_at, now())
+    SET updated_at = COALESCE(updated_at, now())
     WHERE updated_at IS NULL;
 
     UPDATE ftip_job_runs
-    SET requested = '{}'::jsonb
-    WHERE requested IS NULL;
+    SET started_at = COALESCE(started_at, created_at, now())
+    WHERE started_at IS NULL;
 
     UPDATE ftip_job_runs
-    SET as_of_date = COALESCE(as_of_date, CURRENT_DATE)
-    WHERE as_of_date IS NULL;
+    SET requested = COALESCE(requested, '{}'::jsonb)
+    WHERE requested IS NULL;
 
     UPDATE ftip_job_runs
     SET lock_owner = COALESCE(lock_owner, 'unknown')
     WHERE lock_owner IS NULL;
 
     UPDATE ftip_job_runs
-    SET started_at = COALESCE(started_at, now())
-    WHERE started_at IS NULL;
+    SET as_of_date = COALESCE(as_of_date, CURRENT_DATE)
+    WHERE as_of_date IS NULL;
 
     ALTER TABLE IF EXISTS ftip_job_runs
         ALTER COLUMN job_name SET NOT NULL,
@@ -70,8 +70,9 @@ BEGIN
         ALTER COLUMN updated_at SET NOT NULL;
 
     DROP INDEX IF EXISTS ftip_job_runs_active_idx;
-    CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_idx
-        ON ftip_job_runs(job_name)
+    DROP INDEX IF EXISTS ftip_job_runs_active_uq;
+    CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_uq
+        ON ftip_job_runs (job_name)
         WHERE finished_at IS NULL;
 END;
 $$;

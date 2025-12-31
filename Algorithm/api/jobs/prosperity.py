@@ -129,7 +129,7 @@ def _acquire_job_lock(
 
         cur.execute(
             """
-            SELECT run_id, started_at, lock_owner
+            SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
             FROM ftip_job_runs
             WHERE job_name = %s AND finished_at IS NULL
             FOR UPDATE
@@ -138,12 +138,18 @@ def _acquire_job_lock(
         )
         existing = cur.fetchone()
         if existing:
-            existing_run_id, started_at, owner = existing
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing
             conn.commit()
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
+                "lock_acquired_at": lock_acquired_at.isoformat()
+                if lock_acquired_at
+                else None,
+                "lock_expires_at": lock_expires_at.isoformat()
+                if lock_expires_at
+                else None,
             }
 
         cur.execute(
@@ -156,39 +162,74 @@ def _acquire_job_lock(
                 status,
                 requested,
                 lock_owner,
+                lock_acquired_at,
+                lock_expires_at,
+                created_at,
                 updated_at
             )
-            VALUES (%s, %s, %s, now(), 'IN_PROGRESS', %s, %s, now())
-            ON CONFLICT (job_name) WHERE finished_at IS NULL DO NOTHING
-            RETURNING started_at
+            VALUES (
+                %s,
+                %s,
+                %s,
+                now(),
+                'IN_PROGRESS',
+                %s::jsonb,
+                %s,
+                now(),
+                now() + (%s || ' seconds')::interval,
+                now(),
+                now()
+            )
+            ON CONFLICT (job_name) WHERE finished_at IS NULL
+            DO UPDATE SET
+                run_id = EXCLUDED.run_id,
+                as_of_date = EXCLUDED.as_of_date,
+                started_at = COALESCE(ftip_job_runs.started_at, EXCLUDED.started_at),
+                status = 'IN_PROGRESS',
+                requested = EXCLUDED.requested,
+                lock_owner = EXCLUDED.lock_owner,
+                lock_acquired_at = now(),
+                lock_expires_at = now() + (%s || ' seconds')::interval,
+                updated_at = now()
+            RETURNING
+                run_id,
+                started_at,
+                lock_owner,
+                lock_acquired_at,
+                lock_expires_at
             """,
-            (run_id, job_name, as_of_date, Json(requested), lock_owner),
+            (
+                run_id,
+                job_name,
+                as_of_date,
+                Json(requested),
+                lock_owner,
+                ttl_seconds,
+                ttl_seconds,
+            ),
         )
         inserted = cur.fetchone()
         if not inserted:
-            cur.execute(
-                """
-                SELECT run_id, started_at, lock_owner
-                FROM ftip_job_runs
-                WHERE job_name = %s AND finished_at IS NULL
-                """,
-                (job_name,),
-            )
-            existing_run_id, started_at, owner = cur.fetchone() or (None, None, None)
             conn.commit()
             return False, {
-                "run_id": str(existing_run_id) if existing_run_id else None,
-                "started_at": started_at.isoformat() if started_at else None,
-                "lock_owner": owner,
+                "run_id": None,
+                "started_at": None,
+                "lock_owner": None,
+                "lock_acquired_at": None,
+                "lock_expires_at": None,
             }
 
-        started_at = inserted[0]
+        inserted_run_id, started_at, owner, lock_acquired_at, lock_expires_at = inserted
         conn.commit()
 
         return True, {
-            "run_id": run_id,
+            "run_id": str(inserted_run_id),
             "started_at": started_at.isoformat() if started_at else None,
-            "lock_owner": lock_owner,
+            "lock_owner": owner,
+            "lock_acquired_at": lock_acquired_at.isoformat()
+            if lock_acquired_at
+            else None,
+            "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
         }
 
 

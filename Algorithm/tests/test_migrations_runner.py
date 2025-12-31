@@ -59,6 +59,10 @@ def test_ftip_job_runs_schema_contains_required_columns(monkeypatch):
         "as_of_date",
         "requested",
         "lock_owner",
+        "lock_acquired_at",
+        "lock_expires_at",
+        "created_at",
+        "updated_at",
         "started_at",
         "finished_at",
         "status",
@@ -106,7 +110,11 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                 """
                 SELECT COUNT(*)
                 FROM ftip_job_runs
-                WHERE created_at IS NULL OR updated_at IS NULL
+                WHERE created_at IS NULL
+                  OR updated_at IS NULL
+                  OR started_at IS NULL
+                  OR requested IS NULL
+                  OR lock_owner IS NULL
                 """
             )
             null_timestamps = cur.fetchone()[0]
@@ -127,10 +135,31 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                 FROM pg_indexes
                 WHERE schemaname = ANY (current_schemas(false))
                   AND tablename = 'ftip_job_runs'
-                  AND indexname = 'ftip_job_runs_active_idx'
+                  AND indexname = 'ftip_job_runs_active_uq'
                 """
             )
             index_def = cur.fetchone()[0]
+
+            upsert_run_id = uuid.uuid4()
+            cur.execute(
+                """
+                INSERT INTO ftip_job_runs (
+                    run_id,
+                    job_name,
+                    as_of_date,
+                    started_at,
+                    status,
+                    requested,
+                    lock_owner
+                )
+                VALUES (%s, %s, %s, now(), 'IN_PROGRESS', '{}'::jsonb, 'tester')
+                ON CONFLICT (job_name) WHERE finished_at IS NULL
+                DO UPDATE SET lock_owner = EXCLUDED.lock_owner
+                RETURNING run_id
+                """,
+                (upsert_run_id, "legacy_job", dt.date(2024, 1, 1)),
+            )
+            conflict_upserted = cur.fetchone()[0]
 
     assert {"as_of_date", "lock_acquired_at", "lock_expires_at"}.issubset(columns)
     assert null_timestamps == 0
@@ -138,6 +167,7 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
     assert lock_owner == "unknown"
     assert as_of_date is not None
     assert "finished_at IS NULL" in index_def
+    assert str(conflict_upserted) == str(upsert_run_id)
 
 
 def test_acquire_job_lock_uses_active_index(monkeypatch):
