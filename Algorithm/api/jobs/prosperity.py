@@ -90,61 +90,105 @@ def cleanup_retention(as_of_date: dt.date, retention_days: int) -> Dict[str, int
     return deleted
 
 
-def _acquire_job_lock(job_name: str, ttl_seconds: int, lock_owner: str) -> Tuple[bool, Dict[str, str]]:
+def _cleanup_stale_job_runs(cur, job_name: str, ttl_seconds: int) -> List[str]:
+    cur.execute(
+        """
+        UPDATE ftip_job_runs
+        SET status = 'FAILED',
+            error = 'stale lock cleared',
+            finished_at = now(),
+            updated_at = now()
+        WHERE job_name = %s
+          AND status = 'IN_PROGRESS'
+          AND started_at < now() - (%s || ' seconds')::interval
+        RETURNING run_id
+        """,
+        (job_name, ttl_seconds),
+    )
+    rows = cur.fetchall() or []
+    cleared = [str(row[0]) for row in rows]
+    if cleared:
+        logger.warning(
+            "jobs.prosperity.daily_snapshot.stale_lock_cleared",
+            extra={"job_name": job_name, "run_ids": cleared},
+        )
+    return cleared
+
+
+def _acquire_job_lock(
+    run_id: str,
+    job_name: str,
+    as_of_date: dt.date,
+    requested: Dict[str, object],
+    ttl_seconds: int,
+    lock_owner: str,
+) -> Tuple[bool, Dict[str, str]]:
     with db.with_connection() as (conn, cur):
+        _cleanup_stale_job_runs(cur, job_name, ttl_seconds)
+
         cur.execute(
             """
-            INSERT INTO ftip_job_locks(job_name, locked_until, lock_owner, updated_at)
-            VALUES (%s, now() + (%s || ' seconds')::interval, %s, now())
-            ON CONFLICT (job_name) DO UPDATE
-            SET locked_until = EXCLUDED.locked_until,
-                lock_owner = EXCLUDED.lock_owner,
-                updated_at = now()
-            WHERE ftip_job_locks.locked_until < now()
-            RETURNING locked_until, lock_owner
+            SELECT run_id, started_at, lock_owner
+            FROM ftip_job_runs
+            WHERE job_name = %s AND status = 'IN_PROGRESS'
+            FOR UPDATE
             """,
-            (job_name, ttl_seconds, lock_owner),
+            (job_name,),
         )
-        row = cur.fetchone()
-        conn.commit()
-        if row:
-            locked_until, owner = row
-            return True, {
-                "locked_until": locked_until.isoformat(),
+        existing = cur.fetchone()
+        if existing:
+            existing_run_id, started_at, owner = existing
+            conn.commit()
+            return False, {
+                "run_id": str(existing_run_id),
+                "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
             }
 
         cur.execute(
-            "SELECT locked_until, lock_owner FROM ftip_job_locks WHERE job_name=%s",
-            (job_name,),
-        )
-        existing = cur.fetchone() or (None, None)
-        locked_until, owner = existing
-        return False, {
-            "locked_until": locked_until.isoformat() if locked_until else None,
-            "lock_owner": owner,
-        }
-
-
-def _release_job_lock(job_name: str) -> None:
-    with db.with_connection() as (conn, cur):
-        cur.execute(
-            "UPDATE ftip_job_locks SET locked_until = now(), updated_at = now() WHERE job_name = %s",
-            (job_name,),
-        )
-        conn.commit()
-
-
-def _insert_job_run(run_id: str, job_name: str, requested: Dict[str, object]) -> None:
-    with db.with_connection() as (conn, cur):
-        cur.execute(
             """
-            INSERT INTO ftip_job_runs (run_id, job_name, started_at, status, requested, updated_at)
-            VALUES (%s, %s, now(), %s, %s, now())
+            INSERT INTO ftip_job_runs (
+                run_id,
+                job_name,
+                as_of_date,
+                started_at,
+                status,
+                requested,
+                lock_owner,
+                updated_at
+            )
+            VALUES (%s, %s, %s, now(), 'IN_PROGRESS', %s, %s, now())
+            ON CONFLICT ON CONSTRAINT ftip_job_runs_active_idx DO NOTHING
+            RETURNING started_at
             """,
-            (run_id, job_name, "running", Json(requested)),
+            (run_id, job_name, as_of_date, Json(requested), lock_owner),
         )
+        inserted = cur.fetchone()
+        if not inserted:
+            cur.execute(
+                """
+                SELECT run_id, started_at, lock_owner
+                FROM ftip_job_runs
+                WHERE job_name = %s AND status = 'IN_PROGRESS'
+                """,
+                (job_name,),
+            )
+            existing_run_id, started_at, owner = cur.fetchone() or (None, None, None)
+            conn.commit()
+            return False, {
+                "run_id": str(existing_run_id) if existing_run_id else None,
+                "started_at": started_at.isoformat() if started_at else None,
+                "lock_owner": owner,
+            }
+
+        started_at = inserted[0]
         conn.commit()
+
+        return True, {
+            "run_id": run_id,
+            "started_at": started_at.isoformat() if started_at else None,
+            "lock_owner": lock_owner,
+        }
 
 
 def _update_job_run(
@@ -170,7 +214,7 @@ def _fetch_last_job_run(job_name: str) -> Optional[Dict[str, object]]:
     with db.with_connection() as (conn, cur):
         cur.execute(
             """
-            SELECT run_id, job_name, started_at, finished_at, status, requested, result, error
+            SELECT run_id, job_name, as_of_date, started_at, finished_at, status, requested, result, error, lock_owner
             FROM ftip_job_runs
             WHERE job_name = %s
             ORDER BY started_at DESC
@@ -181,24 +225,37 @@ def _fetch_last_job_run(job_name: str) -> Optional[Dict[str, object]]:
         row = cur.fetchone()
         if not row:
             return None
-        run_id, jname, started_at, finished_at, status, requested, result, error = row
+        (
+            run_id,
+            jname,
+            as_of_date,
+            started_at,
+            finished_at,
+            status,
+            requested,
+            result,
+            error,
+            lock_owner,
+        ) = row
         return {
             "run_id": str(run_id),
             "job_name": jname,
+            "as_of_date": as_of_date.isoformat() if as_of_date else None,
             "started_at": started_at.isoformat() if started_at else None,
             "finished_at": finished_at.isoformat() if finished_at else None,
             "status": status,
             "requested": requested,
             "result": result,
             "error": error,
+            "lock_owner": lock_owner,
         }
 
 
 def _result_status(result_payload: Dict[str, object]) -> str:
     failed = result_payload.get("symbols_failed") or []
     if failed:
-        return "partial"
-    return "success"
+        return "PARTIAL"
+    return "SUCCESS"
 
 
 @router.post("/prosperity/daily-snapshot")
@@ -208,12 +265,6 @@ async def prosperity_daily_snapshot(request: Request):
     run_id = str(uuid.uuid4())
     ttl_seconds = _lock_ttl_seconds()
     lock_owner = _job_lock_owner()
-    acquired, lock_info = _acquire_job_lock(JOB_NAME, ttl_seconds, lock_owner)
-    if not acquired:
-        return JSONResponse(
-            status_code=409,
-            content={"error": "job already running", **lock_info},
-        )
 
     today = _utc_today()
     as_of_date = today - dt.timedelta(days=1)
@@ -245,17 +296,36 @@ async def prosperity_daily_snapshot(request: Request):
     }
 
     run_recorded = False
-    status = "failed"
+    status = "FAILED"
     result_record: Dict[str, object] = {}
     error_message: Optional[str] = None
 
     try:
-        _insert_job_run(run_id, JOB_NAME, requested_payload)
+        acquired, lock_info = _acquire_job_lock(
+            run_id,
+            JOB_NAME,
+            as_of_date,
+            requested_payload,
+            ttl_seconds,
+            lock_owner,
+        )
+        if not acquired:
+            logger.info(
+                "jobs.prosperity.daily_snapshot.lock_conflict",
+                extra={"job_name": JOB_NAME, **lock_info},
+            )
+            return JSONResponse(status_code=409, content={"error": "job already running", **lock_info})
+
         run_recorded = True
 
         logger.info(
             "jobs.prosperity.daily_snapshot.start",
-            extra={"run_id": run_id, "job_name": JOB_NAME, "lock_owner": lock_owner},
+            extra={
+                "run_id": run_id,
+                "job_name": JOB_NAME,
+                "lock_owner": lock_owner,
+                "started_at": lock_info.get("started_at"),
+            },
         )
 
         result = await snapshot_run(req, request)
@@ -298,7 +368,11 @@ async def prosperity_daily_snapshot(request: Request):
         except Exception:
             logger.warning("jobs.prosperity.daily_snapshot.run_update_failed", extra={"run_id": run_id})
         finally:
-            _release_job_lock(JOB_NAME)
+            if run_recorded:
+                logger.info(
+                    "jobs.prosperity.daily_snapshot.lock_released",
+                    extra={"run_id": run_id, "job_name": JOB_NAME, "status": status},
+                )
 
 
 @router.get("/prosperity/daily-snapshot/status")
