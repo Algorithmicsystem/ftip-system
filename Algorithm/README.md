@@ -208,6 +208,36 @@ To validate production (or local) deployments end-to-end, run:
 BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase6_verify.sh
 ```
 
+## Phase 7 verification (Railway Cron + job status)
+
+Set the Railway variables to control the automated daily snapshot job:
+
+```
+FTIP_UNIVERSE
+FTIP_LOOKBACK
+FTIP_SNAPSHOT_WINDOW_DAYS
+FTIP_SNAPSHOT_CONCURRENCY
+FTIP_RETENTION_DAYS (optional)
+FTIP_JOB_LOCK_TTL_SECONDS (optional)
+FTIP_DB_ENABLED=1
+FTIP_DB_WRITE_ENABLED=1
+FTIP_DB_READ_ENABLED=1
+FTIP_MIGRATIONS_AUTO=1
+FTIP_API_KEY=your-api-key
+```
+
+The Railway Cron entry can POST directly to the protected job endpoint:
+
+```
+curl -s -X POST "$BASE/jobs/prosperity/daily-snapshot" -H "X-FTIP-API-Key: $KEY"
+```
+
+Check the job status and overlap lock using the official verification script:
+
+```bash
+BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase7_verify.sh
+```
+
 ## Assistant / Narrator (Phase 5)
 
 Environment variables:

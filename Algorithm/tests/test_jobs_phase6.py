@@ -34,6 +34,17 @@ def clear_env(monkeypatch: pytest.MonkeyPatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def stub_job_run_tables(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(
+        "api.jobs.prosperity._acquire_job_lock",
+        lambda *args, **kwargs: (True, {"locked_until": None, "lock_owner": "test"}),
+    )
+    monkeypatch.setattr("api.jobs.prosperity._release_job_lock", lambda *args, **kwargs: None)
+    monkeypatch.setattr("api.jobs.prosperity._insert_job_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr("api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None)
+
+
 def test_daily_snapshot_requires_api_key(monkeypatch: pytest.MonkeyPatch):
     _set_db_flags(monkeypatch)
     monkeypatch.setenv("FTIP_API_KEY", "secret")
