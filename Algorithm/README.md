@@ -131,6 +131,26 @@ To run a local end-to-end smoke check that exercises the prosperity endpoints:
 bash tools/smoke_prosperity.sh
 ```
 
+## Phase 4 verification (Narrator + Prosperity)
+
+Phase 4 hardens the narrator endpoints and adds a deep integration with the prosperity strategy graph. After setting `FTIP_API_KEY` (or `FTIP_API_KEYS`) and `OPENAI_API_KEY`, run the official script to validate Railway or local deployments:
+
+```bash
+# Local example
+BASE="http://localhost:8000" KEY="demo-key" ./scripts/phase4_verify.sh
+
+# Production example (Railway)
+BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase4_verify.sh
+```
+
+The script confirms:
+
+- `/health` and `/version` stay public.
+- `/narrator/health` rejects missing API keys.
+- `/prosperity/snapshot/run` can compute five symbols and writes both `signals` and `features` rows.
+- `/narrator/explain-strategy-graph` returns a narrated graph with nodes.
+- `/narrator/diagnose` reports a clean bill of health for auth, DB, migrations, and latest signals.
+
 ## Assistant / Narrator (Phase 5)
 
 Environment variables:

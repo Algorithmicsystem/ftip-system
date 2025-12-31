@@ -2,13 +2,15 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from api import config, db, security
+from api import config, db, migrations, security
 from api.ops import metrics_tracker
 from api.prosperity import query
 from api.prosperity import strategy_graph_db
@@ -19,12 +21,38 @@ logger = logging.getLogger("ftip.api.narrator")
 router = APIRouter(tags=["narrator"])
 
 
-class NarratorAskRequest(BaseModel):
+class _ValidatedRequest(BaseModel):
+    @field_validator("symbol", mode="before", check_fields=False)
+    @classmethod
+    def _clean_symbol(cls, value: str) -> str:
+        cleaned = (value or "").strip().upper()
+        if not cleaned:
+            raise ValueError("symbol required")
+        if not re.match(r"^[A-Z][A-Z0-9\\.\-]{0,9}$", cleaned):
+            raise ValueError("symbol must be alphanumeric (.+-) up to 10 chars")
+        return cleaned
+
+class NarratorAskRequest(_ValidatedRequest):
     question: str = Field(..., description="User question")
     symbols: List[str]
     as_of_date: dt.date
-    lookback: int = 252
-    days: int = 365
+    lookback: int = Field(252, ge=5, le=5000)
+    days: int = Field(365, ge=1, le=3650)
+
+    @field_validator("symbols")
+    @classmethod
+    def _clean_symbols(cls, value: List[str]) -> List[str]:
+        cleaned = []
+        for sym in value:
+            sym_clean = (sym or "").strip().upper()
+            if not sym_clean:
+                continue
+            if not re.match(r"^[A-Z][A-Z0-9\\.\-]{0,9}$", sym_clean):
+                raise ValueError("symbol must be alphanumeric (.+-) up to 10 chars")
+            cleaned.append(sym_clean)
+        if not cleaned:
+            raise ValueError("symbols required")
+        return cleaned
 
 
 class NarratorAskResponse(BaseModel):
@@ -34,11 +62,11 @@ class NarratorAskResponse(BaseModel):
     context_used: Dict[str, Any]
 
 
-class NarratorExplainRequest(BaseModel):
+class NarratorExplainRequest(_ValidatedRequest):
     symbol: str
     as_of_date: dt.date
-    lookback: int = 252
-    days: int = 365
+    lookback: int = Field(252, ge=5, le=5000)
+    days: int = Field(365, ge=1, le=3650)
 
 
 class NarratorExplainResponse(BaseModel):
@@ -52,9 +80,31 @@ class NarratorExplainResponse(BaseModel):
     trace_id: str
 
 
+class NarratorExplainStrategyRequest(_ValidatedRequest):
+    symbol: str
+    lookback: int = Field(252, ge=5, le=5000)
+    days: int = Field(365, ge=1, le=3650)
+    to_date: dt.date
+
+
+class NarratorExplainStrategyResponse(BaseModel):
+    symbol: str
+    lookback: int
+    window: Dict[str, Any]
+    explanation: str
+    graph: Dict[str, Any]
+    trace_id: str
+
+
 class NarratorHealthResponse(BaseModel):
     status: str
     has_api_key: bool
+    trace_id: str
+
+
+class NarratorDiagnoseResponse(BaseModel):
+    status: str
+    checks: List[Dict[str, Any]]
     trace_id: str
 
 
@@ -86,6 +136,7 @@ def _clean_symbol(symbol: str) -> str:
 
 
 def _load_symbol_context(symbol: str, as_of_date: dt.date, lookback: int, days: int) -> Dict[str, Any]:
+    days = min(max(days, 1), 3650)
     sig = query.signal_as_of(symbol, lookback, as_of_date)
     feats = query.features_as_of(symbol, lookback, as_of_date)
     history = query.signal_history(symbol, lookback, as_of_date, days)
@@ -106,6 +157,64 @@ def _load_strategy_graph(symbol: str, lookback: int, as_of_date: dt.date) -> Opt
     if not ensemble:
         return None
     return {"ensemble": ensemble, "strategies": strategies}
+
+
+def _build_transition_graph(symbol: str, lookback: int, to_date: dt.date, days: int) -> Optional[Dict[str, Any]]:
+    window_days = min(max(days, 1), 3650)
+    history = query.signal_history(symbol, lookback, to_date, window_days)
+    if not history:
+        return None
+
+    try:
+        ordered = sorted(history, key=lambda item: dt.date.fromisoformat(str(item.get("as_of"))))
+    except Exception:  # pragma: no cover - defensive
+        ordered = history[::-1]
+
+    nodes: Dict[str, int] = {}
+    edges: Dict[tuple[str, str], int] = {}
+    series: List[Dict[str, Any]] = []
+
+    for entry in ordered:
+        sig = (entry.get("signal") or "UNKNOWN").upper()
+        nodes[sig] = nodes.get(sig, 0) + 1
+        series.append(
+            {
+                "as_of": entry.get("as_of"),
+                "signal": sig,
+                "score": entry.get("score"),
+                "regime": entry.get("regime"),
+                "confidence": entry.get("confidence"),
+            }
+        )
+
+    for idx in range(len(ordered) - 1):
+        from_sig = (ordered[idx].get("signal") or "UNKNOWN").upper()
+        to_sig = (ordered[idx + 1].get("signal") or "UNKNOWN").upper()
+        edges[(from_sig, to_sig)] = edges.get((from_sig, to_sig), 0) + 1
+
+    window_from = to_date - dt.timedelta(days=window_days)
+    nodes_list = [{"id": key, "count": count} for key, count in sorted(nodes.items())]
+    edges_list = [
+        {"from": pair[0], "to": pair[1], "count": count} for pair, count in sorted(edges.items())
+    ]
+
+    return {
+        "symbol": symbol,
+        "lookback": lookback,
+        "window": {"days": window_days, "from": window_from.isoformat(), "to": to_date.isoformat()},
+        "nodes": nodes_list,
+        "edges": edges_list,
+        "series_sample": series[-120:],
+    }
+
+
+def _trim_graph_for_prompt(graph: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        **graph,
+        "nodes": (graph.get("nodes") or [])[:50],
+        "edges": (graph.get("edges") or [])[:100],
+        "series_sample": (graph.get("series_sample") or [])[-50:],
+    }
 
 
 def _build_context(req: NarratorAskRequest) -> Dict[str, Any]:
@@ -139,6 +248,34 @@ def _build_explain_context(req: NarratorExplainRequest) -> Dict[str, Any]:
         "signal": signal_ctx,
         "strategy_graph": strategy_graph,
     }
+
+
+def _check(name: str, ok: bool, details: Dict[str, Any]) -> Dict[str, Any]:
+    return {"name": name, "status": "pass" if ok else "fail", "details": details}
+
+
+def _migrations_status() -> tuple[bool, Dict[str, Any]]:
+    if not db.db_enabled():
+        return False, {"message": "database disabled"}
+    if not db.db_read_enabled():
+        return False, {"message": "database read access disabled"}
+    try:
+        migrations.ensure_schema()
+        rows = db.safe_fetchall("SELECT version, applied_at FROM schema_migrations ORDER BY version ASC")
+        versions = [row[0] for row in rows]
+        return True, {"versions": versions}
+    except Exception as exc:  # pragma: no cover - defensive
+        return False, {"error": str(exc)}
+
+
+def _latest_signal_exists(symbol: str, lookback: int) -> tuple[bool, Dict[str, Any]]:
+    if not (db.db_enabled() and db.db_read_enabled()):
+        return False, {"message": "database disabled"}
+    try:
+        exists = bool(query.latest_signal(symbol, lookback))
+        return exists, {"found": exists, "symbol": symbol, "lookback": lookback}
+    except Exception as exc:  # pragma: no cover - defensive
+        return False, {"error": str(exc)}
 
 
 # ---------------------------------------------------------------------------
@@ -205,6 +342,77 @@ async def narrator_explain_signal(req: NarratorExplainRequest, request: Request)
         what_to_watch=["Threshold changes", "Feature stability"],
         trace_id=trace_id,
     )
+
+
+@router.post("/explain-strategy-graph", response_model=NarratorExplainStrategyResponse)
+async def narrator_explain_strategy_graph(
+    req: NarratorExplainStrategyRequest, request: Request
+) -> NarratorExplainStrategyResponse:
+    trace_id = _trace_id(request)
+    _ensure_db(trace_id)
+    _ensure_openai_key(trace_id)
+
+    logger.info(
+        "narrator.explain_strategy_graph.start",
+        extra={"trace_id": trace_id, "symbol": req.symbol, "to_date": req.to_date.isoformat()},
+    )
+
+    graph = _build_transition_graph(req.symbol, req.lookback, req.to_date, req.days)
+    if not graph:
+        raise HTTPException(status_code=404, detail={"message": "graph context not found", "trace_id": trace_id})
+
+    trimmed_graph = _trim_graph_for_prompt(graph)
+    messages = prompts.build_strategy_graph_prompt(trimmed_graph, safe_mode=True)
+    max_tokens = min(config.llm_max_tokens(), 500)
+    reply, model, _ = narrator_client.complete_chat(messages, trace_id=trace_id, max_tokens=max_tokens)
+
+    metrics_tracker.record_narrator_call()
+    return NarratorExplainStrategyResponse(
+        symbol=graph["symbol"],
+        lookback=graph["lookback"],
+        window=graph["window"],
+        explanation=f"{reply.strip()}\n\n{prompts.DISCLAIMER}",
+        graph=graph,
+        trace_id=trace_id,
+    )
+
+
+@router.post("/diagnose", response_model=NarratorDiagnoseResponse)
+async def narrator_diagnose(request: Request) -> NarratorDiagnoseResponse:
+    trace_id = _trace_id(request)
+    checks: List[Dict[str, Any]] = []
+
+    auth_env = [name for name in ("FTIP_API_KEY", "FTIP_API_KEYS", "FTIP_API_KEY_PRIMARY") if os.getenv(name)]
+    openai_env = [name for name in ("OPENAI_API_KEY", "OpenAI_ftip-system") if os.getenv(name)]
+
+    checks.append(
+        _check(
+            "auth",
+            security.auth_enabled(),
+            {"auth_enabled": security.auth_enabled(), "env_vars": auth_env},
+        )
+    )
+
+    db_ok = db.db_enabled() and db.db_read_enabled()
+    checks.append(
+        _check(
+            "database",
+            db_ok,
+            {"enabled": db.db_enabled(), "read_enabled": db.db_read_enabled(), "write_enabled": db.db_write_enabled()},
+        )
+    )
+
+    mig_ok, mig_details = _migrations_status()
+    checks.append(_check("migrations", mig_ok, mig_details))
+
+    signal_ok, signal_details = _latest_signal_exists("AAPL", 252)
+    checks.append(_check("latest_signal", signal_ok, signal_details))
+
+    openai_ok = bool(config.openai_api_key())
+    checks.append(_check("openai_api_key", openai_ok, {"env_vars": openai_env}))
+
+    overall_status = "ok" if all(item.get("status") == "pass" for item in checks) else "degraded"
+    return NarratorDiagnoseResponse(status=overall_status, checks=checks, trace_id=trace_id)
 
 
 __all__ = ["router"]
