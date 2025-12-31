@@ -247,6 +247,9 @@ def _migration_job_metadata(cur: Any) -> None:
             result JSONB,
             error TEXT,
             lock_owner TEXT NOT NULL DEFAULT 'unknown',
+            lock_acquired_at TIMESTAMPTZ,
+            lock_expires_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
         )
         """
@@ -260,13 +263,16 @@ def _migration_job_metadata(cur: Any) -> None:
     _ensure_column(cur, "ftip_job_runs", "result", "IF NOT EXISTS result JSONB")
     _ensure_column(cur, "ftip_job_runs", "error", "IF NOT EXISTS error TEXT")
     _ensure_column(cur, "ftip_job_runs", "lock_owner", "IF NOT EXISTS lock_owner TEXT NOT NULL DEFAULT 'unknown'")
+    _ensure_column(cur, "ftip_job_runs", "lock_acquired_at", "IF NOT EXISTS lock_acquired_at TIMESTAMPTZ")
+    _ensure_column(cur, "ftip_job_runs", "lock_expires_at", "IF NOT EXISTS lock_expires_at TIMESTAMPTZ")
+    _ensure_column(cur, "ftip_job_runs", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()")
     _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
 
     cur.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_idx
         ON ftip_job_runs(job_name)
-        WHERE status = 'IN_PROGRESS'
+        WHERE finished_at IS NULL
         """
     )
 
@@ -384,6 +390,25 @@ def _verify_job_run_schema(cur: Any) -> None:
     if missing:
         raise RuntimeError(
             "ftip_job_runs schema is missing required columns: " + ", ".join(missing)
+        )
+
+    cur.execute(
+        """
+        SELECT indexdef
+        FROM pg_indexes
+        WHERE schemaname = ANY (current_schemas(false))
+          AND tablename = 'ftip_job_runs'
+          AND indexname = 'ftip_job_runs_active_idx'
+        """
+    )
+    index_row = cur.fetchone()
+    if not index_row:
+        raise RuntimeError("ftip_job_runs schema is missing ftip_job_runs_active_idx")
+
+    index_def = index_row[0] or ""
+    if "UNIQUE INDEX" not in index_def or "finished_at IS NULL" not in index_def:
+        raise RuntimeError(
+            "ftip_job_runs_active_idx must be a unique partial index on job_name where finished_at IS NULL"
         )
 
 

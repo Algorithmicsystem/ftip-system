@@ -100,7 +100,7 @@ def _cleanup_stale_job_runs(cur, job_name: str, ttl_seconds: int) -> List[str]:
             finished_at = now(),
             updated_at = now()
         WHERE job_name = %s
-          AND status = 'IN_PROGRESS'
+          AND finished_at IS NULL
           AND started_at < now() - (%s || ' seconds')::interval
         RETURNING run_id
         """,
@@ -131,7 +131,7 @@ def _acquire_job_lock(
             """
             SELECT run_id, started_at, lock_owner
             FROM ftip_job_runs
-            WHERE job_name = %s AND status = 'IN_PROGRESS'
+            WHERE job_name = %s AND finished_at IS NULL
             FOR UPDATE
             """,
             (job_name,),
@@ -159,7 +159,7 @@ def _acquire_job_lock(
                 updated_at
             )
             VALUES (%s, %s, %s, now(), 'IN_PROGRESS', %s, %s, now())
-            ON CONFLICT ON CONSTRAINT ftip_job_runs_active_idx DO NOTHING
+            ON CONFLICT (job_name) WHERE finished_at IS NULL DO NOTHING
             RETURNING started_at
             """,
             (run_id, job_name, as_of_date, Json(requested), lock_owner),
@@ -170,7 +170,7 @@ def _acquire_job_lock(
                 """
                 SELECT run_id, started_at, lock_owner
                 FROM ftip_job_runs
-                WHERE job_name = %s AND status = 'IN_PROGRESS'
+                WHERE job_name = %s AND finished_at IS NULL
                 """,
                 (job_name,),
             )
