@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
+from psycopg.errors import UndefinedColumn
 from psycopg.types.json import Json
 
 from api import config, db, security
@@ -357,10 +358,23 @@ async def prosperity_daily_snapshot(request: Request):
         }
         result_record = {"response": response_body, "raw_result": result_payload}
         return response_body
+    except UndefinedColumn as exc:
+        error_message = str(exc)
+        logger.exception("jobs.prosperity.daily_snapshot.error", extra={"run_id": run_id})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "database_schema_missing",
+                "detail": error_message,
+            },
+        )
     except Exception as exc:
         error_message = str(exc)
         logger.exception("jobs.prosperity.daily_snapshot.error", extra={"run_id": run_id})
-        raise
+        return JSONResponse(
+            status_code=500,
+            content={"error": "unexpected_error", "detail": error_message},
+        )
     finally:
         try:
             if run_recorded:
