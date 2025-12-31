@@ -5,13 +5,9 @@ import uuid
 import psycopg
 import pytest
 
-from api import migrations
+from api import db, migrations
 from api.jobs import prosperity
-
-
-pytestmark = pytest.mark.skipif(
-    os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set"
-)
+from api import main
 
 
 def _reset_schema() -> None:
@@ -21,6 +17,7 @@ def _reset_schema() -> None:
             cur.execute("DROP TABLE IF EXISTS ftip_job_runs CASCADE")
 
 
+@pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
 def test_migrations_commit_versions(monkeypatch):
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     _reset_schema()
@@ -38,6 +35,7 @@ def test_migrations_commit_versions(monkeypatch):
     assert set(applied).issubset(set(versions))
 
 
+@pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
 def test_ftip_job_runs_schema_contains_required_columns(monkeypatch):
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     _reset_schema()
@@ -70,6 +68,7 @@ def test_ftip_job_runs_schema_contains_required_columns(monkeypatch):
         assert col in columns, f"expected column {col} in ftip_job_runs"
 
 
+@pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
 def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     _reset_schema()
@@ -114,8 +113,6 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                   OR updated_at IS NULL
                   OR started_at IS NULL
                   OR requested IS NULL
-                  OR lock_owner IS NULL
-                  OR status IS NULL
                 """
             )
             null_timestamps = cur.fetchone()[0]
@@ -136,7 +133,7 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                 FROM pg_indexes
                 WHERE schemaname = ANY (current_schemas(false))
                   AND tablename = 'ftip_job_runs'
-                  AND indexname = 'ftip_job_runs_active_idx'
+                  AND indexname = 'ftip_job_runs_active_job'
                 """
             )
             index_def = cur.fetchone()[0]
@@ -149,11 +146,10 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                     job_name,
                     as_of_date,
                     started_at,
-                    status,
                     requested,
                     lock_owner
                 )
-                VALUES (%s, %s, %s, now(), 'IN_PROGRESS', '{}'::jsonb, 'tester')
+                VALUES (%s, %s, %s, now(), '{}'::jsonb, 'tester')
                 ON CONFLICT (job_name) WHERE finished_at IS NULL
                 DO NOTHING
                 RETURNING run_id
@@ -165,12 +161,13 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
     assert {"as_of_date", "lock_acquired_at", "lock_expires_at"}.issubset(columns)
     assert null_timestamps == 0
     assert requested == {}
-    assert lock_owner == "unknown"
-    assert as_of_date is not None
+    assert lock_owner is None
+    assert as_of_date is None
     assert "finished_at IS NULL" in index_def
     assert conflict_upserted is None
 
 
+@pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
 def test_acquire_job_lock_uses_active_index(monkeypatch):
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     os.environ.setdefault("FTIP_DB_WRITE_ENABLED", "1")
@@ -216,3 +213,17 @@ def test_acquire_job_lock_uses_active_index(monkeypatch):
             active = cur.fetchone()[0]
 
     assert active == 1
+
+
+def test_startup_fails_fast_when_ensure_schema_errors(monkeypatch):
+    os.environ.setdefault("FTIP_DB_ENABLED", "1")
+
+    def boom():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(db, "db_enabled", lambda: True)
+    monkeypatch.setattr(migrations, "ensure_schema", boom)
+    monkeypatch.setattr(db, "ensure_schema", lambda: None)
+
+    with pytest.raises(RuntimeError):
+        main._startup()

@@ -5,19 +5,19 @@ BEGIN
     -- Ensure base table exists with full schema for new deployments
     CREATE TABLE IF NOT EXISTS ftip_job_runs (
         run_id UUID PRIMARY KEY,
-        job_name TEXT NOT NULL,
+        job_name TEXT,
         as_of_date DATE,
-        started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        started_at TIMESTAMPTZ DEFAULT now(),
         finished_at TIMESTAMPTZ,
         status TEXT,
-        requested JSONB NOT NULL DEFAULT '{}'::jsonb,
+        requested JSONB DEFAULT '{}'::jsonb,
         result JSONB,
         error TEXT,
-        lock_owner TEXT NOT NULL DEFAULT 'unknown',
+        lock_owner TEXT,
         lock_acquired_at TIMESTAMPTZ,
         lock_expires_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        created_at TIMESTAMPTZ DEFAULT now(),
+        updated_at TIMESTAMPTZ DEFAULT now()
     );
 
     -- Add any missing columns as nullable first to keep legacy data intact
@@ -42,9 +42,6 @@ BEGIN
     UPDATE ftip_job_runs SET updated_at = COALESCE(updated_at, now()) WHERE updated_at IS NULL;
     UPDATE ftip_job_runs SET started_at = COALESCE(started_at, created_at, now()) WHERE started_at IS NULL;
     UPDATE ftip_job_runs SET requested = COALESCE(requested, '{}'::jsonb) WHERE requested IS NULL;
-    UPDATE ftip_job_runs SET lock_owner = COALESCE(lock_owner, 'unknown') WHERE lock_owner IS NULL;
-    UPDATE ftip_job_runs SET status = COALESCE(status, 'UNKNOWN') WHERE status IS NULL;
-    UPDATE ftip_job_runs SET as_of_date = COALESCE(as_of_date, CURRENT_DATE) WHERE as_of_date IS NULL;
 
     -- Apply defaults and NOT NULL constraints after backfill
     ALTER TABLE IF EXISTS ftip_job_runs
@@ -52,13 +49,10 @@ BEGIN
         ALTER COLUMN started_at SET NOT NULL,
         ALTER COLUMN requested SET DEFAULT '{}'::jsonb,
         ALTER COLUMN requested SET NOT NULL,
-        ALTER COLUMN lock_owner SET DEFAULT 'unknown',
-        ALTER COLUMN lock_owner SET NOT NULL,
         ALTER COLUMN created_at SET DEFAULT now(),
         ALTER COLUMN created_at SET NOT NULL,
         ALTER COLUMN updated_at SET DEFAULT now(),
         ALTER COLUMN updated_at SET NOT NULL,
-        ALTER COLUMN job_name SET NOT NULL,
         ALTER COLUMN run_id SET NOT NULL;
 
     -- Ensure primary key exists on run_id
@@ -74,9 +68,7 @@ BEGIN
     END IF;
 
     -- Recreate the unique partial index used for active job locking
-    DROP INDEX IF EXISTS ftip_job_runs_active_idx;
-    DROP INDEX IF EXISTS ftip_job_runs_active_uq;
-    CREATE UNIQUE INDEX ftip_job_runs_active_idx
+    CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_job
         ON ftip_job_runs (job_name)
         WHERE finished_at IS NULL;
 END;
