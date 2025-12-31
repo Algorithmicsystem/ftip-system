@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Callable, List, Sequence
 
 from api import db
@@ -270,10 +271,18 @@ def _migration_job_metadata(cur: Any) -> None:
     )
 
 
+def _migration_job_lock_owner(cur: Any) -> None:
+    """Ensure job run tables include lock ownership metadata."""
+
+    sql_path = Path(__file__).with_name("004_job_lock_owner.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
     ("003_job_metadata", _migration_job_metadata),
+    ("004_job_lock_owner", _migration_job_lock_owner),
 ]
 
 

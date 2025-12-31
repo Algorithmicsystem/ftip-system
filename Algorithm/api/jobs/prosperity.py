@@ -314,7 +314,7 @@ async def prosperity_daily_snapshot(request: Request):
                 "jobs.prosperity.daily_snapshot.lock_conflict",
                 extra={"job_name": JOB_NAME, **lock_info},
             )
-            return JSONResponse(status_code=409, content={"error": "job already running", **lock_info})
+            return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
         run_recorded = True
 

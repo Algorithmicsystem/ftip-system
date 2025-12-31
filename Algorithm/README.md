@@ -232,6 +232,8 @@ Railway Cron should call the protected job endpoint with POST to trigger the sna
 curl -s -X POST "$BASE/jobs/prosperity/daily-snapshot" -H "X-FTIP-API-Key: $KEY"
 ```
 
+If a run is already in progress, an immediate second POST will return HTTP 409 with a JSON error body indicating the lock state.
+
 Check the job status and overlap lock using the official verification script:
 
 ```bash
