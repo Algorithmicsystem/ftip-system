@@ -226,7 +226,7 @@ FTIP_MIGRATIONS_AUTO=1
 FTIP_API_KEY=your-api-key
 ```
 
-The Railway Cron entry can POST directly to the protected job endpoint:
+Railway Cron should call the protected job endpoint with POST to trigger the snapshot run:
 
 ```
 curl -s -X POST "$BASE/jobs/prosperity/daily-snapshot" -H "X-FTIP-API-Key: $KEY"

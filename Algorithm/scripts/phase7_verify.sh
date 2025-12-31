@@ -41,22 +41,25 @@ fi
 pass "/version"
 
 echo "-- Auth guards --"
-job_no_key=$(curl -s -i "${BASE}/jobs/prosperity/daily-snapshot" | head -n 1)
-if ! printf '%s' "$job_no_key" | grep -q "401"; then
-  echo "$job_no_key"
-  fail "/jobs/prosperity/daily-snapshot should require API key"
+job_no_key_out="${tmpdir}/job_no_key.json"
+status=$(curl_json POST "/jobs/prosperity/daily-snapshot" "$job_no_key_out")
+if [[ "$status" != "401" ]]; then
+  out_json "$job_no_key_out"
+  fail "/jobs/prosperity/daily-snapshot without key expected 401 got ${status}"
 fi
 pass "/jobs/prosperity/daily-snapshot without key"
 
-echo "-- Daily snapshot job lock + status --"
-job_out="${tmpdir}/daily_job.json"
-status=$(curl_json POST "/jobs/prosperity/daily-snapshot" "$job_out" "${AUTH_HEADER[@]}")
+job_first_out="${tmpdir}/daily_job.json"
+status=$(curl_json POST "/jobs/prosperity/daily-snapshot" "$job_first_out" "${AUTH_HEADER[@]}")
 if [[ "$status" != "200" ]]; then
-  out_json "$job_out"
-  fail "first /jobs/prosperity/daily-snapshot HTTP ${status}"
+  out_json "$job_first_out"
+  fail "/jobs/prosperity/daily-snapshot with key HTTP ${status}"
 fi
-if ! jq -e '.run_id and (.rows_written.signals // 0) >= 0' "$job_out" >/dev/null; then
-  out_json "$job_out"
+pass "/jobs/prosperity/daily-snapshot with key"
+
+echo "-- Daily snapshot job lock + status --"
+if ! jq -e '.run_id and (.rows_written.signals // 0) >= 0' "$job_first_out" >/dev/null; then
+  out_json "$job_first_out"
   fail "daily snapshot response missing run_id or rows_written"
 fi
 pass "first /jobs/prosperity/daily-snapshot"
