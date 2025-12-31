@@ -218,9 +218,50 @@ def _migration_strategy_graph(cur: Any) -> None:
     _ensure_column(cur, "prosperity_ensemble_signals_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
 
 
+def _migration_job_metadata(cur: Any) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ftip_job_locks (
+            job_name TEXT PRIMARY KEY,
+            locked_until TIMESTAMPTZ NOT NULL,
+            lock_owner TEXT NOT NULL,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    _ensure_column(cur, "ftip_job_locks", "locked_until", "IF NOT EXISTS locked_until TIMESTAMPTZ NOT NULL")
+    _ensure_column(cur, "ftip_job_locks", "lock_owner", "IF NOT EXISTS lock_owner TEXT NOT NULL DEFAULT 'unknown'")
+    _ensure_column(cur, "ftip_job_locks", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS ftip_job_runs (
+            run_id UUID PRIMARY KEY,
+            job_name TEXT NOT NULL,
+            started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            finished_at TIMESTAMPTZ,
+            status TEXT,
+            requested JSONB,
+            result JSONB,
+            error TEXT,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """
+    )
+    _ensure_column(cur, "ftip_job_runs", "job_name", "IF NOT EXISTS job_name TEXT NOT NULL")
+    _ensure_column(cur, "ftip_job_runs", "started_at", "IF NOT EXISTS started_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+    _ensure_column(cur, "ftip_job_runs", "finished_at", "IF NOT EXISTS finished_at TIMESTAMPTZ")
+    _ensure_column(cur, "ftip_job_runs", "status", "IF NOT EXISTS status TEXT")
+    _ensure_column(cur, "ftip_job_runs", "requested", "IF NOT EXISTS requested JSONB")
+    _ensure_column(cur, "ftip_job_runs", "result", "IF NOT EXISTS result JSONB")
+    _ensure_column(cur, "ftip_job_runs", "error", "IF NOT EXISTS error TEXT")
+    _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
+    ("003_job_metadata", _migration_job_metadata),
 ]
 
 
