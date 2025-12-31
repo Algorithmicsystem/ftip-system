@@ -120,6 +120,28 @@ def _prepare_citations(symbols: List[str]) -> List[Dict[str, str]]:
     return citations
 
 
+def _safe_perf_value(value: Any) -> float:
+    try:
+        if value is None:
+            return 0.0
+        return float(value)
+    except Exception:
+        return 0.0
+
+
+def _performance_defaults(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
+    base = {
+        "return": 0.0,
+        "sharpe": 0.0,
+        "max_drawdown": 0.0,
+        "turnover": 0.0,
+    }
+    if overrides:
+        for key in base.keys():
+            base[key] = _safe_perf_value(overrides.get(key, base[key]))
+    return base
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -162,7 +184,7 @@ async def narrator_portfolio(req: NarratorPortfolioRequest, request: Request) ->
     _ensure_api_key(trace_id)
 
     summary: Dict[str, Any] = {
-        "performance": {},
+        "performance": _performance_defaults(),
         "contributors": [],
         "exposures": [],
     }
@@ -179,24 +201,21 @@ async def narrator_portfolio(req: NarratorPortfolioRequest, request: Request) ->
             max_weight=req.max_weight,
         )
         backtest = api_main.backtest_portfolio(bt_req)
-        perf = {
-            "return": float(backtest.total_return),
-            "sharpe": float(backtest.sharpe),
-            "max_drawdown": float(backtest.max_drawdown),
-            "turnover": float(backtest.turnover),
-        }
+        perf = _performance_defaults(
+            {
+                "return": getattr(backtest, "total_return", None),
+                "sharpe": getattr(backtest, "sharpe", None),
+                "max_drawdown": getattr(backtest, "max_drawdown", None),
+                "turnover": getattr(backtest, "turnover", None),
+            }
+        )
         summary["performance"] = perf
         audit = backtest.audit or {}
         skipped = audit.get("skipped_symbols") or []
         if skipped:
             summary["exposures"].append(f"Skipped symbols: {[item.get('symbol') for item in skipped]}")
     else:
-        summary["performance"] = {
-            "return": None,
-            "sharpe": None,
-            "max_drawdown": None,
-            "turnover": None,
-        }
+        summary["performance"] = _performance_defaults()
         summary["exposures"].append("Backtest skipped per request; metrics limited.")
 
     messages = prompts.build_portfolio_prompt(summary, req.style)
