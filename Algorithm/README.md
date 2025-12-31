@@ -147,7 +147,7 @@ The script confirms:
 
 - `/health` and `/version` stay public.
 - `/narrator/health` rejects missing API keys.
-- `/prosperity/snapshot/run` can compute five symbols and writes both `signals` and `features` rows.
+- `/prosperity/snapshot/run` can compute five symbols and writes both `signals` and `features` rows (using a 2023-01-01 → 2024-12-31 range to satisfy the 252-day lookback).
 - `/narrator/explain-strategy-graph` returns a narrated graph with nodes.
 - `/narrator/diagnose` reports a clean bill of health for auth, DB, migrations, and latest signals.
 

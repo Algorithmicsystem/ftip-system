@@ -81,22 +81,25 @@ fi
 pass "/narrator/health with key"
 
 echo "-- Snapshot run --"
-snapshot_body='{ "symbols":["AAPL","MSFT","NVDA","AMZN","TSLA"],"from_date":"2024-01-02","to_date":"2024-01-05","as_of_date":"2024-01-05","lookback":252,"concurrency":3,"compute_strategy_graph":true }'
+snapshot_body='{ "symbols":["AAPL","MSFT","NVDA","AMZN","TSLA"],"from_date":"2023-01-01","to_date":"2024-12-31","as_of_date":"2024-12-31","lookback":252,"concurrency":3,"compute_strategy_graph":true }'
 snapshot_out="${tmpdir}/snapshot.json"
 status=$(curl_json POST "/prosperity/snapshot/run" "$snapshot_out" "${AUTH_HEADER[@]}" -H "Content-Type: application/json" -d "$snapshot_body")
 if [[ "$status" != "200" ]]; then
   out_json "$snapshot_out"
   fail "/prosperity/snapshot/run HTTP ${status}"
 fi
-python - <<'PY' "$snapshot_out" || fail "/prosperity/snapshot/run invalid JSON"
-import json, sys
-body = json.load(open(sys.argv[1]))
-rows = body.get("result", {}).get("rows_written", {})
-if rows.get("signals") != 5 or rows.get("features") != 5:
-    print(json.dumps(body, indent=2))
-    sys.exit(1)
-print("rows ok")
-PY
+if ! jq . "$snapshot_out" >/dev/null 2>&1; then
+  out_json "$snapshot_out"
+  fail "/prosperity/snapshot/run invalid JSON"
+fi
+if jq -e '((.result.symbols_failed // []) | map([.reasons[]? // ""][] | ascii_downcase | contains("insufficient bars")) | any)' "$snapshot_out" >/dev/null; then
+  out_json "$snapshot_out"
+  fail "/prosperity/snapshot/run insufficient bars for lookback=252; extend date range to include enough history"
+fi
+if ! jq -e '(.result.rows_written.signals == 5) and (.result.rows_written.features == 5)' "$snapshot_out" >/dev/null; then
+  out_json "$snapshot_out"
+  fail "/prosperity/snapshot/run rows_written expected signals=5 features=5"
+fi
 pass "/prosperity/snapshot/run"
 
 echo "-- Narrator strategy graph --"
