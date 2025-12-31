@@ -278,11 +278,19 @@ def _migration_job_lock_owner(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_ftip_job_runs_columns(cur: Any) -> None:
+    """Ensure ftip_job_runs includes all columns used by job code."""
+
+    sql_path = Path(__file__).with_name("005_ftip_job_runs_columns.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
     ("003_job_metadata", _migration_job_metadata),
     ("004_job_lock_owner", _migration_job_lock_owner),
+    ("005_ftip_job_runs_columns", _migration_ftip_job_runs_columns),
 ]
 
 
