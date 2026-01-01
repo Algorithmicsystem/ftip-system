@@ -52,45 +52,69 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     signals_store: Dict[str, Dict[str, str]] = {}
 
     monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
+
+    bars = [
+        {
+            "date": (dt.date(2023, 1, 1) + dt.timedelta(days=i)).isoformat(),
+            "close": 100.0 + i,
+            "volume": 1_000 + i,
+        }
+        for i in range(260)
+    ]
+
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles",
+        lambda *args, **kwargs: SignalResponse(
+            symbol="AAPL",
+            as_of="2024-01-05",
+            lookback=5,
+            effective_lookback=5,
+            regime="TRENDING",
+            thresholds={"buy": 0.1, "sell": -0.1},
+            score=0.5,
+            base_score=0.5,
+            stacked_score=0.5,
+            signal="BUY",
+            confidence=0.7,
+            features={"mom_21": 0.1},
+            notes=["Score mode: STACKED"],
+            calibration_meta={"score_mode": "stacked", "base_score": 0.5},
+        ),
+    )
+
+    def fake_persist(symbol: str, as_of_date: dt.date, lookback: int, feats, feature_meta, signal_payload, **_kwargs):
+        meta = {"regime": "TEST"}
+        features_store[symbol] = {
+            "symbol": symbol,
+            "as_of": as_of_date.isoformat(),
+            "lookback": lookback,
+            "features": feats,
+            "meta": meta,
+        }
+        signals_store[symbol] = {
+            "symbol": symbol,
+            "as_of": as_of_date.isoformat(),
+            "lookback": lookback,
+            "score": signal_payload["signal_dict"].get("score"),
+            "signal": signal_payload["signal_dict"].get("signal"),
+            "thresholds": signal_payload["thresholds"],
+            "regime": signal_payload["regime"],
+            "confidence": signal_payload["confidence"],
+            "notes": signal_payload["notes"],
+            "meta": signal_payload["meta"],
+        }
+        return {"features": 1, "signals": 1, "strategies": 0, "ensembles": 0}
+
     monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {"inserted": 1, "updated": 0})
-
-    def fake_features(symbol: str, as_of_date: dt.date, lookback: int):
-        payload = {
-            "symbol": symbol,
-            "as_of": as_of_date.isoformat(),
-            "lookback": lookback,
-            "stored": True,
-            "features": {"mom_5": 0.1},
-            "regime": "TEST",
-            "meta": {"regime": "TEST"},
-        }
-        features_store[symbol] = payload
-        return payload
-
-    def fake_signal(symbol: str, as_of_date: dt.date, lookback: int):
-        payload = {
-            "symbol": symbol,
-            "as_of": as_of_date.isoformat(),
-            "lookback": lookback,
-            "score": 0.5,
-            "signal": "BUY",
-            "regime": "TEST",
-            "thresholds": {},
-            "confidence": 0.7,
-            "notes": {},
-            "meta": {"score_mode": "stacked"},
-        }
-        signals_store[symbol] = payload
-        return payload
-
-    monkeypatch.setattr(ingest, "compute_and_store_features", fake_features)
-    monkeypatch.setattr(ingest, "compute_and_store_signal", fake_signal)
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
+    monkeypatch.setattr("api.prosperity.routes._persist_symbol_outputs", fake_persist)
+    monkeypatch.setattr("api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None)
     monkeypatch.setattr(query, "latest_features", lambda sym, lb: features_store.get(sym))
     monkeypatch.setattr(query, "latest_signal", lambda sym, lb: signals_store.get(sym))
 
     payload = {
         "symbols": symbols,
-        "from_date": "2024-01-01",
+        "from_date": "2023-01-01",
         "to_date": "2024-01-05",
         "as_of_date": "2024-01-05",
         "lookback": 5,
@@ -112,6 +136,38 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     feat_res = client.get("/prosperity/latest/features", params={"symbol": "AAPL", "lookback": 5})
     assert feat_res.status_code == 200
     assert feat_res.json()["meta"]["regime"] == "TEST"
+
+
+def test_snapshot_run_with_insufficient_bars(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    _enable_db_flags(monkeypatch)
+
+    monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
+    monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {})
+    monkeypatch.setattr("api.prosperity.routes._persist_symbol_outputs", lambda *args, **kwargs: {})
+    monkeypatch.setattr("api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        query,
+        "fetch_bars",
+        lambda *args, **kwargs: [
+            {"date": "2024-01-02", "close": 100.0, "volume": 1_000},
+        ],
+    )
+
+    payload = {
+        "symbols": ["SHORT"],
+        "from_date": "2024-01-01",
+        "to_date": "2024-01-05",
+        "as_of_date": "2024-01-05",
+        "lookback": 5,
+        "concurrency": 3,
+    }
+    res = client.post("/prosperity/snapshot/run", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "partial"
+    failure = body["result"]["symbols_failed"][0]
+    assert failure["reason_code"] == "INSUFFICIENT_BARS"
+    assert "required=252" in failure["reason_detail"]
 
 
 def test_latest_endpoints_return_404(monkeypatch: pytest.MonkeyPatch, client: TestClient):
@@ -141,6 +197,7 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
     symbol = f"APX{dt.datetime.utcnow().timestamp():.0f}"[:8]
     as_of = dt.date(2024, 2, 5)
     lookback = 10
+    start_date = as_of - dt.timedelta(days=300)
 
     db.safe_execute("DELETE FROM prosperity_daily_bars WHERE symbol=%s", (symbol,))
     db.safe_execute("DELETE FROM prosperity_signals_daily WHERE symbol=%s", (symbol,))
@@ -196,7 +253,7 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
             "/prosperity/snapshot/run",
             json={
                 "symbols": [symbol],
-                "from_date": as_of.isoformat(),
+                "from_date": start_date.isoformat(),
                 "to_date": as_of.isoformat(),
                 "as_of_date": as_of.isoformat(),
                 "lookback": lookback,

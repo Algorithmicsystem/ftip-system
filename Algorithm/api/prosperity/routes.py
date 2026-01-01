@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -28,6 +29,22 @@ logger = logging.getLogger(__name__)
 
 router.include_router(strategy_graph_router, prefix="/strategy_graph")
 router.include_router(narrator_router, prefix="/narrator")
+
+
+class SymbolFailure(Exception):
+    def __init__(
+        self,
+        reason_code: str,
+        reason_detail: str = "",
+        *,
+        bars_required: Optional[int] = None,
+        bars_returned: Optional[int] = None,
+    ):
+        super().__init__(reason_detail or reason_code)
+        self.reason_code = reason_code
+        self.reason_detail = reason_detail
+        self.bars_required = bars_required
+        self.bars_returned = bars_returned
 
 
 def _require_db_enabled(write: bool = False, read: bool = False) -> None:
@@ -109,8 +126,359 @@ def _normalize_symbols(symbols: List[str]) -> List[str]:
     return cleaned
 
 
+def _bars_required(lookback: int) -> int:
+    return max(int(lookback), 252)
+
+
+def _validate_bars(symbol: str, bars: List[Dict[str, Any]], required: int) -> None:
+    if not bars:
+        raise SymbolFailure(
+            "NO_DATA",
+            f"no bars returned for {symbol}",
+            bars_required=required,
+            bars_returned=0,
+        )
+    if len(bars) < required:
+        raise SymbolFailure(
+            "INSUFFICIENT_BARS",
+            f"required={required} returned={len(bars)}",
+            bars_required=required,
+            bars_returned=len(bars),
+        )
+
+
+def _candles_from_bars(bars: List[Dict[str, Any]]):
+    from api.main import Candle  # type: ignore
+
+    candles = [
+        Candle(
+            timestamp=b["date"],
+            close=float(b["close"]),
+            volume=float(b["volume"]) if b.get("volume") is not None else None,
+        )
+        for b in bars
+    ]
+    return candles
+
+
+def _compute_features_payload(symbol: str, as_of_date: dt.date, lookback: int, candles):
+    from api.main import compute_features, detect_regime  # type: ignore
+
+    feats = compute_features(candles[-lookback:])
+    regime = detect_regime(feats)
+    payload = {**feats, "regime": regime, "as_of": as_of_date.isoformat(), "lookback": int(lookback)}
+    meta = {"regime": regime, "features_hash": ingest._hash_dict(payload)}
+    return feats, meta, regime
+
+
+def _compute_signal_payload(symbol: str, as_of_date: dt.date, lookback: int, candles_all):
+    from api.main import compute_signal_for_symbol_from_candles, _score_mode  # type: ignore
+
+    signal_payload = compute_signal_for_symbol_from_candles(
+        symbol, as_of_date.isoformat(), lookback, candles_all
+    )
+    signal_dict = signal_payload.model_dump()
+    signal_hash = ingest._hash_dict(signal_dict)
+
+    preferred_score_mode = signal_dict.get("score_mode")
+    calibration_meta = signal_dict.get("calibration_meta") or {}
+    if not preferred_score_mode:
+        preferred_score_mode = calibration_meta.get("score_mode")
+    if not preferred_score_mode:
+        notes = signal_dict.get("notes") or []
+        preferred_score_mode = "stacked" if any(isinstance(n, str) and "STACKED" in n.upper() for n in notes) else None
+    score_mode = preferred_score_mode or _score_mode() or "single"
+
+    base_score = signal_dict.get("base_score")
+    if base_score is None:
+        base_score = calibration_meta.get("base_score")
+    if base_score is None:
+        base_score = signal_dict.get("score")
+
+    stacked_score = signal_dict.get("stacked_score")
+    thresholds = signal_dict.get("thresholds") or {}
+    notes = signal_dict.get("notes") or []
+    features = signal_dict.get("features") or {}
+    meta = signal_dict.get("meta") or {}
+
+    regime = signal_dict.get("regime")
+    confidence = signal_dict.get("confidence")
+
+    return {
+        "signal_dict": signal_dict,
+        "signal_hash": signal_hash,
+        "score_mode": score_mode,
+        "base_score": base_score,
+        "stacked_score": stacked_score,
+        "thresholds": thresholds,
+        "notes": notes,
+        "features": features,
+        "meta": meta,
+        "regime": regime,
+        "confidence": confidence,
+    }
+
+
+def _compute_strategy_graph(symbol: str, as_of_date: dt.date, lookback: int, candles):
+    from api.main import Candle  # type: ignore  # noqa: F401
+    from ftip.strategy_graph import compute_strategy_graph
+
+    res = compute_strategy_graph(symbol, as_of_date, lookback, candles)
+    strat_rows = []
+    for strat in res.get("strategies", []):
+        strat_rows.append(
+            {
+                "symbol": symbol,
+                "as_of_date": as_of_date,
+                "lookback": lookback,
+                "strategy_id": strat.get("strategy_id"),
+                "strategy_version": strat.get("version"),
+                "regime": res.get("regime"),
+                "raw_score": strat.get("raw_score"),
+                "normalized_score": strat.get("normalized_score"),
+                "signal": strat.get("signal"),
+                "confidence": strat.get("confidence"),
+                "rationale": strat.get("rationale"),
+                "feature_contributions": strat.get("feature_contributions"),
+                "meta": {"regime_meta": res.get("regime_meta")},
+            }
+        )
+    ensemble_row = res.get("ensemble") or {}
+    ensemble_payload = {
+        "symbol": symbol,
+        "as_of_date": as_of_date,
+        "lookback": lookback,
+        "regime": res.get("regime"),
+        "ensemble_method": ensemble_row.get("ensemble_method"),
+        "final_signal": ensemble_row.get("final_signal"),
+        "final_score": ensemble_row.get("final_score"),
+        "final_confidence": ensemble_row.get("final_confidence"),
+        "thresholds": ensemble_row.get("thresholds"),
+        "risk_overlay_applied": ensemble_row.get("risk_overlay_applied"),
+        "strategies_used": ensemble_row.get("strategies_used"),
+        "audit": res.get("audit"),
+        "hashes": res.get("hashes"),
+    }
+    return strat_rows, ensemble_payload
+
+
+def _persist_symbol_outputs(
+    symbol: str,
+    as_of_date: dt.date,
+    lookback: int,
+    features: Dict[str, Any],
+    feature_meta: Dict[str, Any],
+    signal_payload: Dict[str, Any],
+    *,
+    strategy_rows: Optional[List[Dict[str, Any]]] = None,
+    ensemble_row: Optional[Dict[str, Any]] = None,
+) -> Dict[str, int]:
+    rows_written = {"features": 0, "signals": 0, "strategies": 0, "ensembles": 0}
+    with db.with_connection() as (conn, cur):
+        try:
+            cur.execute(
+                """
+                INSERT INTO prosperity_features_daily(
+                    symbol, as_of, lookback, features, meta
+                ) VALUES (%s, %s, %s, %s::jsonb, %s::jsonb)
+                ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
+                    features=EXCLUDED.features,
+                    meta=EXCLUDED.meta,
+                    updated_at=now()
+                """,
+                (symbol, as_of_date, lookback, json.dumps(features), json.dumps(feature_meta)),
+            )
+            rows_written["features"] += 1
+
+            cur.execute(
+                """
+                INSERT INTO prosperity_signals_daily(
+                    symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, thresholds, regime, confidence, notes, features, calibration_meta, meta, signal_hash
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s)
+                ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
+                    score_mode=EXCLUDED.score_mode,
+                    score=EXCLUDED.score,
+                    base_score=EXCLUDED.base_score,
+                    stacked_score=EXCLUDED.stacked_score,
+                    signal=EXCLUDED.signal,
+                    thresholds=EXCLUDED.thresholds,
+                    regime=EXCLUDED.regime,
+                    confidence=EXCLUDED.confidence,
+                    notes=EXCLUDED.notes,
+                    features=EXCLUDED.features,
+                    calibration_meta=EXCLUDED.calibration_meta,
+                    meta=EXCLUDED.meta,
+                    signal_hash=EXCLUDED.signal_hash,
+                    updated_at=now()
+                """,
+                (
+                    symbol,
+                    as_of_date,
+                    lookback,
+                    signal_payload["score_mode"],
+                    signal_payload["signal_dict"].get("score"),
+                    signal_payload["base_score"],
+                    signal_payload["stacked_score"],
+                    signal_payload["signal_dict"].get("signal"),
+                    json.dumps(signal_payload["thresholds"]),
+                    signal_payload["regime"],
+                    signal_payload["confidence"],
+                    json.dumps(signal_payload["notes"]),
+                    json.dumps(signal_payload["features"]),
+                    json.dumps(signal_payload["signal_dict"].get("calibration_meta") or {}),
+                    json.dumps(signal_payload["meta"]),
+                    signal_payload["signal_hash"],
+                ),
+            )
+            rows_written["signals"] += 1
+
+            if strategy_rows is not None:
+                for row in strategy_rows:
+                    cur.execute(
+                        """
+                        INSERT INTO prosperity_strategy_signals_daily(
+                            symbol, as_of_date, lookback, strategy_id, strategy_version, regime,
+                            raw_score, normalized_score, signal, confidence, rationale, feature_contributions, meta
+                        ) VALUES (
+                            %(symbol)s, %(as_of_date)s, %(lookback)s, %(strategy_id)s, %(strategy_version)s, %(regime)s,
+                            %(raw_score)s, %(normalized_score)s, %(signal)s, %(confidence)s,
+                            %(rationale)s::jsonb, %(feature_contributions)s::jsonb, %(meta)s::jsonb
+                        )
+                        ON CONFLICT(symbol, as_of_date, lookback, strategy_id, strategy_version) DO UPDATE SET
+                            regime=EXCLUDED.regime,
+                            raw_score=EXCLUDED.raw_score,
+                            normalized_score=EXCLUDED.normalized_score,
+                            signal=EXCLUDED.signal,
+                            confidence=EXCLUDED.confidence,
+                            rationale=EXCLUDED.rationale,
+                            feature_contributions=EXCLUDED.feature_contributions,
+                            meta=EXCLUDED.meta,
+                            updated_at=now()
+                        """,
+                        {
+                            "symbol": row["symbol"],
+                            "as_of_date": row["as_of_date"],
+                            "lookback": row["lookback"],
+                            "strategy_id": row["strategy_id"],
+                            "strategy_version": row.get("strategy_version", "v1"),
+                            "regime": row.get("regime"),
+                            "raw_score": row.get("raw_score"),
+                            "normalized_score": row.get("normalized_score"),
+                            "signal": row.get("signal"),
+                            "confidence": row.get("confidence"),
+                            "rationale": json.dumps(row.get("rationale") or []),
+                            "feature_contributions": json.dumps(row.get("feature_contributions") or {}),
+                            "meta": json.dumps(row.get("meta") or {}),
+                        },
+                    )
+                    rows_written["strategies"] += 1
+
+            if ensemble_row is not None:
+                cur.execute(
+                    """
+                    INSERT INTO prosperity_ensemble_signals_daily(
+                        symbol, as_of_date, lookback, regime, ensemble_method, final_signal, final_score,
+                        final_confidence, thresholds, risk_overlay_applied, strategies_used, audit, hashes
+                    ) VALUES (
+                        %(symbol)s, %(as_of_date)s, %(lookback)s, %(regime)s, %(ensemble_method)s, %(final_signal)s, %(final_score)s,
+                        %(final_confidence)s, %(thresholds)s::jsonb, %(risk_overlay_applied)s,
+                        %(strategies_used)s::jsonb, %(audit)s::jsonb, %(hashes)s::jsonb
+                    )
+                    ON CONFLICT(symbol, as_of_date, lookback) DO UPDATE SET
+                        regime=EXCLUDED.regime,
+                        ensemble_method=EXCLUDED.ensemble_method,
+                        final_signal=EXCLUDED.final_signal,
+                        final_score=EXCLUDED.final_score,
+                        final_confidence=EXCLUDED.final_confidence,
+                        thresholds=EXCLUDED.thresholds,
+                        risk_overlay_applied=EXCLUDED.risk_overlay_applied,
+                        strategies_used=EXCLUDED.strategies_used,
+                        audit=EXCLUDED.audit,
+                        hashes=EXCLUDED.hashes,
+                        updated_at=now()
+                    """,
+                    {
+                        "symbol": ensemble_row["symbol"],
+                        "as_of_date": ensemble_row["as_of_date"],
+                        "lookback": ensemble_row["lookback"],
+                        "regime": ensemble_row.get("regime"),
+                        "ensemble_method": ensemble_row.get("ensemble_method"),
+                        "final_signal": ensemble_row.get("final_signal"),
+                        "final_score": ensemble_row.get("final_score"),
+                        "final_confidence": ensemble_row.get("final_confidence"),
+                        "thresholds": json.dumps(ensemble_row.get("thresholds") or {}),
+                        "risk_overlay_applied": bool(ensemble_row.get("risk_overlay_applied", False)),
+                        "strategies_used": json.dumps(ensemble_row.get("strategies_used") or []),
+                        "audit": json.dumps(ensemble_row.get("audit") or {}),
+                        "hashes": json.dumps(ensemble_row.get("hashes") or {}),
+                    },
+                )
+                rows_written["ensembles"] += 1
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+    return rows_written
+
+
+def _log_symbol_coverage(
+    run_id: Optional[str],
+    job_name: Optional[str],
+    as_of_date: dt.date,
+    symbol: str,
+    status: str,
+    *,
+    reason_code: Optional[str] = None,
+    reason_detail: Optional[str] = None,
+    bars_required: Optional[int] = None,
+    bars_returned: Optional[int] = None,
+) -> None:
+    if not run_id or not job_name:
+        return
+    try:
+        db.safe_execute(
+            """
+            INSERT INTO prosperity_symbol_coverage(
+                run_id, job_name, as_of_date, symbol, status, reason_code, reason_detail, bars_returned, bars_required
+            ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                status,
+                reason_code,
+                reason_detail,
+                bars_returned,
+                bars_required,
+            ),
+        )
+        logger.info(
+            "jobs.prosperity.daily_snapshot.coverage_logged",
+            extra={
+                "run_id": run_id,
+                "symbol": symbol,
+                "status": status,
+                "reason_code": reason_code,
+            },
+        )
+    except Exception:
+        logger.warning(
+            "jobs.prosperity.daily_snapshot.coverage_failed",
+            extra={"run_id": run_id, "symbol": symbol, "status": status},
+        )
+
+
 @router.post("/snapshot/run")
-async def snapshot_run(req: SnapshotRunRequest, request: Request):
+async def snapshot_run(
+    req: SnapshotRunRequest,
+    request: Request,
+    run_id: Optional[str] = None,
+    job_name: Optional[str] = None,
+):
     _require_db_enabled(write=True, read=True)
     trace_id = getattr(request.state, "trace_id", None)
     if req.from_date > req.to_date:
@@ -147,95 +515,139 @@ async def snapshot_run(req: SnapshotRunRequest, request: Request):
 
     for sym in symbols:
         sym_start = time.time()
-        errors: List[str] = []
-
+        bars_returned: Optional[int] = None
+        bars_required = _bars_required(req.lookback)
         try:
             ingest.ingest_bars(sym, req.from_date, req.to_date, force_refresh=req.force_refresh)
-        except Exception as exc:
-            errors.append(f"bars: {exc}")
+            bars = query.fetch_bars(sym, req.from_date, req.as_of_date)
+            bars_returned = len(bars)
+            _validate_bars(sym, bars, bars_required)
 
-        if not errors:
-            try:
-                ingest.compute_and_store_features(sym, req.as_of_date, req.lookback)
-                rows_written["features"] += 1
-            except Exception as exc:
-                errors.append(f"features: {exc}")
+            candles = _candles_from_bars(bars)
+            feats, feat_meta, regime = _compute_features_payload(sym, req.as_of_date, req.lookback, candles)
+            signal_payload = _compute_signal_payload(sym, req.as_of_date, req.lookback, candles)
+            strategy_rows = None
+            ensemble_row = None
+            if req.compute_strategy_graph:
+                strategy_rows, ensemble_row = _compute_strategy_graph(sym, req.as_of_date, req.lookback, candles)
 
-        if not errors:
-            try:
-                ingest.compute_and_store_signal(sym, req.as_of_date, req.lookback)
-                rows_written["signals"] += 1
-            except Exception as exc:
-                errors.append(f"signals: {exc}")
-
-        if not errors and req.compute_strategy_graph:
-            try:
-                from api.main import Candle
-                bars = query.fetch_bars(sym, req.from_date, req.as_of_date)
-                candles = [
-                    Candle(
-                        timestamp=b["date"],
-                        close=float(b["close"]),
-                        volume=float(b["volume"]) if b.get("volume") is not None else None,
-                    )
-                    for b in bars
-                ]
-                from ftip.strategy_graph import compute_strategy_graph
-                from api.prosperity.strategy_graph_db import upsert_ensemble_row, upsert_strategy_rows
-
-                res = compute_strategy_graph(sym, req.as_of_date, req.lookback, candles)
-                strat_rows = []
-                for strat in res.get("strategies", []):
-                    strat_rows.append(
-                        {
-                            "symbol": sym,
-                            "as_of_date": req.as_of_date,
-                            "lookback": req.lookback,
-                            "strategy_id": strat.get("strategy_id"),
-                            "strategy_version": strat.get("version"),
-                            "regime": res.get("regime"),
-                            "raw_score": strat.get("raw_score"),
-                            "normalized_score": strat.get("normalized_score"),
-                            "signal": strat.get("signal"),
-                            "confidence": strat.get("confidence"),
-                            "rationale": strat.get("rationale"),
-                            "feature_contributions": strat.get("feature_contributions"),
-                            "meta": {"regime_meta": res.get("regime_meta")},
-                        }
-                    )
-                strategy_graph_rows["strategies"] += upsert_strategy_rows(strat_rows)
-                ens = res.get("ensemble") or {}
-                upsert_ensemble_row(
-                    {
-                        "symbol": sym,
-                        "as_of_date": req.as_of_date,
-                        "lookback": req.lookback,
-                        "regime": res.get("regime"),
-                        "ensemble_method": ens.get("ensemble_method"),
-                        "final_signal": ens.get("final_signal"),
-                        "final_score": ens.get("final_score"),
-                        "final_confidence": ens.get("final_confidence"),
-                        "thresholds": ens.get("thresholds"),
-                        "risk_overlay_applied": ens.get("risk_overlay_applied"),
-                        "strategies_used": ens.get("strategies_used"),
-                        "audit": res.get("audit"),
-                        "hashes": res.get("hashes"),
-                    }
-                )
-                strategy_graph_rows["ensembles"] += 1
-            except Exception as exc:
-                errors.append(f"strategy_graph: {exc}")
-
-        duration = time.time() - sym_start
-        if errors:
-            symbols_failed.append({"symbol": sym, "reason": "; ".join(errors)})
-            logger.warning(
-                "[prosperity.snapshot] symbol failed", extra={"symbol": sym, "errors": errors, "duration_sec": duration, "trace_id": trace_id}
+            written = _persist_symbol_outputs(
+                sym,
+                req.as_of_date,
+                req.lookback,
+                feats,
+                {**feat_meta, "regime": regime},
+                signal_payload,
+                strategy_rows=strategy_rows if req.compute_strategy_graph else None,
+                ensemble_row=ensemble_row if req.compute_strategy_graph else None,
             )
-        else:
+            rows_written["features"] += written.get("features", 0)
+            rows_written["signals"] += written.get("signals", 0)
+            strategy_graph_rows["strategies"] += written.get("strategies", 0)
+            strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
             symbols_ok.append(sym)
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                req.as_of_date,
+                sym,
+                "OK",
+                bars_required=bars_required,
+                bars_returned=bars_returned,
+            )
             logger.info(
-                "[prosperity.snapshot] symbol complete", extra={"symbol": sym, "duration_sec": duration, "trace_id": trace_id}
+                "jobs.prosperity.daily_snapshot.symbol_ok",
+                extra={"symbol": sym, "duration_sec": time.time() - sym_start, "trace_id": trace_id},
+            )
+        except SymbolFailure as failure:
+            symbols_failed.append(
+                {
+                    "symbol": sym,
+                    "reason": failure.reason_detail or failure.reason_code,
+                    "reason_code": failure.reason_code,
+                    "reason_detail": failure.reason_detail or failure.reason_code,
+                }
+            )
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                req.as_of_date,
+                sym,
+                "FAILED",
+                reason_code=failure.reason_code,
+                reason_detail=failure.reason_detail,
+                bars_required=failure.bars_required or bars_required,
+                bars_returned=failure.bars_returned if failure.bars_returned is not None else bars_returned,
+            )
+            logger.warning(
+                "jobs.prosperity.daily_snapshot.symbol_failed",
+                extra={
+                    "symbol": sym,
+                    "reason_code": failure.reason_code,
+                    "reason_detail": failure.reason_detail,
+                    "duration_sec": time.time() - sym_start,
+                    "trace_id": trace_id,
+                },
+            )
+        except HTTPException as exc:
+            failure = SymbolFailure(
+                "VALIDATION_ERROR",
+                str(exc.detail),
+                bars_required=bars_required,
+                bars_returned=bars_returned,
+            )
+            symbols_failed.append(
+                {
+                    "symbol": sym,
+                    "reason": failure.reason_detail or failure.reason_code,
+                    "reason_code": failure.reason_code,
+                    "reason_detail": failure.reason_detail,
+                }
+            )
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                req.as_of_date,
+                sym,
+                "FAILED",
+                reason_code=failure.reason_code,
+                reason_detail=failure.reason_detail,
+                bars_required=bars_required,
+                bars_returned=bars_returned,
+            )
+            logger.warning(
+                "jobs.prosperity.daily_snapshot.symbol_failed",
+                extra={"symbol": sym, "reason_code": failure.reason_code, "duration_sec": time.time() - sym_start},
+            )
+        except Exception as exc:
+            failure = SymbolFailure(
+                "API_ERROR",
+                str(exc),
+                bars_required=bars_required,
+                bars_returned=bars_returned,
+            )
+            symbols_failed.append(
+                {
+                    "symbol": sym,
+                    "reason": failure.reason_detail or failure.reason_code,
+                    "reason_code": failure.reason_code,
+                    "reason_detail": failure.reason_detail,
+                }
+            )
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                req.as_of_date,
+                sym,
+                "FAILED",
+                reason_code=failure.reason_code,
+                reason_detail=failure.reason_detail,
+                bars_required=bars_required,
+                bars_returned=bars_returned,
+            )
+            logger.warning(
+                "jobs.prosperity.daily_snapshot.symbol_failed",
+                extra={"symbol": sym, "reason_code": failure.reason_code, "duration_sec": time.time() - sym_start},
             )
 
     timings["total"] = time.time() - t0

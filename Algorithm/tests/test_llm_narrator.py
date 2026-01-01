@@ -4,6 +4,7 @@ from typing import Any, Dict
 import pytest
 from fastapi.testclient import TestClient
 
+from api import security
 from api.llm import prompts, routes
 from api.main import app
 
@@ -12,9 +13,11 @@ from api.main import app
 def clear_openai_env(monkeypatch):
     monkeypatch.delenv("OpenAI_ftip-system", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    security._API_KEYS = None
     yield
     monkeypatch.delenv("OpenAI_ftip-system", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    security._API_KEYS = None
 
 
 def test_narrator_signal_missing_key(monkeypatch):

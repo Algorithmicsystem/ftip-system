@@ -62,7 +62,7 @@ def test_daily_snapshot_runs_with_defaults(monkeypatch: pytest.MonkeyPatch):
     called: Dict[str, Any] = {}
     fixed_today = dt.date(2024, 1, 10)
 
-    async def fake_snapshot(req, request):
+    async def fake_snapshot(req, request, **_kwargs):
         called["req"] = req
         return {
             "status": "ok",
@@ -104,7 +104,7 @@ def test_daily_snapshot_invokes_retention(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FTIP_RETENTION_DAYS", "730")
 
     called: Dict[str, Any] = {}
-    async def fake_snapshot(req, request):
+    async def fake_snapshot(req, request, **_kwargs):
         return {
             "status": "ok",
             "result": {

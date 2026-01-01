@@ -253,6 +253,18 @@ def _acquire_job_lock(
         }
 
 
+def _release_job_lock(_run_id: str, _job_name: str) -> None:
+    """Legacy stub retained for backwards compatibility."""
+
+    return None
+
+
+def _insert_job_run(*_args, **_kwargs) -> None:
+    """Legacy stub retained for backwards compatibility."""
+
+    return None
+
+
 def _update_job_run(
     run_id: str,
     *,
@@ -390,7 +402,7 @@ async def prosperity_daily_snapshot(request: Request):
             },
         )
 
-        result = await snapshot_run(req, request)
+        result = await snapshot_run(req, request, run_id=run_id, job_name=JOB_NAME)
         result_payload = result.get("result", {}) if isinstance(result, dict) else {}
 
         retention_info: Dict[str, int] = {}
@@ -455,3 +467,80 @@ async def prosperity_daily_snapshot_status():
     _require_db_enabled(read=True)
     last_run = _fetch_last_job_run(JOB_NAME)
     return last_run or {}
+
+
+def _coverage_response(*, as_of_date: dt.date | None = None, run_id: str | None = None):
+    filters = ["job_name=%s"]
+    params: List[object] = [JOB_NAME]
+    if as_of_date:
+        filters.append("as_of_date=%s")
+        params.append(as_of_date)
+    if run_id:
+        filters.append("run_id=%s")
+        params.append(run_id)
+    where_clause = " AND ".join(filters)
+    params_tuple = tuple(params)
+
+    attempted_row = db.safe_fetchone(
+        f"SELECT COUNT(*) FROM prosperity_symbol_coverage WHERE {where_clause}", params_tuple
+    )
+    attempted = int(attempted_row[0]) if attempted_row else 0
+
+    grouped = db.safe_fetchall(
+        f"SELECT status, reason_code, COUNT(*) FROM prosperity_symbol_coverage WHERE {where_clause} GROUP BY status, reason_code",
+        params_tuple,
+    )
+    status_counts = {"OK": 0, "FAILED": 0, "SKIPPED": 0}
+    by_reason: Dict[str, int] = {}
+    for status, reason_code, count in grouped:
+        if status in status_counts:
+            status_counts[status] += int(count)
+        reason_key = reason_code or "UNKNOWN"
+        by_reason[reason_key] = by_reason.get(reason_key, 0) + int(count)
+
+    failed_rows = db.safe_fetchall(
+        f"""
+        SELECT symbol, reason_code, reason_detail, bars_required, bars_returned
+        FROM prosperity_symbol_coverage
+        WHERE {where_clause} AND status='FAILED'
+        ORDER BY symbol ASC
+        """,
+        params_tuple,
+    )
+    failed_symbols = []
+    for symbol, reason_code, reason_detail, bars_required, bars_returned in failed_rows:
+        failed_symbols.append(
+            {
+                "symbol": symbol,
+                "reason_code": reason_code,
+                "reason_detail": reason_detail,
+                "bars_required": bars_required,
+                "bars_returned": bars_returned,
+            }
+        )
+
+    payload: Dict[str, object] = {
+        "attempted": attempted,
+        "ok": status_counts.get("OK", 0),
+        "failed": status_counts.get("FAILED", 0),
+        "skipped": status_counts.get("SKIPPED", 0),
+        "by_reason_code": by_reason,
+        "failed_symbols": failed_symbols,
+    }
+    if as_of_date:
+        payload["as_of_date"] = as_of_date.isoformat()
+    if run_id:
+        payload["run_id"] = run_id
+    return payload
+
+
+@router.get("/prosperity/daily-snapshot/coverage")
+async def prosperity_daily_snapshot_coverage(as_of_date: dt.date):
+    _require_db_enabled(read=True)
+    return _coverage_response(as_of_date=as_of_date)
+
+
+@router.get("/prosperity/daily-snapshot/runs/{run_id}/coverage")
+async def prosperity_daily_snapshot_run_coverage(run_id: str):
+    _require_db_enabled(read=True)
+    return _coverage_response(run_id=run_id)

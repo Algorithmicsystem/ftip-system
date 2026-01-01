@@ -59,7 +59,7 @@ def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr("api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None)
     monkeypatch.setattr("api.jobs.prosperity._utc_today", lambda: dt.date(2024, 2, 10))
 
-    async def fake_snapshot(req, request):
+    async def fake_snapshot(req, request, **_kwargs):
         return {
             "status": "ok",
             "result": {
