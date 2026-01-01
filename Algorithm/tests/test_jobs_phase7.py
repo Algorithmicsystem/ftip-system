@@ -28,6 +28,7 @@ def clear_env(monkeypatch: pytest.MonkeyPatch):
         "FTIP_DB_WRITE_ENABLED",
         "FTIP_DB_READ_ENABLED",
         "FTIP_JOB_LOCK_TTL_SECONDS",
+        "FTIP_JOB_LOCK_WINDOW_SEC",
     ]:
         monkeypatch.delenv(key, raising=False)
     security._API_KEYS = None
