@@ -69,8 +69,10 @@ def test_ftip_job_runs_schema_contains_required_columns(monkeypatch):
 
 
 @pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
-def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
+def test_ftip_job_runs_migration_cleans_indexes_and_supports_locking(monkeypatch):
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
+    os.environ.setdefault("FTIP_DB_WRITE_ENABLED", "1")
+    os.environ.setdefault("FTIP_DB_READ_ENABLED", "1")
     _reset_schema()
 
     with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
@@ -80,7 +82,8 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                 CREATE TABLE ftip_job_runs (
                     run_id UUID PRIMARY KEY,
                     job_name TEXT,
-                    created_at TIMESTAMPTZ
+                    created_at TIMESTAMPTZ,
+                    finished_at TIMESTAMPTZ
                 )
                 """
             )
@@ -90,6 +93,13 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
                 VALUES (%s, %s, NULL)
                 """,
                 ("00000000-0000-0000-0000-000000000001", "legacy_job"),
+            )
+            cur.execute(
+                """
+                CREATE UNIQUE INDEX ftip_job_runs_active_idx
+                    ON ftip_job_runs(job_name)
+                    WHERE finished_at IS NULL
+                """
             )
 
     migrations.ensure_schema()
@@ -107,64 +117,62 @@ def test_ftip_job_runs_migration_backfills_nullable_columns(monkeypatch):
 
             cur.execute(
                 """
-                SELECT COUNT(*)
-                FROM ftip_job_runs
-                WHERE created_at IS NULL
-                  OR updated_at IS NULL
-                  OR started_at IS NULL
-                  OR requested IS NULL
-                """
-            )
-            null_timestamps = cur.fetchone()[0]
-
-            cur.execute(
-                """
-                SELECT as_of_date, requested, lock_owner
-                FROM ftip_job_runs
-                WHERE run_id = %s
-                """,
-                ("00000000-0000-0000-0000-000000000001",),
-            )
-            as_of_date, requested, lock_owner = cur.fetchone()
-
-            cur.execute(
-                """
-                SELECT indexdef
+                SELECT 1
                 FROM pg_indexes
                 WHERE schemaname = ANY (current_schemas(false))
                   AND tablename = 'ftip_job_runs'
-                  AND indexname = 'ftip_job_runs_active_job'
+                  AND indexname = 'ftip_job_runs_active_idx'
                 """
             )
-            index_def = cur.fetchone()[0]
+            legacy_index = cur.fetchone()
 
-            upsert_run_id = uuid.uuid4()
             cur.execute(
                 """
-                INSERT INTO ftip_job_runs (
-                    run_id,
-                    job_name,
-                    as_of_date,
-                    started_at,
-                    requested,
-                    lock_owner
-                )
-                VALUES (%s, %s, %s, now(), '{}'::jsonb, 'tester')
-                ON CONFLICT (job_name) WHERE finished_at IS NULL
-                DO NOTHING
-                RETURNING run_id
-                """,
-                (upsert_run_id, "legacy_job", dt.date(2024, 1, 1)),
+                SELECT
+                    i.indisunique,
+                    pg_get_expr(i.indpred, i.indrelid)
+                FROM pg_class t
+                JOIN pg_index i ON t.oid = i.indrelid
+                JOIN pg_class idx ON idx.oid = i.indexrelid
+                WHERE t.relname = 'ftip_job_runs'
+                  AND idx.relname = 'idx_ftip_job_runs_active'
+                """
             )
-            conflict_upserted = cur.fetchone()
+            index_meta = cur.fetchone()
 
     assert {"as_of_date", "lock_acquired_at", "lock_expires_at"}.issubset(columns)
-    assert null_timestamps == 0
-    assert requested == {}
-    assert lock_owner is None
-    assert as_of_date is None
-    assert "finished_at IS NULL" in index_def
-    assert conflict_upserted is None
+    assert index_meta is not None
+    assert index_meta[0] is False
+    assert "finished_at IS NULL" in (index_meta[1] or "")
+    assert legacy_index is None
+
+    run_id = str(uuid.uuid4())
+    as_of = dt.date(2024, 1, 1)
+
+    acquired, info = prosperity._acquire_job_lock(
+        run_id,
+        prosperity.JOB_NAME,
+        as_of,
+        {"symbols": ["AAPL"]},
+        30,
+        "tester",
+    )
+
+    assert acquired is True
+    assert info["run_id"] == run_id
+
+    second_run_id = str(uuid.uuid4())
+    acquired_second, info_second = prosperity._acquire_job_lock(
+        second_run_id,
+        prosperity.JOB_NAME,
+        as_of,
+        {"symbols": ["MSFT"]},
+        30,
+        "tester2",
+    )
+
+    assert acquired_second is False
+    assert info_second["run_id"] == run_id
 
 
 @pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")

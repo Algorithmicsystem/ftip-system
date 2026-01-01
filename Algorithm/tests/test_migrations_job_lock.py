@@ -29,6 +29,11 @@ def test_ftip_job_runs_columns_migration_registered():
     assert "005_ftip_job_runs_columns" in versions
 
 
+def test_ftip_job_runs_lock_cleanup_migration_registered():
+    versions = [version for version, _ in migrations.MIGRATIONS]
+    assert "006_ftip_job_runs_lock_cleanup" in versions
+
+
 def test_ftip_job_runs_columns_migration_adds_as_of_date():
     cur = _FakeCursor()
     migrations._migration_ftip_job_runs_columns(cur)
