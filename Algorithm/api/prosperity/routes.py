@@ -42,7 +42,7 @@ class SymbolFailure(Exception):
     ):
         super().__init__(reason_detail or reason_code)
         self.reason_code = reason_code
-        self.reason_detail = reason_detail
+        self.reason_detail = reason_detail or reason_code
         self.bars_required = bars_required
         self.bars_returned = bars_returned
 

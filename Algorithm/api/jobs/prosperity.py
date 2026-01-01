@@ -509,11 +509,13 @@ def _coverage_response(*, as_of_date: dt.date | None = None, run_id: str | None 
     )
     failed_symbols = []
     for symbol, reason_code, reason_detail, bars_required, bars_returned in failed_rows:
+        detail = reason_detail or reason_code or "UNKNOWN"
         failed_symbols.append(
             {
                 "symbol": symbol,
+                "reason": detail,
                 "reason_code": reason_code,
-                "reason_detail": reason_detail,
+                "reason_detail": detail,
                 "bars_required": bars_required,
                 "bars_returned": bars_returned,
             }
