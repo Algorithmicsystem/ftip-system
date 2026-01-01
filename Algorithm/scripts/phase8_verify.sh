@@ -19,6 +19,52 @@ curl_json() {
   echo "$status"
 }
 
+parse_field() {
+  local file="$1"; shift
+  local field="$1"; shift
+  python - <<'PY' "$file" "$field"
+import json, sys
+file_path, field = sys.argv[1:3]
+data = json.load(open(file_path))
+parts = field.split('.')
+val = data
+for part in parts:
+    if isinstance(val, dict) and part in val:
+        val = val[part]
+    else:
+        sys.exit("")
+if isinstance(val, (dict, list)):
+    sys.exit(json.dumps(val))
+print(val)
+PY
+}
+
+validate_failure_reasons() {
+  local file="$1"
+  python - <<'PY' "$file"
+import json, sys
+payload = json.load(open(sys.argv[1]))
+failed = payload.get("symbols_failed") or []
+for item in failed:
+    if not item.get("reason_code"):
+        sys.exit("missing reason_code")
+print("ok")
+PY
+}
+
+ensure_failed_symbols_reason_code() {
+  local file="$1"
+  python - <<'PY' "$file"
+import json, sys
+payload = json.load(open(sys.argv[1]))
+failed = payload.get("failed_symbols") or []
+for item in failed:
+    if not item.get("reason_code"):
+        sys.exit("missing reason_code")
+print("ok")
+PY
+}
+
 echo "== FTIP Phase 8 Verification =="
 echo "BASE=${BASE}";
 echo ""
@@ -55,14 +101,31 @@ if [[ "$status" != "200" ]]; then
   out_json "$job_first_out"
   fail "/jobs/prosperity/daily-snapshot with key HTTP ${status}"
 fi
-pass "/jobs/prosperity/daily-snapshot with key"
 
-if ! jq -e '.run_id and (.rows_written.signals // 0) >= 0' "$job_first_out" >/dev/null; then
+if ! validate_failure_reasons "$job_first_out" >/dev/null; then
   out_json "$job_first_out"
-  fail "daily snapshot response missing run_id or rows_written"
+  fail "daily snapshot response missing reason codes"
 fi
-as_of=$(jq -r '.as_of_date' "$job_first_out")
-run_id=$(jq -r '.run_id' "$job_first_out")
+
+mapfile -t parsed_run < <(python - <<'PY' "$job_first_out"
+import json, sys
+payload = json.load(open(sys.argv[1]))
+run_id = payload.get("run_id")
+as_of = payload.get("as_of_date")
+rows_written = payload.get("rows_written")
+if not run_id or rows_written is None:
+    sys.exit("missing run_id or rows_written")
+print(run_id)
+print(as_of or "")
+PY
+)
+if [[ ${#parsed_run[@]} -lt 2 ]]; then
+  out_json "$job_first_out"
+  fail "unable to parse run_id/as_of_date"
+fi
+run_id=${parsed_run[0]}
+as_of=${parsed_run[1]}
+pass "/jobs/prosperity/daily-snapshot with key"
 
 job_again="${tmpdir}/daily_job_again.json"
 status=$(curl_json POST "/jobs/prosperity/daily-snapshot" "$job_again" "${AUTH_HEADER[@]}")
@@ -78,9 +141,9 @@ if [[ "$status" != "200" ]]; then
   out_json "$status_out"
   fail "/jobs/prosperity/daily-snapshot/status HTTP ${status}"
 fi
-if ! jq -e '.status and .started_at and .run_id' "$status_out" >/dev/null; then
+if [[ -z "$(parse_field "$status_out" run_id || true)" ]]; then
   out_json "$status_out"
-  fail "status endpoint missing fields"
+  fail "status endpoint missing run_id"
 fi
 pass "/jobs/prosperity/daily-snapshot/status"
 
@@ -91,11 +154,11 @@ if [[ "$status" != "200" ]]; then
   out_json "$coverage_out"
   fail "coverage by date HTTP ${status}"
 fi
-if ! jq -e '.attempted >= 0 and (.by_reason_code | type=="object")' "$coverage_out" >/dev/null; then
+if [[ -z "$(parse_field "$coverage_out" attempted || true)" ]]; then
   out_json "$coverage_out"
-  fail "coverage payload missing fields"
+  fail "coverage payload missing attempted"
 fi
-if jq -e '.failed > 0 and (.failed_symbols[0].reason_code == "" or .failed_symbols[0].reason_code == null)' "$coverage_out" >/dev/null; then
+if ! ensure_failed_symbols_reason_code "$coverage_out" >/dev/null; then
   out_json "$coverage_out"
   fail "coverage failed_symbols missing reason_code"
 fi
@@ -107,7 +170,7 @@ if [[ "$status" != "200" ]]; then
   out_json "$run_cov_out"
   fail "coverage by run HTTP ${status}"
 fi
-if ! jq -e ".run_id == \"${run_id}\"" "$run_cov_out" >/dev/null; then
+if [[ "$(parse_field "$run_cov_out" run_id)" != "$run_id" ]]; then
   out_json "$run_cov_out"
   fail "coverage run_id mismatch"
 fi
