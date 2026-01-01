@@ -290,6 +290,13 @@ def _migration_ftip_job_runs_lock_cleanup(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_prosperity_symbol_coverage(cur: Any) -> None:
+    """Add coverage logging table for per-symbol run results."""
+
+    sql_path = Path(__file__).with_name("007_prosperity_symbol_coverage.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
@@ -297,6 +304,7 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     ("004_job_lock_owner", _migration_job_lock_owner),
     ("005_ftip_job_runs_columns", _migration_ftip_job_runs_columns),
     ("006_ftip_job_runs_lock_cleanup", _migration_ftip_job_runs_lock_cleanup),
+    ("007_prosperity_symbol_coverage", _migration_prosperity_symbol_coverage),
 ]
 
 

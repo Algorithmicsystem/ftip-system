@@ -18,6 +18,9 @@ def _disable_db(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("FTIP_DB_ENABLED", "0")
+    monkeypatch.setenv("FTIP_DB_WRITE_ENABLED", "0")
+    monkeypatch.setenv("FTIP_DB_READ_ENABLED", "0")
     monkeypatch.setattr(migrations, "ensure_schema", lambda: [])
     with TestClient(app) as client:
         yield client
