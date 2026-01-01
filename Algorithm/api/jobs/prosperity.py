@@ -55,6 +55,11 @@ def _lock_ttl_seconds() -> int:
     return max(ttl, 1)
 
 
+def _lock_window_seconds() -> int:
+    window = config.env_int("FTIP_JOB_LOCK_WINDOW_SEC", 120)
+    return max(window, 0)
+
+
 def _job_lock_owner() -> str:
     return (
         config.env("FTIP_JOB_LOCK_OWNER")
@@ -127,16 +132,18 @@ def _acquire_job_lock(
     with db.with_connection() as (conn, cur):
         _cleanup_stale_job_runs(cur, job_name, ttl_seconds)
 
+        lock_window_seconds = _lock_window_seconds()
+
         cur.execute(
             """
             SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
             FROM ftip_job_runs
             WHERE job_name = %s
-              AND finished_at IS NULL
+              AND (finished_at IS NULL OR finished_at > now() - (%s || ' seconds')::interval)
             FOR UPDATE SKIP LOCKED
             LIMIT 1
             """,
-            (job_name,),
+            (job_name, lock_window_seconds),
         )
         existing_locked = cur.fetchone()
         if existing_locked:
@@ -157,10 +164,10 @@ def _acquire_job_lock(
             SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
             FROM ftip_job_runs
             WHERE job_name = %s
-              AND finished_at IS NULL
+              AND (finished_at IS NULL OR finished_at > now() - (%s || ' seconds')::interval)
             LIMIT 1
             """,
-            (job_name,),
+            (job_name, lock_window_seconds),
         )
         existing_pending = cur.fetchone()
         if existing_pending:
