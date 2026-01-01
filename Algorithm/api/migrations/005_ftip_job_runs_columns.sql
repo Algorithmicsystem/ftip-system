@@ -67,8 +67,8 @@ BEGIN
         ALTER TABLE ftip_job_runs ADD CONSTRAINT ftip_job_runs_pkey PRIMARY KEY (run_id);
     END IF;
 
-    -- Recreate the unique partial index used for active job locking
-    CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_job
+    -- Ensure a non-unique partial index exists for active job lookups
+    CREATE INDEX IF NOT EXISTS idx_ftip_job_runs_active
         ON ftip_job_runs (job_name)
         WHERE finished_at IS NULL;
 END;

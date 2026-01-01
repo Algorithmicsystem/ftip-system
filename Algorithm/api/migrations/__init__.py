@@ -268,14 +268,6 @@ def _migration_job_metadata(cur: Any) -> None:
     _ensure_column(cur, "ftip_job_runs", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
     _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
 
-    cur.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS ftip_job_runs_active_job
-        ON ftip_job_runs(job_name)
-        WHERE finished_at IS NULL
-        """
-    )
-
 
 def _migration_job_lock_owner(cur: Any) -> None:
     """Ensure job run tables include lock ownership metadata."""
@@ -291,12 +283,20 @@ def _migration_ftip_job_runs_columns(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_ftip_job_runs_lock_cleanup(cur: Any) -> None:
+    """Remove legacy unique indexes and ensure non-unique active run index."""
+
+    sql_path = Path(__file__).with_name("006_ftip_job_runs_lock_cleanup.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
     ("003_job_metadata", _migration_job_metadata),
     ("004_job_lock_owner", _migration_job_lock_owner),
     ("005_ftip_job_runs_columns", _migration_ftip_job_runs_columns),
+    ("006_ftip_job_runs_lock_cleanup", _migration_ftip_job_runs_lock_cleanup),
 ]
 
 
@@ -394,27 +394,35 @@ def _verify_job_run_schema(cur: Any) -> None:
 
     cur.execute(
         """
+        CREATE INDEX IF NOT EXISTS idx_ftip_job_runs_active
+        ON ftip_job_runs(job_name)
+        WHERE finished_at IS NULL
+        """
+    )
+
+    cur.execute(
+        """
         SELECT
             i.indisunique,
-            pg_get_indexdef(i.indexrelid),
-            pg_get_expr(i.indpred, i.indrelid)
+            pg_get_expr(i.indpred, i.indrelid),
+            pg_get_indexdef(i.indexrelid)
         FROM pg_class t
         JOIN pg_index i ON t.oid = i.indrelid
         JOIN pg_class idx ON idx.oid = i.indexrelid
         WHERE t.relname = 'ftip_job_runs'
-          AND idx.relname = 'ftip_job_runs_active_job'
+          AND idx.relname = 'idx_ftip_job_runs_active'
     """
     )
     index_row = cur.fetchone()
     if not index_row:
-        raise RuntimeError("database_schema_missing: ftip_job_runs_active_job")
+        raise RuntimeError("database_schema_missing: idx_ftip_job_runs_active")
 
-    is_unique, index_def, predicate = index_row
+    is_unique, predicate, index_def = index_row
     predicate = predicate or ""
     index_def = index_def or ""
-    if not is_unique or "(job_name)" not in index_def or "finished_at IS NULL" not in predicate:
+    if is_unique or "finished_at IS NULL" not in predicate or "(job_name)" not in index_def:
         raise RuntimeError(
-            "ftip_job_runs_active_job must be a unique partial index on job_name where finished_at IS NULL"
+            "idx_ftip_job_runs_active must be a non-unique partial index on job_name where finished_at IS NULL"
         )
 
 
