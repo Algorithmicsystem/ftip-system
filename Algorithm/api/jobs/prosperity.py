@@ -6,6 +6,8 @@ import socket
 import uuid
 from typing import Dict, List, Optional, Tuple
 
+from pydantic import BaseModel, Field, ValidationError
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from psycopg.errors import UndefinedColumn
@@ -28,6 +30,19 @@ JOB_NAME = "prosperity_daily_snapshot"
 DEFAULT_UNIVERSE = (
     "AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B"
 )
+CORE5_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,TSLA"
+SP500_SAMPLE_UNIVERSE = (
+    "AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B,JNJ,UNH,V,PG,HD"
+)
+
+SYMBOLS_MODES = {"core10", "core5", "sp500_sample"}
+
+
+class CronSnapshotParams(BaseModel):
+    as_of_date: Optional[dt.date] = None
+    lookback_days: int = Field(365, ge=1)
+    symbols_mode: str = Field("core10")
+    concurrency: int = Field(3, ge=1)
 
 
 def _utc_today() -> dt.date:
@@ -332,25 +347,25 @@ def _result_status(result_payload: Dict[str, object]) -> str:
     return "SUCCESS"
 
 
-@router.post("/prosperity/daily-snapshot")
-async def prosperity_daily_snapshot(request: Request):
-    _require_db_enabled(write=True, read=True)
+def _symbols_for_mode(mode: str) -> List[str]:
+    if mode == "core5":
+        return _parse_symbols(CORE5_UNIVERSE)
+    if mode == "sp500_sample":
+        return _parse_symbols(SP500_SAMPLE_UNIVERSE)
+    return _parse_symbols(DEFAULT_UNIVERSE)
 
-    run_id = str(uuid.uuid4())
-    ttl_seconds = _lock_ttl_seconds()
-    lock_owner = _job_lock_owner()
 
-    today = _utc_today()
-    as_of_date = today - dt.timedelta(days=1)
+def _build_snapshot_request(
+    *,
+    as_of_date: dt.date,
+    lookback_days: int,
+    symbols: List[str],
+    lookback: int,
+    concurrency: int,
+) -> SnapshotRunRequest:
     to_date = as_of_date
-    window_days = config.env_int("FTIP_SNAPSHOT_WINDOW_DAYS", 365)
-    from_date = to_date - dt.timedelta(days=window_days)
-
-    lookback = config.env_int("FTIP_LOOKBACK", 252)
-    concurrency = config.env_int("FTIP_SNAPSHOT_CONCURRENCY", 3)
-    symbols = _parse_symbols(config.env("FTIP_UNIVERSE"))
-
-    req = SnapshotRunRequest(
+    from_date = to_date - dt.timedelta(days=lookback_days)
+    return SnapshotRunRequest(
         symbols=symbols,
         from_date=from_date,
         to_date=to_date,
@@ -360,11 +375,35 @@ async def prosperity_daily_snapshot(request: Request):
         compute_strategy_graph=True,
     )
 
+
+async def _run_daily_snapshot(
+    request: Request,
+    *,
+    as_of_date: dt.date,
+    lookback_days: int,
+    symbols: List[str],
+    concurrency: int,
+) -> JSONResponse | Dict[str, object]:
+    _require_db_enabled(write=True, read=True)
+
+    run_id = str(uuid.uuid4())
+    ttl_seconds = _lock_ttl_seconds()
+    lock_owner = _job_lock_owner()
+    lookback = config.env_int("FTIP_LOOKBACK", 252)
+
+    req = _build_snapshot_request(
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        symbols=symbols,
+        lookback=lookback,
+        concurrency=concurrency,
+    )
+
     requested_payload = {
         "symbols": symbols,
-        "from_date": from_date.isoformat(),
-        "to_date": to_date.isoformat(),
-        "as_of_date": as_of_date.isoformat(),
+        "from_date": req.from_date.isoformat(),
+        "to_date": req.to_date.isoformat(),
+        "as_of_date": req.as_of_date.isoformat(),
         "lookback": lookback,
         "concurrency": concurrency,
     }
@@ -385,24 +424,38 @@ async def prosperity_daily_snapshot(request: Request):
         )
         if not acquired:
             logger.info(
-                "jobs.prosperity.daily_snapshot.lock_conflict",
-                extra={"job_name": JOB_NAME, **lock_info},
+                "daily_snapshot.lock_conflict",
+                extra={
+                    "run_id": lock_info.get("run_id"),
+                    "as_of_date": as_of_date.isoformat(),
+                    "lock_owner": lock_info.get("lock_owner"),
+                },
             )
             return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
         run_recorded = True
 
         logger.info(
-            "jobs.prosperity.daily_snapshot.start",
+            "daily_snapshot.lock_acquired",
             extra={
                 "run_id": run_id,
-                "job_name": JOB_NAME,
+                "as_of_date": as_of_date.isoformat(),
+                "lock_owner": lock_owner,
+            },
+        )
+        logger.info(
+            "daily_snapshot.start",
+            extra={
+                "run_id": run_id,
+                "as_of_date": as_of_date.isoformat(),
                 "lock_owner": lock_owner,
                 "started_at": lock_info.get("started_at"),
             },
         )
 
-        result = await snapshot_run(req, request, run_id=run_id, job_name=JOB_NAME)
+        result = await snapshot_run(
+            req, request, run_id=run_id, job_name=JOB_NAME, lock_owner=lock_owner
+        )
         result_payload = result.get("result", {}) if isinstance(result, dict) else {}
 
         retention_info: Dict[str, int] = {}
@@ -424,8 +477,8 @@ async def prosperity_daily_snapshot(request: Request):
         response_body = {
             "status": result.get("status"),
             "as_of_date": as_of_date.isoformat(),
-            "from_date": from_date.isoformat(),
-            "to_date": to_date.isoformat(),
+            "from_date": req.from_date.isoformat(),
+            "to_date": req.to_date.isoformat(),
             "run_id": run_id,
             **summary,
         }
@@ -457,9 +510,63 @@ async def prosperity_daily_snapshot(request: Request):
         finally:
             if run_recorded:
                 logger.info(
-                    "jobs.prosperity.daily_snapshot.lock_released",
-                    extra={"run_id": run_id, "job_name": JOB_NAME, "status": status},
+                    "daily_snapshot.end",
+                    extra={
+                        "run_id": run_id,
+                        "as_of_date": as_of_date.isoformat(),
+                        "lock_owner": lock_owner,
+                        "status": status,
+                    },
                 )
+
+
+@router.post("/prosperity/daily-snapshot")
+async def prosperity_daily_snapshot(request: Request):
+    today = _utc_today()
+    as_of_date = today - dt.timedelta(days=1)
+    lookback_days = config.env_int("FTIP_SNAPSHOT_WINDOW_DAYS", 365)
+    concurrency = config.env_int("FTIP_SNAPSHOT_CONCURRENCY", 3)
+    symbols = _parse_symbols(config.env("FTIP_UNIVERSE"))
+    return await _run_daily_snapshot(
+        request,
+        as_of_date=as_of_date,
+        lookback_days=lookback_days,
+        symbols=symbols,
+        concurrency=concurrency,
+    )
+
+
+@router.post("/prosperity/daily-snapshot/cron")
+async def prosperity_daily_snapshot_cron(request: Request):
+    body: Dict[str, object] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    payload: Dict[str, object] = dict(request.query_params)
+    payload.update(body if isinstance(body, dict) else {})
+
+    try:
+        params = CronSnapshotParams.model_validate(payload)
+    except ValidationError as exc:
+        return JSONResponse(status_code=400, content={"error": "invalid_request", "detail": exc.errors()})
+
+    symbols_mode = (params.symbols_mode or "core10").strip()
+    if symbols_mode not in SYMBOLS_MODES:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_symbols_mode", "allowed": sorted(SYMBOLS_MODES)},
+        )
+
+    as_of_date = params.as_of_date or _utc_today()
+    return await _run_daily_snapshot(
+        request,
+        as_of_date=as_of_date,
+        lookback_days=params.lookback_days,
+        symbols=_symbols_for_mode(symbols_mode),
+        concurrency=params.concurrency,
+    )
 
 
 @router.get("/prosperity/daily-snapshot/status")
@@ -467,6 +574,48 @@ async def prosperity_daily_snapshot_status():
     _require_db_enabled(read=True)
     last_run = _fetch_last_job_run(JOB_NAME)
     return last_run or {}
+
+
+@router.get("/prosperity/daily-snapshot/summary")
+async def prosperity_daily_snapshot_summary():
+    _require_db_enabled(read=True)
+    last_run = _fetch_last_job_run(JOB_NAME)
+    if not last_run:
+        return {
+            "last_run": None,
+            "last_as_of_date": None,
+            "ok_count": 0,
+            "failed_count": 0,
+            "last_failures_sample": [],
+            "coverage": None,
+        }
+
+    result = last_run.get("result") or {}
+    response_payload = result.get("response") or {}
+    symbols_ok = response_payload.get("symbols_ok") or []
+    symbols_failed = response_payload.get("symbols_failed") or []
+
+    last_as_of = last_run.get("as_of_date")
+    coverage = None
+    if last_as_of:
+        try:
+            coverage = _coverage_response(as_of_date=dt.date.fromisoformat(last_as_of))
+        except Exception:
+            coverage = None
+
+    return {
+        "last_run": {
+            "run_id": last_run.get("run_id"),
+            "started_at": last_run.get("started_at"),
+            "ended_at": last_run.get("finished_at"),
+            "status": last_run.get("status"),
+        },
+        "last_as_of_date": last_as_of,
+        "ok_count": len(symbols_ok),
+        "failed_count": len(symbols_failed),
+        "last_failures_sample": symbols_failed[:5],
+        "coverage": coverage,
+    }
 
 
 def _coverage_response(*, as_of_date: dt.date | None = None, run_id: str | None = None):

@@ -3,9 +3,11 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import random
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api import config, db, security
@@ -434,6 +436,7 @@ def _log_symbol_coverage(
     reason_detail: Optional[str] = None,
     bars_required: Optional[int] = None,
     bars_returned: Optional[int] = None,
+    lock_owner: Optional[str] = None,
 ) -> None:
     if not run_id or not job_name:
         return
@@ -457,9 +460,11 @@ def _log_symbol_coverage(
             ),
         )
         logger.info(
-            "jobs.prosperity.daily_snapshot.coverage_logged",
+            "daily_snapshot.coverage_logged",
             extra={
                 "run_id": run_id,
+                "as_of_date": as_of_date.isoformat(),
+                "lock_owner": lock_owner,
                 "symbol": symbol,
                 "status": status,
                 "reason_code": reason_code,
@@ -472,12 +477,34 @@ def _log_symbol_coverage(
         )
 
 
+def _classify_error(exc: Exception) -> Tuple[str, str, bool]:
+    if isinstance(exc, SymbolFailure):
+        return exc.reason_code, exc.reason_detail or exc.reason_code, False
+    if isinstance(exc, HTTPException):
+        detail = str(exc.detail)
+        if exc.status_code >= 500:
+            return "UPSTREAM_5XX", detail, True
+        return "VALIDATION_ERROR", detail, False
+    if isinstance(exc, (TimeoutError, requests.exceptions.Timeout)):
+        return "TIMEOUT", str(exc), True
+    if isinstance(exc, requests.exceptions.RequestException):
+        return "NETWORK_ERROR", str(exc), True
+    return "UNEXPECTED_ERROR", str(exc), False
+
+
+def _retry_sleep(attempt: int) -> None:
+    base_sleep = 1.0
+    jitter = random.uniform(0.0, 0.5)
+    time.sleep(base_sleep * (2 ** (attempt - 1)) + jitter)
+
+
 @router.post("/snapshot/run")
 async def snapshot_run(
     req: SnapshotRunRequest,
     request: Request,
     run_id: Optional[str] = None,
     job_name: Optional[str] = None,
+    lock_owner: Optional[str] = None,
 ):
     _require_db_enabled(write=True, read=True)
     trace_id = getattr(request.state, "trace_id", None)
@@ -513,142 +540,112 @@ async def snapshot_run(
         raise HTTPException(status_code=503, detail=f"failed to upsert universe: {exc}")
     timings["upsert_universe"] = time.time() - t0
 
+    max_attempts = 3
+
     for sym in symbols:
         sym_start = time.time()
         bars_returned: Optional[int] = None
         bars_required = _bars_required(req.lookback)
-        try:
-            ingest.ingest_bars(sym, req.from_date, req.to_date, force_refresh=req.force_refresh)
-            bars = query.fetch_bars(sym, req.from_date, req.as_of_date)
-            bars_returned = len(bars)
-            _validate_bars(sym, bars, bars_required)
+        attempts = 0
+        while attempts < max_attempts:
+            attempts += 1
+            try:
+                ingest.ingest_bars(sym, req.from_date, req.to_date, force_refresh=req.force_refresh)
+                bars = query.fetch_bars(sym, req.from_date, req.as_of_date)
+                bars_returned = len(bars)
+                _validate_bars(sym, bars, bars_required)
 
-            candles = _candles_from_bars(bars)
-            feats, feat_meta, regime = _compute_features_payload(sym, req.as_of_date, req.lookback, candles)
-            signal_payload = _compute_signal_payload(sym, req.as_of_date, req.lookback, candles)
-            strategy_rows = None
-            ensemble_row = None
-            if req.compute_strategy_graph:
-                strategy_rows, ensemble_row = _compute_strategy_graph(sym, req.as_of_date, req.lookback, candles)
+                candles = _candles_from_bars(bars)
+                feats, feat_meta, regime = _compute_features_payload(sym, req.as_of_date, req.lookback, candles)
+                signal_payload = _compute_signal_payload(sym, req.as_of_date, req.lookback, candles)
+                strategy_rows = None
+                ensemble_row = None
+                if req.compute_strategy_graph:
+                    strategy_rows, ensemble_row = _compute_strategy_graph(sym, req.as_of_date, req.lookback, candles)
 
-            written = _persist_symbol_outputs(
-                sym,
-                req.as_of_date,
-                req.lookback,
-                feats,
-                {**feat_meta, "regime": regime},
-                signal_payload,
-                strategy_rows=strategy_rows if req.compute_strategy_graph else None,
-                ensemble_row=ensemble_row if req.compute_strategy_graph else None,
-            )
-            rows_written["features"] += written.get("features", 0)
-            rows_written["signals"] += written.get("signals", 0)
-            strategy_graph_rows["strategies"] += written.get("strategies", 0)
-            strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
-            symbols_ok.append(sym)
-            _log_symbol_coverage(
-                run_id,
-                job_name,
-                req.as_of_date,
-                sym,
-                "OK",
-                bars_required=bars_required,
-                bars_returned=bars_returned,
-            )
-            logger.info(
-                "jobs.prosperity.daily_snapshot.symbol_ok",
-                extra={"symbol": sym, "duration_sec": time.time() - sym_start, "trace_id": trace_id},
-            )
-        except SymbolFailure as failure:
-            symbols_failed.append(
-                {
-                    "symbol": sym,
-                    "reason": failure.reason_detail or failure.reason_code,
-                    "reason_code": failure.reason_code,
-                    "reason_detail": failure.reason_detail or failure.reason_code,
-                }
-            )
-            _log_symbol_coverage(
-                run_id,
-                job_name,
-                req.as_of_date,
-                sym,
-                "FAILED",
-                reason_code=failure.reason_code,
-                reason_detail=failure.reason_detail,
-                bars_required=failure.bars_required or bars_required,
-                bars_returned=failure.bars_returned if failure.bars_returned is not None else bars_returned,
-            )
-            logger.warning(
-                "jobs.prosperity.daily_snapshot.symbol_failed",
-                extra={
-                    "symbol": sym,
-                    "reason_code": failure.reason_code,
-                    "reason_detail": failure.reason_detail,
-                    "duration_sec": time.time() - sym_start,
-                    "trace_id": trace_id,
-                },
-            )
-        except HTTPException as exc:
-            failure = SymbolFailure(
-                "VALIDATION_ERROR",
-                str(exc.detail),
-                bars_required=bars_required,
-                bars_returned=bars_returned,
-            )
-            symbols_failed.append(
-                {
-                    "symbol": sym,
-                    "reason": failure.reason_detail or failure.reason_code,
-                    "reason_code": failure.reason_code,
-                    "reason_detail": failure.reason_detail,
-                }
-            )
-            _log_symbol_coverage(
-                run_id,
-                job_name,
-                req.as_of_date,
-                sym,
-                "FAILED",
-                reason_code=failure.reason_code,
-                reason_detail=failure.reason_detail,
-                bars_required=bars_required,
-                bars_returned=bars_returned,
-            )
-            logger.warning(
-                "jobs.prosperity.daily_snapshot.symbol_failed",
-                extra={"symbol": sym, "reason_code": failure.reason_code, "duration_sec": time.time() - sym_start},
-            )
-        except Exception as exc:
-            failure = SymbolFailure(
-                "API_ERROR",
-                str(exc),
-                bars_required=bars_required,
-                bars_returned=bars_returned,
-            )
-            symbols_failed.append(
-                {
-                    "symbol": sym,
-                    "reason": failure.reason_detail or failure.reason_code,
-                    "reason_code": failure.reason_code,
-                    "reason_detail": failure.reason_detail,
-                }
-            )
-            _log_symbol_coverage(
-                run_id,
-                job_name,
-                req.as_of_date,
-                sym,
-                "FAILED",
-                reason_code=failure.reason_code,
-                reason_detail=failure.reason_detail,
-                bars_required=bars_required,
-                bars_returned=bars_returned,
-            )
-            logger.warning(
-                "jobs.prosperity.daily_snapshot.symbol_failed",
-                extra={"symbol": sym, "reason_code": failure.reason_code, "duration_sec": time.time() - sym_start},
-            )
+                written = _persist_symbol_outputs(
+                    sym,
+                    req.as_of_date,
+                    req.lookback,
+                    feats,
+                    {**feat_meta, "regime": regime},
+                    signal_payload,
+                    strategy_rows=strategy_rows if req.compute_strategy_graph else None,
+                    ensemble_row=ensemble_row if req.compute_strategy_graph else None,
+                )
+                rows_written["features"] += written.get("features", 0)
+                rows_written["signals"] += written.get("signals", 0)
+                strategy_graph_rows["strategies"] += written.get("strategies", 0)
+                strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
+                symbols_ok.append(sym)
+                _log_symbol_coverage(
+                    run_id,
+                    job_name,
+                    req.as_of_date,
+                    sym,
+                    "OK",
+                    bars_required=bars_required,
+                    bars_returned=bars_returned,
+                    lock_owner=lock_owner,
+                )
+                logger.info(
+                    "jobs.prosperity.daily_snapshot.symbol_ok",
+                    extra={"symbol": sym, "duration_sec": time.time() - sym_start, "trace_id": trace_id},
+                )
+                break
+            except Exception as exc:
+                reason_code, reason_detail, retryable = _classify_error(exc)
+                if retryable and attempts < max_attempts:
+                    logger.info(
+                        "daily_snapshot.retry",
+                        extra={
+                            "run_id": run_id,
+                            "as_of_date": req.as_of_date.isoformat(),
+                            "lock_owner": lock_owner,
+                            "symbol": sym,
+                            "attempt": attempts + 1,
+                            "reason_code": reason_code,
+                        },
+                    )
+                    _retry_sleep(attempts)
+                    continue
+
+                symbols_failed.append(
+                    {
+                        "symbol": sym,
+                        "reason": reason_detail or reason_code,
+                        "reason_code": reason_code,
+                        "reason_detail": reason_detail or reason_code,
+                        "attempts": attempts,
+                        "retryable": bool(retryable),
+                    }
+                )
+                if isinstance(exc, SymbolFailure):
+                    bars_required = exc.bars_required or bars_required
+                    bars_returned = exc.bars_returned if exc.bars_returned is not None else bars_returned
+                _log_symbol_coverage(
+                    run_id,
+                    job_name,
+                    req.as_of_date,
+                    sym,
+                    "FAILED",
+                    reason_code=reason_code,
+                    reason_detail=reason_detail,
+                    bars_required=bars_required,
+                    bars_returned=bars_returned,
+                    lock_owner=lock_owner,
+                )
+                logger.warning(
+                    "jobs.prosperity.daily_snapshot.symbol_failed",
+                    extra={
+                        "symbol": sym,
+                        "reason_code": reason_code,
+                        "reason_detail": reason_detail,
+                        "duration_sec": time.time() - sym_start,
+                        "trace_id": trace_id,
+                    },
+                )
+                break
 
     timings["total"] = time.time() - t0
 

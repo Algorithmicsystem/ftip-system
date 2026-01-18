@@ -240,6 +240,14 @@ Check the job status and overlap lock using the official verification script:
 BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase7_verify.sh
 ```
 
+## Milestone A verification (Automation + Reliability)
+
+Run the Milestone A verification script after deploying the automation and reliability updates:
+
+```bash
+BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/milestoneA_verify.sh
+```
+
 ## Assistant / Narrator (Phase 5)
 
 Environment variables:
@@ -347,4 +355,3 @@ To run the phase 3 verifier locally against a running server:
 ```bash
 BASE_URL=http://localhost:8000 API_KEY=${API_KEY} bash scripts/verify_phase3.sh
 ```
-
