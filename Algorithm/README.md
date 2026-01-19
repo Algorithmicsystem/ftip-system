@@ -123,7 +123,7 @@ Set `FTIP_API_KEY` (or `FTIP_API_KEYS`) and `OPENAI_API_KEY` on Railway, then ru
 BASE="https://ftip-system-production.up.railway.app" KEY="your-api-key" ./scripts/phase3_verify.sh
 ```
 
-The script confirms `/health` and `/version` remain public, `/narrator/health` is locked down without the key, and `/narrator/ask` + `/narrator/explain-signal` return narrated responses when the OpenAI API key is configured.
+The script confirms `/health` and `/version` remain public, `/narrator/health` is locked down without the key, `/narrator/ask` returns a narrated response when the OpenAI API key is configured, and `/narrator/explain-signal` returns a deterministic explanation from evidence payloads.
 
 To run a local end-to-end smoke check that exercises the prosperity endpoints:
 
@@ -354,4 +354,47 @@ To run the phase 3 verifier locally against a running server:
 
 ```bash
 BASE_URL=http://localhost:8000 API_KEY=${API_KEY} bash scripts/verify_phase3.sh
+```
+
+## Milestone B+C+D (Data Backbone + Feature Engine + Signal Engine)
+
+Canonical symbol formats:
+
+- US tickers: `AAPL`, `NVDA`.
+- Canada tickers: `SHOP.TO` (TSX) or `PNG.V` (TSXV).
+
+Free-first data adapters use Stooq for US daily bars and YFinance for intraday (when installed). If intraday data is unavailable, the intraday job still returns HTTP 200 with `status=partial` and a typed `reason_code` such as `PROVIDER_UNAVAILABLE`.
+
+### Protected job endpoints
+
+All `/jobs/*` routes require `X-FTIP-API-Key` when auth is enabled:
+
+- `POST /jobs/data/universe` (upsert symbol universe, `mode=default` for the US+CA starter set)
+- `POST /jobs/data/bars-daily`
+- `POST /jobs/data/bars-intraday`
+- `POST /jobs/data/news`
+- `POST /jobs/data/fundamentals`
+- `POST /jobs/data/sentiment-daily`
+- `POST /jobs/features/daily`
+- `POST /jobs/features/intraday`
+- `POST /jobs/signals/daily`
+- `POST /jobs/signals/intraday`
+
+### Protected query endpoints
+
+- `GET /signals/latest?symbol=AAPL`
+- `GET /signals/top?mode=buy&limit=10&country=US`
+- `GET /signals/evidence?symbol=AAPL&as_of_date=YYYY-MM-DD`
+
+### Narrator evidence endpoint
+
+`POST /narrator/explain-signal` accepts the evidence payload returned by `/signals/evidence` and returns a deterministic explanation, bullet reasons, and risk notes without invoking an LLM.
+
+### Verification script
+
+Run the end-to-end Milestone B+C+D checks (uses POSIX sh + python3 helpers):
+
+```bash
+chmod +x scripts/milestoneB_verify.sh
+BASE="http://localhost:8000" KEY="demo-key" ./scripts/milestoneB_verify.sh
 ```

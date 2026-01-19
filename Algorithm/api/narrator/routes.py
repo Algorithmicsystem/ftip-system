@@ -108,6 +108,28 @@ class NarratorDiagnoseResponse(BaseModel):
     trace_id: str
 
 
+class NarratorExplainSignalRequest(_ValidatedRequest):
+    symbol: str
+    as_of_date: dt.date
+    signal: Dict[str, Any]
+    features: Dict[str, Any]
+    quality: Dict[str, Any]
+    bars: Dict[str, Any]
+    sentiment: Dict[str, Any]
+
+
+class NarratorExplainSignalResponse(BaseModel):
+    symbol: str
+    as_of_date: dt.date
+    action: str
+    confidence: Optional[float]
+    explanation: str
+    reasons: List[str]
+    risks: List[str]
+    invalidation: str
+    trace_id: str
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -254,6 +276,59 @@ def _check(name: str, ok: bool, details: Dict[str, Any]) -> Dict[str, Any]:
     return {"name": name, "status": "pass" if ok else "fail", "details": details}
 
 
+def _reason_mapping() -> Dict[str, str]:
+    return {
+        "TREND_UP": "Trend slope is positive over the long window.",
+        "TREND_DOWN": "Trend slope is negative over the long window.",
+        "MOMENTUM_STRONG": "Momentum is strong relative to volatility.",
+        "MOMENTUM_WEAK": "Momentum is weak relative to volatility.",
+        "SENTIMENT_POSITIVE": "News sentiment skews positive.",
+        "SENTIMENT_NEGATIVE": "News sentiment skews negative.",
+        "NEUTRAL_SCORE": "Signals are mixed and score is near neutral.",
+    }
+
+
+def _render_explain_signal(req: NarratorExplainSignalRequest, trace_id: str) -> NarratorExplainSignalResponse:
+    signal = req.signal or {}
+    action = (signal.get("action") or "HOLD").upper()
+    confidence = signal.get("confidence")
+    reason_codes = signal.get("reason_codes") or []
+    reasons = [_reason_mapping().get(code, f"Signal reason: {code}.") for code in reason_codes]
+
+    quality = req.quality or {}
+    missing_notes = []
+    if quality.get("sentiment_ok") is False or (req.sentiment or {}).get("headline_count") in (0, None):
+        missing_notes.append("Sentiment coverage is thin or missing.")
+    if quality.get("intraday_ok") is False:
+        missing_notes.append("Intraday coverage is missing.")
+    if quality.get("fundamentals_ok") is False:
+        missing_notes.append("Fundamentals coverage is missing.")
+
+    stop_loss = signal.get("stop_loss")
+    invalidation = (
+        f"Invalidated if price breaches stop-loss at {stop_loss:.2f}."
+        if isinstance(stop_loss, (int, float))
+        else "Invalidated if risk limits are hit."
+    )
+    risks = missing_notes or ["Normal market volatility applies. Use position sizing and risk limits."]
+    explanation = (
+        f"{action} signal with confidence {confidence:.2f}." if confidence is not None else f"{action} signal generated."
+    )
+    explanation += " This summary is informational only."
+
+    return NarratorExplainSignalResponse(
+        symbol=req.symbol,
+        as_of_date=req.as_of_date,
+        action=action,
+        confidence=confidence if isinstance(confidence, (int, float)) else None,
+        explanation=explanation,
+        reasons=reasons,
+        risks=risks,
+        invalidation=invalidation,
+        trace_id=trace_id,
+    )
+
+
 def _migrations_status() -> tuple[bool, Dict[str, Any]]:
     if not db.db_enabled():
         return False, {"message": "database disabled"}
@@ -314,34 +389,14 @@ async def narrator_ask(req: NarratorAskRequest, request: Request) -> NarratorAsk
     )
 
 
-@router.post("/explain-signal", response_model=NarratorExplainResponse)
-async def narrator_explain_signal(req: NarratorExplainRequest, request: Request) -> NarratorExplainResponse:
+@router.post("/explain-signal", response_model=NarratorExplainSignalResponse)
+async def narrator_explain_signal(req: NarratorExplainSignalRequest, request: Request) -> NarratorExplainSignalResponse:
     trace_id = _trace_id(request)
-    _ensure_db(trace_id)
-    _ensure_openai_key(trace_id)
-
     logger.info(
         "narrator.explain_signal.start",
         extra={"trace_id": trace_id, "symbol": req.symbol, "as_of_date": req.as_of_date.isoformat()},
     )
-
-    context_packet = _build_explain_context(req)
-    messages = prompts.build_explain_prompt(context_packet, safe_mode=True)
-    reply, model, _ = narrator_client.complete_chat(messages, trace_id=trace_id)
-
-    signal = context_packet.get("signal", {}).get("signal", {})
-    narration = reply.strip()
-
-    return NarratorExplainResponse(
-        symbol=_clean_symbol(req.symbol),
-        as_of=req.as_of_date,
-        signal=signal.get("signal") if isinstance(signal, dict) else None,
-        explanation=f"{narration}\n\n{prompts.DISCLAIMER}",
-        drivers=["Model drivers referenced in context"],
-        risks=["Model limitations and market regime shifts"],
-        what_to_watch=["Threshold changes", "Feature stability"],
-        trace_id=trace_id,
-    )
+    return _render_explain_signal(req, trace_id)
 
 
 @router.post("/explain-strategy-graph", response_model=NarratorExplainStrategyResponse)
