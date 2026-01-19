@@ -27,6 +27,10 @@ from api.prosperity.routes import router as prosperity_router
 from api.narrator.routes import router as narrator_router
 from api.ops import metrics_tracker, router as ops_router
 from api.jobs.prosperity import router as prosperity_jobs_router
+from api.jobs.market_data import router as market_data_jobs_router
+from api.jobs.features import router as features_jobs_router
+from api.jobs.signals import router as signals_jobs_router
+from api.signals.routes import router as signals_router
 
 # =============================================================================
 # App + environment helpers
@@ -1855,6 +1859,10 @@ app.include_router(llm_router)
 app.include_router(narrator_router, prefix="/narrator")
 app.include_router(prosperity_router, prefix="/prosperity")
 app.include_router(prosperity_jobs_router)
+app.include_router(market_data_jobs_router)
+app.include_router(features_jobs_router)
+app.include_router(signals_jobs_router)
+app.include_router(signals_router)
 app.include_router(ops_router)
 
 

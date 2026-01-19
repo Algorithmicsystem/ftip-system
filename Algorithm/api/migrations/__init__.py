@@ -297,6 +297,61 @@ def _migration_prosperity_symbol_coverage(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_market_symbols(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("008_market_symbols.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_market_bars_daily(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("009_market_bars_daily.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_market_bars_intraday(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("010_market_bars_intraday.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_fundamentals_quarterly(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("011_fundamentals_quarterly.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_news_raw(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("012_news_raw.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_sentiment_daily(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("013_sentiment_daily.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_quality_daily(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("014_quality_daily.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_features_daily(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("015_features_daily.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_features_intraday(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("016_features_intraday.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_signals_daily(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("017_signals_daily.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_signals_intraday(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("018_signals_intraday.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
@@ -305,6 +360,17 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     ("005_ftip_job_runs_columns", _migration_ftip_job_runs_columns),
     ("006_ftip_job_runs_lock_cleanup", _migration_ftip_job_runs_lock_cleanup),
     ("007_prosperity_symbol_coverage", _migration_prosperity_symbol_coverage),
+    ("008_market_symbols", _migration_market_symbols),
+    ("009_market_bars_daily", _migration_market_bars_daily),
+    ("010_market_bars_intraday", _migration_market_bars_intraday),
+    ("011_fundamentals_quarterly", _migration_fundamentals_quarterly),
+    ("012_news_raw", _migration_news_raw),
+    ("013_sentiment_daily", _migration_sentiment_daily),
+    ("014_quality_daily", _migration_quality_daily),
+    ("015_features_daily", _migration_features_daily),
+    ("016_features_intraday", _migration_features_intraday),
+    ("017_signals_daily", _migration_signals_daily),
+    ("018_signals_intraday", _migration_signals_intraday),
 ]
 
 

@@ -90,7 +90,7 @@ if [[ "$status" != "200" ]]; then
   out_json "$ask_out"
   fail "/narrator/ask HTTP ${status}"
 fi
-python - <<'PY' "$ask_out" || fail "/narrator/ask missing answer"
+python3 - <<'PY' "$ask_out" || fail "/narrator/ask missing answer"
 import json, sys
 body = json.load(open(sys.argv[1]))
 if not body.get("answer"):
@@ -102,14 +102,14 @@ echo "Response preview:"; head -c 400 "$ask_out"; echo ""
 pass "/narrator/ask"
 
 echo "-- Narrator explain-signal --"
-explain_body='{ "symbol":"AAPL","as_of_date":"2024-12-31","lookback":252,"days":365 }'
+explain_body='{"symbol":"AAPL","as_of_date":"2024-12-31","signal":{"action":"BUY","confidence":0.6,"reason_codes":["TREND_UP"],"stop_loss":90},"features":{},"quality":{"sentiment_ok":true,"intraday_ok":false,"fundamentals_ok":true},"bars":{},"sentiment":{"headline_count":2}}'
 explain_out="${tmpdir}/narrator_explain.json"
 status=$(curl_json POST "/narrator/explain-signal" "$explain_out" "${AUTH_HEADER[@]}" -H "Content-Type: application/json" -d "$explain_body")
 if [[ "$status" != "200" ]]; then
   out_json "$explain_out"
   fail "/narrator/explain-signal HTTP ${status}"
 fi
-python - <<'PY' "$explain_out" || fail "/narrator/explain-signal invalid response"
+python3 - <<'PY' "$explain_out" || fail "/narrator/explain-signal invalid response"
 import json, sys
 body = json.load(open(sys.argv[1]))
 if not body.get("explanation"):

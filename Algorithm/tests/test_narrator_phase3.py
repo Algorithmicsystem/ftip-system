@@ -121,12 +121,20 @@ def test_narrator_endpoints_with_mocked_llm(monkeypatch):
     explain_payload = {
         "symbol": "AAPL",
         "as_of_date": "2024-12-31",
-        "lookback": 252,
-        "days": 60,
+        "signal": {
+            "action": "BUY",
+            "confidence": 0.7,
+            "reason_codes": ["TREND_UP"],
+            "stop_loss": 90.0,
+        },
+        "features": {},
+        "quality": {"sentiment_ok": True, "intraday_ok": False, "fundamentals_ok": True},
+        "bars": {},
+        "sentiment": {"headline_count": 2},
     }
     explain_resp = client.post("/narrator/explain-signal", json=explain_payload, headers=_auth_header("demo"))
     assert explain_resp.status_code == 200
     explain_body = explain_resp.json()
     assert explain_body["symbol"] == "AAPL"
-    assert "Mocked answer" in explain_body["explanation"]
+    assert "BUY signal" in explain_body["explanation"]
     assert explain_body["trace_id"]
