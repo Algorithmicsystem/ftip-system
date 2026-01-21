@@ -1,6 +1,6 @@
 DO $$
 DECLARE
-    v_constraint_name text;
+    v_existing_pk text;
     v_as_of_column text;
 BEGIN
     SELECT c.column_name
@@ -16,38 +16,29 @@ BEGIN
         RETURN;
     END IF;
 
-    SELECT tc.constraint_name
-    INTO v_constraint_name
-    FROM information_schema.table_constraints tc
-    WHERE tc.table_schema = current_schema()
-      AND tc.table_name = 'prosperity_signals_daily'
-      AND tc.constraint_type = 'PRIMARY KEY'
+    SELECT c.conname
+    INTO v_existing_pk
+    FROM pg_constraint c
+    JOIN pg_class t ON t.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = t.relnamespace
+    WHERE n.nspname = current_schema()
+      AND t.relname = 'prosperity_signals_daily'
+      AND c.contype = 'p'
     LIMIT 1;
 
-    IF v_constraint_name IS NOT NULL THEN
+    IF v_existing_pk IS NOT NULL THEN
         EXECUTE format(
             'ALTER TABLE %I.%I DROP CONSTRAINT IF EXISTS %I',
             current_schema(),
             'prosperity_signals_daily',
-            v_constraint_name
+            v_existing_pk
         );
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint c
-        JOIN pg_class t ON t.oid = c.conrelid
-        JOIN pg_namespace n ON n.oid = t.relnamespace
-        WHERE n.nspname = current_schema()
-          AND t.relname = 'prosperity_signals_daily'
-          AND c.contype = 'p'
-          AND c.conname = 'prosperity_signals_daily_pkey'
-    ) THEN
-        EXECUTE format(
-            'ALTER TABLE %I.%I ADD CONSTRAINT prosperity_signals_daily_pkey PRIMARY KEY (symbol, %I, lookback, score_mode)',
-            current_schema(),
-            'prosperity_signals_daily',
-            v_as_of_column
-        );
-    END IF;
+    EXECUTE format(
+        'ALTER TABLE %I.%I ADD CONSTRAINT prosperity_signals_daily_pkey PRIMARY KEY (symbol, %I, lookback, score_mode)',
+        current_schema(),
+        'prosperity_signals_daily',
+        v_as_of_column
+    );
 END $$;
