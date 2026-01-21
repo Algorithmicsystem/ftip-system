@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api import db
 
@@ -31,6 +31,18 @@ def fetch_bars(symbol: str, from_date: dt.date, to_date: dt.date) -> List[Dict[s
             }
         )
     return out
+
+
+def fetch_bars_with_latest(
+    symbol: str, from_date: dt.date, to_date: dt.date
+) -> Tuple[List[Dict[str, Any]], Optional[dt.date]]:
+    bars = fetch_bars(symbol, from_date, to_date)
+    latest_date = None
+    for bar in bars:
+        bar_date = dt.date.fromisoformat(bar["date"])
+        if latest_date is None or bar_date > latest_date:
+            latest_date = bar_date
+    return bars, latest_date
 
 
 def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:

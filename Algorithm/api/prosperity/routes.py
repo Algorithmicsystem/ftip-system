@@ -132,18 +132,29 @@ def _bars_required(lookback: int) -> int:
     return max(int(lookback), 252)
 
 
-def _validate_bars(symbol: str, bars: List[Dict[str, Any]], required: int) -> None:
+def _validate_bars(
+    symbol: str,
+    bars: List[Dict[str, Any]],
+    required: int,
+    *,
+    window_start: Optional[dt.date] = None,
+    window_end: Optional[dt.date] = None,
+) -> None:
+    window_detail = ""
+    if window_start and window_end:
+        window_detail = f" window={window_start.isoformat()}..{window_end.isoformat()}"
     if not bars:
         raise SymbolFailure(
             "NO_DATA",
-            f"no bars returned for {symbol}",
+            f"no bars returned for {symbol}{window_detail}",
             bars_required=required,
             bars_returned=0,
         )
     if len(bars) < required:
+        detail = f"required={required} returned={len(bars)}{window_detail}"
         raise SymbolFailure(
             "INSUFFICIENT_BARS",
-            f"required={required} returned={len(bars)}",
+            detail,
             bars_required=required,
             bars_returned=len(bars),
         )
@@ -546,26 +557,43 @@ async def snapshot_run(
         sym_start = time.time()
         bars_returned: Optional[int] = None
         bars_required = _bars_required(req.lookback)
+        effective_as_of: Optional[dt.date] = None
         attempts = 0
         while attempts < max_attempts:
             attempts += 1
             try:
                 ingest.ingest_bars(sym, req.from_date, req.to_date, force_refresh=req.force_refresh)
-                bars = query.fetch_bars(sym, req.from_date, req.as_of_date)
+                initial_bars, effective_as_of = query.fetch_bars_with_latest(sym, req.from_date, req.to_date)
+                if effective_as_of is None:
+                    bars_returned = len(initial_bars)
+                    _validate_bars(sym, initial_bars, bars_required)
+
+                # Over-fetch to cover weekend/holiday gaps, then slice to the required lookback window.
+                window_start = effective_as_of - dt.timedelta(days=420)
+                bars = query.fetch_bars(sym, window_start, effective_as_of)
                 bars_returned = len(bars)
-                _validate_bars(sym, bars, bars_required)
+                _validate_bars(
+                    sym,
+                    bars,
+                    bars_required,
+                    window_start=window_start,
+                    window_end=effective_as_of,
+                )
+                bars = bars[-bars_required:]
 
                 candles = _candles_from_bars(bars)
-                feats, feat_meta, regime = _compute_features_payload(sym, req.as_of_date, req.lookback, candles)
-                signal_payload = _compute_signal_payload(sym, req.as_of_date, req.lookback, candles)
+                feats, feat_meta, regime = _compute_features_payload(sym, effective_as_of, req.lookback, candles)
+                signal_payload = _compute_signal_payload(sym, effective_as_of, req.lookback, candles)
                 strategy_rows = None
                 ensemble_row = None
                 if req.compute_strategy_graph:
-                    strategy_rows, ensemble_row = _compute_strategy_graph(sym, req.as_of_date, req.lookback, candles)
+                    strategy_rows, ensemble_row = _compute_strategy_graph(
+                        sym, effective_as_of, req.lookback, candles
+                    )
 
                 written = _persist_symbol_outputs(
                     sym,
-                    req.as_of_date,
+                    effective_as_of,
                     req.lookback,
                     feats,
                     {**feat_meta, "regime": regime},
@@ -581,7 +609,7 @@ async def snapshot_run(
                 _log_symbol_coverage(
                     run_id,
                     job_name,
-                    req.as_of_date,
+                    effective_as_of,
                     sym,
                     "OK",
                     bars_required=bars_required,
@@ -626,7 +654,7 @@ async def snapshot_run(
                 _log_symbol_coverage(
                     run_id,
                     job_name,
-                    req.as_of_date,
+                    effective_as_of or req.as_of_date,
                     sym,
                     "FAILED",
                     reason_code=reason_code,
