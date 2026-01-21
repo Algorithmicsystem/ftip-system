@@ -17,6 +17,18 @@ def _enable_db_flags(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(db, "db_read_enabled", lambda: True)
 
 
+def _weekday_bars(end_date: dt.date, count: int) -> List[Dict[str, float]]:
+    bars: List[Dict[str, float]] = []
+    day = end_date
+    close_price = 100.0
+    while len(bars) < count:
+        if day.weekday() < 5:
+            bars.append({"date": day.isoformat(), "close": close_price, "volume": 1_000 + len(bars)})
+            close_price += 1.0
+        day -= dt.timedelta(days=1)
+    return list(reversed(bars))
+
+
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
     # Avoid touching a real database in unit tests
@@ -53,14 +65,7 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
 
     monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
 
-    bars = [
-        {
-            "date": (dt.date(2023, 1, 1) + dt.timedelta(days=i)).isoformat(),
-            "close": 100.0 + i,
-            "volume": 1_000 + i,
-        }
-        for i in range(260)
-    ]
+    bars = _weekday_bars(dt.date(2024, 1, 5), 260)
 
     monkeypatch.setattr(
         "api.main.compute_signal_for_symbol_from_candles",
@@ -168,6 +173,63 @@ def test_snapshot_run_with_insufficient_bars(monkeypatch: pytest.MonkeyPatch, cl
     failure = body["result"]["symbols_failed"][0]
     assert failure["reason_code"] == "INSUFFICIENT_BARS"
     assert "required=252" in failure["reason_detail"]
+    assert "returned=1" in failure["reason_detail"]
+    assert "window=" in failure["reason_detail"]
+
+
+def test_snapshot_run_uses_latest_trading_day(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    _enable_db_flags(monkeypatch)
+
+    monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
+    monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {"inserted": 1, "updated": 0})
+    monkeypatch.setattr("api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None)
+
+    friday = dt.date(2024, 1, 5)
+    sunday = dt.date(2024, 1, 7)
+    bars = _weekday_bars(friday, 260)
+
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles",
+        lambda *args, **kwargs: SignalResponse(
+            symbol="AAPL",
+            as_of=friday.isoformat(),
+            lookback=5,
+            effective_lookback=5,
+            regime="TRENDING",
+            thresholds={"buy": 0.1, "sell": -0.1},
+            score=0.5,
+            base_score=0.5,
+            stacked_score=0.5,
+            signal="BUY",
+            confidence=0.7,
+            features={"mom_21": 0.1},
+            notes=["Score mode: STACKED"],
+            calibration_meta={"score_mode": "stacked", "base_score": 0.5},
+        ),
+    )
+
+    captured_as_of: Dict[str, dt.date] = {}
+
+    def fake_persist(symbol: str, as_of_date: dt.date, *args, **kwargs):
+        captured_as_of[symbol] = as_of_date
+        return {"features": 1, "signals": 1, "strategies": 0, "ensembles": 0}
+
+    monkeypatch.setattr("api.prosperity.routes._persist_symbol_outputs", fake_persist)
+
+    payload = {
+        "symbols": ["AAPL"],
+        "from_date": "2023-01-01",
+        "to_date": sunday.isoformat(),
+        "as_of_date": sunday.isoformat(),
+        "lookback": 5,
+        "concurrency": 3,
+    }
+    res = client.post("/prosperity/snapshot/run", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert captured_as_of["AAPL"] == friday
 
 
 def test_latest_endpoints_return_404(monkeypatch: pytest.MonkeyPatch, client: TestClient):
