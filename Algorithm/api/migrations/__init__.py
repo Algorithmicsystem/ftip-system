@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, List, Sequence
 
-from api import db
+from api import config, db
 
 logger = logging.getLogger(__name__)
 
@@ -389,6 +389,11 @@ MIGRATIONS: List[tuple[str, Migration]] = [
 
 def ensure_schema() -> List[str]:
     if not db.db_enabled():
+        return []
+    if not config.env("DATABASE_URL"):
+        if config.db_required():
+            raise RuntimeError("DATABASE_URL is required when FTIP_DB_ENABLED=1")
+        logger.warning("[migrations] DATABASE_URL missing; skipping migrations")
         return []
 
     pool = db.get_pool()
