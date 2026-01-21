@@ -238,6 +238,30 @@ def test_startup_fails_fast_when_ensure_schema_errors(monkeypatch):
         main._startup()
 
 
+def test_startup_runs_migrations_when_enabled(monkeypatch):
+    monkeypatch.setenv("FTIP_DB_ENABLED", "1")
+    monkeypatch.setenv("FTIP_MIGRATIONS_AUTO", "1")
+
+    called = {"migrations": False, "schema": False}
+
+    def record_migrations():
+        called["migrations"] = True
+        return ["001_prosperity_core"]
+
+    def record_schema():
+        called["schema"] = True
+
+    monkeypatch.setattr(db, "db_enabled", lambda: True)
+    monkeypatch.setattr(migrations, "ensure_schema", record_migrations)
+    monkeypatch.setattr(db, "ensure_schema", record_schema)
+
+    applied = main._startup()
+
+    assert called["migrations"] is True
+    assert called["schema"] is True
+    assert applied == ["001_prosperity_core"]
+
+
 def test_startup_skips_migrations_when_auto_disabled(monkeypatch):
     monkeypatch.setenv("FTIP_DB_ENABLED", "1")
     monkeypatch.setenv("FTIP_MIGRATIONS_AUTO", "0")
