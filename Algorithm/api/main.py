@@ -10,6 +10,7 @@ import logging
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1774,7 +1775,23 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 # FastAPI
 # =============================================================================
 
-app = FastAPI(title=APP_NAME, version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> Any:
+    if db.db_enabled():
+        try:
+            applied = migrations.ensure_schema()
+            db.ensure_schema()
+            if applied:
+                logger.info("[startup] applied migrations", extra={"versions": applied})
+        except Exception as e:
+            logger.exception(
+                "[startup] ensure_schema failed", extra={"error": str(e)}
+            )
+            raise
+    yield
+
+
+app = FastAPI(title=APP_NAME, version="1.0.0", lifespan=lifespan)
 security.add_cors_middleware(app)
 security.log_auth_config(logger)
 
@@ -1877,21 +1894,6 @@ if WEBAPP_DIR.exists():
 @app.get("/app")
 def webapp_index() -> FileResponse:
     return FileResponse(WEBAPP_DIR / "index.html")
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    if db.db_enabled():
-        try:
-            applied = migrations.ensure_schema()
-            db.ensure_schema()
-            if applied:
-                logger.info("[startup] applied migrations", extra={"versions": applied})
-        except Exception as e:
-            logger.exception(
-                "[startup] ensure_schema failed", extra={"error": str(e)}
-            )
-            raise
 
 
 @app.get("/")

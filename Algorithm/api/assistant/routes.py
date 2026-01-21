@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Dict
+from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -70,7 +70,7 @@ def ensure_enabled() -> None:
 
 
 @router.get("/health")
-def assistant_health() -> Dict[str, bool]:
+def assistant_health() -> Dict[str, Any]:
     return {
         "status": "ok",
         "llm_enabled": config.llm_enabled(),
