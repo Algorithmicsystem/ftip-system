@@ -119,6 +119,7 @@ def _migration_prosperity_core(cur: Any) -> None:
             symbol TEXT NOT NULL,
             as_of DATE NOT NULL,
             lookback INT NOT NULL,
+            score_mode TEXT NOT NULL DEFAULT 'single',
             score DOUBLE PRECISION NOT NULL,
             signal TEXT NOT NULL,
             thresholds JSONB NOT NULL,
@@ -129,7 +130,7 @@ def _migration_prosperity_core(cur: Any) -> None:
             meta JSONB,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (symbol, as_of, lookback)
+            PRIMARY KEY (symbol, as_of, lookback, score_mode)
         )
         """
     )
@@ -155,7 +156,7 @@ def _migration_prosperity_core(cur: Any) -> None:
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN score SET NOT NULL")
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN signal SET NOT NULL")
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN as_of DROP DEFAULT")
-    _ensure_primary_key(cur, "prosperity_signals_daily", ("symbol", "as_of", "lookback"))
+    _ensure_primary_key(cur, "prosperity_signals_daily", ("symbol", "as_of", "lookback", "score_mode"))
 
     cur.execute("CREATE INDEX IF NOT EXISTS idx_prosperity_universe_active ON prosperity_universe(active)")
     cur.execute(
@@ -352,6 +353,16 @@ def _migration_signals_intraday(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_fix_prosperity_signals_score_mode_pk(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("019_fix_prosperity_signals_score_mode_pk.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_backtest_tables(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("020_backtest_tables.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_prosperity_core", _migration_prosperity_core),
     ("002_strategy_graph", _migration_strategy_graph),
@@ -371,6 +382,8 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     ("016_features_intraday", _migration_features_intraday),
     ("017_signals_daily", _migration_signals_daily),
     ("018_signals_intraday", _migration_signals_intraday),
+    ("019_fix_prosperity_signals_score_mode_pk", _migration_fix_prosperity_signals_score_mode_pk),
+    ("020_backtest_tables", _migration_backtest_tables),
 ]
 
 

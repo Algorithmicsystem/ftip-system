@@ -10,18 +10,21 @@ import logging
 import os
 import time
 import uuid
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
 from api import db, migrations, security
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
+from api.backtest.routes import router as backtest_router
 from api.llm.routes import router as llm_router
 from api.prosperity.routes import router as prosperity_router
 from api.narrator.routes import router as narrator_router
@@ -1863,7 +1866,17 @@ app.include_router(market_data_jobs_router)
 app.include_router(features_jobs_router)
 app.include_router(signals_jobs_router)
 app.include_router(signals_router)
+app.include_router(backtest_router)
 app.include_router(ops_router)
+
+WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
+if WEBAPP_DIR.exists():
+    app.mount("/app/static", StaticFiles(directory=str(WEBAPP_DIR)), name="webapp-static")
+
+
+@app.get("/app")
+def webapp_index() -> FileResponse:
+    return FileResponse(WEBAPP_DIR / "index.html")
 
 
 @app.on_event("startup")

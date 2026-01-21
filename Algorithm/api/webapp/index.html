@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FTIP Assistant</title>
+    <link rel="stylesheet" href="/app/static/styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>FTIP Chat Orchestrator</h1>
+    </header>
+    <main>
+      <div class="panel chart-placeholder">Chart panel (placeholder)</div>
+
+      <div class="panel">
+        <div class="input-row">
+          <input id="symbol-input" placeholder="Symbol (e.g. NVDA)" />
+          <select id="horizon-input">
+            <option value="swing">swing</option>
+            <option value="position">position</option>
+          </select>
+          <select id="risk-input">
+            <option value="balanced">balanced</option>
+            <option value="conservative">conservative</option>
+            <option value="aggressive">aggressive</option>
+          </select>
+          <button id="analyze-btn">Analyze</button>
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="features">Features</button>
+        <button class="tab" data-tab="sentiment">Sentiment</button>
+        <button class="tab" data-tab="fundamentals">Fundamentals</button>
+        <button class="tab" data-tab="backtest">Backtest</button>
+      </div>
+
+      <div id="overview" class="panel tab-panel">
+        <h3 id="narration-headline"></h3>
+        <p id="narration-summary"></p>
+        <ul id="narration-bullets"></ul>
+        <p id="narration-disclaimer"></p>
+        <ul id="narration-followups"></ul>
+      </div>
+
+      <div id="features" class="panel tab-panel hidden">
+        <p>Feature summary will render from /assistant/analyze payload.</p>
+      </div>
+
+      <div id="sentiment" class="panel tab-panel hidden">
+        <p>Sentiment panel placeholder.</p>
+      </div>
+
+      <div id="fundamentals" class="panel tab-panel hidden">
+        <p>Fundamentals panel placeholder.</p>
+      </div>
+
+      <div id="backtest" class="panel tab-panel hidden">
+        <div class="input-row">
+          <input id="backtest-symbol" placeholder="Symbol (optional)" />
+          <select id="backtest-universe">
+            <option value="sp500">sp500</option>
+            <option value="nasdaq100">nasdaq100</option>
+            <option value="custom">custom</option>
+          </select>
+          <input id="backtest-start" type="date" />
+          <input id="backtest-end" type="date" />
+          <select id="backtest-horizon">
+            <option value="swing">swing</option>
+            <option value="position">position</option>
+          </select>
+          <select id="backtest-risk">
+            <option value="balanced">balanced</option>
+            <option value="conservative">conservative</option>
+            <option value="aggressive">aggressive</option>
+          </select>
+          <button id="backtest-run">Run backtest</button>
+        </div>
+
+        <div class="row" style="margin-top: 16px;">
+          <div class="col metric-card">
+            <div>CAGR: <span id="metric-cagr">0</span></div>
+            <div>Sharpe: <span id="metric-sharpe">0</span></div>
+            <div>Sortino: <span id="metric-sortino">0</span></div>
+            <div>MaxDD: <span id="metric-maxdd">0</span></div>
+            <div>Turnover: <span id="metric-turnover">0</span></div>
+          </div>
+          <div class="col">
+            <canvas id="equity-canvas" class="equity-chart" width="620" height="260"></canvas>
+          </div>
+        </div>
+
+        <table class="panel" style="width: 100%; margin-top: 16px;">
+          <thead>
+            <tr>
+              <th>Regime</th>
+              <th>CAGR</th>
+              <th>Sharpe</th>
+              <th>MaxDD</th>
+              <th>WinRate</th>
+              <th>Trades</th>
+            </tr>
+          </thead>
+          <tbody id="regime-table"></tbody>
+        </table>
+      </div>
+    </main>
+
+    <div class="chat-shell">
+      <div class="signal-card">
+        <strong>Signal card</strong>
+        <div>Direction: <span id="signal-direction">N/A</span></div>
+        <div>Score: <span id="signal-score">N/A</span></div>
+        <div>Confidence: <span id="signal-confidence">N/A</span></div>
+        <div>Horizon: <span id="signal-horizon">N/A</span></div>
+        <div>Risk Mode: <span id="signal-risk">N/A</span></div>
+        <div class="confidence-bar"><span></span></div>
+        <div>Confidence: <span id="confidence-value">0%</span></div>
+        <ul id="reason-codes" class="reason-list"></ul>
+      </div>
+
+      <div>
+        <div id="chat-log" class="chat-log"></div>
+        <div class="chat-input">
+          <input id="chat-message" placeholder="Ask the narrator..." style="flex: 1;" />
+          <button id="chat-send">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="/app/static/app.js"></script>
+  </body>
+</html>

@@ -115,6 +115,16 @@ Production verification (after setting Railway variables):
 BASE="https://ftip-system-production.up.railway.app" KEY="cfotwin-dev-2025-12-29" ./scripts/phase2_verify.sh
 ```
 
+## Milestone E/F quickstart
+
+- UI: `http://localhost:8000/app`
+- Docs: `docs/runbook.md`
+- Smoke script:
+
+```bash
+bash scripts/smoke_milestone_ef.sh
+```
+
 ## Phase 3 narrator verification
 
 Set `FTIP_API_KEY` (or `FTIP_API_KEYS`) and `OPENAI_API_KEY` on Railway, then run the official checklist to validate the narrator endpoints and auth (requires `BASE` and `KEY`, using the `X-FTIP-API-Key` header):

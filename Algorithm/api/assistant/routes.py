@@ -8,15 +8,19 @@ from typing import Dict
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api import config
-from api.assistant import service
+from api.assistant import narration, orchestrator, service
 from api.assistant.models import (
+    AnalyzeRequest,
     ChatRequest,
     ChatResponse,
     ExplainBacktestRequest,
     ExplainSignalRequest,
+    NarrateRequest,
+    NarrateResponse,
     SessionResponse,
     TitleSessionRequest,
     TitleSessionResponse,
+    TopPicksRequest,
 )
 from api.assistant.storage import storage
 
@@ -130,3 +134,68 @@ async def title_session_endpoint(
     result = service.title_session(payload.session_id, hint=payload.hint)
     logger.info("assistant.title_session", extra={"request_id": request_id})
     return TitleSessionResponse(**result)
+
+
+@router.post("/analyze")
+async def analyze_endpoint(
+    payload: AnalyzeRequest,
+    request_id: str = Depends(request_id_dependency),
+    __: None = Depends(rate_limit),
+):
+    symbol = orchestrator.normalize_symbol(payload.symbol)
+    freshness = await orchestrator.ensure_freshness(symbol)
+    as_of_date = freshness["as_of_date"]
+
+    await orchestrator.run_features(symbol, as_of_date)
+    await orchestrator.run_signals(symbol, as_of_date)
+
+    signal = orchestrator.fetch_signal(symbol, as_of_date)
+    if not signal:
+        raise HTTPException(status_code=404, detail="signal not available after compute")
+
+    key_features = orchestrator.fetch_key_features(symbol, as_of_date)
+    quality = orchestrator.fetch_quality(symbol, as_of_date, freshness)
+
+    evidence = {
+        "reason_codes": signal.get("reason_codes") or [],
+        "reason_details": signal.get("reason_details") or {},
+        "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
+    }
+
+    return {
+        "symbol": symbol,
+        "as_of_date": as_of_date.isoformat(),
+        "signal": {**signal, "horizon": payload.horizon, "risk_mode": payload.risk_mode},
+        "key_features": key_features,
+        "quality": quality,
+        "evidence": evidence,
+    }
+
+
+@router.post("/top-picks")
+async def top_picks_endpoint(
+    payload: TopPicksRequest,
+    request_id: str = Depends(request_id_dependency),
+    __: None = Depends(rate_limit),
+):
+    as_of_date, picks = orchestrator.fetch_top_picks(payload.limit)
+    coverage = orchestrator.universe_coverage(as_of_date)
+    return {
+        "as_of_date": as_of_date.isoformat() if as_of_date else None,
+        "horizon": payload.horizon,
+        "risk_mode": payload.risk_mode,
+        "picks": picks,
+        "quality": {"universe_coverage_pct": coverage, "warnings": [] if picks else ["no picks available"]},
+    }
+
+
+@router.post("/narrate", response_model=NarrateResponse)
+async def narrate_endpoint(
+    payload: NarrateRequest,
+    request_id: str = Depends(request_id_dependency),
+    __: None = Depends(rate_limit),
+):
+    ensure_enabled()
+    narration_result = narration.narrate_payload(payload.payload, payload.user_message, trace_id=request_id)
+    logger.info("assistant.narrate", extra={"request_id": request_id})
+    return NarrateResponse(**narration_result.model_dump())
