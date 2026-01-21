@@ -52,3 +52,29 @@ class TitleSessionRequest(BaseModel):
 class TitleSessionResponse(BaseModel):
     session_id: str
     title: str
+
+
+class AnalyzeRequest(BaseModel):
+    symbol: str
+    horizon: str
+    risk_mode: str
+
+
+class TopPicksRequest(BaseModel):
+    universe: str
+    horizon: str
+    risk_mode: str
+    limit: int = 10
+
+
+class NarrateRequest(BaseModel):
+    payload: Dict[str, Any]
+    user_message: str
+
+
+class NarrateResponse(BaseModel):
+    headline: str
+    summary: str
+    bullets: List[str]
+    disclaimer: str
+    followups: List[str]
