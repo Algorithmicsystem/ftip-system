@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
-from api import db, migrations, security
+from api import db, lifecycle, migrations, security
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
 from api.backtest.routes import router as backtest_router
@@ -1777,18 +1777,12 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
-    if db.db_enabled():
-        try:
-            applied = migrations.ensure_schema()
-            db.ensure_schema()
-            if applied:
-                logger.info("[startup] applied migrations", extra={"versions": applied})
-        except Exception as e:
-            logger.exception(
-                "[startup] ensure_schema failed", extra={"error": str(e)}
-            )
-            raise
+    _startup()
     yield
+
+
+def _startup() -> List[str]:
+    return lifecycle.startup()
 
 
 app = FastAPI(title=APP_NAME, version="1.0.0", lifespan=lifespan)
