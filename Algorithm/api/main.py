@@ -1903,6 +1903,7 @@ def root() -> Dict[str, Any]:
         "db_pool_ready": _db_pool_ready(),
         "endpoints": [
             "/health",
+            "/ready",
             "/db/health",
             "/db/save_signal",
             "/db/save_signals",
@@ -1938,6 +1939,22 @@ def root() -> Dict[str, Any]:
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {"status": "ok"}
+
+
+@app.get("/ready")
+def ready() -> Dict[str, Any]:
+    if not db.db_enabled():
+        raise HTTPException(status_code=503, detail="db disabled")
+
+    try:
+        row = db.fetch1("SELECT 1")
+        if not row or row[0] != 1:
+            raise HTTPException(status_code=503, detail="db not ready")
+        return {"status": "ok", "db_enabled": True, "select_1": row[0]}
+    except DBError as exc:
+        raise HTTPException(status_code=503, detail=f"db not ready: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"db not ready: {type(exc).__name__}: {exc}") from exc
 
 
 @app.get("/auth/status")

@@ -195,6 +195,11 @@ def apply_migrations() -> None:
 def ensure_schema() -> None:
     if not db_enabled():
         return
+    if not config.env("DATABASE_URL"):
+        if config.db_required():
+            raise RuntimeError("DATABASE_URL is required when FTIP_DB_ENABLED=1")
+        logger.warning("DATABASE_URL missing; skipping schema bootstrap")
+        return
     from api import migrations
 
     migrations.ensure_schema()
