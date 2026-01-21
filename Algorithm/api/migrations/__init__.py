@@ -388,6 +388,9 @@ MIGRATIONS: List[tuple[str, Migration]] = [
 
 
 def ensure_schema() -> List[str]:
+    if not config.migrations_auto():
+        logger.info("[migrations] migrations disabled; skipping")
+        return []
     if not db.db_enabled():
         return []
     if not config.env("DATABASE_URL"):
