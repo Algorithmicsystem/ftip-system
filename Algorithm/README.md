@@ -1,26 +1,50 @@
 # FTIP System Notes
 
-## Local Quickstart (Dockerized Postgres)
+## Local Development Runbook (zero-issues)
 
-```bash
-cp .env.example .env
-docker-compose up -d db
-make migrate
-uvicorn api.main:app --reload --port 8000
-```
+Follow these steps from a clean checkout (use **Terminal 1** unless noted).
 
-The API will be available at `http://localhost:8000` (try `/health`). Prefer `make dev` to automate startup on a clean checkout.
+1) `cd Algorithm`
+2) `python3 -m venv .venv`
+3) `source .venv/bin/activate`
+4) `pip install -r requirements.txt`
+5) `cp .env.example .env`
+6) Choose **one** database option:
+   - **Homebrew Postgres**:
+     - `brew services start postgresql@16`
+     - Update `.env` if needed (e.g. `DATABASE_URL=postgresql://$USER@localhost:5432/postgres`)
+   - **Docker Compose v1** (only `docker-compose` is supported here):
+     - `docker-compose up -d db`
+7) `make migrate` (uses the internal migration runner in `api/migrations`, not Alembic)
+8) `make db-check`
+9) `make dev` (keep this running in **Terminal 1**)
+10) In **Terminal 2**, verify endpoints:
+    - `curl http://localhost:8000/health`
+    - `curl http://localhost:8000/docs`
+    - `curl http://localhost:8000/openapi.json`
+11) `make test`
 
 ### Make targets (recommended)
 
 ```bash
-make dev       # start Postgres, run migrations, launch API
-make db-reset  # drop/recreate schema and re-run migrations
-make migrate   # run migrations only
-make db-check  # verify database connectivity
-make db-down   # stop Postgres and remove volumes
-make test      # pytest -q
+make dev             # start the API (uvicorn)
+make compose-up-db   # start Postgres via docker-compose (v1)
+make compose-down-db # stop Postgres and remove volumes
+make migrate         # run migrations only
+make db-check        # verify database connectivity
+make db-reset        # drop/recreate schema and re-run migrations
+make env-check       # print FTIP_DB_ENABLED and DATABASE_URL
+make test            # pytest -q
+make lint            # ruff check .
+make fmt             # ruff check --fix . && black .
 ```
+
+### Troubleshooting
+
+- **`zsh: command not found: python`**: run `python3 -m venv .venv` and `source .venv/bin/activate` (or use `.venv/bin/python` directly).
+- **`ModuleNotFoundError: No module named 'psycopg'`**: make sure you installed deps inside the venv (`pip install -r requirements.txt`) and are using `.venv/bin/python`.
+- **`curl: (7) Failed to connect` / connection refused**: the API isn't running; keep `make dev` running in Terminal 1.
+- **`docker-compose.yml not found`**: run docker-compose from the `Algorithm` folder (where `docker-compose.yml` lives).
 
 ## Reset DB (safe for local/dev)
 

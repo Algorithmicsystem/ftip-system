@@ -2,54 +2,81 @@ SHELL := /bin/bash
 
 COMPOSE := docker-compose
 ENV_FILE ?= .env
+VENV_PY := .venv/bin/python
 RUN_ENV = if [ -f $(ENV_FILE) ]; then set -a; . $(ENV_FILE); set +a; fi;
 
-.PHONY: help dev db-up db-down db-reset migrate db-check test lint fmt
+.PHONY: help dev compose-up-db compose-down-db db-up db-down db-reset migrate db-check env-check test lint fmt
 
 help:
 	@echo "Targets:"
-	@echo "  make dev       Start Postgres, run migrations, then start the API (uvicorn)"
-	@echo "  make db-up     Start Postgres via docker compose"
-	@echo "  make db-down   Stop Postgres via docker compose"
+	@echo "  make dev            Start the API (uvicorn)"
+	@echo "  make compose-up-db  Start Postgres via docker-compose"
+	@echo "  make compose-down-db Stop Postgres via docker-compose"
 	@echo "  make db-reset  Drop/recreate schema and re-run migrations"
 	@echo "  make migrate   Run database migrations"
 	@echo "  make db-check  Verify database connectivity"
+	@echo "  make env-check Print FTIP_DB_ENABLED and DATABASE_URL"
 	@echo "  make test      Run pytest"
 	@echo "  make lint      Run ruff checks"
 	@echo "  make fmt       Run ruff fixes and black formatting"
 
-db-up:
+define require_venv
+	@if [ ! -x "$(VENV_PY)" ]; then \
+		echo "Missing .venv. Run: python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt"; \
+		exit 1; \
+	fi
+endef
+
+
+compose-up-db:
 	@$(COMPOSE) up -d db
 
 
-db-down:
+compose-down-db:
 	@$(COMPOSE) down -v
 
 
+db-up: compose-up-db
+
+
+db-down: compose-down-db
+
+
+env-check:
+	@$(call require_venv)
+	@$(RUN_ENV) $(VENV_PY) tools/env_check.py
+
 db-check:
-	@$(RUN_ENV) python tools/db_check.py --retries 10 --sleep 1
+	@$(call require_venv)
+	@$(RUN_ENV) $(VENV_PY) tools/db_check.py --retries 10 --sleep 1
 
 
 migrate:
-	@$(RUN_ENV) python tools/migrate_db.py
+	@$(call require_venv)
+	@$(RUN_ENV) $(VENV_PY) tools/migrate_db.py
 
 
 db-reset:
-	@$(RUN_ENV) python tools/reset_db.py
+	@$(call require_venv)
+	@$(RUN_ENV) $(VENV_PY) tools/reset_db.py
 
 
-dev: db-up migrate db-check
-	@$(RUN_ENV) uvicorn api.main:app --reload --port $${PORT:-8000}
+dev:
+	@$(call require_venv)
+	@$(RUN_ENV) $(VENV_PY) -m uvicorn api.main:app --reload --port $${PORT:-8000}
 
 
 test:
-	@$(RUN_ENV) pytest -q
+	@$(call require_venv)
+	@$(RUN_ENV) $(VENV_PY) -m pytest -q
 
 
 lint:
-	@ruff check .
+	@$(call require_venv)
+	@$(VENV_PY) -m ruff check .
 
 
 fmt:
-	@ruff check --fix .
-	@black .
+	@$(call require_venv)
+	@$(VENV_PY) -m ruff check --fix .
+	@$(VENV_PY) -m black .

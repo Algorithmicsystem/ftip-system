@@ -1,6 +1,10 @@
 import os
 from typing import Any, Optional
 
+from dotenv import find_dotenv, load_dotenv
+
+load_dotenv(find_dotenv(usecwd=True))
+
 
 def env(name: str, default: Optional[str] = None) -> Optional[str]:
     value = os.getenv(name)
