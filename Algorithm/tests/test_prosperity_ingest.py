@@ -1,6 +1,6 @@
 import datetime as dt
 import os
-from typing import Any, List
+from typing import Any, List, Optional, Tuple
 
 import pytest
 
@@ -9,8 +9,8 @@ from api.prosperity import ingest
 
 
 def _sample_rows(
-    n: int = 40, *, start: dt.date | None = None
-) -> List[tuple[dt.date, float, float]]:
+    n: int = 40, *, start: Optional[dt.date] = None
+) -> List[Tuple[dt.date, float, float]]:
     base = start or dt.date(2024, 1, 1)
     return [(base + dt.timedelta(days=i), 100.0 + i, 1_000.0 + i) for i in range(n)]
 

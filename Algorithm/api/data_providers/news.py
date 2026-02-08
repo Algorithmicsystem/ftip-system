@@ -21,9 +21,7 @@ class NewsProviderError(ProviderError):
 
 def _rss_url_for_symbol(symbol: str) -> str:
     query = f"{symbol} stock"
-    return (
-        f"https://news.google.com/rss/search?q={query}"  # noqa: S310 - controlled input
-    )
+    return f"https://news.google.com/rss/search?q={query}"  # noqa: S310 - controlled input
 
 
 def _parse_rss(content: str) -> List[Dict[str, object]]:

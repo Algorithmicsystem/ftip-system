@@ -85,7 +85,7 @@ async def top_picks(
         JOIN latest l ON sd.as_of_date = l.as_of_date
         LEFT JOIN market_symbols ms ON ms.symbol = sd.symbol
         WHERE sd.action = %s {where_country}
-        ORDER BY sd.score {'DESC' if mode_upper == 'BUY' else 'ASC'}
+        ORDER BY sd.score {"DESC" if mode_upper == "BUY" else "ASC"}
         LIMIT %s
         """,
         tuple(params + [limit]),
@@ -102,7 +102,7 @@ async def top_picks(
             JOIN latest l ON sd.as_of_date = l.as_of_date
             LEFT JOIN market_symbols ms ON ms.symbol = sd.symbol
             WHERE 1=1 {where_country}
-            ORDER BY sd.score {'DESC' if mode_upper == 'BUY' else 'ASC'}
+            ORDER BY sd.score {"DESC" if mode_upper == "BUY" else "ASC"}
             LIMIT %s
             """,
             tuple(params[1:] + [limit]) if country_upper != "ALL" else (limit,),

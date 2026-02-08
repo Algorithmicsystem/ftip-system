@@ -54,7 +54,9 @@ def trend_momentum(features: Dict[str, float]) -> StrategyOutput:
             (
                 "Trend slope positive"
                 if trend > 0
-                else "Trend slope negative" if trend < 0 else "Trend flat"
+                else "Trend slope negative"
+                if trend < 0
+                else "Trend flat"
             ),
         ),
         "feature_contributions": {
@@ -83,12 +85,16 @@ def mean_reversion(features: Dict[str, float]) -> StrategyOutput:
             (
                 "RSI stretched to downside"
                 if rsi < 40
-                else "RSI stretched to upside" if rsi > 60 else "RSI neutral"
+                else "RSI stretched to upside"
+                if rsi > 60
+                else "RSI neutral"
             ),
             (
                 "Short-term momentum down"
                 if mom5 < 0
-                else "Short-term momentum up" if mom5 > 0 else "Momentum flat"
+                else "Short-term momentum up"
+                if mom5 > 0
+                else "Momentum flat"
             ),
         ),
         "feature_contributions": {
@@ -168,12 +174,16 @@ def macro_proxy_sentiment(features: Dict[str, float]) -> StrategyOutput:
             (
                 "Sentiment supportive"
                 if sentiment > 0
-                else "Sentiment cautious" if sentiment < 0 else "Sentiment neutral"
+                else "Sentiment cautious"
+                if sentiment < 0
+                else "Sentiment neutral"
             ),
             (
                 "Momentum assists macro view"
                 if mom21 > 0
-                else "Momentum disagrees with macro" if mom21 < 0 else "Momentum flat"
+                else "Momentum disagrees with macro"
+                if mom21 < 0
+                else "Momentum flat"
             ),
         ),
         "feature_contributions": {
