@@ -1,10 +1,10 @@
 SHELL := /bin/bash
 
-COMPOSE := $(shell if command -v docker-compose >/dev/null 2>&1; then echo docker-compose; elif docker compose version >/dev/null 2>&1; then echo docker compose; fi)
+COMPOSE := docker-compose
 ENV_FILE ?= .env
 RUN_ENV = if [ -f $(ENV_FILE) ]; then set -a; . $(ENV_FILE); set +a; fi;
 
-.PHONY: help dev db-up db-down db-reset migrate db-check test lint format
+.PHONY: help dev db-up db-down db-reset migrate db-check test lint fmt
 
 help:
 	@echo "Targets:"
@@ -16,20 +16,14 @@ help:
 	@echo "  make db-check  Verify database connectivity"
 	@echo "  make test      Run pytest"
 	@echo "  make lint      Run ruff checks"
-	@echo "  make format    Run black formatting"
+	@echo "  make fmt       Run ruff fixes and black formatting"
 
-_guard_compose:
-	@if [ -z "$(COMPOSE)" ]; then \
-		echo "docker compose not found. Install docker-compose or Docker Desktop."; \
-		exit 1; \
-	fi
-
-db-up: _guard_compose
+db-up:
 	@$(COMPOSE) up -d db
 
 
-db-down: _guard_compose
-	@$(COMPOSE) down
+db-down:
+	@$(COMPOSE) down -v
 
 
 db-check:
@@ -56,5 +50,6 @@ lint:
 	@ruff check .
 
 
-format:
+fmt:
+	@ruff check --fix .
 	@black .

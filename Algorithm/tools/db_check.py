@@ -6,6 +6,7 @@ import sys
 import time
 
 import psycopg
+from dotenv import load_dotenv
 
 
 def _connect_once(db_url: str) -> None:
@@ -23,6 +24,7 @@ def main() -> int:
     parser.add_argument("--sleep", type=float, default=0.5)
     args = parser.parse_args()
 
+    load_dotenv()
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("DATABASE_URL is required for db_check.", file=sys.stderr)

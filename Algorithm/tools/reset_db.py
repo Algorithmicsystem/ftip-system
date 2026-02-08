@@ -4,9 +4,11 @@ import os
 import sys
 
 import psycopg
+from dotenv import load_dotenv
 
 
 def main() -> int:
+    load_dotenv()
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("DATABASE_URL is required to reset the database.", file=sys.stderr)

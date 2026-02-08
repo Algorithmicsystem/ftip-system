@@ -3,8 +3,11 @@ from __future__ import annotations
 import os
 import sys
 
+from dotenv import load_dotenv
+
 
 def main() -> int:
+    load_dotenv()
     db_url = os.getenv("DATABASE_URL")
     if not db_url:
         print("DATABASE_URL is required to run migrations.", file=sys.stderr)
