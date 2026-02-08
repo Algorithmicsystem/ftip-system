@@ -1,5 +1,57 @@
 # FTIP System Notes
 
+## Local Quickstart (Docker)
+
+```bash
+docker compose up --build
+```
+
+The API will be available at `http://localhost:8000` (try `/health`). Copy `.env.example` to `.env` if you want to override defaults locally.
+
+## Reset DB (safe for local/dev)
+
+If you are running with Docker, the fastest reset is to drop the volume:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+If you are running against a local Postgres instance, use the reset helper:
+
+```bash
+export FTIP_DB_ENABLED=1
+export FTIP_MIGRATIONS_AUTO=1
+export DATABASE_URL=postgresql://ftip:ftip@localhost:5432/ftip
+python tools/reset_db.py
+```
+
+## DB Health Check
+
+```bash
+BASE=http://localhost:8000 ./scripts/db_health_check.sh
+```
+
+## Run Tests
+
+```bash
+cd Algorithm
+pytest -q
+```
+
+## Deploy (Railway)
+
+1. Create a Railway service from this repo.
+2. Add the required environment variables (see `.env.example` and the production guardrails below).
+3. Ensure the service start command uses the default `CMD` in the Dockerfile (runs `scripts/railway_start.sh`).
+4. Configure a Postgres database in Railway and set `DATABASE_URL` accordingly.
+
+## CHANGELOG
+
+### Unreleased
+- Added schema version reporting to `/db/health` to surface migration state and aid diagnostics.
+- Added `.env.example` and helper scripts for DB health checks and resets.
+
 ## DB smoke tests
 
 Set the environment for database access (for local testing you can point `DATABASE_URL` at a Postgres instance) and enable DB endpoints:
