@@ -21,7 +21,9 @@ class NewsProviderError(ProviderError):
 
 def _rss_url_for_symbol(symbol: str) -> str:
     query = f"{symbol} stock"
-    return f"https://news.google.com/rss/search?q={query}"  # noqa: S310 - controlled input
+    return (
+        f"https://news.google.com/rss/search?q={query}"  # noqa: S310 - controlled input
+    )
 
 
 def _parse_rss(content: str) -> List[Dict[str, object]]:
@@ -41,7 +43,9 @@ def _parse_rss(content: str) -> List[Dict[str, object]]:
     return items
 
 
-def fetch_news_items(symbol: str, from_ts: dt.datetime, to_ts: dt.datetime) -> List[Dict[str, object]]:
+def fetch_news_items(
+    symbol: str, from_ts: dt.datetime, to_ts: dt.datetime
+) -> List[Dict[str, object]]:
     symbol = canonical_symbol(symbol)
     url = _rss_url_for_symbol(symbol)
     try:
@@ -50,7 +54,9 @@ def fetch_news_items(symbol: str, from_ts: dt.datetime, to_ts: dt.datetime) -> L
         raise NewsProviderError("PROVIDER_UNAVAILABLE", str(exc)) from exc
 
     if resp.status_code != 200:
-        raise NewsProviderError("PROVIDER_UNAVAILABLE", f"news RSS HTTP {resp.status_code}")
+        raise NewsProviderError(
+            "PROVIDER_UNAVAILABLE", f"news RSS HTTP {resp.status_code}"
+        )
 
     items = _parse_rss(resp.text)
     results: List[Dict[str, object]] = []

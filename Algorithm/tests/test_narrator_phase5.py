@@ -70,7 +70,9 @@ def test_portfolio_no_backtest_returns_defaults(monkeypatch):
         "lookback": 252,
         "include_backtest": False,
     }
-    resp = client.post("/narrator/portfolio", json=payload, headers={"X-FTIP-API-Key": "demo"})
+    resp = client.post(
+        "/narrator/portfolio", json=payload, headers={"X-FTIP-API-Key": "demo"}
+    )
     assert resp.status_code == 200
     body = resp.json()
     _assert_perf_numbers(body["performance"])
@@ -92,7 +94,9 @@ def test_portfolio_backtest_coerces_missing_stats(monkeypatch):
             self.turnover = "3.0"
             self.audit = None
 
-    monkeypatch.setattr(api_main, "backtest_portfolio", lambda *_args, **_kwargs: DummyBacktest())
+    monkeypatch.setattr(
+        api_main, "backtest_portfolio", lambda *_args, **_kwargs: DummyBacktest()
+    )
 
     client = TestClient(app)
     payload = {
@@ -102,7 +106,9 @@ def test_portfolio_backtest_coerces_missing_stats(monkeypatch):
         "lookback": 252,
         "include_backtest": True,
     }
-    resp = client.post("/narrator/portfolio", json=payload, headers={"X-FTIP-API-Key": "demo"})
+    resp = client.post(
+        "/narrator/portfolio", json=payload, headers={"X-FTIP-API-Key": "demo"}
+    )
     assert resp.status_code == 200
     body = resp.json()
     _assert_perf_numbers(body["performance"])

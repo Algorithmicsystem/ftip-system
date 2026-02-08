@@ -4,6 +4,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+
 @dataclass
 class BacktestResult:
     equity_curve: pd.Series
@@ -14,10 +15,13 @@ class BacktestResult:
     max_drawdown: float
     volatility: float
 
+
 class Portfolio:
     """Simple portfolio container for backtest results."""
+
     def __init__(self, initial_capital: float = 1.0):
         self.initial_capital = initial_capital
+
 
 class BacktestSimulator:
     def __init__(
@@ -53,7 +57,7 @@ class BacktestSimulator:
             if self.stop_loss is not None and r <= -abs(self.stop_loss):
                 w = 0.0
 
-            equity *= (1 + current_weight * r)
+            equity *= 1 + current_weight * r
             peak = max(peak, equity)
 
             if self.trailing_stop is not None:
@@ -70,7 +74,11 @@ class BacktestSimulator:
         total_return = equity_curve.iloc[-1] - 1
         annual_return = (1 + portfolio_returns.mean()) ** self.trading_days - 1
         volatility = portfolio_returns.std() * np.sqrt(self.trading_days)
-        sharpe = 0.0 if volatility == 0 else portfolio_returns.mean() / volatility * np.sqrt(self.trading_days)
+        sharpe = (
+            0.0
+            if volatility == 0
+            else portfolio_returns.mean() / volatility * np.sqrt(self.trading_days)
+        )
         max_drawdown = (1 - equity_curve / equity_curve.cummax()).max()
 
         return BacktestResult(
@@ -83,6 +91,9 @@ class BacktestSimulator:
             volatility=volatility,
         )
 
-def evaluate_backtest(prices: pd.Series, weights: pd.Series, **kwargs) -> BacktestResult:
+
+def evaluate_backtest(
+    prices: pd.Series, weights: pd.Series, **kwargs
+) -> BacktestResult:
     simulator = BacktestSimulator(**kwargs)
     return simulator.run(prices, weights)

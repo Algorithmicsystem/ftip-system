@@ -6,7 +6,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from api import db
 
 
-def fetch_bars(symbol: str, from_date: dt.date, to_date: dt.date) -> List[Dict[str, Any]]:
+def fetch_bars(
+    symbol: str, from_date: dt.date, to_date: dt.date
+) -> List[Dict[str, Any]]:
     rows = db.safe_fetchall(
         """
         SELECT date, open, high, low, close, adj_close, volume, source
@@ -78,7 +80,9 @@ def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     }
 
 
-def signal_as_of(symbol: str, lookback: int, as_of: dt.date) -> Optional[Dict[str, Any]]:
+def signal_as_of(
+    symbol: str, lookback: int, as_of: dt.date
+) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
         SELECT symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, regime, thresholds, confidence,
@@ -112,7 +116,9 @@ def signal_as_of(symbol: str, lookback: int, as_of: dt.date) -> Optional[Dict[st
     }
 
 
-def signal_history(symbol: str, lookback: int, as_of: dt.date, window_days: int) -> List[Dict[str, Any]]:
+def signal_history(
+    symbol: str, lookback: int, as_of: dt.date, window_days: int
+) -> List[Dict[str, Any]]:
     cutoff = as_of - dt.timedelta(days=max(0, window_days))
     rows = db.safe_fetchall(
         """
@@ -161,7 +167,9 @@ def latest_features(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     }
 
 
-def features_as_of(symbol: str, lookback: int, as_of: dt.date) -> Optional[Dict[str, Any]]:
+def features_as_of(
+    symbol: str, lookback: int, as_of: dt.date
+) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
         SELECT symbol, as_of, lookback, features, meta

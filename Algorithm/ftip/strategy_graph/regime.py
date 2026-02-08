@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 from typing import Dict, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -21,7 +20,9 @@ def _pct_change(values: List[float]) -> List[float]:
     return out
 
 
-def classify_regime(candles: List["Candle"], features: Dict[str, float]) -> RegimeDecision:
+def classify_regime(
+    candles: List["Candle"], features: Dict[str, float]
+) -> RegimeDecision:
     closes = [float(c.close) for c in candles]
     returns = _pct_change(closes)
     vol_ann = float(features.get("volatility_ann", 0.0))
@@ -41,7 +42,7 @@ def classify_regime(candles: List["Candle"], features: Dict[str, float]) -> Regi
     if len(returns) > 2:
         mu = sum(returns[1:]) / max(len(returns) - 1, 1)
         var = sum((r - mu) ** 2 for r in returns[1:]) / max(len(returns) - 2, 1)
-        vol_fallback = (var ** 0.5) * (252.0 ** 0.5)
+        vol_fallback = (var**0.5) * (252.0**0.5)
 
     vol_metric = vol_ann if vol_ann > 0 else vol_fallback
     slope = 0.0

@@ -1,5 +1,3 @@
-import datetime as dt
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -49,7 +47,10 @@ def test_explain_not_found_when_missing(monkeypatch):
     monkeypatch.setattr(narrator, "ensemble_as_of", lambda *_, **__: None)
 
     client = TestClient(app)
-    resp = client.get("/prosperity/narrator/explain", params={"symbol": "AAPL", "as_of_date": "2024-01-31", "lookback": 252})
+    resp = client.get(
+        "/prosperity/narrator/explain",
+        params={"symbol": "AAPL", "as_of_date": "2024-01-31", "lookback": 252},
+    )
     assert resp.status_code == 404
     assert resp.json().get("trace_id")
 
@@ -87,9 +88,17 @@ def test_explain_ok_when_context_present(monkeypatch):
 
     monkeypatch.setattr(narrator, "ensemble_as_of", lambda *_, **__: ensemble)
     monkeypatch.setattr(narrator, "strategies_as_of", lambda *_, **__: strategies)
-    monkeypatch.setattr(narrator.query, "features_as_of", lambda *_, **__: {"features": {"mom": 1.0}})
-    monkeypatch.setattr(narrator.query, "signal_as_of", lambda *_, **__: {"signal": "BUY", "score": 0.5, "as_of": "2024-01-31"})
-    monkeypatch.setattr(narrator.llm_client, "complete_chat", lambda *_, **__: ("Narration", "gpt", {}))
+    monkeypatch.setattr(
+        narrator.query, "features_as_of", lambda *_, **__: {"features": {"mom": 1.0}}
+    )
+    monkeypatch.setattr(
+        narrator.query,
+        "signal_as_of",
+        lambda *_, **__: {"signal": "BUY", "score": 0.5, "as_of": "2024-01-31"},
+    )
+    monkeypatch.setattr(
+        narrator.llm_client, "complete_chat", lambda *_, **__: ("Narration", "gpt", {})
+    )
 
     client = TestClient(app)
     resp = client.get(

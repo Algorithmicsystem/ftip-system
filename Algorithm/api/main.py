@@ -5,11 +5,7 @@ import time
 import math
 import json
 import datetime as dt
-import json
 import logging
-import os
-import time
-import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -17,12 +13,12 @@ from typing import Any, Dict, List, Optional, Tuple
 import requests
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
-from api import db, lifecycle, migrations, security
+from api import db, lifecycle, security
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
 from api.backtest.routes import router as backtest_router
@@ -43,7 +39,9 @@ from api.signals.routes import router as signals_router
 APP_NAME = "FTIP System API"
 logger = logging.getLogger("ftip.api")
 if not logger.handlers:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
+    )
 
 
 def _env(name: str, default: Optional[str] = None) -> Optional[str]:
@@ -178,7 +176,11 @@ def db_insert_portfolio_backtest(req_obj: Any, out_obj: Any) -> None:
     Persist portfolio backtest summary + audit.
     Never raises.
     """
-    payload = out_obj.model_dump(exclude_none=True) if hasattr(out_obj, "model_dump") else dict(out_obj)
+    payload = (
+        out_obj.model_dump(exclude_none=True)
+        if hasattr(out_obj, "model_dump")
+        else dict(out_obj)
+    )
     audit = payload.get("audit")
 
     try:
@@ -340,7 +342,10 @@ def persist_portfolio_backtest_record(req_obj: Any, out_obj: Any) -> Optional[in
 # Calibration loader (single + per-symbol map)
 # =============================================================================
 
-def _load_calibration_for_symbol(symbol: Optional[str]) -> Tuple[bool, Optional[Dict[str, Any]]]:
+
+def _load_calibration_for_symbol(
+    symbol: Optional[str],
+) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """
     Loads calibration thresholds.
     Priority:
@@ -391,6 +396,7 @@ def _load_calibration_single() -> Tuple[bool, Optional[Dict[str, Any]]]:
 # Models
 # =============================================================================
 
+
 class Candle(BaseModel):
     timestamp: str  # ISO date "YYYY-MM-DD" (daily)
     close: float
@@ -408,7 +414,7 @@ class BacktestRequest(BaseModel):
 
     symbol: Optional[str] = None
     from_date: Optional[str] = None  # YYYY-MM-DD
-    to_date: Optional[str] = None    # YYYY-MM-DD
+    to_date: Optional[str] = None  # YYYY-MM-DD
 
     include_equity_curve: bool = False
     include_returns: bool = False
@@ -585,9 +591,7 @@ def _cache_set(key: Tuple[str, str, str], val: List[Candle]) -> None:
 # =============================================================================
 
 MARKETDATA_BASE_URL = (
-    _env("MASSIVE_BASE_URL")
-    or _env("POLYGON_BASE_URL")
-    or "https://api.polygon.io"
+    _env("MASSIVE_BASE_URL") or _env("POLYGON_BASE_URL") or "https://api.polygon.io"
 )
 
 MARKETDATA_API_KEY = _env("MASSIVE_API_KEY") or _env("POLYGON_API_KEY")
@@ -610,7 +614,9 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
     api_key = _require_marketdata_key()
     sym = (symbol or "").strip().upper()
 
-    url = f"{MARKETDATA_BASE_URL}/v2/aggs/ticker/{sym}/range/1/day/{from_date}/{to_date}"
+    url = (
+        f"{MARKETDATA_BASE_URL}/v2/aggs/ticker/{sym}/range/1/day/{from_date}/{to_date}"
+    )
     params = {
         "adjusted": "true",
         "sort": "asc",
@@ -628,21 +634,26 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
             resp = requests.get(url, params=params, timeout=60)
         except Exception as e:
             last_err = f"Market data request failed: {e}"
-            time.sleep(base_sleep * (2 ** attempt))
+            time.sleep(base_sleep * (2**attempt))
             continue
 
         if resp.status_code == 429:
             last_err = f"Market data rate-limited 429: {resp.text}"
-            time.sleep(base_sleep * (2 ** attempt))
+            time.sleep(base_sleep * (2**attempt))
             continue
 
         if resp.status_code != 200:
-            raise HTTPException(status_code=502, detail=f"Market data error {resp.status_code}: {resp.text}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Market data error {resp.status_code}: {resp.text}",
+            )
 
         js = resp.json()
         results = js.get("results") or []
         if not results:
-            raise HTTPException(status_code=404, detail=f"No bars returned for {sym} in range.")
+            raise HTTPException(
+                status_code=404, detail=f"No bars returned for {sym} in range."
+            )
 
         candles: List[Candle] = []
         for r in results:
@@ -652,16 +663,28 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
             if t_ms is None or c is None:
                 continue
             day = dt.datetime.utcfromtimestamp(t_ms / 1000.0).date().isoformat()
-            candles.append(Candle(timestamp=day, close=float(c), volume=float(v) if v is not None else None))
+            candles.append(
+                Candle(
+                    timestamp=day,
+                    close=float(c),
+                    volume=float(v) if v is not None else None,
+                )
+            )
 
         if not candles:
-            raise HTTPException(status_code=404, detail=f"Returned empty/invalid candles for {sym}.")
+            raise HTTPException(
+                status_code=404, detail=f"Returned empty/invalid candles for {sym}."
+            )
         return candles
 
-    raise HTTPException(status_code=502, detail=last_err or "Market data failed after retries.")
+    raise HTTPException(
+        status_code=502, detail=last_err or "Market data failed after retries."
+    )
 
 
-def massive_fetch_daily_bars_cached(symbol: str, from_date: str, to_date: str) -> List[Candle]:
+def massive_fetch_daily_bars_cached(
+    symbol: str, from_date: str, to_date: str
+) -> List[Candle]:
     s = (symbol or "").strip().upper()
     key = (s, from_date, to_date)
     hit = _cache_get(key)
@@ -699,7 +722,14 @@ def massive_fetch_daily_bars_cached(symbol: str, from_date: str, to_date: str) -
                 )
 
             if rows:
-                bars = [Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None) for r in rows]
+                bars = [
+                    Candle(
+                        timestamp=r[0].isoformat(),
+                        close=float(r[1]),
+                        volume=float(r[2]) if r[2] is not None else None,
+                    )
+                    for r in rows
+                ]
                 _cache_set(key, bars)
                 return bars
     except Exception:
@@ -713,6 +743,7 @@ def massive_fetch_daily_bars_cached(symbol: str, from_date: str, to_date: str) -
 # =============================================================================
 # Math helpers
 # =============================================================================
+
 
 def _mean(xs: List[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
@@ -755,6 +786,7 @@ def _max_drawdown(equity: List[float]) -> float:
 # =============================================================================
 # Features + regime detection + scoring
 # =============================================================================
+
 
 def _sma(values: List[float], window: int) -> float:
     if window <= 0 or len(values) < window:
@@ -842,7 +874,9 @@ def score_from_features(features: Dict[str, float]) -> Tuple[float, List[str]]:
     rsi = float(features.get("rsi14", 50.0))
     rsi_sig = _clamp((rsi - 50.0) / 25.0, -1.0, 1.0)
 
-    mom = 0.4 * float(features.get("mom_21", 0.0)) + 0.6 * float(features.get("mom_63", 0.0))
+    mom = 0.4 * float(features.get("mom_21", 0.0)) + 0.6 * float(
+        features.get("mom_63", 0.0)
+    )
     mom_sig = _clamp(mom / 0.25, -1.0, 1.0)
 
     trend = float(features.get("trend_sma20_50", 0.0))
@@ -917,11 +951,17 @@ def _score_components_from_features(features: Dict[str, float]) -> Dict[str, flo
     return {"short": float(short), "mid": float(mid), "long": float(long)}
 
 
-def stacked_score_from_features(features: Dict[str, float], regime: str) -> Tuple[float, Dict[str, Any]]:
+def stacked_score_from_features(
+    features: Dict[str, float], regime: str
+) -> Tuple[float, Dict[str, Any]]:
     comps = _score_components_from_features(features)
     w = _stack_weights_for_regime(regime)
 
-    raw = w["short"] * comps["short"] + w["mid"] * comps["mid"] + w["long"] * comps["long"]
+    raw = (
+        w["short"] * comps["short"]
+        + w["mid"] * comps["mid"]
+        + w["long"] * comps["long"]
+    )
 
     vola = float(features.get("volatility_ann", 0.0))
     vola_pen = _clamp((vola - 0.25) / 0.50, 0.0, 0.5)
@@ -940,7 +980,10 @@ def stacked_score_from_features(features: Dict[str, float], regime: str) -> Tupl
 # Thresholds
 # =============================================================================
 
-def _thresholds_for_regime(regime: str, calibration: Optional[Dict[str, Any]]) -> Dict[str, float]:
+
+def _thresholds_for_regime(
+    regime: str, calibration: Optional[Dict[str, Any]]
+) -> Dict[str, float]:
     defaults = {
         "TRENDING": {"buy": 0.2, "sell": -0.2},
         "CHOPPY": {"buy": 0.3, "sell": -0.3},
@@ -951,8 +994,12 @@ def _thresholds_for_regime(regime: str, calibration: Optional[Dict[str, Any]]) -
 
     thr_by_reg = calibration.get("thresholds_by_regime") or {}
     if regime in thr_by_reg and isinstance(thr_by_reg[regime], dict):
-        b = float(thr_by_reg[regime].get("buy", defaults.get(regime, {"buy": 0.3})["buy"]))
-        s = float(thr_by_reg[regime].get("sell", defaults.get(regime, {"sell": -0.3})["sell"]))
+        b = float(
+            thr_by_reg[regime].get("buy", defaults.get(regime, {"buy": 0.3})["buy"])
+        )
+        s = float(
+            thr_by_reg[regime].get("sell", defaults.get(regime, {"sell": -0.3})["sell"])
+        )
         return {"buy": b, "sell": s}
 
     return defaults.get(regime, {"buy": 0.3, "sell": -0.3})
@@ -967,7 +1014,10 @@ def _score_mode() -> str:
 # Core backtest engine (simple buy-and-hold placeholder for /run_backtest)
 # =============================================================================
 
-def run_backtest_core(candles: List[Candle], include_equity: bool, include_returns: bool) -> BacktestSummary:
+
+def run_backtest_core(
+    candles: List[Candle], include_equity: bool, include_returns: bool
+) -> BacktestSummary:
     closes = [c.close for c in candles]
     dates = [c.timestamp for c in candles]
 
@@ -991,14 +1041,23 @@ def run_backtest_core(candles: List[Candle], include_equity: bool, include_retur
         sharpe=float(sharpe),
         max_drawdown=float(mdd),
         volatility=float(vol),
-        equity_curve={d: float(equity[i]) for i, d in enumerate(dates)} if include_equity else None,
-        returns={d: float(rets[i]) for i, d in enumerate(dates)} if include_returns else None,
+        equity_curve=(
+            {d: float(equity[i]) for i, d in enumerate(dates)}
+            if include_equity
+            else None
+        ),
+        returns=(
+            {d: float(rets[i]) for i, d in enumerate(dates)}
+            if include_returns
+            else None
+        ),
     )
 
 
 # =============================================================================
 # Signal computation
 # =============================================================================
+
 
 def _filter_upto(candles: List[Candle], as_of: str) -> List[Candle]:
     cutoff = _parse_date(as_of)
@@ -1021,7 +1080,10 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     candles_upto = _filter_upto(candles_all, as_of)
 
     if len(candles_upto) < 30:
-        raise HTTPException(status_code=400, detail=f"Not enough data <= {as_of}. Need 30, got {len(candles_upto)}.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Not enough data <= {as_of}. Need 30, got {len(candles_upto)}.",
+        )
 
     effective = min(int(lookback), len(candles_upto))
     window = candles_upto[-effective:]
@@ -1055,7 +1117,10 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
         notes.append("Confidence reduced due to HIGH_VOL regime.")
 
     if effective < lookback:
-        notes.insert(0, f"Requested lookback={lookback}, only {effective} bars available. Using effective_lookback={effective}.")
+        notes.insert(
+            0,
+            f"Requested lookback={lookback}, only {effective} bars available. Using effective_lookback={effective}.",
+        )
 
     if regime == "TRENDING":
         notes.append("Regime: TRENDING.")
@@ -1065,7 +1130,9 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
         notes.append("Regime: HIGH_VOL.")
 
     if cal_loaded:
-        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
+        notes.append(
+            "Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON."
+        )
 
     meta = None
     if cal_loaded and cal:
@@ -1143,7 +1210,10 @@ def compute_signal_for_symbol_from_candles(
         notes.append("Confidence reduced due to HIGH_VOL regime.")
 
     if effective < lookback:
-        notes.insert(0, f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.")
+        notes.insert(
+            0,
+            f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.",
+        )
 
     if regime == "TRENDING":
         notes.append("Regime: TRENDING.")
@@ -1153,7 +1223,9 @@ def compute_signal_for_symbol_from_candles(
         notes.append("Regime: HIGH_VOL.")
 
     if cal_loaded:
-        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
+        notes.append(
+            "Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON."
+        )
 
     meta = None
     if cal_loaded and cal:
@@ -1189,6 +1261,7 @@ def compute_signal_for_symbol_from_candles(
 # Walk-forward + Calibration
 # =============================================================================
 
+
 def _forward_return(closes: List[float], idx: int, horizon: int) -> Optional[float]:
     j = idx + horizon
     if j >= len(closes):
@@ -1198,7 +1271,9 @@ def _forward_return(closes: List[float], idx: int, horizon: int) -> Optional[flo
     return float(closes[j] / closes[idx] - 1.0)
 
 
-def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int, horizons: List[int]) -> List[Dict[str, Any]]:
+def walk_forward_table(
+    symbol: str, from_date: str, to_date: str, lookback: int, horizons: List[int]
+) -> List[Dict[str, Any]]:
     candles_all = massive_fetch_daily_bars_cached(symbol, from_date, to_date)
     closes = [c.close for c in candles_all]
     dates = [c.timestamp for c in candles_all]
@@ -1249,7 +1324,9 @@ def walk_forward_table(symbol: str, from_date: str, to_date: str, lookback: int,
     return rows
 
 
-def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_trades_per_side: int) -> Dict[str, Any]:
+def calibrate_thresholds(
+    rows: List[Dict[str, Any]], optimize_horizon: int, min_trades_per_side: int
+) -> Dict[str, Any]:
     created = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
     regimes = sorted(set(r["regime"] for r in rows))
@@ -1274,16 +1351,28 @@ def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_
                 buysig = [r for r in rrows if float(r["score"]) >= float(b)]
                 sellsig = [r for r in rrows if float(r["score"]) <= float(s)]
 
-                if len(buysig) < int(min_trades_per_side) or len(sellsig) < int(min_trades_per_side):
+                if len(buysig) < int(min_trades_per_side) or len(sellsig) < int(
+                    min_trades_per_side
+                ):
                     continue
 
-                buy_ret = _mean([float(r[key]) for r in buysig if r.get(key) is not None])
-                sell_ret = _mean([float(r[key]) for r in sellsig if r.get(key) is not None])
+                buy_ret = _mean(
+                    [float(r[key]) for r in buysig if r.get(key) is not None]
+                )
+                sell_ret = _mean(
+                    [float(r[key]) for r in sellsig if r.get(key) is not None]
+                )
 
                 metric = float(buy_ret - sell_ret)
                 if best_metric is None or metric > best_metric:
                     best_metric = metric
-                    best = {"buy": float(b), "sell": float(s), "metric": float(metric), "buy_n": len(buysig), "sell_n": len(sellsig)}
+                    best = {
+                        "buy": float(b),
+                        "sell": float(s),
+                        "metric": float(metric),
+                        "buy_n": len(buysig),
+                        "sell_n": len(sellsig),
+                    }
 
         if best is None:
             if reg == "TRENDING":
@@ -1292,9 +1381,15 @@ def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_
                 thresholds_by_regime[reg] = {"buy": 0.3, "sell": -0.3}
             else:
                 thresholds_by_regime[reg] = {"buy": 0.45, "sell": -0.45}
-            diagnostics[reg] = {"note": "No valid threshold pair met min_trades constraints; using defaults.", "row_count": len(rrows)}
+            diagnostics[reg] = {
+                "note": "No valid threshold pair met min_trades constraints; using defaults.",
+                "row_count": len(rrows),
+            }
         else:
-            thresholds_by_regime[reg] = {"buy": float(best["buy"]), "sell": float(best["sell"])}
+            thresholds_by_regime[reg] = {
+                "buy": float(best["buy"]),
+                "sell": float(best["sell"]),
+            }
             diagnostics[reg] = {"best": best, "row_count": len(rrows)}
 
     return {
@@ -1309,18 +1404,37 @@ def calibrate_thresholds(rows: List[Dict[str, Any]], optimize_horizon: int, min_
 # Portfolio layer helpers
 # =============================================================================
 
+
 def _portfolio_knobs(req: PortfolioRequest) -> Dict[str, float]:
-    max_w = req.max_weight if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
-    hold_mult = req.hold_multiplier if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
-    min_conf = req.min_confidence if req.min_confidence is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
+    max_w = (
+        req.max_weight
+        if req.max_weight is not None
+        else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+    )
+    hold_mult = (
+        req.hold_multiplier
+        if req.hold_multiplier is not None
+        else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
+    )
+    min_conf = (
+        req.min_confidence
+        if req.min_confidence is not None
+        else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
+    )
 
     max_w = _clamp(float(max_w), 0.01, 1.0)
     hold_mult = _clamp(float(hold_mult), 0.0, 1.0)
     min_conf = _clamp(float(min_conf), 0.0, 1.0)
-    return {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf}
+    return {
+        "max_weight": max_w,
+        "hold_multiplier": hold_mult,
+        "min_confidence": min_conf,
+    }
 
 
-def _raw_weight_from_signal(sig: Dict[str, Any], hold_mult: float, min_conf: float, allow_shorts: bool) -> float:
+def _raw_weight_from_signal(
+    sig: Dict[str, Any], hold_mult: float, min_conf: float, allow_shorts: bool
+) -> float:
     signal = (sig.get("signal") or "HOLD").upper()
     conf = float(sig.get("confidence") or 0.0)
     vola = float(
@@ -1343,7 +1457,9 @@ def _raw_weight_from_signal(sig: Dict[str, Any], hold_mult: float, min_conf: flo
     return 0.0
 
 
-def _apply_deadband(old_w: Dict[str, float], new_w: Dict[str, float], min_delta: float) -> Dict[str, float]:
+def _apply_deadband(
+    old_w: Dict[str, float], new_w: Dict[str, float], min_delta: float
+) -> Dict[str, float]:
     out: Dict[str, float] = {}
     syms = set(old_w.keys()) | set(new_w.keys())
     for s in syms:
@@ -1358,7 +1474,9 @@ def _apply_deadband(old_w: Dict[str, float], new_w: Dict[str, float], min_delta:
     return out
 
 
-def _cap_turnover(old_w: Dict[str, float], target_w: Dict[str, float], max_turnover: float) -> Dict[str, float]:
+def _cap_turnover(
+    old_w: Dict[str, float], target_w: Dict[str, float], max_turnover: float
+) -> Dict[str, float]:
     if max_turnover <= 0:
         return dict(old_w)
 
@@ -1383,7 +1501,9 @@ def _cap_turnover(old_w: Dict[str, float], target_w: Dict[str, float], max_turno
     return out
 
 
-def _normalize_long_only_with_caps(raw_pos: Dict[str, float], max_w: float) -> Tuple[Dict[str, float], float]:
+def _normalize_long_only_with_caps(
+    raw_pos: Dict[str, float], max_w: float
+) -> Tuple[Dict[str, float], float]:
     items = {k: float(v) for k, v in raw_pos.items() if float(v) > 0.0}
     if not items:
         return {}, 1.0
@@ -1426,7 +1546,9 @@ def _normalize_long_only_with_caps(raw_pos: Dict[str, float], max_w: float) -> T
     return final, cash
 
 
-def _normalize_allow_shorts_with_caps(raw: Dict[str, float], max_w: float) -> Tuple[Dict[str, float], float]:
+def _normalize_allow_shorts_with_caps(
+    raw: Dict[str, float], max_w: float
+) -> Tuple[Dict[str, float], float]:
     if not raw:
         return {}, 1.0
 
@@ -1446,7 +1568,9 @@ def _normalize_allow_shorts_with_caps(raw: Dict[str, float], max_w: float) -> Tu
     return wts, cash
 
 
-def _daily_returns_from_closes(dates: List[str], closes: List[float]) -> Dict[str, float]:
+def _daily_returns_from_closes(
+    dates: List[str], closes: List[float]
+) -> Dict[str, float]:
     out: Dict[str, float] = {}
     for i in range(1, len(closes)):
         prev = closes[i - 1]
@@ -1458,6 +1582,7 @@ def _daily_returns_from_closes(dates: List[str], closes: List[float]) -> Dict[st
 # =============================================================================
 # Portfolio backtest (OFFLINE signals from cached candles)
 # =============================================================================
+
 
 def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestResponse:
     # ---- absolute safety: never return None ----
@@ -1481,19 +1606,25 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                     raise ValueError("No market data returned")
                 candles_by_sym[s] = bars
             except HTTPException as e:
-                skipped_symbols.append({
-                    "symbol": s,
-                    "reason": f"HTTP {e.status_code}: {e.detail}",
-                })
+                skipped_symbols.append(
+                    {
+                        "symbol": s,
+                        "reason": f"HTTP {e.status_code}: {e.detail}",
+                    }
+                )
             except Exception as e:
-                skipped_symbols.append({"symbol": s, "reason": f"{type(e).__name__}: {e}"})
+                skipped_symbols.append(
+                    {"symbol": s, "reason": f"{type(e).__name__}: {e}"}
+                )
 
         audit_info: Dict[str, Any] = {}
         if skipped_symbols:
             audit_info["skipped_symbols"] = skipped_symbols
 
         if not candles_by_sym:
-            raise HTTPException(status_code=502, detail="All symbols failed to fetch market data.")
+            raise HTTPException(
+                status_code=502, detail="All symbols failed to fetch market data."
+            )
 
         if len(candles_by_sym) < min_symbols:
             note = (
@@ -1515,7 +1646,9 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         # Common calendar intersection within requested range
         date_sets: List[set] = []
         for _s, cs in candles_by_sym.items():
-            ds = {c.timestamp for c in cs if req.from_date <= c.timestamp <= req.to_date}
+            ds = {
+                c.timestamp for c in cs if req.from_date <= c.timestamp <= req.to_date
+            }
             if ds:
                 date_sets.append(ds)
 
@@ -1559,7 +1692,9 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
         mode = _score_mode()
 
-        def _compute_signal_from_cached(symbol: str, as_of: str, lookback: int) -> Optional[Dict[str, Any]]:
+        def _compute_signal_from_cached(
+            symbol: str, as_of: str, lookback: int
+        ) -> Optional[Dict[str, Any]]:
             cs_all = candles_by_sym.get(symbol, [])
             if not cs_all:
                 return None
@@ -1608,7 +1743,9 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 notes.append("Confidence reduced due to HIGH_VOL regime.")
 
             if cal_loaded:
-                notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
+                notes.append(
+                    "Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON."
+                )
 
             meta = None
             if cal_loaded and cal:
@@ -1640,9 +1777,21 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             }
 
         def _weights_for_date(as_of: str) -> Tuple[Dict[str, float], float]:
-            max_w = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
-            hold_mult = float(req.hold_multiplier) if req.hold_multiplier is not None else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
-            min_conf = float(req.min_confidence) if req.min_confidence is not None else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
+            max_w = (
+                float(req.max_weight)
+                if req.max_weight is not None
+                else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+            )
+            hold_mult = (
+                float(req.hold_multiplier)
+                if req.hold_multiplier is not None
+                else _env_float("FTIP_PORTFOLIO_HOLD_MULT", 0.35)
+            )
+            min_conf = (
+                float(req.min_confidence)
+                if req.min_confidence is not None
+                else _env_float("FTIP_PORTFOLIO_MIN_CONF", 0.10)
+            )
             allow_shorts = bool(req.allow_shorts)
 
             max_w = _clamp(max_w, 0.01, 1.0)
@@ -1657,7 +1806,12 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
             raw: Dict[str, float] = {}
             for s, sig in per.items():
-                rw = _raw_weight_from_signal(sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=allow_shorts)
+                rw = _raw_weight_from_signal(
+                    sig,
+                    hold_mult=hold_mult,
+                    min_conf=min_conf,
+                    allow_shorts=allow_shorts,
+                )
                 if rw != 0.0:
                     raw[s] = float(rw)
 
@@ -1673,7 +1827,9 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         # Audit tracking
         audit_rows: List[Dict[str, Any]] = []
         audit_violations = 0
-        ts_by_sym: Dict[str, List[str]] = {s: [c.timestamp for c in cs] for s, cs in candles_by_sym.items()}
+        ts_by_sym: Dict[str, List[str]] = {
+            s: [c.timestamp for c in cs] for s, cs in candles_by_sym.items()
+        }
 
         # Rebalance loop
         cost_rate = (float(req.trading_cost_bps) + float(req.slippage_bps)) / 10000.0
@@ -1685,7 +1841,11 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         total_turnover = 0.0
         reb_every = max(1, int(req.rebalance_every))
 
-        max_w_caps = float(req.max_weight) if req.max_weight is not None else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+        max_w_caps = (
+            float(req.max_weight)
+            if req.max_weight is not None
+            else _env_float("FTIP_PORTFOLIO_MAX_WEIGHT", 0.30)
+        )
         max_w_caps = _clamp(max_w_caps, 0.01, 1.0)
 
         for i, d in enumerate(common_dates):
@@ -1711,20 +1871,30 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                     if len(audit_rows) < int(req.audit_max_rows):
                         audit_rows.append(row)
 
-                target_w = _apply_deadband(weights, target_w, min_delta=float(req.min_trade_delta))
-                capped_w = _cap_turnover(weights, target_w, max_turnover=float(req.max_turnover_per_rebalance))
+                target_w = _apply_deadband(
+                    weights, target_w, min_delta=float(req.min_trade_delta)
+                )
+                capped_w = _cap_turnover(
+                    weights,
+                    target_w,
+                    max_turnover=float(req.max_turnover_per_rebalance),
+                )
 
                 if req.allow_shorts:
-                    capped_w, _cash2 = _normalize_allow_shorts_with_caps(capped_w, max_w_caps)
+                    capped_w, _cash2 = _normalize_allow_shorts_with_caps(
+                        capped_w, max_w_caps
+                    )
                 else:
-                    capped_w, _cash2 = _normalize_long_only_with_caps({k: v for k, v in capped_w.items() if v > 0.0}, max_w_caps)
+                    capped_w, _cash2 = _normalize_long_only_with_caps(
+                        {k: v for k, v in capped_w.items() if v > 0.0}, max_w_caps
+                    )
 
                 turnover = sum(
                     abs(float(capped_w.get(s, 0.0)) - float(weights.get(s, 0.0)))
                     for s in set(weights) | set(capped_w)
                 )
 
-                equity *= (1.0 - turnover * cost_rate)
+                equity *= 1.0 - turnover * cost_rate
                 total_turnover += turnover
                 weights = dict(capped_w)
 
@@ -1732,7 +1902,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             for s, w in weights.items():
                 pr += float(w) * float(rets_by_sym.get(s, {}).get(d, 0.0))
 
-            equity *= (1.0 + pr)
+            equity *= 1.0 + pr
             equity_curve[d] = equity
             daily_port_rets.append(float(pr))
 
@@ -1740,7 +1910,11 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
         n = max(1, len(daily_port_rets))
         annual_return = (1.0 + total_return) ** (252.0 / n) - 1.0
 
-        volatility = _std(daily_port_rets) * math.sqrt(252.0) if len(daily_port_rets) > 2 else 0.0
+        volatility = (
+            _std(daily_port_rets) * math.sqrt(252.0)
+            if len(daily_port_rets) > 2
+            else 0.0
+        )
         sharpe = (annual_return / volatility) if volatility > 0 else 0.0
         max_dd = _max_drawdown(list(equity_curve.values()))
 
@@ -1768,12 +1942,15 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"portfolio_backtest crash: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"portfolio_backtest crash: {type(e).__name__}: {e}"
+        )
 
 
 # =============================================================================
 # FastAPI
 # =============================================================================
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
@@ -1796,7 +1973,11 @@ async def security_and_tracing_middleware(request: Request, call_next):
     start = time.perf_counter()
     logger.info(
         "request.start",
-        extra={"path": request.url.path, "method": request.method, "trace_id": trace_id},
+        extra={
+            "path": request.url.path,
+            "method": request.method,
+            "trace_id": trace_id,
+        },
     )
 
     auth_error = security.require_api_key_if_needed(request, trace_id)
@@ -1813,18 +1994,30 @@ async def security_and_tracing_middleware(request: Request, call_next):
         response = await call_next(request)
     except DBError as exc:
         logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
-        response = security.json_error_response("database_error", str(exc), trace_id, exc.status_code)
+        response = security.json_error_response(
+            "database_error", str(exc), trace_id, exc.status_code
+        )
     except HTTPException as exc:
         if exc.status_code == 401:
             response = security.unauthorized_response(trace_id)
         else:
-            detail_msg = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
-            response = security.json_error_response("http_error", detail_msg, trace_id, exc.status_code)
+            detail_msg = (
+                exc.detail.get("message")
+                if isinstance(exc.detail, dict)
+                else str(exc.detail)
+            )
+            response = security.json_error_response(
+                "http_error", detail_msg, trace_id, exc.status_code
+            )
     except RequestValidationError as exc:
-        response = security.json_error_response("validation_error", str(exc), trace_id, 422)
+        response = security.json_error_response(
+            "validation_error", str(exc), trace_id, 422
+        )
     except Exception as exc:  # pragma: no cover - defensive
         logger.exception("unhandled.error", extra={"trace_id": trace_id})
-        response = security.json_error_response(exc.__class__.__name__, str(exc), trace_id, 500)
+        response = security.json_error_response(
+            exc.__class__.__name__, str(exc), trace_id, 500
+        )
 
     duration_ms = (time.perf_counter() - start) * 1000
     response.headers["X-Trace-Id"] = trace_id
@@ -1845,14 +2038,20 @@ async def security_and_tracing_middleware(request: Request, call_next):
 async def db_exception_handler(request: Request, exc: DBError):
     trace_id = security.trace_id_from_request(request)
     logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
-    return security.json_error_response("database_error", str(exc), trace_id, exc.status_code)
+    return security.json_error_response(
+        "database_error", str(exc), trace_id, exc.status_code
+    )
 
 
 @app.exception_handler(HTTPException)
 async def http_exception_handler(request: Request, exc: HTTPException):
     trace_id = security.trace_id_from_request(request)
-    detail_msg = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
-    return security.json_error_response("http_error", detail_msg, trace_id, exc.status_code)
+    detail_msg = (
+        exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
+    )
+    return security.json_error_response(
+        "http_error", detail_msg, trace_id, exc.status_code
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -1882,7 +2081,9 @@ app.include_router(ops_router)
 
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
 if WEBAPP_DIR.exists():
-    app.mount("/app/static", StaticFiles(directory=str(WEBAPP_DIR)), name="webapp-static")
+    app.mount(
+        "/app/static", StaticFiles(directory=str(WEBAPP_DIR)), name="webapp-static"
+    )
 
 
 @app.get("/app")
@@ -1950,7 +2151,9 @@ def ready() -> Dict[str, Any]:
     except DBError as exc:
         raise HTTPException(status_code=503, detail=f"db not ready: {exc}") from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"db not ready: {type(exc).__name__}: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"db not ready: {type(exc).__name__}: {exc}"
+        ) from exc
 
 
 @app.get("/auth/status")
@@ -1972,11 +2175,19 @@ def db_health() -> Dict[str, Any]:
 
     try:
         row = db.fetch1("SELECT 1")
-        schema_info: Dict[str, Any] = {"schema_migrations": None, "latest_migration": None}
+        schema_info: Dict[str, Any] = {
+            "schema_migrations": None,
+            "latest_migration": None,
+        }
         try:
             table_row = db.fetch1("SELECT to_regclass('public.schema_migrations')")
             if table_row and table_row[0]:
-                versions = [r[0] for r in db.fetchall("SELECT version FROM schema_migrations ORDER BY applied_at ASC")]
+                versions = [
+                    r[0]
+                    for r in db.fetchall(
+                        "SELECT version FROM schema_migrations ORDER BY applied_at ASC"
+                    )
+                ]
                 latest = db.fetch1(
                     "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1"
                 )
@@ -1994,25 +2205,34 @@ def db_health() -> Dict[str, Any]:
             **schema_info,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"db_health failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"db_health failed: {type(e).__name__}: {e}"
+        )
 
 
 @app.post("/db/save_signal")
 def db_save_signal(req: SaveSignalRequest) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         sig = compute_signal_for_symbol(req.symbol, req.as_of, req.lookback)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"compute_signal failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"compute_signal failed: {type(e).__name__}: {e}"
+        )
 
     try:
         inserted, row_id = persist_signal_record(sig)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"save_signal failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"save_signal failed: {type(e).__name__}: {e}"
+        )
 
     return {
         "status": "ok",
@@ -2030,7 +2250,10 @@ def db_save_signal(req: SaveSignalRequest) -> Dict[str, Any]:
 @app.post("/db/save_signals")
 def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     results: Dict[str, Any] = {}
     errors: Dict[str, Any] = {}
@@ -2053,7 +2276,10 @@ def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
         try:
             inserted, row_id = persist_signal_record(sig)
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"save_signals failed on {s}: {type(e).__name__}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"save_signals failed on {s}: {type(e).__name__}: {e}",
+            )
 
         results[s] = {
             "id": row_id,
@@ -2083,7 +2309,10 @@ def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
 @app.post("/db/run_snapshot")
 def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         db.get_pool()
@@ -2100,7 +2329,9 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load universe: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load universe: {type(e).__name__}: {e}"
+        )
 
     saved_count = 0
     error_count = 0
@@ -2150,19 +2381,28 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
 @app.post("/db/save_portfolio_backtest")
 def db_save_portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         out = backtest_portfolio(req)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"backtest_portfolio failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"backtest_portfolio failed: {type(e).__name__}: {e}",
+        )
 
     try:
         row_id = persist_portfolio_backtest_record(req, out)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"save_portfolio_backtest failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"save_portfolio_backtest failed: {type(e).__name__}: {e}",
+        )
 
     return {"status": "ok", "id": row_id, "perf": out.model_dump(exclude_none=True)}
 
@@ -2184,14 +2424,19 @@ DEFAULT_PROSPERITY_UNIVERSE = [
 @app.post("/db/universe/upsert")
 def db_universe_upsert(req: UniverseDbUpsertRequest) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         received, upserted = db.upsert_universe(req.symbols, req.source)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}"
+        )
 
     return {"status": "ok", "received": received, "upserted": upserted}
 
@@ -2199,12 +2444,17 @@ def db_universe_upsert(req: UniverseDbUpsertRequest) -> Dict[str, Any]:
 @app.get("/db/universe")
 def db_universe(active_only: bool = Query(True)) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         symbols = db.get_universe(active_only=active_only)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"universe_get failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"universe_get failed: {type(e).__name__}: {e}"
+        )
 
     return {"count": len(symbols), "symbols": symbols}
 
@@ -2212,7 +2462,10 @@ def db_universe(active_only: bool = Query(True)) -> Dict[str, Any]:
 @app.post("/db/universe/load_default")
 def db_universe_load_default() -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         pool = db.get_pool()
@@ -2223,7 +2476,10 @@ def db_universe_load_default() -> Dict[str, Any]:
         with pool.connection(timeout=10) as conn:
             with conn.cursor() as cur:
                 db.set_statement_timeout(cur, 5000)
-                params = [(sym, True, "default_top1000_seed") for sym in DEFAULT_PROSPERITY_UNIVERSE]
+                params = [
+                    (sym, True, "default_top1000_seed")
+                    for sym in DEFAULT_PROSPERITY_UNIVERSE
+                ]
                 cur.executemany(
                     """
                     INSERT INTO prosperity_universe(symbol, active, source)
@@ -2235,10 +2491,12 @@ def db_universe_load_default() -> Dict[str, Any]:
                 )
                 conn.commit()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"universe_load_default failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"universe_load_default failed: {type(e).__name__}: {e}",
+        )
 
     return {"status": "ok", "upserted": len(DEFAULT_PROSPERITY_UNIVERSE)}
-
 
 
 @app.get("/version")
@@ -2253,7 +2511,12 @@ def market_massive_bars(
     to_date: str = Query(..., description="YYYY-MM-DD"),
 ) -> Dict[str, Any]:
     candles = massive_fetch_daily_bars(symbol, from_date, to_date)
-    return {"symbol": symbol.upper(), "from_date": from_date, "to_date": to_date, "data": [c.model_dump() for c in candles]}
+    return {
+        "symbol": symbol.upper(),
+        "from_date": from_date,
+        "to_date": to_date,
+        "data": [c.model_dump() for c in candles],
+    }
 
 
 @app.post("/run_backtest")
@@ -2262,7 +2525,10 @@ def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
         candles = req.data
     else:
         if not (req.symbol and req.from_date and req.to_date):
-            raise HTTPException(status_code=400, detail="Provide either `data` OR (`symbol`, `from_date`, `to_date`).")
+            raise HTTPException(
+                status_code=400,
+                detail="Provide either `data` OR (`symbol`, `from_date`, `to_date`).",
+            )
         candles = massive_fetch_daily_bars(req.symbol, req.from_date, req.to_date)
 
     summary = run_backtest_core(candles, req.include_equity_curve, req.include_returns)
@@ -2328,7 +2594,9 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
         if not s:
             continue
         try:
-            out = compute_signal_for_symbol(s, req.as_of, req.lookback).model_dump(exclude_none=True)
+            out = compute_signal_for_symbol(s, req.as_of, req.lookback).model_dump(
+                exclude_none=True
+            )
             per[s] = out
         except HTTPException as e:
             errors[s] = {"status_code": e.status_code, "detail": e.detail}
@@ -2337,7 +2605,9 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
 
     raw: Dict[str, float] = {}
     for s, sig in per.items():
-        rw = _raw_weight_from_signal(sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=req.allow_shorts)
+        rw = _raw_weight_from_signal(
+            sig, hold_mult=hold_mult, min_conf=min_conf, allow_shorts=req.allow_shorts
+        )
         if rw != 0.0:
             raw[s] = float(rw)
 
@@ -2345,7 +2615,12 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
         return {
             "as_of": req.as_of,
             "lookback": req.lookback,
-            "knobs": {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf, "allow_shorts": req.allow_shorts},
+            "knobs": {
+                "max_weight": max_w,
+                "hold_multiplier": hold_mult,
+                "min_confidence": min_conf,
+                "allow_shorts": req.allow_shorts,
+            },
             "portfolio": {},
             "cash": 1.0,
             "count_ok": len(per),
@@ -2358,12 +2633,19 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
     if req.allow_shorts:
         portfolio, cash = _normalize_allow_shorts_with_caps(raw, max_w)
     else:
-        portfolio, cash = _normalize_long_only_with_caps({k: v for k, v in raw.items() if v > 0.0}, max_w)
+        portfolio, cash = _normalize_long_only_with_caps(
+            {k: v for k, v in raw.items() if v > 0.0}, max_w
+        )
 
     return {
         "as_of": req.as_of,
         "lookback": req.lookback,
-        "knobs": {"max_weight": max_w, "hold_multiplier": hold_mult, "min_confidence": min_conf, "allow_shorts": req.allow_shorts},
+        "knobs": {
+            "max_weight": max_w,
+            "hold_multiplier": hold_mult,
+            "min_confidence": min_conf,
+            "allow_shorts": req.allow_shorts,
+        },
         "portfolio": portfolio,
         "cash": cash,
         "count_ok": len(per),
@@ -2385,7 +2667,9 @@ def portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
 
 @app.post("/walk_forward")
 def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
-    rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
+    rows = walk_forward_table(
+        req.symbol, req.from_date, req.to_date, req.lookback, req.horizons
+    )
     return {
         "symbol": req.symbol.upper(),
         "from_date": req.from_date,
@@ -2399,7 +2683,9 @@ def walk_forward(req: WalkForwardRequest) -> Dict[str, Any]:
 
 @app.post("/calibrate")
 def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
-    rows = walk_forward_table(req.symbol, req.from_date, req.to_date, req.lookback, req.horizons)
+    rows = walk_forward_table(
+        req.symbol, req.from_date, req.to_date, req.lookback, req.horizons
+    )
     cal_core = calibrate_thresholds(rows, req.optimize_horizon, req.min_trades_per_side)
 
     env_payload = {
@@ -2449,10 +2735,14 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
 # Phase 4: Universe endpoints (Top 1,000)
 # =============================================================================
 
+
 @app.post("/universe/upsert")
 def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     syms = [(s or "").strip().upper() for s in (req.symbols or [])]
     syms = [s for s in syms if s]
@@ -2480,7 +2770,9 @@ def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
                 )
                 snapshot_id = cur.fetchone()[0]
 
-                cur.execute("DELETE FROM universe_member WHERE snapshot_id=%s", (snapshot_id,))
+                cur.execute(
+                    "DELETE FROM universe_member WHERE snapshot_id=%s", (snapshot_id,)
+                )
 
                 rows = [(snapshot_id, s, i) for i, s in enumerate(syms, start=1)]
                 cur.executemany(
@@ -2491,9 +2783,16 @@ def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"universe_upsert failed: {type(e).__name__}: {e}"
+        )
 
-    return {"status": "ok", "as_of_date": req.as_of_date, "name": req.name, "count": len(syms)}
+    return {
+        "status": "ok",
+        "as_of_date": req.as_of_date,
+        "name": req.name,
+        "count": len(syms),
+    }
 
 
 @app.get("/universe/top")
@@ -2503,7 +2802,10 @@ def universe_top(
     limit: int = Query(1000, ge=1, le=5000),
 ) -> Dict[str, Any]:
     if not DB_ENABLED:
-        raise HTTPException(status_code=400, detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.")
+        raise HTTPException(
+            status_code=400,
+            detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
+        )
 
     try:
         pool = db.get_pool()
@@ -2520,7 +2822,9 @@ def universe_top(
                 )
                 row = cur.fetchone()
                 if not row:
-                    raise HTTPException(status_code=404, detail="Universe snapshot not found.")
+                    raise HTTPException(
+                        status_code=404, detail="Universe snapshot not found."
+                    )
 
                 sid = row[0]
                 cur.execute(
@@ -2537,6 +2841,8 @@ def universe_top(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"universe_top failed: {type(e).__name__}: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"universe_top failed: {type(e).__name__}: {e}"
+        )
 
     return {"as_of_date": as_of_date, "name": name, "count": len(items), "items": items}

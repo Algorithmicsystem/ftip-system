@@ -7,7 +7,6 @@ from starlette.requests import Request
 
 from api import security
 from api.main import app
-from api.jobs import prosperity
 from api.prosperity import ingest, query, routes
 from api.prosperity.models import SnapshotRunRequest
 
@@ -65,12 +64,18 @@ def test_coverage_endpoints_require_auth(monkeypatch: pytest.MonkeyPatch):
             payload["run_id"] = run_id
         return payload
 
-    monkeypatch.setattr("api.jobs.prosperity._coverage_response", fake_coverage_response)
-    monkeypatch.setattr("api.jobs.prosperity._require_db_enabled", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "api.jobs.prosperity._coverage_response", fake_coverage_response
+    )
+    monkeypatch.setattr(
+        "api.jobs.prosperity._require_db_enabled", lambda *args, **kwargs: None
+    )
 
     client = TestClient(app)
 
-    unauthorized = client.get("/jobs/prosperity/daily-snapshot/coverage", params={"as_of_date": "2024-01-01"})
+    unauthorized = client.get(
+        "/jobs/prosperity/daily-snapshot/coverage", params={"as_of_date": "2024-01-01"}
+    )
     assert unauthorized.status_code == 401
 
     resp = client.get(
@@ -95,7 +100,9 @@ def test_coverage_endpoints_require_auth(monkeypatch: pytest.MonkeyPatch):
 async def test_snapshot_run_reports_reason_code(monkeypatch: pytest.MonkeyPatch):
     _set_db_flags(monkeypatch)
     monkeypatch.setattr(routes, "_require_db_enabled", lambda *args, **kwargs: None)
-    monkeypatch.setattr(routes.metrics_tracker, "record_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(ingest, "upsert_universe", lambda symbols: symbols)
     monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: None)
 
@@ -116,7 +123,9 @@ async def test_snapshot_run_reports_reason_code(monkeypatch: pytest.MonkeyPatch)
         compute_strategy_graph=False,
     )
 
-    result = await routes.snapshot_run(req, Request(scope={"type": "http"}), run_id="run-1", job_name="job-1")
+    result = await routes.snapshot_run(
+        req, Request(scope={"type": "http"}), run_id="run-1", job_name="job-1"
+    )
     failures: List[Dict[str, Any]] = result.get("result", {}).get("symbols_failed", [])
 
     assert failures
@@ -128,10 +137,14 @@ async def test_snapshot_run_reports_reason_code(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.anyio
-async def test_failure_shape_contains_reason_code_attempts_retryable(monkeypatch: pytest.MonkeyPatch):
+async def test_failure_shape_contains_reason_code_attempts_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+):
     _set_db_flags(monkeypatch)
     monkeypatch.setattr(routes, "_require_db_enabled", lambda *args, **kwargs: None)
-    monkeypatch.setattr(routes.metrics_tracker, "record_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(ingest, "upsert_universe", lambda symbols: symbols)
     monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: None)
 
@@ -152,7 +165,9 @@ async def test_failure_shape_contains_reason_code_attempts_retryable(monkeypatch
         compute_strategy_graph=False,
     )
 
-    result = await routes.snapshot_run(req, Request(scope={"type": "http"}), run_id="run-2", job_name="job-1")
+    result = await routes.snapshot_run(
+        req, Request(scope={"type": "http"}), run_id="run-2", job_name="job-1"
+    )
     failures: List[Dict[str, Any]] = result.get("result", {}).get("symbols_failed", [])
     assert failures
     failure = failures[0]
@@ -167,11 +182,26 @@ def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
 
     call_count = {"count": 0}
 
-    def fake_acquire(run_id: str, job_name: str, as_of_date, requested, ttl_seconds: int, lock_owner: str):
+    def fake_acquire(
+        run_id: str,
+        job_name: str,
+        as_of_date,
+        requested,
+        ttl_seconds: int,
+        lock_owner: str,
+    ):
         call_count["count"] += 1
         if call_count["count"] == 1:
-            return True, {"run_id": run_id, "started_at": "now", "lock_owner": lock_owner}
-        return False, {"run_id": "existing", "started_at": "later", "lock_owner": lock_owner}
+            return True, {
+                "run_id": run_id,
+                "started_at": "now",
+                "lock_owner": lock_owner,
+            }
+        return False, {
+            "run_id": "existing",
+            "started_at": "later",
+            "lock_owner": lock_owner,
+        }
 
     async def fake_snapshot(req, request, **_kwargs):
         return {
@@ -185,13 +215,19 @@ def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
         }
 
     monkeypatch.setattr("api.jobs.prosperity._acquire_job_lock", fake_acquire)
-    monkeypatch.setattr("api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr("api.jobs.prosperity._utc_today", lambda: dt.date(2024, 1, 5))
     monkeypatch.setattr("api.jobs.prosperity.snapshot_run", fake_snapshot)
 
     client = TestClient(app)
-    first = client.post("/jobs/prosperity/daily-snapshot", headers={"X-FTIP-API-Key": "secret"})
-    second = client.post("/jobs/prosperity/daily-snapshot", headers={"X-FTIP-API-Key": "secret"})
+    first = client.post(
+        "/jobs/prosperity/daily-snapshot", headers={"X-FTIP-API-Key": "secret"}
+    )
+    second = client.post(
+        "/jobs/prosperity/daily-snapshot", headers={"X-FTIP-API-Key": "secret"}
+    )
 
     assert first.status_code == 200
     assert second.status_code == 409
@@ -204,11 +240,26 @@ def test_cron_endpoint_auth_and_lock(monkeypatch: pytest.MonkeyPatch):
 
     call_count = {"count": 0}
 
-    def fake_acquire(run_id: str, job_name: str, as_of_date, requested, ttl_seconds: int, lock_owner: str):
+    def fake_acquire(
+        run_id: str,
+        job_name: str,
+        as_of_date,
+        requested,
+        ttl_seconds: int,
+        lock_owner: str,
+    ):
         call_count["count"] += 1
         if call_count["count"] == 1:
-            return True, {"run_id": run_id, "started_at": "now", "lock_owner": lock_owner}
-        return False, {"run_id": "existing", "started_at": "later", "lock_owner": lock_owner}
+            return True, {
+                "run_id": run_id,
+                "started_at": "now",
+                "lock_owner": lock_owner,
+            }
+        return False, {
+            "run_id": "existing",
+            "started_at": "later",
+            "lock_owner": lock_owner,
+        }
 
     async def fake_snapshot(req, request, **_kwargs):
         return {
@@ -222,15 +273,21 @@ def test_cron_endpoint_auth_and_lock(monkeypatch: pytest.MonkeyPatch):
         }
 
     monkeypatch.setattr("api.jobs.prosperity._acquire_job_lock", fake_acquire)
-    monkeypatch.setattr("api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr("api.jobs.prosperity.snapshot_run", fake_snapshot)
 
     client = TestClient(app)
     unauthorized = client.post("/jobs/prosperity/daily-snapshot/cron")
     assert unauthorized.status_code == 401
 
-    first = client.post("/jobs/prosperity/daily-snapshot/cron", headers={"X-FTIP-API-Key": "secret"})
-    second = client.post("/jobs/prosperity/daily-snapshot/cron", headers={"X-FTIP-API-Key": "secret"})
+    first = client.post(
+        "/jobs/prosperity/daily-snapshot/cron", headers={"X-FTIP-API-Key": "secret"}
+    )
+    second = client.post(
+        "/jobs/prosperity/daily-snapshot/cron", headers={"X-FTIP-API-Key": "secret"}
+    )
 
     assert first.status_code == 200
     assert second.status_code == 409
@@ -272,10 +329,14 @@ def test_summary_endpoint_shape(monkeypatch: pytest.MonkeyPatch):
         return payload
 
     monkeypatch.setattr("api.jobs.prosperity._fetch_last_job_run", fake_last_run)
-    monkeypatch.setattr("api.jobs.prosperity._coverage_response", fake_coverage_response)
+    monkeypatch.setattr(
+        "api.jobs.prosperity._coverage_response", fake_coverage_response
+    )
 
     client = TestClient(app)
-    resp = client.get("/jobs/prosperity/daily-snapshot/summary", headers={"X-FTIP-API-Key": "secret"})
+    resp = client.get(
+        "/jobs/prosperity/daily-snapshot/summary", headers={"X-FTIP-API-Key": "secret"}
+    )
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["last_run"]["run_id"] == "run-1"

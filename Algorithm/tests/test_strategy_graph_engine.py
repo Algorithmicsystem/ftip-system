@@ -7,7 +7,10 @@ from ftip.strategy_graph import compute_strategy_graph
 def test_strategy_graph_engine_basic():
     as_of = dt.date(2024, 1, 25)
     candles = [
-        Candle(timestamp=(dt.date(2023, 12, 20) + dt.timedelta(days=i)).isoformat(), close=100 + 0.5 * i)
+        Candle(
+            timestamp=(dt.date(2023, 12, 20) + dt.timedelta(days=i)).isoformat(),
+            close=100 + 0.5 * i,
+        )
         for i in range(40)
     ]
     result = compute_strategy_graph("TEST", as_of, 30, candles)

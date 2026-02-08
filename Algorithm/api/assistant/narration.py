@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Set
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
@@ -36,13 +36,17 @@ def _sanitize_numbers(text: str, allowed: Set[str]) -> str:
     return NUMBER_PATTERN.sub(_replace, text)
 
 
-def _sanitize_output(model: NarrationPayload, allowed_numbers: Set[str]) -> NarrationPayload:
+def _sanitize_output(
+    model: NarrationPayload, allowed_numbers: Set[str]
+) -> NarrationPayload:
     return NarrationPayload(
         headline=_sanitize_numbers(model.headline, allowed_numbers),
         summary=_sanitize_numbers(model.summary, allowed_numbers),
         bullets=[_sanitize_numbers(item, allowed_numbers) for item in model.bullets],
         disclaimer=_sanitize_numbers(model.disclaimer, allowed_numbers),
-        followups=[_sanitize_numbers(item, allowed_numbers) for item in model.followups],
+        followups=[
+            _sanitize_numbers(item, allowed_numbers) for item in model.followups
+        ],
     )
 
 
@@ -58,7 +62,10 @@ def _build_prompt(payload: Dict[str, Any], user_message: str) -> List[Dict[str, 
         f"User message: {user_message}\n\n"
         "Respond with JSON only."
     )
-    return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
 
 def _parse_json(raw: str) -> Dict[str, Any]:
@@ -71,7 +78,9 @@ def _parse_json(raw: str) -> Dict[str, Any]:
         return json.loads(match.group(0))
 
 
-def narrate_payload(payload: Dict[str, Any], user_message: str, *, trace_id: str | None = None) -> NarrationPayload:
+def narrate_payload(
+    payload: Dict[str, Any], user_message: str, *, trace_id: str | None = None
+) -> NarrationPayload:
     messages = _build_prompt(payload, user_message)
     reply, _model, _usage = narrator_client.complete_chat(
         messages,
@@ -82,12 +91,16 @@ def narrate_payload(payload: Dict[str, Any], user_message: str, *, trace_id: str
     try:
         parsed = _parse_json(reply)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-        raise HTTPException(status_code=502, detail={"message": "Narrator response invalid JSON"}) from exc
+        raise HTTPException(
+            status_code=502, detail={"message": "Narrator response invalid JSON"}
+        ) from exc
 
     try:
         model = NarrationPayload(**parsed)
     except ValidationError as exc:
-        raise HTTPException(status_code=502, detail={"message": "Narrator response schema invalid"}) from exc
+        raise HTTPException(
+            status_code=502, detail={"message": "Narrator response schema invalid"}
+        ) from exc
 
     allowed_numbers = _numbers_in_payload(payload)
     return _sanitize_output(model, allowed_numbers)

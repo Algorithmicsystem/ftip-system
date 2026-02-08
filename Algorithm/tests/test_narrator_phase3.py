@@ -1,5 +1,4 @@
-import datetime as dt
-from typing import Any, Dict
+from typing import Dict
 
 import pytest
 from fastapi.testclient import TestClient
@@ -90,17 +89,32 @@ def test_narrator_endpoints_with_mocked_llm(monkeypatch):
     monkeypatch.setenv("FTIP_DB_READ_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test")
 
-    monkeypatch.setattr("api.narrator.routes.query.signal_as_of", lambda *_, **__: {"signal": "BUY"})
-    monkeypatch.setattr("api.narrator.routes.query.features_as_of", lambda *_, **__: {"features": {"mom": 1.0}})
+    monkeypatch.setattr(
+        "api.narrator.routes.query.signal_as_of", lambda *_, **__: {"signal": "BUY"}
+    )
+    monkeypatch.setattr(
+        "api.narrator.routes.query.features_as_of",
+        lambda *_, **__: {"features": {"mom": 1.0}},
+    )
     monkeypatch.setattr("api.narrator.routes.query.signal_history", lambda *_, **__: [])
     monkeypatch.setattr(
         "api.narrator.routes.strategy_graph_db.ensemble_as_of",
-        lambda sym, lookback, as_of_date: {"symbol": sym, "as_of_date": as_of_date.isoformat(), "final_signal": "BUY"},
+        lambda sym, lookback, as_of_date: {
+            "symbol": sym,
+            "as_of_date": as_of_date.isoformat(),
+            "final_signal": "BUY",
+        },
     )
-    monkeypatch.setattr("api.narrator.routes.strategy_graph_db.strategies_as_of", lambda *_, **__: [])
+    monkeypatch.setattr(
+        "api.narrator.routes.strategy_graph_db.strategies_as_of", lambda *_, **__: []
+    )
     monkeypatch.setattr(
         "api.narrator.routes.narrator_client.complete_chat",
-        lambda *_, **__: ("Mocked answer", "gpt-mock", {"prompt_tokens": 1, "completion_tokens": 1}),
+        lambda *_, **__: (
+            "Mocked answer",
+            "gpt-mock",
+            {"prompt_tokens": 1, "completion_tokens": 1},
+        ),
     )
 
     client = TestClient(app)
@@ -112,7 +126,9 @@ def test_narrator_endpoints_with_mocked_llm(monkeypatch):
         "lookback": 252,
         "days": 30,
     }
-    ask_resp = client.post("/narrator/ask", json=ask_payload, headers=_auth_header("demo"))
+    ask_resp = client.post(
+        "/narrator/ask", json=ask_payload, headers=_auth_header("demo")
+    )
     assert ask_resp.status_code == 200
     ask_body = ask_resp.json()
     assert ask_body["answer"].startswith("Mocked answer")
@@ -128,11 +144,17 @@ def test_narrator_endpoints_with_mocked_llm(monkeypatch):
             "stop_loss": 90.0,
         },
         "features": {},
-        "quality": {"sentiment_ok": True, "intraday_ok": False, "fundamentals_ok": True},
+        "quality": {
+            "sentiment_ok": True,
+            "intraday_ok": False,
+            "fundamentals_ok": True,
+        },
         "bars": {},
         "sentiment": {"headline_count": 2},
     }
-    explain_resp = client.post("/narrator/explain-signal", json=explain_payload, headers=_auth_header("demo"))
+    explain_resp = client.post(
+        "/narrator/explain-signal", json=explain_payload, headers=_auth_header("demo")
+    )
     assert explain_resp.status_code == 200
     explain_body = explain_resp.json()
     assert explain_body["symbol"] == "AAPL"

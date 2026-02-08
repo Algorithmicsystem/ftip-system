@@ -11,7 +11,9 @@ from api import config, db
 
 class AssistantStorage:
     def __init__(self, use_memory: Optional[bool] = None):
-        self.use_memory = bool(use_memory) if use_memory is not None else not config.db_enabled()
+        self.use_memory = (
+            bool(use_memory) if use_memory is not None else not config.db_enabled()
+        )
         self._sessions: Dict[str, Dict[str, Any]] = {}
         self._messages: List[Dict[str, Any]] = []
         self._artifacts: List[Dict[str, Any]] = []
@@ -19,7 +21,9 @@ class AssistantStorage:
     def _now(self) -> float:
         return time.time()
 
-    def create_session(self, *, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> str:
+    def create_session(
+        self, *, title: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None
+    ) -> str:
         sid = str(uuid.uuid4())
         if self.use_memory:
             self._sessions[sid] = {
@@ -40,7 +44,9 @@ class AssistantStorage:
         )
         return sid
 
-    def upsert_session_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
+    def upsert_session_metadata(
+        self, session_id: str, metadata: Dict[str, Any]
+    ) -> None:
         if self.use_memory:
             session = self._sessions.get(session_id)
             if session:
@@ -114,9 +120,20 @@ class AssistantStorage:
             VALUES
               (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             """,
-            (mid, session_id, role, content, model, tokens_in, tokens_out, Json(extra) if extra else None),
+            (
+                mid,
+                session_id,
+                role,
+                content,
+                model,
+                tokens_in,
+                tokens_out,
+                Json(extra) if extra else None,
+            ),
         )
-        db.exec1("UPDATE assistant_sessions SET updated_at=now() WHERE id=%s", (session_id,))
+        db.exec1(
+            "UPDATE assistant_sessions SET updated_at=now() WHERE id=%s", (session_id,)
+        )
         return mid
 
     def get_messages(self, session_id: str, limit: int = 50) -> List[Dict[str, Any]]:

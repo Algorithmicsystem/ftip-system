@@ -53,7 +53,9 @@ def _lock_window_seconds() -> int:
 
 
 def _job_lock_owner() -> str:
-    return config.env("FTIP_JOB_LOCK_OWNER") or socket.gethostname() or "ftip-job-runner"
+    return (
+        config.env("FTIP_JOB_LOCK_OWNER") or socket.gethostname() or "ftip-job-runner"
+    )
 
 
 def _cleanup_stale_job_runs(cur, job_name: str, ttl_seconds: int) -> None:
@@ -98,13 +100,19 @@ def _acquire_job_lock(
         existing_locked = cur.fetchone()
         if existing_locked:
             conn.commit()
-            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing_locked
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = (
+                existing_locked
+            )
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat() if lock_acquired_at else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         cur.execute(
@@ -120,13 +128,19 @@ def _acquire_job_lock(
         existing_pending = cur.fetchone()
         if existing_pending:
             conn.commit()
-            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing_pending
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = (
+                existing_pending
+            )
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat() if lock_acquired_at else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         cur.execute(
@@ -156,7 +170,9 @@ def _acquire_job_lock(
         return True, {"run_id": run_id}
 
 
-def _update_job_run(run_id: str, status: str, result: Dict[str, object], error: Optional[str]) -> None:
+def _update_job_run(
+    run_id: str, status: str, result: Dict[str, object], error: Optional[str]
+) -> None:
     with db.with_connection() as (conn, cur):
         cur.execute(
             """
@@ -169,7 +185,15 @@ def _update_job_run(run_id: str, status: str, result: Dict[str, object], error: 
         conn.commit()
 
 
-def _log_symbol_coverage(run_id: str, job_name: str, as_of_date: dt.date, symbol: str, status: str, reason_code: Optional[str] = None, reason_detail: Optional[str] = None) -> None:
+def _log_symbol_coverage(
+    run_id: str,
+    job_name: str,
+    as_of_date: dt.date,
+    symbol: str,
+    status: str,
+    reason_code: Optional[str] = None,
+    reason_detail: Optional[str] = None,
+) -> None:
     db.safe_execute(
         """
         INSERT INTO prosperity_symbol_coverage(
@@ -195,7 +219,14 @@ async def compute_signals_daily(req: SignalsDailyRequest):
 
     run_id = uuid.uuid4().hex
     job_name = "signals.daily"
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), _lock_ttl_seconds(), _job_lock_owner())
+    acquired, lock_info = _acquire_job_lock(
+        run_id,
+        job_name,
+        as_of_date,
+        req.model_dump(),
+        _lock_ttl_seconds(),
+        _job_lock_owner(),
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -258,7 +289,9 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                 """,
                 (symbol, as_of_date),
             )
-            latest_close = float(close_row[0]) if close_row and close_row[0] is not None else None
+            latest_close = (
+                float(close_row[0]) if close_row and close_row[0] is not None else None
+            )
 
             signal = compute_daily_signal(features, quality_score, latest_close)
             db.safe_execute(
@@ -304,8 +337,18 @@ async def compute_signals_daily(req: SignalsDailyRequest):
             _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "OK")
             symbols_ok.append(symbol)
         except Exception as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code="SIGNAL_ERROR", reason_detail=str(exc))
-            symbols_failed.append({"symbol": symbol, "reason": str(exc), "reason_code": "SIGNAL_ERROR"})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code="SIGNAL_ERROR",
+                reason_detail=str(exc),
+            )
+            symbols_failed.append(
+                {"symbol": symbol, "reason": str(exc), "reason_code": "SIGNAL_ERROR"}
+            )
 
     status = "ok" if not symbols_failed else "partial" if symbols_ok else "failed"
     payload = {
@@ -316,7 +359,9 @@ async def compute_signals_daily(req: SignalsDailyRequest):
         "rows_written": {"signals_daily": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload
 
 
@@ -333,7 +378,14 @@ async def compute_signals_intraday(req: SignalsIntradayRequest):
 
     run_id = uuid.uuid4().hex
     job_name = "signals.intraday"
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), _lock_ttl_seconds(), _job_lock_owner())
+    acquired, lock_info = _acquire_job_lock(
+        run_id,
+        job_name,
+        as_of_date,
+        req.model_dump(),
+        _lock_ttl_seconds(),
+        _job_lock_owner(),
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -391,8 +443,18 @@ async def compute_signals_intraday(req: SignalsIntradayRequest):
             _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "OK")
             symbols_ok.append(symbol)
         except Exception as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code="SIGNAL_ERROR", reason_detail=str(exc))
-            symbols_failed.append({"symbol": symbol, "reason": str(exc), "reason_code": "SIGNAL_ERROR"})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code="SIGNAL_ERROR",
+                reason_detail=str(exc),
+            )
+            symbols_failed.append(
+                {"symbol": symbol, "reason": str(exc), "reason_code": "SIGNAL_ERROR"}
+            )
 
     status = "ok" if not symbols_failed else "partial" if symbols_ok else "failed"
     payload = {
@@ -403,5 +465,7 @@ async def compute_signals_intraday(req: SignalsIntradayRequest):
         "rows_written": {"signals_intraday": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload

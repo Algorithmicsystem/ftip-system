@@ -45,12 +45,7 @@ class StructuralAlphaKernel:
             raise RuntimeError("Kernel must be fit before transform.")
 
         # Rebuild the numeric matrix with the same columns used in fit()
-        matrix = (
-            features
-            .reindex(columns=self.feature_columns_)
-            .fillna(0.0)
-            .values
-        )
+        matrix = features.reindex(columns=self.feature_columns_).fillna(0.0).values
 
         centered = matrix - self.mean_
         scores = centered @ self.components_
@@ -77,9 +72,3 @@ class StructuralAlphaKernel:
         anomaly_penalty = self.detect_anomalies(features)
         alpha = factors.mean(axis=1) - anomaly_penalty
         return alpha.rename("structural_alpha")
-
-
-
-
-
-

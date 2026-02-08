@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import uuid
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
@@ -31,7 +31,9 @@ def _resolve_symbols(symbol: Optional[str], universe: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def _fetch_bars(symbols: List[str], start: dt.date, end: dt.date) -> Dict[str, Dict[dt.date, float]]:
+def _fetch_bars(
+    symbols: List[str], start: dt.date, end: dt.date
+) -> Dict[str, Dict[dt.date, float]]:
     if not symbols:
         return {}
     rows = db.safe_fetchall(
@@ -96,7 +98,9 @@ def _fetch_quality_score(symbol: str, as_of_date: dt.date) -> int:
     return int(row[0]) if row and row[0] is not None else 0
 
 
-def _compute_signal_if_missing(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
+def _compute_signal_if_missing(
+    symbol: str, as_of_date: dt.date
+) -> Optional[Dict[str, Any]]:
     from api.signal_engine import compute_daily_signal
 
     features = _fetch_features(symbol, as_of_date)
@@ -128,7 +132,9 @@ def _signal_for_date(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any
     return _compute_signal_if_missing(symbol, as_of_date)
 
 
-def _daily_returns(closes: Dict[dt.date, float], dates: List[dt.date]) -> Dict[dt.date, float]:
+def _daily_returns(
+    closes: Dict[dt.date, float], dates: List[dt.date]
+) -> Dict[dt.date, float]:
     out: Dict[dt.date, float] = {}
     for i in range(1, len(dates)):
         prev = closes.get(dates[i - 1])
@@ -174,7 +180,9 @@ def _sortino(returns: List[float]) -> float:
     return float(mean / std * math.sqrt(252.0))
 
 
-def _regime_labels(spy_dates: List[dt.date], spy_closes: Dict[dt.date, float]) -> Dict[dt.date, str]:
+def _regime_labels(
+    spy_dates: List[dt.date], spy_closes: Dict[dt.date, float]
+) -> Dict[dt.date, str]:
     dates_sorted = sorted(spy_dates)
     returns = _daily_returns(spy_closes, dates_sorted)
     vol_values: List[float] = []
@@ -212,7 +220,9 @@ def _regime_labels(spy_dates: List[dt.date], spy_closes: Dict[dt.date, float]) -
     return labels
 
 
-def _bench_equity(spy_closes: Dict[dt.date, float], dates: List[dt.date]) -> List[float]:
+def _bench_equity(
+    spy_closes: Dict[dt.date, float], dates: List[dt.date]
+) -> List[float]:
     equity = [1.0]
     for i in range(1, len(dates)):
         prev = spy_closes.get(dates[i - 1])
@@ -257,11 +267,17 @@ def run_backtest(
         raise HTTPException(status_code=404, detail="no bar data found")
 
     spy_closes = bars.get("SPY", {})
-    all_dates = sorted({d for series in bars.values() for d in series.keys() if start <= d <= end})
+    all_dates = sorted(
+        {d for series in bars.values() for d in series.keys() if start <= d <= end}
+    )
     if len(all_dates) < 2:
-        raise HTTPException(status_code=400, detail="not enough data points for backtest")
+        raise HTTPException(
+            status_code=400, detail="not enough data points for backtest"
+        )
 
-    cost_rate = (float(cost_model.get("fee_bps", 0)) + float(cost_model.get("slippage_bps", 0))) / 10000.0
+    cost_rate = (
+        float(cost_model.get("fee_bps", 0)) + float(cost_model.get("slippage_bps", 0))
+    ) / 10000.0
     positions: Dict[str, Dict[str, Any]] = {}
     trades: List[Dict[str, Any]] = []
     equity_curve: List[Dict[str, Any]] = []
@@ -292,7 +308,9 @@ def run_backtest(
 
             if current and (desired != current["side"]):
                 exit_px = closes[date]
-                pnl_pct = (exit_px / current["entry_px"] - 1.0) * (1.0 if current["side"] == "LONG" else -1.0)
+                pnl_pct = (exit_px / current["entry_px"] - 1.0) * (
+                    1.0 if current["side"] == "LONG" else -1.0
+                )
                 pnl = pnl_pct * current["qty"]
                 trades.append(
                     {
@@ -313,7 +331,12 @@ def run_backtest(
                 positions.pop(sym, None)
 
             if desired and sym not in positions:
-                positions[sym] = {"side": desired, "entry_dt": date, "entry_px": closes[date], "qty": 1.0}
+                positions[sym] = {
+                    "side": desired,
+                    "entry_dt": date,
+                    "entry_px": closes[date],
+                    "qty": 1.0,
+                }
                 trade_cost += cost_rate
                 trades_notional += 1.0
 
@@ -321,10 +344,14 @@ def run_backtest(
             if current:
                 prev_px = closes.get(all_dates[i - 1])
                 if prev_px:
-                    ret = (closes[date] / prev_px - 1.0) * (1.0 if current["side"] == "LONG" else -1.0)
+                    ret = (closes[date] / prev_px - 1.0) * (
+                        1.0 if current["side"] == "LONG" else -1.0
+                    )
                     active_returns.append(ret)
 
-        portfolio_return = sum(active_returns) / len(active_returns) if active_returns else 0.0
+        portfolio_return = (
+            sum(active_returns) / len(active_returns) if active_returns else 0.0
+        )
         portfolio_return -= trade_cost
         equity *= 1.0 + portfolio_return
         daily_returns.append(portfolio_return)
@@ -344,7 +371,11 @@ def run_backtest(
             "dt": daily_dates[i].isoformat(),
             "equity": daily_equity[i],
             "drawdown": drawdowns[i],
-            "benchmark_equity": benchmark_equity[i] if i < len(benchmark_equity) else benchmark_equity[-1],
+            "benchmark_equity": (
+                benchmark_equity[i]
+                if i < len(benchmark_equity)
+                else benchmark_equity[-1]
+            ),
         }
         for i in range(len(daily_dates))
     ]
@@ -353,7 +384,10 @@ def run_backtest(
     n_days = max(1, len(daily_returns))
     cagr = (1.0 + total_return) ** (252.0 / n_days) - 1.0
     volatility = (
-        math.sqrt(sum((r - (sum(daily_returns) / n_days)) ** 2 for r in daily_returns) / max(1, n_days - 1))
+        math.sqrt(
+            sum((r - (sum(daily_returns) / n_days)) ** 2 for r in daily_returns)
+            / max(1, n_days - 1)
+        )
         * math.sqrt(252.0)
         if len(daily_returns) > 1
         else 0.0
@@ -363,7 +397,9 @@ def run_backtest(
     max_dd = _max_drawdown(daily_equity)
     wins = [t for t in trades if t["pnl"] > 0]
     winrate = float(len(wins) / len(trades)) if trades else 0.0
-    avg_trade = float(sum(t["pnl_pct"] for t in trades) / len(trades)) if trades else 0.0
+    avg_trade = (
+        float(sum(t["pnl_pct"] for t in trades) / len(trades)) if trades else 0.0
+    )
     years = max(1e-9, n_days / 252.0)
     trades_per_year = float(len(trades) / years) if years > 0 else 0.0
     avg_equity = sum(daily_equity) / len(daily_equity) if daily_equity else 1.0
@@ -388,7 +424,9 @@ def run_backtest(
         rets = data["returns"]
         if not rets:
             continue
-        r_cagr = (1.0 + sum(rets)) ** (252.0 / len(rets)) - 1.0 if len(rets) > 0 else 0.0
+        r_cagr = (
+            (1.0 + sum(rets)) ** (252.0 / len(rets)) - 1.0 if len(rets) > 0 else 0.0
+        )
         r_sharpe = _sharpe(rets)
         r_maxdd = min(0.0, min(rets)) if rets else 0.0
         r_winrate = float(len([r for r in rets if r > 0]) / len(rets)) if rets else 0.0
@@ -621,12 +659,15 @@ def fetch_results(run_id: str) -> Dict[str, Any]:
     best_regime = None
     worst_regime = None
     if regime_metrics:
-        sorted_regimes = sorted(regime_metrics, key=lambda item: item.get("cagr") or 0.0, reverse=True)
+        sorted_regimes = sorted(
+            regime_metrics, key=lambda item: item.get("cagr") or 0.0, reverse=True
+        )
         best_regime = sorted_regimes[0]["regime_name"]
         worst_regime = sorted_regimes[-1]["regime_name"]
 
     summary = {
-        "beats_spy": metrics.get("alpha_vs_spy", 0) is not None and metrics.get("alpha_vs_spy", 0) > 0,
+        "beats_spy": metrics.get("alpha_vs_spy", 0) is not None
+        and metrics.get("alpha_vs_spy", 0) > 0,
         "best_regime": best_regime,
         "worst_regime": worst_regime,
         "turnover": metrics.get("turnover"),

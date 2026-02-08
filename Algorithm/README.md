@@ -1,20 +1,34 @@
 # FTIP System Notes
 
-## Local Quickstart (Docker)
+## Local Quickstart (Dockerized Postgres)
 
 ```bash
-docker compose up --build
+cp .env.example .env
+docker-compose up -d db
+make migrate
+uvicorn api.main:app --reload --port 8000
 ```
 
-The API will be available at `http://localhost:8000` (try `/health`). Copy `.env.example` to `.env` if you want to override defaults locally.
+The API will be available at `http://localhost:8000` (try `/health`). If your Docker CLI supports the v2 plugin, `docker compose up -d db` works as well. Prefer `make dev` to automate startup on a clean checkout.
+
+### Make targets (recommended)
+
+```bash
+make dev       # start Postgres, run migrations, launch API
+make db-reset  # drop/recreate schema and re-run migrations
+make migrate   # run migrations only
+make db-check  # verify database connectivity
+make test      # pytest -q
+```
 
 ## Reset DB (safe for local/dev)
 
 If you are running with Docker, the fastest reset is to drop the volume:
 
 ```bash
-docker compose down -v
-docker compose up --build
+docker-compose down -v
+docker-compose up -d db
+make migrate
 ```
 
 If you are running against a local Postgres instance, use the reset helper:
@@ -30,6 +44,20 @@ python tools/reset_db.py
 
 ```bash
 BASE=http://localhost:8000 ./scripts/db_health_check.sh
+```
+
+## Migrations
+
+This repo uses the internal migrations runner in `api/migrations` (not Alembic). To run migrations explicitly:
+
+```bash
+make migrate
+```
+
+Or call the legacy shim directly:
+
+```bash
+python -c "from api.migrations.runner import apply_migrations; apply_migrations()"
 ```
 
 ## Run Tests

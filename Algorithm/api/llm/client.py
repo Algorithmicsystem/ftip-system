@@ -26,7 +26,11 @@ class LLMClient:
         api_key = config.openai_api_key()
         if not api_key:
             raise _missing_key_exc(trace_id)
-        self._client = OpenAI(api_key=api_key, timeout=config.llm_timeout_seconds(), max_retries=config.llm_max_retries())
+        self._client = OpenAI(
+            api_key=api_key,
+            timeout=config.llm_timeout_seconds(),
+            max_retries=config.llm_max_retries(),
+        )
 
     def complete_chat(
         self,
@@ -40,8 +44,12 @@ class LLMClient:
             resp = self._client.chat.completions.create(
                 model=model or config.llm_model(),
                 messages=messages,
-                max_tokens=max_tokens if max_tokens is not None else config.llm_max_tokens(),
-                temperature=temperature if temperature is not None else config.llm_temperature(),
+                max_tokens=(
+                    max_tokens if max_tokens is not None else config.llm_max_tokens()
+                ),
+                temperature=(
+                    temperature if temperature is not None else config.llm_temperature()
+                ),
                 response_format={"type": "text"},
             )
             reply = resp.choices[0].message.content or ""
@@ -63,10 +71,16 @@ class LLMClient:
         except HTTPException:
             raise
         except (APIStatusError, APIError, APITimeoutError) as exc:
-            logger.warning("narrator.llm.upstream", extra={"trace_id": self.trace_id, "error": str(exc)})
+            logger.warning(
+                "narrator.llm.upstream",
+                extra={"trace_id": self.trace_id, "error": str(exc)},
+            )
             raise HTTPException(status_code=502, detail="LLM upstream error")
         except Exception as exc:  # noqa: BLE001
-            logger.warning("narrator.llm.unexpected", extra={"trace_id": self.trace_id, "error": str(exc)})
+            logger.warning(
+                "narrator.llm.unexpected",
+                extra={"trace_id": self.trace_id, "error": str(exc)},
+            )
             raise HTTPException(status_code=502, detail="LLM upstream error")
 
 
@@ -79,7 +93,9 @@ def complete_chat(
     trace_id: Optional[str] = None,
 ) -> Tuple[str, str, Dict[str, Optional[int]]]:
     client = LLMClient(trace_id)
-    return client.complete_chat(messages, max_tokens=max_tokens, model=model, temperature=temperature)
+    return client.complete_chat(
+        messages, max_tokens=max_tokens, model=model, temperature=temperature
+    )
 
 
 __all__ = ["LLMClient", "complete_chat", "_missing_key_exc"]

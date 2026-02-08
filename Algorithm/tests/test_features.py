@@ -1,5 +1,6 @@
 from ftip.features import FeatureEngineer
 
+
 def test_feature_engineer_builds_expected_columns(sample_data):
     fe = FeatureEngineer(price_windows=[2], volume_windows=[2])
     features = fe.build_feature_matrix(sample_data)

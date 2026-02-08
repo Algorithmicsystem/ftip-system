@@ -6,6 +6,7 @@ from .superfactor import SuperfactorModel
 from .backtest.simulator import evaluate_backtest
 from typing import Optional
 
+
 class FTIPSystem:
     """High level orchestrator for the FTIP workflow."""
 

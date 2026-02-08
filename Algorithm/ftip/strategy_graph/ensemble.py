@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 StrategyOutput = Dict[str, object]
 
@@ -90,7 +90,9 @@ def combine(regime: str, strategies: List[StrategyOutput]) -> Dict[str, object]:
         "final_confidence": float(conf),
         "thresholds": thresholds,
         "risk_overlay_applied": risk_overlay_applied,
-        "strategies_used": [{"strategy_id": k, "weight": v} for k, v in weights.items()],
+        "strategies_used": [
+            {"strategy_id": k, "weight": v} for k, v in weights.items()
+        ],
     }
 
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from typing import Dict, List, Tuple
 
 StrategyOutput = Dict[str, object]
@@ -47,8 +46,16 @@ def trend_momentum(features: Dict[str, float]) -> StrategyOutput:
         "signal": signal,
         "confidence": _confidence(normalized),
         "rationale": _rationale(
-            "Momentum favors continuation" if normalized > 0 else "Momentum weak/negative",
-            "Trend slope positive" if trend > 0 else "Trend slope negative" if trend < 0 else "Trend flat",
+            (
+                "Momentum favors continuation"
+                if normalized > 0
+                else "Momentum weak/negative"
+            ),
+            (
+                "Trend slope positive"
+                if trend > 0
+                else "Trend slope negative" if trend < 0 else "Trend flat"
+            ),
         ),
         "feature_contributions": {
             "mom_21": mom21,
@@ -73,8 +80,16 @@ def mean_reversion(features: Dict[str, float]) -> StrategyOutput:
         "signal": signal,
         "confidence": _confidence(normalized),
         "rationale": _rationale(
-            "RSI stretched to downside" if rsi < 40 else "RSI stretched to upside" if rsi > 60 else "RSI neutral",
-            "Short-term momentum down" if mom5 < 0 else "Short-term momentum up" if mom5 > 0 else "Momentum flat",
+            (
+                "RSI stretched to downside"
+                if rsi < 40
+                else "RSI stretched to upside" if rsi > 60 else "RSI neutral"
+            ),
+            (
+                "Short-term momentum down"
+                if mom5 < 0
+                else "Short-term momentum up" if mom5 > 0 else "Momentum flat"
+            ),
         ),
         "feature_contributions": {
             "rsi14": rsi,
@@ -133,7 +148,11 @@ def defensive_risk_off(features: Dict[str, float]) -> StrategyOutput:
 
 
 def macro_proxy_sentiment(features: Dict[str, float]) -> StrategyOutput:
-    sentiment = float(features.get("sentiment", 0.0)) if isinstance(features.get("sentiment"), (int, float)) else 0.0
+    sentiment = (
+        float(features.get("sentiment", 0.0))
+        if isinstance(features.get("sentiment"), (int, float))
+        else 0.0
+    )
     mom21 = float(features.get("mom_21", 0.0))
     raw = 0.4 * sentiment + 0.6 * mom21
     normalized = _normalize(raw, 0.25)
@@ -146,8 +165,16 @@ def macro_proxy_sentiment(features: Dict[str, float]) -> StrategyOutput:
         "signal": signal,
         "confidence": _confidence(normalized) * 0.8,
         "rationale": _rationale(
-            "Sentiment supportive" if sentiment > 0 else "Sentiment cautious" if sentiment < 0 else "Sentiment neutral",
-            "Momentum assists macro view" if mom21 > 0 else "Momentum disagrees with macro" if mom21 < 0 else "Momentum flat",
+            (
+                "Sentiment supportive"
+                if sentiment > 0
+                else "Sentiment cautious" if sentiment < 0 else "Sentiment neutral"
+            ),
+            (
+                "Momentum assists macro view"
+                if mom21 > 0
+                else "Momentum disagrees with macro" if mom21 < 0 else "Momentum flat"
+            ),
         ),
         "feature_contributions": {
             "sentiment": sentiment,

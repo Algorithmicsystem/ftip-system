@@ -41,7 +41,14 @@ def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
 
     lock_calls: List[Dict[str, Any]] = []
 
-    def fake_acquire(run_id: str, job_name: str, as_of_date, requested, ttl_seconds: int, lock_owner: str):
+    def fake_acquire(
+        run_id: str,
+        job_name: str,
+        as_of_date,
+        requested,
+        ttl_seconds: int,
+        lock_owner: str,
+    ):
         if not lock_calls:
             lock_calls.append(
                 {
@@ -52,11 +59,21 @@ def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
                     "as_of_date": as_of_date,
                 }
             )
-            return True, {"started_at": "now", "lock_owner": lock_owner, "run_id": run_id}
-        return False, {"started_at": "later", "lock_owner": lock_owner, "run_id": run_id}
+            return True, {
+                "started_at": "now",
+                "lock_owner": lock_owner,
+                "run_id": run_id,
+            }
+        return False, {
+            "started_at": "later",
+            "lock_owner": lock_owner,
+            "run_id": run_id,
+        }
 
     monkeypatch.setattr("api.jobs.prosperity._acquire_job_lock", fake_acquire)
-    monkeypatch.setattr("api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr("api.jobs.prosperity._utc_today", lambda: dt.date(2024, 2, 10))
 
     async def fake_snapshot(req, request, **_kwargs):

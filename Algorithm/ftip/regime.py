@@ -1,5 +1,5 @@
 import pandas as pd
-import numpy as np
+
 
 def classify_regime(data, lookback=10):
     price = data["close"]
@@ -12,7 +12,4 @@ def classify_regime(data, lookback=10):
     regime = regime.where(regime_score <= 0.5, "bull")
     regime = regime.where(regime_score >= -0.5, "bear")
 
-    return pd.DataFrame({
-        "regime_score": regime_score,
-        "regime": regime
-    })
+    return pd.DataFrame({"regime_score": regime_score, "regime": regime})

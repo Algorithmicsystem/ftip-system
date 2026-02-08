@@ -6,13 +6,23 @@ from api.main import app
 def test_backtest_endpoints(monkeypatch):
     from api.backtest import service
 
-    monkeypatch.setattr(service, "run_backtest", lambda **_kwargs: {"run_id": "run-123", "status": "success"})
+    monkeypatch.setattr(
+        service,
+        "run_backtest",
+        lambda **_kwargs: {"run_id": "run-123", "status": "success"},
+    )
     monkeypatch.setattr(
         service,
         "fetch_results",
         lambda _run_id: {
             "run": {"id": "run-123"},
-            "metrics": {"cagr": 0.1, "sharpe": 1.0, "sortino": 1.2, "maxdd": -0.2, "turnover": 0.5},
+            "metrics": {
+                "cagr": 0.1,
+                "sharpe": 1.0,
+                "sortino": 1.2,
+                "maxdd": -0.2,
+                "turnover": 0.5,
+            },
             "regime_metrics": [],
             "summary": {"beats_spy": True},
         },
@@ -20,7 +30,14 @@ def test_backtest_endpoints(monkeypatch):
     monkeypatch.setattr(
         service,
         "fetch_equity_curve",
-        lambda _run_id: [{"dt": "2024-01-02", "equity": 1.0, "drawdown": 0.0, "benchmark_equity": 1.0}],
+        lambda _run_id: [
+            {
+                "dt": "2024-01-02",
+                "equity": 1.0,
+                "drawdown": 0.0,
+                "benchmark_equity": 1.0,
+            }
+        ],
     )
 
     with TestClient(app) as client:

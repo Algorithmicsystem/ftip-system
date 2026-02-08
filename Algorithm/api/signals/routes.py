@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 

@@ -11,7 +11,9 @@ BASE_SYSTEM_PROMPT = (
 )
 
 
-def build_chat_messages(history: List[Dict[str, str]], user_message: str, context: Optional[Dict[str, Any]]) -> List[Dict[str, str]]:
+def build_chat_messages(
+    history: List[Dict[str, str]], user_message: str, context: Optional[Dict[str, Any]]
+) -> List[Dict[str, str]]:
     messages: List[Dict[str, str]] = [{"role": "system", "content": BASE_SYSTEM_PROMPT}]
     messages.extend(history)
 

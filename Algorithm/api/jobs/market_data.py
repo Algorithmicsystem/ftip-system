@@ -6,9 +6,9 @@ import socket
 import uuid
 from typing import Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from psycopg.types.json import Json
 
 from api import config, db, security
@@ -109,7 +109,9 @@ def _lock_window_seconds() -> int:
 
 
 def _job_lock_owner() -> str:
-    return config.env("FTIP_JOB_LOCK_OWNER") or socket.gethostname() or "ftip-job-runner"
+    return (
+        config.env("FTIP_JOB_LOCK_OWNER") or socket.gethostname() or "ftip-job-runner"
+    )
 
 
 def _cleanup_stale_job_runs(cur, job_name: str, ttl_seconds: int) -> List[str]:
@@ -157,13 +159,19 @@ def _acquire_job_lock(
         existing_locked = cur.fetchone()
         if existing_locked:
             conn.commit()
-            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing_locked
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = (
+                existing_locked
+            )
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat() if lock_acquired_at else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         cur.execute(
@@ -179,13 +187,19 @@ def _acquire_job_lock(
         existing_pending = cur.fetchone()
         if existing_pending:
             conn.commit()
-            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing_pending
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = (
+                existing_pending
+            )
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat() if lock_acquired_at else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         cur.execute(
@@ -215,7 +229,9 @@ def _acquire_job_lock(
         return True, {"run_id": run_id}
 
 
-def _update_job_run(run_id: str, status: str, result: Dict[str, object], error: Optional[str]) -> None:
+def _update_job_run(
+    run_id: str, status: str, result: Dict[str, object], error: Optional[str]
+) -> None:
     with db.with_connection() as (conn, cur):
         cur.execute(
             """
@@ -285,8 +301,28 @@ def _upsert_symbols(symbols: List[str]) -> None:
 
 
 def _sentiment_lexicon() -> Dict[str, set[str]]:
-    pos = {"beat", "strong", "growth", "upgrade", "surge", "record", "wins", "profit", "positive"}
-    neg = {"miss", "weak", "downgrade", "drop", "loss", "negative", "cut", "lawsuit", "decline"}
+    pos = {
+        "beat",
+        "strong",
+        "growth",
+        "upgrade",
+        "surge",
+        "record",
+        "wins",
+        "profit",
+        "positive",
+    }
+    neg = {
+        "miss",
+        "weak",
+        "downgrade",
+        "drop",
+        "loss",
+        "negative",
+        "cut",
+        "lawsuit",
+        "decline",
+    }
     return {"pos": pos, "neg": neg}
 
 
@@ -327,7 +363,9 @@ async def ingest_bars_daily(req: DailyBarsRequest):
     ttl_seconds = _lock_ttl_seconds()
     lock_owner = _job_lock_owner()
 
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), ttl_seconds, lock_owner)
+    acquired, lock_info = _acquire_job_lock(
+        run_id, job_name, as_of_date, req.model_dump(), ttl_seconds, lock_owner
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -381,11 +419,39 @@ async def ingest_bars_daily(req: DailyBarsRequest):
             _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "OK")
             symbols_ok.append(symbol)
         except ProviderError as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code=exc.reason_code, reason_detail=exc.reason_detail)
-            symbols_failed.append({"symbol": symbol, "reason": exc.reason_detail, "reason_code": exc.reason_code})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code=exc.reason_code,
+                reason_detail=exc.reason_detail,
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": exc.reason_detail,
+                    "reason_code": exc.reason_code,
+                }
+            )
         except Exception as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code="UNEXPECTED_ERROR", reason_detail=str(exc))
-            symbols_failed.append({"symbol": symbol, "reason": str(exc), "reason_code": "UNEXPECTED_ERROR"})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code="UNEXPECTED_ERROR",
+                reason_detail=str(exc),
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": str(exc),
+                    "reason_code": "UNEXPECTED_ERROR",
+                }
+            )
 
     status = "ok" if not symbols_failed else "partial" if symbols_ok else "failed"
     payload = {
@@ -396,7 +462,9 @@ async def ingest_bars_daily(req: DailyBarsRequest):
         "rows_written": {"market_bars_daily": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload
 
 
@@ -412,7 +480,14 @@ async def ingest_bars_intraday(req: IntradayBarsRequest):
 
     run_id = uuid.uuid4().hex
     job_name = "data.bars_intraday"
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), _lock_ttl_seconds(), _job_lock_owner())
+    acquired, lock_info = _acquire_job_lock(
+        run_id,
+        job_name,
+        as_of_date,
+        req.model_dump(),
+        _lock_ttl_seconds(),
+        _job_lock_owner(),
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -468,21 +543,66 @@ async def ingest_bars_intraday(req: IntradayBarsRequest):
             _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "OK")
             symbols_ok.append(symbol)
         except ProviderUnavailable as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code=exc.reason_code, reason_detail=exc.reason_detail)
-            symbols_failed.append({"symbol": symbol, "reason": exc.reason_detail, "reason_code": exc.reason_code})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code=exc.reason_code,
+                reason_detail=exc.reason_detail,
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": exc.reason_detail,
+                    "reason_code": exc.reason_code,
+                }
+            )
         except SymbolNoData as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code=exc.reason_code, reason_detail=exc.reason_detail)
-            symbols_failed.append({"symbol": symbol, "reason": exc.reason_detail, "reason_code": exc.reason_code})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code=exc.reason_code,
+                reason_detail=exc.reason_detail,
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": exc.reason_detail,
+                    "reason_code": exc.reason_code,
+                }
+            )
         except Exception as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code="UNEXPECTED_ERROR", reason_detail=str(exc))
-            symbols_failed.append({"symbol": symbol, "reason": str(exc), "reason_code": "UNEXPECTED_ERROR"})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code="UNEXPECTED_ERROR",
+                reason_detail=str(exc),
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": str(exc),
+                    "reason_code": "UNEXPECTED_ERROR",
+                }
+            )
 
     if not symbols_failed:
         status = "ok"
     elif symbols_ok:
         status = "partial"
     else:
-        provider_unavailable = any(item.get("reason_code") in {"PROVIDER_UNAVAILABLE", "PROVIDER_UNSUPPORTED"} for item in symbols_failed)
+        provider_unavailable = any(
+            item.get("reason_code") in {"PROVIDER_UNAVAILABLE", "PROVIDER_UNSUPPORTED"}
+            for item in symbols_failed
+        )
         status = "partial" if provider_unavailable else "failed"
     payload = {
         "status": status,
@@ -492,7 +612,9 @@ async def ingest_bars_intraday(req: IntradayBarsRequest):
         "rows_written": {"market_bars_intraday": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload
 
 
@@ -508,7 +630,14 @@ async def ingest_news(req: NewsRequest):
 
     run_id = uuid.uuid4().hex
     job_name = "data.news"
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), _lock_ttl_seconds(), _job_lock_owner())
+    acquired, lock_info = _acquire_job_lock(
+        run_id,
+        job_name,
+        as_of_date,
+        req.model_dump(),
+        _lock_ttl_seconds(),
+        _job_lock_owner(),
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -549,15 +678,27 @@ async def ingest_news(req: NewsRequest):
             if isinstance(exc, ProviderError):
                 reason_code = exc.reason_code
                 reason_detail = exc.reason_detail
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code=reason_code, reason_detail=reason_detail)
-            symbols_failed.append({"symbol": symbol, "reason": reason_detail, "reason_code": reason_code})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code=reason_code,
+                reason_detail=reason_detail,
+            )
+            symbols_failed.append(
+                {"symbol": symbol, "reason": reason_detail, "reason_code": reason_code}
+            )
 
     if not symbols_failed:
         status = "ok"
     elif symbols_ok:
         status = "partial"
     else:
-        provider_unavailable = any(item.get("reason_code") == "PROVIDER_UNAVAILABLE" for item in symbols_failed)
+        provider_unavailable = any(
+            item.get("reason_code") == "PROVIDER_UNAVAILABLE" for item in symbols_failed
+        )
         status = "partial" if provider_unavailable else "failed"
     payload = {
         "status": status,
@@ -567,7 +708,9 @@ async def ingest_news(req: NewsRequest):
         "rows_written": {"news_raw": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload
 
 
@@ -580,7 +723,14 @@ async def ingest_fundamentals(req: FundamentalsRequest):
     run_id = uuid.uuid4().hex
     job_name = "data.fundamentals"
     as_of_date = _default_as_of_date()
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), _lock_ttl_seconds(), _job_lock_owner())
+    acquired, lock_info = _acquire_job_lock(
+        run_id,
+        job_name,
+        as_of_date,
+        req.model_dump(),
+        _lock_ttl_seconds(),
+        _job_lock_owner(),
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -636,11 +786,39 @@ async def ingest_fundamentals(req: FundamentalsRequest):
             _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "OK")
             symbols_ok.append(symbol)
         except ProviderError as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code=exc.reason_code, reason_detail=exc.reason_detail)
-            symbols_failed.append({"symbol": symbol, "reason": exc.reason_detail, "reason_code": exc.reason_code})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code=exc.reason_code,
+                reason_detail=exc.reason_detail,
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": exc.reason_detail,
+                    "reason_code": exc.reason_code,
+                }
+            )
         except Exception as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code="UNEXPECTED_ERROR", reason_detail=str(exc))
-            symbols_failed.append({"symbol": symbol, "reason": str(exc), "reason_code": "UNEXPECTED_ERROR"})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code="UNEXPECTED_ERROR",
+                reason_detail=str(exc),
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": str(exc),
+                    "reason_code": "UNEXPECTED_ERROR",
+                }
+            )
 
     status = "ok" if not symbols_failed else "partial" if symbols_ok else "failed"
     payload = {
@@ -651,7 +829,9 @@ async def ingest_fundamentals(req: FundamentalsRequest):
         "rows_written": {"fundamentals_quarterly": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload
 
 
@@ -659,14 +839,25 @@ async def ingest_fundamentals(req: FundamentalsRequest):
 async def compute_sentiment(req: SentimentRequest):
     _require_db_enabled(write=True, read=True)
     as_of_date = req.as_of_date
-    start_ts = dt.datetime.combine(as_of_date, dt.time.min).replace(tzinfo=dt.timezone.utc)
-    end_ts = dt.datetime.combine(as_of_date, dt.time.max).replace(tzinfo=dt.timezone.utc)
+    start_ts = dt.datetime.combine(as_of_date, dt.time.min).replace(
+        tzinfo=dt.timezone.utc
+    )
+    end_ts = dt.datetime.combine(as_of_date, dt.time.max).replace(
+        tzinfo=dt.timezone.utc
+    )
     symbols = [canonical_symbol(sym) for sym in (req.symbols or _load_active_symbols())]
     _upsert_symbols(symbols)
 
     run_id = uuid.uuid4().hex
     job_name = "data.sentiment_daily"
-    acquired, lock_info = _acquire_job_lock(run_id, job_name, as_of_date, req.model_dump(), _lock_ttl_seconds(), _job_lock_owner())
+    acquired, lock_info = _acquire_job_lock(
+        run_id,
+        job_name,
+        as_of_date,
+        req.model_dump(),
+        _lock_ttl_seconds(),
+        _job_lock_owner(),
+    )
     if not acquired:
         return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
 
@@ -692,7 +883,9 @@ async def compute_sentiment(req: SentimentRequest):
             pos = sum(1 for score in scores if score > 0)
             neg = sum(1 for score in scores if score < 0)
             neu = headline_count - pos - neg
-            sentiment_mean = float(sum(scores) / headline_count) if headline_count else None
+            sentiment_mean = (
+                float(sum(scores) / headline_count) if headline_count else None
+            )
             sentiment_score = sentiment_mean
             db.safe_execute(
                 """
@@ -736,8 +929,22 @@ async def compute_sentiment(req: SentimentRequest):
             rows_written += 1
             symbols_ok.append(symbol)
         except Exception as exc:
-            _log_symbol_coverage(run_id, job_name, as_of_date, symbol, "FAILED", reason_code="UNEXPECTED_ERROR", reason_detail=str(exc))
-            symbols_failed.append({"symbol": symbol, "reason": str(exc), "reason_code": "UNEXPECTED_ERROR"})
+            _log_symbol_coverage(
+                run_id,
+                job_name,
+                as_of_date,
+                symbol,
+                "FAILED",
+                reason_code="UNEXPECTED_ERROR",
+                reason_detail=str(exc),
+            )
+            symbols_failed.append(
+                {
+                    "symbol": symbol,
+                    "reason": str(exc),
+                    "reason_code": "UNEXPECTED_ERROR",
+                }
+            )
 
     status = "ok" if not symbols_failed else "partial" if symbols_ok else "failed"
     payload = {
@@ -748,5 +955,7 @@ async def compute_sentiment(req: SentimentRequest):
         "rows_written": {"sentiment_daily": rows_written},
         "timings": {},
     }
-    _update_job_run(run_id, status.upper(), payload, None if status == "ok" else "partial failures")
+    _update_job_run(
+        run_id, status.upper(), payload, None if status == "ok" else "partial failures"
+    )
     return payload

@@ -43,7 +43,9 @@ def upsert_strategy_rows(rows: Iterable[Dict[str, Any]]) -> int:
                 "signal": row.get("signal"),
                 "confidence": row.get("confidence"),
                 "rationale": json.dumps(row.get("rationale") or []),
-                "feature_contributions": json.dumps(row.get("feature_contributions") or {}),
+                "feature_contributions": json.dumps(
+                    row.get("feature_contributions") or {}
+                ),
                 "meta": json.dumps(row.get("meta") or {}),
             },
         )
@@ -124,7 +126,9 @@ def latest_ensemble(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
     }
 
 
-def ensemble_as_of(symbol: str, lookback: int, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
+def ensemble_as_of(
+    symbol: str, lookback: int, as_of_date: dt.date
+) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
         SELECT symbol, as_of_date, lookback, regime, ensemble_method, final_signal, final_score,
@@ -189,7 +193,9 @@ def latest_strategies(symbol: str, lookback: int) -> List[Dict[str, Any]]:
     return out
 
 
-def strategies_as_of(symbol: str, lookback: int, as_of_date: dt.date) -> List[Dict[str, Any]]:
+def strategies_as_of(
+    symbol: str, lookback: int, as_of_date: dt.date
+) -> List[Dict[str, Any]]:
     rows = db.safe_fetchall(
         """
         SELECT symbol, as_of_date, lookback, strategy_id, strategy_version, regime, raw_score, normalized_score,

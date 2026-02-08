@@ -36,7 +36,9 @@ def _latest_bar_info(symbol: str) -> Tuple[Optional[dt.date], Optional[dt.dateti
     return row[0], row[1]
 
 
-def _latest_news_info(symbol: str) -> Tuple[Optional[dt.datetime], Optional[dt.datetime]]:
+def _latest_news_info(
+    symbol: str,
+) -> Tuple[Optional[dt.datetime], Optional[dt.datetime]]:
     row = db.safe_fetchone(
         """
         SELECT MAX(published_at), MAX(ingested_at)
@@ -50,7 +52,9 @@ def _latest_news_info(symbol: str) -> Tuple[Optional[dt.datetime], Optional[dt.d
     return row[0], row[1]
 
 
-def _latest_sentiment_info(symbol: str) -> Tuple[Optional[dt.date], Optional[dt.datetime]]:
+def _latest_sentiment_info(
+    symbol: str,
+) -> Tuple[Optional[dt.date], Optional[dt.datetime]]:
     row = db.safe_fetchone(
         """
         SELECT MAX(as_of_date), MAX(computed_at)
@@ -85,7 +89,9 @@ async def ensure_freshness(symbol: str, *, refresh: bool = True) -> Dict[str, An
             )
             resp = await market_data_job.ingest_bars_daily(request)
             if isinstance(resp, JSONResponse) and resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail=resp.body.decode())
+                raise HTTPException(
+                    status_code=resp.status_code, detail=resp.body.decode()
+                )
             bars_date, bars_updated = _latest_bar_info(symbol)
 
         if news_date is None or (today - news_date.date()).days > 5:
@@ -96,7 +102,9 @@ async def ensure_freshness(symbol: str, *, refresh: bool = True) -> Dict[str, An
             )
             resp = await market_data_job.ingest_news(request)
             if isinstance(resp, JSONResponse) and resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail=resp.body.decode())
+                raise HTTPException(
+                    status_code=resp.status_code, detail=resp.body.decode()
+                )
             news_date, news_updated = _latest_news_info(symbol)
 
         if sentiment_date is None or (today - sentiment_date).days > 3:
@@ -106,11 +114,15 @@ async def ensure_freshness(symbol: str, *, refresh: bool = True) -> Dict[str, An
             )
             resp = await market_data_job.compute_sentiment(request)
             if isinstance(resp, JSONResponse) and resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail=resp.body.decode())
+                raise HTTPException(
+                    status_code=resp.status_code, detail=resp.body.decode()
+                )
             sentiment_date, sentiment_updated = _latest_sentiment_info(symbol)
 
     if bars_date is None:
-        raise HTTPException(status_code=404, detail="no market bars available for symbol")
+        raise HTTPException(
+            status_code=404, detail="no market bars available for symbol"
+        )
 
     if news_date is None:
         warnings.append("news data missing")
@@ -120,11 +132,18 @@ async def ensure_freshness(symbol: str, *, refresh: bool = True) -> Dict[str, An
     return {
         "as_of_date": bars_date,
         "bars_ok": bars_date is not None and (today - bars_date).days <= 3,
-        "news_ok": news_date is not None and (today - news_date.date()).days <= 7 if news_date else False,
-        "sentiment_ok": sentiment_date is not None and (today - sentiment_date).days <= 5,
+        "news_ok": (
+            news_date is not None and (today - news_date.date()).days <= 7
+            if news_date
+            else False
+        ),
+        "sentiment_ok": sentiment_date is not None
+        and (today - sentiment_date).days <= 5,
         "bars_updated_at": bars_updated.isoformat() if bars_updated else None,
         "news_updated_at": news_updated.isoformat() if news_updated else None,
-        "sentiment_updated_at": sentiment_updated.isoformat() if sentiment_updated else None,
+        "sentiment_updated_at": (
+            sentiment_updated.isoformat() if sentiment_updated else None
+        ),
         "warnings": warnings,
     }
 
@@ -202,7 +221,9 @@ def fetch_key_features(symbol: str, as_of_date: dt.date) -> Dict[str, Any]:
     }
 
 
-def fetch_quality(symbol: str, as_of_date: dt.date, freshness: Dict[str, Any]) -> Dict[str, Any]:
+def fetch_quality(
+    symbol: str, as_of_date: dt.date, freshness: Dict[str, Any]
+) -> Dict[str, Any]:
     row = db.safe_fetchone(
         """
         SELECT bars_ok, fundamentals_ok, sentiment_ok, intraday_ok, missingness, anomaly_flags, quality_score
@@ -244,7 +265,11 @@ def fetch_top_picks(limit: int) -> Tuple[Optional[dt.date], List[Dict[str, Any]]
     )
     picks: List[Dict[str, Any]] = []
     for row in rows:
-        direction = "long" if (row[1] or "").upper() == "BUY" else "short" if (row[1] or "").upper() == "SELL" else "hold"
+        direction = (
+            "long"
+            if (row[1] or "").upper() == "BUY"
+            else "short" if (row[1] or "").upper() == "SELL" else "hold"
+        )
         picks.append(
             {
                 "symbol": row[0],

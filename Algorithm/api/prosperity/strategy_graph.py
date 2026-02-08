@@ -55,7 +55,9 @@ class StrategyGraphListResponse(BaseModel):
 class _Normalizer:
     @staticmethod
     def symbols(symbols: Optional[List[str]]) -> List[str]:
-        syms = sorted({(s or "").strip().upper() for s in (symbols or []) if s and s.strip()})
+        syms = sorted(
+            {(s or "").strip().upper() for s in (symbols or []) if s and s.strip()}
+        )
         if not syms:
             default = config.env("FTIP_UNIVERSE_DEFAULT", "AAPL,MSFT").split(",")
             syms = sorted({s.strip().upper() for s in default if s.strip()})
@@ -68,9 +70,13 @@ class _Normalizer:
 async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
     trace_id = getattr(request.state, "trace_id", None)
     if req.from_date > req.to_date:
-        raise HTTPException(status_code=400, detail="from_date must be on/before to_date")
+        raise HTTPException(
+            status_code=400, detail="from_date must be on/before to_date"
+        )
     if req.to_date > req.as_of_date:
-        raise HTTPException(status_code=400, detail="as_of_date must be on/after to_date")
+        raise HTTPException(
+            status_code=400, detail="as_of_date must be on/after to_date"
+        )
 
     symbols = _Normalizer.symbols(req.symbols)
     concurrency = min(max(req.concurrency, 1), 5)
@@ -84,15 +90,25 @@ async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
         errors: List[str] = []
         try:
             if db.db_enabled() and db.db_write_enabled():
-                ingest.ingest_bars(sym, req.from_date, req.to_date, force_refresh=req.force_refresh)
-            bars = query.fetch_bars(sym, req.from_date, req.as_of_date) if db.db_enabled() else []
+                ingest.ingest_bars(
+                    sym, req.from_date, req.to_date, force_refresh=req.force_refresh
+                )
+            bars = (
+                query.fetch_bars(sym, req.from_date, req.as_of_date)
+                if db.db_enabled()
+                else []
+            )
             from api.main import Candle
 
             candles: List[Candle] = [
                 Candle(
                     timestamp=b["date"] if isinstance(b, dict) else b.timestamp,
                     close=float(b["close"]),
-                    volume=float(b.get("volume")) if isinstance(b, dict) and b.get("volume") is not None else None,
+                    volume=(
+                        float(b.get("volume"))
+                        if isinstance(b, dict) and b.get("volume") is not None
+                        else None
+                    ),
                 )
                 for b in bars
             ]
@@ -100,10 +116,20 @@ async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
                 # fallback: try to synthesize a minimal history using ingest helper
                 from api.main import massive_fetch_daily_bars
 
-                fetched = massive_fetch_daily_bars(sym, req.from_date.isoformat(), req.as_of_date.isoformat())
+                fetched = massive_fetch_daily_bars(
+                    sym, req.from_date.isoformat(), req.as_of_date.isoformat()
+                )
                 for bar in fetched:
-                    candles.append(Candle(timestamp=bar.timestamp, close=float(bar.close)))
-            result = compute_strategy_graph(sym, req.as_of_date, req.lookback, candles, audit_no_lookahead=req.audit_no_lookahead)
+                    candles.append(
+                        Candle(timestamp=bar.timestamp, close=float(bar.close))
+                    )
+            result = compute_strategy_graph(
+                sym,
+                req.as_of_date,
+                req.lookback,
+                candles,
+                audit_no_lookahead=req.audit_no_lookahead,
+            )
             if req.persist and db.db_enabled() and db.db_write_enabled():
                 strat_rows = []
                 for strat in result["strategies"]:
@@ -148,7 +174,9 @@ async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
         except Exception as exc:  # pragma: no cover - defensive
             errors.append(str(exc))
             symbols_failed.append({"symbol": sym, "reason": "; ".join(errors)})
-            logger.exception("strategy_graph.run.failed", extra={"symbol": sym, "trace_id": trace_id})
+            logger.exception(
+                "strategy_graph.run.failed", extra={"symbol": sym, "trace_id": trace_id}
+            )
             continue
 
     status = "ok" if not symbols_failed else "partial"
@@ -157,7 +185,10 @@ async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
         trace_id,
         status,
         timings=timings,
-        rows_written={"strategies": rows_written.get("strategies"), "ensembles": rows_written.get("ensembles")},
+        rows_written={
+            "strategies": rows_written.get("strategies"),
+            "ensembles": rows_written.get("ensembles"),
+        },
     )
 
     return {

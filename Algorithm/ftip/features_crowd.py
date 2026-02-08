@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def compute_crowd_features(data):
     features = pd.DataFrame(index=data.index)
     crowd = data.get("crowd")

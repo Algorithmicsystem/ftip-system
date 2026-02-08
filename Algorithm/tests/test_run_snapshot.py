@@ -53,7 +53,9 @@ def test_db_save_signal_persists_json_fields(monkeypatch: pytest.MonkeyPatch) ->
     _patched_signal(monkeypatch, candles)
 
     client = TestClient(app)
-    resp = client.post("/db/save_signal", json={"symbol": symbol, "as_of": as_of, "lookback": lookback})
+    resp = client.post(
+        "/db/save_signal", json={"symbol": symbol, "as_of": as_of, "lookback": lookback}
+    )
 
     assert resp.status_code == 200
     payload = resp.json()
@@ -89,7 +91,9 @@ def test_db_run_snapshot_handles_symbol_errors(monkeypatch: pytest.MonkeyPatch) 
     def _fake_compute(symbol: str, as_of_date: str, lookback_val: int):
         if symbol.upper() == bad_symbol.upper():
             raise HTTPException(status_code=500, detail="boom")
-        return compute_signal_for_symbol_from_candles(symbol, as_of_date, lookback_val, candles)
+        return compute_signal_for_symbol_from_candles(
+            symbol, as_of_date, lookback_val, candles
+        )
 
     monkeypatch.setattr("api.main.compute_signal_for_symbol", _fake_compute)
 

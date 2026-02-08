@@ -2,6 +2,7 @@ import pandas as pd
 from .features import FeatureEngineer
 from .labels import generate_labels
 
+
 class FatTailPipeline:
     def __init__(self, horizon=1, threshold=0):
         self.horizon = horizon
@@ -27,7 +28,9 @@ class FatTailPipeline:
         for cols in (mom_cols, sent_cols, crowd_cols):
             if cols:
                 alpha_components.append(features[cols].mean(axis=1))
-        scores["alpha_score"] = sum(alpha_components) / len(alpha_components) if alpha_components else 0
+        scores["alpha_score"] = (
+            sum(alpha_components) / len(alpha_components) if alpha_components else 0
+        )
 
         scores["composite"] = scores["alpha_score"] + scores["risk_score"]
         scores["rank"] = scores["composite"].rank(ascending=False)
@@ -37,9 +40,10 @@ class FatTailPipeline:
         return scores
 
     def run(self, data):
-        f = self.build_features(data)
-        l = self.build_labels(data)
-        s = self.score(f)
-        return pd.concat([f, l, s], axis=1)
+        features = self.build_features(data)
+        labels = self.build_labels(data)
+        scores = self.score(features)
+        return pd.concat([features, labels, scores], axis=1)
+
 
 FTIPPipeline = FatTailPipeline

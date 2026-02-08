@@ -63,7 +63,11 @@ def openai_api_key() -> Optional[str]:
 
 
 def llm_model() -> str:
-    return env("FTIP_OPENAI_MODEL") or env("FTIP_LLM_MODEL", "gpt-4o-mini") or "gpt-4o-mini"
+    return (
+        env("FTIP_OPENAI_MODEL")
+        or env("FTIP_LLM_MODEL", "gpt-4o-mini")
+        or "gpt-4o-mini"
+    )
 
 
 def llm_timeout_seconds() -> int:

@@ -28,6 +28,7 @@ class DBError(Exception):
 # Environment helpers
 # ---------------------------------------------------------------------------
 
+
 def db_enabled() -> bool:
     return config.db_enabled()
 
@@ -50,6 +51,7 @@ def _db_url() -> str:
 # ---------------------------------------------------------------------------
 # Pool + helpers
 # ---------------------------------------------------------------------------
+
 
 def get_pool() -> ConnectionPool:
     global _POOL
@@ -85,7 +87,9 @@ def with_connection():
         try:
             with pool.connection(timeout=10) as conn:
                 with conn.cursor() as cur:
-                    set_statement_timeout(cur, config.env_int("FTIP_DB_STATEMENT_TIMEOUT_MS", 10_000))
+                    set_statement_timeout(
+                        cur, config.env_int("FTIP_DB_STATEMENT_TIMEOUT_MS", 10_000)
+                    )
                     yield conn, cur
                     return
         except OperationalError as exc:  # pragma: no cover - exercised in integration
@@ -115,6 +119,7 @@ def set_statement_timeout(cur: Any, timeout_ms: int, *, local: bool = True) -> i
 # Safe execution helpers
 # ---------------------------------------------------------------------------
 
+
 def safe_execute(sql: str, params: Sequence[Any] | None = None) -> None:
     try:
         with with_connection() as (conn, cur):
@@ -137,7 +142,9 @@ def safe_fetchall(sql: str, params: Sequence[Any] | None = None) -> List[Sequenc
         raise DBError(f"database error during fetchall: {exc}") from exc
 
 
-def safe_fetchone(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
+def safe_fetchone(
+    sql: str, params: Sequence[Any] | None = None
+) -> Optional[Sequence[Any]]:
     try:
         with with_connection() as (_conn, cur):
             cur.execute(sql, params or ())
@@ -151,6 +158,7 @@ def safe_fetchone(sql: str, params: Sequence[Any] | None = None) -> Optional[Seq
 # ---------------------------------------------------------------------------
 # Backwards-compatible helpers (used across codebase)
 # ---------------------------------------------------------------------------
+
 
 def exec1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
     try:
@@ -191,6 +199,7 @@ def apply_migrations() -> None:
 # ---------------------------------------------------------------------------
 # Simple schema bootstrap (legacy) to keep compatibility
 # ---------------------------------------------------------------------------
+
 
 def ensure_schema() -> None:
     if not db_enabled():

@@ -8,26 +8,34 @@ from api.main import Candle, SignalResponse
 from api.prosperity import ingest
 
 
-def _sample_rows(n: int = 40, *, start: dt.date | None = None) -> List[tuple[dt.date, float, float]]:
+def _sample_rows(
+    n: int = 40, *, start: dt.date | None = None
+) -> List[tuple[dt.date, float, float]]:
     base = start or dt.date(2024, 1, 1)
     return [(base + dt.timedelta(days=i), 100.0 + i, 1_000.0 + i) for i in range(n)]
 
 
-def test_compute_and_store_signal_passes_all_candles(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compute_and_store_signal_passes_all_candles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, Any] = {}
 
     as_of_date = dt.date(2024, 2, 15)
     rows = _sample_rows(n=60, start=dt.date(2023, 12, 15))
     lookback = 50
 
-    monkeypatch.setattr("api.prosperity.ingest.db.safe_fetchall", lambda *args, **kwargs: rows)
+    monkeypatch.setattr(
+        "api.prosperity.ingest.db.safe_fetchall", lambda *args, **kwargs: rows
+    )
 
     def _fake_execute(sql: str, params: Any) -> None:
         captured["execute_params"] = params
 
     monkeypatch.setattr("api.prosperity.ingest.db.safe_execute", _fake_execute)
 
-    def _fake_compute(symbol: str, as_of: str, lookback_val: int, candles_all: List[Candle]):
+    def _fake_compute(
+        symbol: str, as_of: str, lookback_val: int, candles_all: List[Candle]
+    ):
         captured["compute_args"] = (symbol, as_of, lookback_val, candles_all)
         return SignalResponse(
             symbol=symbol,
@@ -42,7 +50,9 @@ def test_compute_and_store_signal_passes_all_candles(monkeypatch: pytest.MonkeyP
             features={"foo": 1.0},
         )
 
-    monkeypatch.setattr("api.main.compute_signal_for_symbol_from_candles", _fake_compute)
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles", _fake_compute
+    )
 
     result = ingest.compute_and_store_signal("aapl", as_of_date, lookback)
 
@@ -62,7 +72,9 @@ def test_compute_and_store_signal_passes_all_candles(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
-def test_compute_and_store_signal_persists_score_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compute_and_store_signal_persists_score_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     os.environ.setdefault("FTIP_DB_WRITE_ENABLED", "1")
     os.environ.setdefault("FTIP_DB_READ_ENABLED", "1")
@@ -80,7 +92,9 @@ def test_compute_and_store_signal_persists_score_mode(monkeypatch: pytest.Monkey
     db.safe_execute("DELETE FROM prosperity_signals_daily WHERE symbol=%s", (symbol,))
     db.safe_execute("DELETE FROM prosperity_daily_bars WHERE symbol=%s", (symbol,))
 
-    sample_rows = _sample_rows(n=lookback + 5, start=as_of - dt.timedelta(days=lookback + 10))
+    sample_rows = _sample_rows(
+        n=lookback + 5, start=as_of - dt.timedelta(days=lookback + 10)
+    )
     for day, close, volume in sample_rows:
         db.safe_execute(
             """
@@ -122,8 +136,12 @@ def test_compute_and_store_signal_persists_score_mode(monkeypatch: pytest.Monkey
     assert row[0] == "stacked"
     assert row[1] == 1.5
     assert row[2] == 2.5
+
+
 @pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
-def test_latest_signal_endpoint_returns_inserted_row(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_latest_signal_endpoint_returns_inserted_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     os.environ.setdefault("FTIP_DB_WRITE_ENABLED", "1")
     os.environ.setdefault("FTIP_DB_READ_ENABLED", "1")
