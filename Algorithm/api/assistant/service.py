@@ -18,10 +18,16 @@ def _build_client() -> OpenAI:
     api_key = config.openai_api_key()
     if not api_key:
         raise HTTPException(status_code=500, detail="LLM API key not configured")
-    return OpenAI(api_key=api_key, timeout=config.llm_timeout_seconds(), max_retries=config.llm_max_retries())
+    return OpenAI(
+        api_key=api_key,
+        timeout=config.llm_timeout_seconds(),
+        max_retries=config.llm_max_retries(),
+    )
 
 
-def _safe_completion(messages: List[ChatCompletionMessageParam]) -> Tuple[str, str, Dict[str, Optional[int]]]:
+def _safe_completion(
+    messages: List[ChatCompletionMessageParam],
+) -> Tuple[str, str, Dict[str, Optional[int]]]:
     try:
         client = _build_client()
         resp = client.chat.completions.create(
@@ -51,10 +57,15 @@ def _safe_completion(messages: List[ChatCompletionMessageParam]) -> Tuple[str, s
 
 def _ensure_llm_enabled() -> None:
     if not config.llm_enabled():
-        raise HTTPException(status_code=503, detail="Assistant is disabled (set FTIP_LLM_ENABLED=1 to enable)")
+        raise HTTPException(
+            status_code=503,
+            detail="Assistant is disabled (set FTIP_LLM_ENABLED=1 to enable)",
+        )
 
 
-def _prepare_history(session_id: Optional[str], store: AssistantStorage) -> Tuple[str, List[Dict[str, str]]]:
+def _prepare_history(
+    session_id: Optional[str], store: AssistantStorage
+) -> Tuple[str, List[Dict[str, str]]]:
     if session_id is None:
         new_session = store.create_session()
         return new_session, []
@@ -71,7 +82,9 @@ def _prepare_history(session_id: Optional[str], store: AssistantStorage) -> Tupl
     return session_id, history
 
 
-def chat_with_assistant(request: Dict[str, Any], store: AssistantStorage = storage) -> Dict[str, Any]:
+def chat_with_assistant(
+    request: Dict[str, Any], store: AssistantStorage = storage
+) -> Dict[str, Any]:
     _ensure_llm_enabled()
 
     session_id = request.get("session_id")
@@ -82,7 +95,9 @@ def chat_with_assistant(request: Dict[str, Any], store: AssistantStorage = stora
     if message:
         store.add_message(sid, "user", message)
 
-    messages: List[ChatCompletionMessageParam] = prompts.build_chat_messages(history, message, context)
+    messages: List[ChatCompletionMessageParam] = prompts.build_chat_messages(
+        history, message, context
+    )
     reply, model_used, usage = _safe_completion(messages)
 
     store.add_message(
@@ -119,16 +134,35 @@ def explain_signal(
     lookback = int(payload.get("lookback") or 252)
 
     result = signal_fetcher(symbol, as_of, lookback)
-    summary = prompts.summarize_signal(result.model_dump()) if hasattr(result, "model_dump") else prompts.summarize_signal(result)
+    summary = (
+        prompts.summarize_signal(result.model_dump())
+        if hasattr(result, "model_dump")
+        else prompts.summarize_signal(result)
+    )
 
     history: List[Dict[str, str]] = []
-    messages = prompts.build_chat_messages(history, f"Explain this signal: {summary}", None)
+    messages = prompts.build_chat_messages(
+        history, f"Explain this signal: {summary}", None
+    )
     reply, model_used, usage = _safe_completion(messages)
 
-    session_id = payload.get("session_id") or store.create_session(metadata={"symbol": symbol, "as_of": as_of})
+    session_id = payload.get("session_id") or store.create_session(
+        metadata={"symbol": symbol, "as_of": as_of}
+    )
     store.add_message(session_id, "system", summary)
-    store.add_message(session_id, "assistant", reply, model=model_used, tokens_in=usage.get("prompt_tokens"), tokens_out=usage.get("completion_tokens"))
-    store.save_artifact(session_id, "signal_explanation", {"symbol": symbol, "as_of": as_of, "lookback": lookback, "summary": summary})
+    store.add_message(
+        session_id,
+        "assistant",
+        reply,
+        model=model_used,
+        tokens_in=usage.get("prompt_tokens"),
+        tokens_out=usage.get("completion_tokens"),
+    )
+    store.save_artifact(
+        session_id,
+        "signal_explanation",
+        {"symbol": symbol, "as_of": as_of, "lookback": lookback, "summary": summary},
+    )
 
     return {"session_id": session_id, "reply": reply, "citations": ["signal_summary"]}
 
@@ -150,20 +184,39 @@ def explain_backtest(
 
     req_obj = backtest_request_model(**payload) if backtest_request_model else payload
     result = backtest_runner(req_obj)  # type: ignore[arg-type]
-    summary = prompts.summarize_backtest(result.model_dump()) if hasattr(result, "model_dump") else prompts.summarize_backtest(result)
+    summary = (
+        prompts.summarize_backtest(result.model_dump())
+        if hasattr(result, "model_dump")
+        else prompts.summarize_backtest(result)
+    )
 
-    messages = prompts.build_chat_messages([], f"Explain this backtest: {summary}", None)
+    messages = prompts.build_chat_messages(
+        [], f"Explain this backtest: {summary}", None
+    )
     reply, model_used, usage = _safe_completion(messages)
 
-    session_id = payload.get("session_id") or store.create_session(metadata={"kind": "backtest"})
+    session_id = payload.get("session_id") or store.create_session(
+        metadata={"kind": "backtest"}
+    )
     store.add_message(session_id, "system", summary)
-    store.add_message(session_id, "assistant", reply, model=model_used, tokens_in=usage.get("prompt_tokens"), tokens_out=usage.get("completion_tokens"))
-    store.save_artifact(session_id, "backtest_explanation", {"summary": summary, "request": payload})
+    store.add_message(
+        session_id,
+        "assistant",
+        reply,
+        model=model_used,
+        tokens_in=usage.get("prompt_tokens"),
+        tokens_out=usage.get("completion_tokens"),
+    )
+    store.save_artifact(
+        session_id, "backtest_explanation", {"summary": summary, "request": payload}
+    )
 
     return {"session_id": session_id, "reply": reply, "citations": ["backtest_summary"]}
 
 
-def title_session(session_id: str, hint: Optional[str] = None, store: AssistantStorage = storage) -> Dict[str, Any]:
+def title_session(
+    session_id: str, hint: Optional[str] = None, store: AssistantStorage = storage
+) -> Dict[str, Any]:
     _ensure_llm_enabled()
 
     history = store.get_messages(session_id=session_id)
@@ -171,6 +224,13 @@ def title_session(session_id: str, hint: Optional[str] = None, store: AssistantS
     messages = prompts.build_chat_messages(history, summary_text, None)
     reply, model_used, usage = _safe_completion(messages)
 
-    store.add_message(session_id, "assistant", reply, model=model_used, tokens_in=usage.get("prompt_tokens"), tokens_out=usage.get("completion_tokens"))
+    store.add_message(
+        session_id,
+        "assistant",
+        reply,
+        model=model_used,
+        tokens_in=usage.get("prompt_tokens"),
+        tokens_out=usage.get("completion_tokens"),
+    )
     store.upsert_session_metadata(session_id, {"title": reply})
     return {"session_id": session_id, "title": reply}

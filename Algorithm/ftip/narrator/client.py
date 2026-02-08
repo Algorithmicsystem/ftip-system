@@ -41,10 +41,14 @@ class NarratorClient:
                 return self._client.chat.completions.create(**kwargs)
             except (APIStatusError, APIError, APITimeoutError) as exc:
                 last_exc = exc
-                backoff = min(2 ** attempt * 0.5, 5.0)
+                backoff = min(2**attempt * 0.5, 5.0)
                 logger.warning(
                     "narrator.llm.retry",
-                    extra={"trace_id": self.trace_id, "attempt": attempt + 1, "backoff_seconds": backoff},
+                    extra={
+                        "trace_id": self.trace_id,
+                        "attempt": attempt + 1,
+                        "backoff_seconds": backoff,
+                    },
                 )
                 time.sleep(backoff)
         if last_exc:
@@ -52,7 +56,10 @@ class NarratorClient:
                 "narrator.llm.failed",
                 extra={"trace_id": self.trace_id, "error": str(last_exc)},
             )
-        raise HTTPException(status_code=502, detail={"message": "LLM upstream error", "trace_id": self.trace_id})
+        raise HTTPException(
+            status_code=502,
+            detail={"message": "LLM upstream error", "trace_id": self.trace_id},
+        )
 
     def complete_chat(
         self,
@@ -66,8 +73,12 @@ class NarratorClient:
             resp = self._request_with_retries(
                 model=model or config.llm_model(),
                 messages=messages,
-                max_tokens=max_tokens if max_tokens is not None else config.llm_max_tokens(),
-                temperature=temperature if temperature is not None else config.llm_temperature(),
+                max_tokens=(
+                    max_tokens if max_tokens is not None else config.llm_max_tokens()
+                ),
+                temperature=(
+                    temperature if temperature is not None else config.llm_temperature()
+                ),
                 response_format={"type": "text"},
             )
             reply = resp.choices[0].message.content or ""
@@ -89,8 +100,14 @@ class NarratorClient:
         except HTTPException:
             raise
         except Exception as exc:  # noqa: BLE001
-            logger.warning("narrator.llm.unexpected", extra={"trace_id": self.trace_id, "error": str(exc)})
-            raise HTTPException(status_code=502, detail={"message": "LLM upstream error", "trace_id": self.trace_id})
+            logger.warning(
+                "narrator.llm.unexpected",
+                extra={"trace_id": self.trace_id, "error": str(exc)},
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={"message": "LLM upstream error", "trace_id": self.trace_id},
+            )
 
 
 def complete_chat(

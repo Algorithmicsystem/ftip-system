@@ -8,7 +8,9 @@ if TYPE_CHECKING:  # pragma: no cover
     from api.main import Candle
 
 
-def build_audit(candles: List["Candle"], as_of_date: dt.date, audit_no_lookahead: bool) -> Dict[str, object]:
+def build_audit(
+    candles: List["Candle"], as_of_date: dt.date, audit_no_lookahead: bool
+) -> Dict[str, object]:
     last_used = None
     per_feature: Dict[str, str] = {}
     if candles:

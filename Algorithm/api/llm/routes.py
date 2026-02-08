@@ -25,6 +25,7 @@ router = APIRouter()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _trace_id(request: Request) -> str:
     trace_id = getattr(request.state, "trace_id", None)
     if not trace_id:
@@ -43,7 +44,9 @@ def _symbol_clean(symbol: str) -> str:
     return (symbol or "").strip().upper()
 
 
-def _fetch_signal_from_db(symbol: str, as_of: dt.date, lookback: int) -> Optional[Dict[str, Any]]:
+def _fetch_signal_from_db(
+    symbol: str, as_of: dt.date, lookback: int
+) -> Optional[Dict[str, Any]]:
     if not (db.db_enabled() and db.db_read_enabled()):
         return None
     try:
@@ -52,7 +55,9 @@ def _fetch_signal_from_db(symbol: str, as_of: dt.date, lookback: int) -> Optiona
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
 
-def _fetch_features_from_db(symbol: str, as_of: dt.date, lookback: int) -> Optional[Dict[str, Any]]:
+def _fetch_features_from_db(
+    symbol: str, as_of: dt.date, lookback: int
+) -> Optional[Dict[str, Any]]:
     if not (db.db_enabled() and db.db_read_enabled()):
         return None
     try:
@@ -61,7 +66,9 @@ def _fetch_features_from_db(symbol: str, as_of: dt.date, lookback: int) -> Optio
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
 
-def _fetch_history(symbol: str, as_of: dt.date, lookback: int, days: int) -> List[Dict[str, Any]]:
+def _fetch_history(
+    symbol: str, as_of: dt.date, lookback: int, days: int
+) -> List[Dict[str, Any]]:
     if days <= 0 or not (db.db_enabled() and db.db_read_enabled()):
         return []
     try:
@@ -129,7 +136,9 @@ def _safe_perf_value(value: Any) -> float:
         return 0.0
 
 
-def _performance_defaults(overrides: Optional[Dict[str, Any]] = None) -> Dict[str, float]:
+def _performance_defaults(
+    overrides: Optional[Dict[str, Any]] = None,
+) -> Dict[str, float]:
     base = {
         "return": 0.0,
         "sharpe": 0.0,
@@ -148,7 +157,9 @@ def _performance_defaults(overrides: Optional[Dict[str, Any]] = None) -> Dict[st
 
 
 @router.post("/narrator/signal", response_model=NarratorSignalResponse)
-async def narrator_signal(req: NarratorSignalRequest, request: Request) -> NarratorSignalResponse:
+async def narrator_signal(
+    req: NarratorSignalRequest, request: Request
+) -> NarratorSignalResponse:
     trace_id = _trace_id(request)
     _ensure_api_key(trace_id)
 
@@ -160,13 +171,23 @@ async def narrator_signal(req: NarratorSignalRequest, request: Request) -> Narra
         include_history_days=req.include_db_history_days,
     )
 
-    drivers = prompts.feature_driver_lines(signal.get("features", {})) if req.include_features else []
-    messages = prompts.build_signal_prompt(signal, drivers, signal.get("history", []), req.style)
+    drivers = (
+        prompts.feature_driver_lines(signal.get("features", {}))
+        if req.include_features
+        else []
+    )
+    messages = prompts.build_signal_prompt(
+        signal, drivers, signal.get("history", []), req.style
+    )
     reply, _, _ = client.complete_chat(messages, trace_id=trace_id, max_tokens=600)
     bullets = prompts.extract_bullets(reply)
 
     as_of_value = signal.get("as_of")
-    as_of_date = as_of_value if isinstance(as_of_value, dt.date) else dt.date.fromisoformat(str(as_of_value))
+    as_of_date = (
+        as_of_value
+        if isinstance(as_of_value, dt.date)
+        else dt.date.fromisoformat(str(as_of_value))
+    )
 
     return NarratorSignalResponse(
         symbol=signal.get("symbol"),
@@ -179,7 +200,9 @@ async def narrator_signal(req: NarratorSignalRequest, request: Request) -> Narra
 
 
 @router.post("/narrator/portfolio", response_model=NarratorPortfolioResponse)
-async def narrator_portfolio(req: NarratorPortfolioRequest, request: Request) -> NarratorPortfolioResponse:
+async def narrator_portfolio(
+    req: NarratorPortfolioRequest, request: Request
+) -> NarratorPortfolioResponse:
     trace_id = _trace_id(request)
     _ensure_api_key(trace_id)
 
@@ -213,7 +236,9 @@ async def narrator_portfolio(req: NarratorPortfolioRequest, request: Request) ->
         audit = backtest.audit or {}
         skipped = audit.get("skipped_symbols") or []
         if skipped:
-            summary["exposures"].append(f"Skipped symbols: {[item.get('symbol') for item in skipped]}")
+            summary["exposures"].append(
+                f"Skipped symbols: {[item.get('symbol') for item in skipped]}"
+            )
     else:
         summary["performance"] = _performance_defaults()
         summary["exposures"].append("Backtest skipped per request; metrics limited.")
@@ -231,18 +256,25 @@ async def narrator_portfolio(req: NarratorPortfolioRequest, request: Request) ->
 
 
 @router.post("/narrator/ask/legacy", response_model=NarratorAskResponse)
-async def narrator_ask(req: NarratorAskRequest, request: Request) -> NarratorAskResponse:
+async def narrator_ask(
+    req: NarratorAskRequest, request: Request
+) -> NarratorAskResponse:
     trace_id = _trace_id(request)
     _ensure_api_key(trace_id)
 
     symbols_context: Dict[str, Any] = {}
     for raw_sym in req.symbols:
         sym = _symbol_clean(raw_sym)
-        sig = _resolve_signal(sym, req.as_of, req.lookback, include_features=True, include_history_days=0)
+        sig = _resolve_signal(
+            sym, req.as_of, req.lookback, include_features=True, include_history_days=0
+        )
         market_stats = _market_stats_from_features(sig.get("features", {}))
         symbols_context[sym] = {"signal": sig, "market_stats": market_stats}
 
-    context = {"symbols": symbols_context, "user_intent": (req.context or {}).get("user_intent") if req.context else None}
+    context = {
+        "symbols": symbols_context,
+        "user_intent": (req.context or {}).get("user_intent") if req.context else None,
+    }
     messages = prompts.build_ask_prompt(req.question, context)
     reply, _, _ = client.complete_chat(messages, trace_id=trace_id, max_tokens=600)
 

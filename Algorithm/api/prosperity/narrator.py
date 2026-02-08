@@ -40,7 +40,9 @@ class MemoryRateLimiter:
         return True
 
 
-_limiter = MemoryRateLimiter(config.narrator_rate_limit(), config.narrator_rate_window_seconds())
+_limiter = MemoryRateLimiter(
+    config.narrator_rate_limit(), config.narrator_rate_window_seconds()
+)
 
 
 SYSTEM_PROMPT = (
@@ -111,17 +113,28 @@ async def _rate_limit(request: Request) -> None:
         return
     ip = request.client.host if request.client else "unknown"
     if not _limiter.allow(ip):
-        raise HTTPException(status_code=429, detail="Too many narrator requests; please slow down.")
+        raise HTTPException(
+            status_code=429, detail="Too many narrator requests; please slow down."
+        )
 
 
 async def _ensure_enabled(trace_id: str) -> None:
     if not config.llm_enabled():
-        raise HTTPException(status_code=503, detail={"message": "Narrator disabled (set FTIP_LLM_ENABLED=1)", "trace_id": trace_id})
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Narrator disabled (set FTIP_LLM_ENABLED=1)",
+                "trace_id": trace_id,
+            },
+        )
     api_key = config.openai_api_key()
     if not api_key:
         raise llm_client._missing_key_exc(trace_id)
     if not (db.db_enabled() and db.db_read_enabled()):
-        raise HTTPException(status_code=503, detail={"message": "database disabled", "trace_id": trace_id})
+        raise HTTPException(
+            status_code=503,
+            detail={"message": "database disabled", "trace_id": trace_id},
+        )
 
 
 SYSTEM_CONTEXT = (
@@ -131,7 +144,13 @@ SYSTEM_CONTEXT = (
 )
 
 
-def _build_grounding(symbol: str, ensemble: Dict[str, Any], strategies: List[Dict[str, Any]], features: Optional[Dict[str, Any]], signal: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def _build_grounding(
+    symbol: str,
+    ensemble: Dict[str, Any],
+    strategies: List[Dict[str, Any]],
+    features: Optional[Dict[str, Any]],
+    signal: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
     strategy_ground = [
         {
             "strategy_id": s.get("strategy_id"),
@@ -159,15 +178,24 @@ def _build_grounding(symbol: str, ensemble: Dict[str, Any], strategies: List[Dic
     }
 
 
-def _top_strategies(strategies: List[Dict[str, Any]], ensemble: Dict[str, Any]) -> List[Dict[str, Any]]:
-    weights = {str(item.get("strategy_id")): abs(float(item.get("weight") or 0.0)) for item in ensemble.get("strategies_used") or []}
+def _top_strategies(
+    strategies: List[Dict[str, Any]], ensemble: Dict[str, Any]
+) -> List[Dict[str, Any]]:
+    weights = {
+        str(item.get("strategy_id")): abs(float(item.get("weight") or 0.0))
+        for item in ensemble.get("strategies_used") or []
+    }
     scored: List[tuple[float, Dict[str, Any]]] = []
     for strat in strategies:
         metric = weights.get(str(strat.get("strategy_id")))
         if metric is None:
             metric = abs(float(strat.get("confidence") or 0.0))
         rationale = strat.get("rationale")
-        rationale_text = "; ".join(rationale) if isinstance(rationale, list) else (str(rationale) if rationale else "")
+        rationale_text = (
+            "; ".join(rationale)
+            if isinstance(rationale, list)
+            else (str(rationale) if rationale else "")
+        )
         scored.append(
             (
                 metric,
@@ -199,8 +227,14 @@ def _load_context(symbol: str, as_of_date: dt.date, lookback: int) -> Dict[str, 
         signal = query.signal_as_of(clean_symbol, lookback, as_of_date)
     except db.DBError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
-    as_of = dt.date.fromisoformat(ensemble["as_of_date"]) if isinstance(ensemble.get("as_of_date"), str) else ensemble.get("as_of_date")
-    aligned_strategies = [s for s in strategies if s.get("as_of_date") == ensemble.get("as_of_date")]
+    as_of = (
+        dt.date.fromisoformat(ensemble["as_of_date"])
+        if isinstance(ensemble.get("as_of_date"), str)
+        else ensemble.get("as_of_date")
+    )
+    aligned_strategies = [
+        s for s in strategies if s.get("as_of_date") == ensemble.get("as_of_date")
+    ]
     return {
         "symbol": clean_symbol,
         "as_of_date": as_of,
@@ -226,7 +260,9 @@ def _build_explain_prompt(context: Dict[str, Any]) -> List[Dict[str, str]]:
         f"Risk overlay applied: {ensemble.get('risk_overlay_applied')}",
     ]
     if snapshot_signal:
-        lines.append(f"Latest snapshot signal: {snapshot_signal.get('signal')} score={snapshot_signal.get('score')} as_of={snapshot_signal.get('as_of')}")
+        lines.append(
+            f"Latest snapshot signal: {snapshot_signal.get('signal')} score={snapshot_signal.get('score')} as_of={snapshot_signal.get('as_of')}"
+        )
     if features:
         feat_snippet = ", ".join([f"{k}={v}" for k, v in list(features.items())[:8]])
         lines.append(f"Features: {feat_snippet}")
@@ -242,7 +278,9 @@ def _build_explain_prompt(context: Dict[str, Any]) -> List[Dict[str, str]]:
     ]
 
 
-def _build_ask_prompt(question: str, context_items: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+def _build_ask_prompt(
+    question: str, context_items: List[Dict[str, Any]]
+) -> List[Dict[str, str]]:
     blocks: List[str] = [SYSTEM_CONTEXT]
     for ctx in context_items:
         ensemble = ctx.get("ensemble") or {}
@@ -258,7 +296,10 @@ def _build_ask_prompt(question: str, context_items: List[Dict[str, Any]]) -> Lis
                 f"Strategy {strat.get('strategy_id')}: signal={strat.get('signal')} conf={strat.get('confidence')} score={strat.get('normalized_score')} rationale={strat.get('rationale')}"
             )
         blocks.append("\n".join(block_lines))
-    content = "\n\n".join(blocks) + f"\n\nQuestion: {question}\nAnswer using only the information above."
+    content = (
+        "\n\n".join(blocks)
+        + f"\n\nQuestion: {question}\nAnswer using only the information above."
+    )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": content},
@@ -277,14 +318,26 @@ async def narrator_health(request: Request) -> HealthResponse:
     )
 
 
-@router.get("/explain", response_model=NarratorExplainResponse, dependencies=[Depends(_rate_limit)])
-async def narrator_explain(request: Request, symbol: str, as_of_date: dt.date, lookback: int = 252) -> NarratorExplainResponse:
+@router.get(
+    "/explain",
+    response_model=NarratorExplainResponse,
+    dependencies=[Depends(_rate_limit)],
+)
+async def narrator_explain(
+    request: Request, symbol: str, as_of_date: dt.date, lookback: int = 252
+) -> NarratorExplainResponse:
     trace_id = _trace_id(request)
     await _ensure_enabled(trace_id)
 
     context = _load_context(symbol, as_of_date, lookback)
     if not context:
-        raise HTTPException(status_code=404, detail={"message": f"DB has no strategy graph for {symbol}", "trace_id": trace_id})
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": f"DB has no strategy graph for {symbol}",
+                "trace_id": trace_id,
+            },
+        )
 
     messages = _build_explain_prompt(context)
     reply, model, _ = llm_client.complete_chat(
@@ -298,7 +351,9 @@ async def narrator_explain(request: Request, symbol: str, as_of_date: dt.date, l
     strategies = context["strategies"]
     features = context.get("features")
     signal = context.get("signal")
-    grounding = _build_grounding(context["symbol"], ensemble, strategies, features, signal)
+    grounding = _build_grounding(
+        context["symbol"], ensemble, strategies, features, signal
+    )
 
     metrics_tracker.record_narrator_call()
 
@@ -320,8 +375,12 @@ async def narrator_explain(request: Request, symbol: str, as_of_date: dt.date, l
     )
 
 
-@router.post("/ask", response_model=NarratorAskResponse, dependencies=[Depends(_rate_limit)])
-async def narrator_ask(payload: NarratorAskRequest, request: Request) -> NarratorAskResponse:
+@router.post(
+    "/ask", response_model=NarratorAskResponse, dependencies=[Depends(_rate_limit)]
+)
+async def narrator_ask(
+    payload: NarratorAskRequest, request: Request
+) -> NarratorAskResponse:
     trace_id = _trace_id(request)
     await _ensure_enabled(trace_id)
 
@@ -336,11 +395,31 @@ async def narrator_ask(payload: NarratorAskRequest, request: Request) -> Narrato
             else:
                 contexts.append(ctx)
     if missing:
-        msg = "; ".join([f"DB has no strategy graph for {sym}; run /prosperity/strategy_graph/run first." for sym in missing])
-        raise HTTPException(status_code=404, detail={"message": msg, "trace_id": trace_id})
+        msg = "; ".join(
+            [
+                f"DB has no strategy graph for {sym}; run /prosperity/strategy_graph/run first."
+                for sym in missing
+            ]
+        )
+        raise HTTPException(
+            status_code=404, detail={"message": msg, "trace_id": trace_id}
+        )
 
     if not contexts:
-        contexts.append({"symbol": "SYSTEM", "ensemble": {"as_of_date": as_of_date.isoformat(), "regime": None, "final_signal": None, "final_score": None, "final_confidence": None, "thresholds": {}}, "strategies": []})
+        contexts.append(
+            {
+                "symbol": "SYSTEM",
+                "ensemble": {
+                    "as_of_date": as_of_date.isoformat(),
+                    "regime": None,
+                    "final_signal": None,
+                    "final_score": None,
+                    "final_confidence": None,
+                    "thresholds": {},
+                },
+                "strategies": [],
+            }
+        )
 
     messages = _build_ask_prompt(payload.question, contexts)
     reply, model, _ = llm_client.complete_chat(

@@ -12,6 +12,7 @@ from api import db
 
 # Utility hashing
 
+
 def _hash_dict(payload: Dict[str, Any]) -> str:
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()
@@ -43,7 +44,14 @@ def _existing_bars(symbol: str, from_date: dt.date, to_date: dt.date) -> List[dt
     return [r[0] for r in rows]
 
 
-def ingest_bars(symbol: str, from_date: dt.date, to_date: dt.date, *, source: str = "massive", force_refresh: bool = False) -> Dict[str, Any]:
+def ingest_bars(
+    symbol: str,
+    from_date: dt.date,
+    to_date: dt.date,
+    *,
+    source: str = "massive",
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
     sym = (symbol or "").strip().upper()
     if not sym:
         raise HTTPException(status_code=400, detail="symbol required")
@@ -113,7 +121,9 @@ def ingest_bars(symbol: str, from_date: dt.date, to_date: dt.date, *, source: st
     }
 
 
-def compute_and_store_features(symbol: str, as_of_date: dt.date, lookback: int) -> Dict[str, Any]:
+def compute_and_store_features(
+    symbol: str, as_of_date: dt.date, lookback: int
+) -> Dict[str, Any]:
     sym = (symbol or "").strip().upper()
     rows = db.safe_fetchall(
         """
@@ -127,10 +137,22 @@ def compute_and_store_features(symbol: str, as_of_date: dt.date, lookback: int) 
     window = rows[-lookback:]
     from api.main import Candle, compute_features, detect_regime  # type: ignore
 
-    candles = [Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None) for r in window]
+    candles = [
+        Candle(
+            timestamp=r[0].isoformat(),
+            close=float(r[1]),
+            volume=float(r[2]) if r[2] is not None else None,
+        )
+        for r in window
+    ]
     feats = compute_features(candles)
     regime = detect_regime(feats)
-    payload = {**feats, "regime": regime, "as_of": as_of_date.isoformat(), "lookback": int(lookback)}
+    payload = {
+        **feats,
+        "regime": regime,
+        "as_of": as_of_date.isoformat(),
+        "lookback": int(lookback),
+    }
     features_hash = _hash_dict(payload)
 
     db.safe_execute(
@@ -161,7 +183,9 @@ def compute_and_store_features(symbol: str, as_of_date: dt.date, lookback: int) 
     }
 
 
-def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) -> Dict[str, Any]:
+def compute_and_store_signal(
+    symbol: str, as_of_date: dt.date, lookback: int
+) -> Dict[str, Any]:
     sym = (symbol or "").strip().upper()
     rows = db.safe_fetchall(
         """
@@ -173,10 +197,16 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
     from api.main import Candle, compute_signal_for_symbol_from_candles, _score_mode  # type: ignore
 
     candles_all = [
-        Candle(timestamp=r[0].isoformat(), close=float(r[1]), volume=float(r[2]) if r[2] is not None else None)
+        Candle(
+            timestamp=r[0].isoformat(),
+            close=float(r[1]),
+            volume=float(r[2]) if r[2] is not None else None,
+        )
         for r in rows
     ]
-    signal_payload = compute_signal_for_symbol_from_candles(sym, as_of_date.isoformat(), lookback, candles_all)
+    signal_payload = compute_signal_for_symbol_from_candles(
+        sym, as_of_date.isoformat(), lookback, candles_all
+    )
     signal_dict = signal_payload.model_dump()
     signal_hash = _hash_dict(signal_dict)
 
@@ -186,7 +216,11 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
         preferred_score_mode = calibration_meta.get("score_mode")
     if not preferred_score_mode:
         notes = signal_dict.get("notes") or []
-        preferred_score_mode = "stacked" if any(isinstance(n, str) and "STACKED" in n.upper() for n in notes) else None
+        preferred_score_mode = (
+            "stacked"
+            if any(isinstance(n, str) and "STACKED" in n.upper() for n in notes)
+            else None
+        )
     score_mode = preferred_score_mode or _score_mode() or "single"
 
     base_score = signal_dict.get("base_score")
@@ -244,7 +278,14 @@ def compute_and_store_signal(symbol: str, as_of_date: dt.date, lookback: int) ->
     return signal_dict
 
 
-def ingest_bars_bulk(symbols: List[str], from_date: dt.date, to_date: dt.date, *, concurrency: int = 3, force_refresh: bool = False) -> Dict[str, Any]:
+def ingest_bars_bulk(
+    symbols: List[str],
+    from_date: dt.date,
+    to_date: dt.date,
+    *,
+    concurrency: int = 3,
+    force_refresh: bool = False,
+) -> Dict[str, Any]:
     ok = 0
     errors: Dict[str, str] = {}
     for sym in symbols:
@@ -256,7 +297,9 @@ def ingest_bars_bulk(symbols: List[str], from_date: dt.date, to_date: dt.date, *
     return {"ok": ok, "errors": errors}
 
 
-def compute_features_bulk(symbols: List[str], as_of_date: dt.date, lookback: int) -> Dict[str, Any]:
+def compute_features_bulk(
+    symbols: List[str], as_of_date: dt.date, lookback: int
+) -> Dict[str, Any]:
     ok = 0
     errors: Dict[str, str] = {}
     for sym in symbols:
@@ -268,7 +311,9 @@ def compute_features_bulk(symbols: List[str], as_of_date: dt.date, lookback: int
     return {"ok": ok, "errors": errors}
 
 
-def compute_signals_bulk(symbols: List[str], as_of_date: dt.date, lookback: int) -> Dict[str, Any]:
+def compute_signals_bulk(
+    symbols: List[str], as_of_date: dt.date, lookback: int
+) -> Dict[str, Any]:
     ok = 0
     errors: Dict[str, str] = {}
     for sym in symbols:

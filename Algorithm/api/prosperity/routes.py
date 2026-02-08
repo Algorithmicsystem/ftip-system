@@ -80,7 +80,12 @@ async def bootstrap(request: Request):
 
     versions = migrations.ensure_schema()
     db.ensure_schema()
-    return {"status": "ok", "db_enabled": True, "migrated": bool(versions), "versions": versions}
+    return {
+        "status": "ok",
+        "db_enabled": True,
+        "migrated": bool(versions),
+        "versions": versions,
+    }
 
 
 @router.post("/universe/upsert")
@@ -93,20 +98,30 @@ async def universe_upsert(req: UniverseUpsertRequest):
 @router.post("/bars/ingest")
 async def bars_ingest(req: BarsIngestRequest):
     _require_db_enabled(write=True)
-    return ingest.ingest_bars(req.symbol, req.from_date, req.to_date, force_refresh=req.force_refresh)
+    return ingest.ingest_bars(
+        req.symbol, req.from_date, req.to_date, force_refresh=req.force_refresh
+    )
 
 
 @router.post("/bars/ingest_bulk")
 async def bars_ingest_bulk(req: BarsIngestBulkRequest):
     _require_db_enabled(write=True)
-    return ingest.ingest_bars_bulk(req.symbols, req.from_date, req.to_date, concurrency=req.concurrency, force_refresh=req.force_refresh)
+    return ingest.ingest_bars_bulk(
+        req.symbols,
+        req.from_date,
+        req.to_date,
+        concurrency=req.concurrency,
+        force_refresh=req.force_refresh,
+    )
 
 
 @router.get("/bars", response_model=BarsResponse)
 async def bars(symbol: str, from_date: dt.date, to_date: dt.date):
     _require_db_enabled(read=True)
     data = query.fetch_bars(symbol.upper(), from_date, to_date)
-    return BarsResponse(symbol=symbol.upper(), from_date=from_date, to_date=to_date, data=data)
+    return BarsResponse(
+        symbol=symbol.upper(), from_date=from_date, to_date=to_date, data=data
+    )
 
 
 @router.post("/features/compute")
@@ -179,12 +194,19 @@ def _compute_features_payload(symbol: str, as_of_date: dt.date, lookback: int, c
 
     feats = compute_features(candles[-lookback:])
     regime = detect_regime(feats)
-    payload = {**feats, "regime": regime, "as_of": as_of_date.isoformat(), "lookback": int(lookback)}
+    payload = {
+        **feats,
+        "regime": regime,
+        "as_of": as_of_date.isoformat(),
+        "lookback": int(lookback),
+    }
     meta = {"regime": regime, "features_hash": ingest._hash_dict(payload)}
     return feats, meta, regime
 
 
-def _compute_signal_payload(symbol: str, as_of_date: dt.date, lookback: int, candles_all):
+def _compute_signal_payload(
+    symbol: str, as_of_date: dt.date, lookback: int, candles_all
+):
     from api.main import compute_signal_for_symbol_from_candles, _score_mode  # type: ignore
 
     signal_payload = compute_signal_for_symbol_from_candles(
@@ -199,7 +221,11 @@ def _compute_signal_payload(symbol: str, as_of_date: dt.date, lookback: int, can
         preferred_score_mode = calibration_meta.get("score_mode")
     if not preferred_score_mode:
         notes = signal_dict.get("notes") or []
-        preferred_score_mode = "stacked" if any(isinstance(n, str) and "STACKED" in n.upper() for n in notes) else None
+        preferred_score_mode = (
+            "stacked"
+            if any(isinstance(n, str) and "STACKED" in n.upper() for n in notes)
+            else None
+        )
     score_mode = preferred_score_mode or _score_mode() or "single"
 
     base_score = signal_dict.get("base_score")
@@ -299,7 +325,13 @@ def _persist_symbol_outputs(
                     meta=EXCLUDED.meta,
                     updated_at=now()
                 """,
-                (symbol, as_of_date, lookback, json.dumps(features), json.dumps(feature_meta)),
+                (
+                    symbol,
+                    as_of_date,
+                    lookback,
+                    json.dumps(features),
+                    json.dumps(feature_meta),
+                ),
             )
             rows_written["features"] += 1
 
@@ -338,7 +370,9 @@ def _persist_symbol_outputs(
                     signal_payload["confidence"],
                     json.dumps(signal_payload["notes"]),
                     json.dumps(signal_payload["features"]),
-                    json.dumps(signal_payload["signal_dict"].get("calibration_meta") or {}),
+                    json.dumps(
+                        signal_payload["signal_dict"].get("calibration_meta") or {}
+                    ),
                     json.dumps(signal_payload["meta"]),
                     signal_payload["signal_hash"],
                 ),
@@ -380,7 +414,9 @@ def _persist_symbol_outputs(
                             "signal": row.get("signal"),
                             "confidence": row.get("confidence"),
                             "rationale": json.dumps(row.get("rationale") or []),
-                            "feature_contributions": json.dumps(row.get("feature_contributions") or {}),
+                            "feature_contributions": json.dumps(
+                                row.get("feature_contributions") or {}
+                            ),
                             "meta": json.dumps(row.get("meta") or {}),
                         },
                     )
@@ -420,8 +456,12 @@ def _persist_symbol_outputs(
                         "final_score": ensemble_row.get("final_score"),
                         "final_confidence": ensemble_row.get("final_confidence"),
                         "thresholds": json.dumps(ensemble_row.get("thresholds") or {}),
-                        "risk_overlay_applied": bool(ensemble_row.get("risk_overlay_applied", False)),
-                        "strategies_used": json.dumps(ensemble_row.get("strategies_used") or []),
+                        "risk_overlay_applied": bool(
+                            ensemble_row.get("risk_overlay_applied", False)
+                        ),
+                        "strategies_used": json.dumps(
+                            ensemble_row.get("strategies_used") or []
+                        ),
                         "audit": json.dumps(ensemble_row.get("audit") or {}),
                         "hashes": json.dumps(ensemble_row.get("hashes") or {}),
                     },
@@ -520,11 +560,17 @@ async def snapshot_run(
     _require_db_enabled(write=True, read=True)
     trace_id = getattr(request.state, "trace_id", None)
     if req.from_date > req.to_date:
-        raise HTTPException(status_code=400, detail="from_date must be on/before to_date")
+        raise HTTPException(
+            status_code=400, detail="from_date must be on/before to_date"
+        )
     if req.to_date > req.as_of_date:
-        raise HTTPException(status_code=400, detail="as_of_date must be on/after to_date")
+        raise HTTPException(
+            status_code=400, detail="as_of_date must be on/after to_date"
+        )
 
-    symbols = req.symbols or ((config.env("FTIP_UNIVERSE_DEFAULT", "") or "AAPL,MSFT").split(","))
+    symbols = req.symbols or (
+        (config.env("FTIP_UNIVERSE_DEFAULT", "") or "AAPL,MSFT").split(",")
+    )
     symbols = _normalize_symbols(symbols)
     concurrency = min(max(req.concurrency, 1), 5)
 
@@ -562,8 +608,12 @@ async def snapshot_run(
         while attempts < max_attempts:
             attempts += 1
             try:
-                ingest.ingest_bars(sym, req.from_date, req.to_date, force_refresh=req.force_refresh)
-                initial_bars, effective_as_of = query.fetch_bars_with_latest(sym, req.from_date, req.to_date)
+                ingest.ingest_bars(
+                    sym, req.from_date, req.to_date, force_refresh=req.force_refresh
+                )
+                initial_bars, effective_as_of = query.fetch_bars_with_latest(
+                    sym, req.from_date, req.to_date
+                )
                 if effective_as_of is None:
                     bars_returned = len(initial_bars)
                     _validate_bars(sym, initial_bars, bars_required)
@@ -582,8 +632,12 @@ async def snapshot_run(
                 bars = bars[-bars_required:]
 
                 candles = _candles_from_bars(bars)
-                feats, feat_meta, regime = _compute_features_payload(sym, effective_as_of, req.lookback, candles)
-                signal_payload = _compute_signal_payload(sym, effective_as_of, req.lookback, candles)
+                feats, feat_meta, regime = _compute_features_payload(
+                    sym, effective_as_of, req.lookback, candles
+                )
+                signal_payload = _compute_signal_payload(
+                    sym, effective_as_of, req.lookback, candles
+                )
                 strategy_rows = None
                 ensemble_row = None
                 if req.compute_strategy_graph:
@@ -618,7 +672,11 @@ async def snapshot_run(
                 )
                 logger.info(
                     "jobs.prosperity.daily_snapshot.symbol_ok",
-                    extra={"symbol": sym, "duration_sec": time.time() - sym_start, "trace_id": trace_id},
+                    extra={
+                        "symbol": sym,
+                        "duration_sec": time.time() - sym_start,
+                        "trace_id": trace_id,
+                    },
                 )
                 break
             except Exception as exc:
@@ -650,7 +708,11 @@ async def snapshot_run(
                 )
                 if isinstance(exc, SymbolFailure):
                     bars_required = exc.bars_required or bars_required
-                    bars_returned = exc.bars_returned if exc.bars_returned is not None else bars_returned
+                    bars_returned = (
+                        exc.bars_returned
+                        if exc.bars_returned is not None
+                        else bars_returned
+                    )
                 _log_symbol_coverage(
                     run_id,
                     job_name,
@@ -691,7 +753,10 @@ async def snapshot_run(
         trace_id,
         status,
         timings=timings,
-        rows_written={"signals": rows_written.get("signals"), "features": rows_written.get("features")},
+        rows_written={
+            "signals": rows_written.get("signals"),
+            "features": rows_written.get("features"),
+        },
     )
 
     return {
@@ -793,13 +858,18 @@ async def strategy_graph(symbol: str, lookback: int = 252, days: int = 365):
 
     nodes_list = [{"id": key, "count": count} for key, count in sorted(nodes.items())]
     edges_list = [
-        {"from": pair[0], "to": pair[1], "count": count} for pair, count in sorted(edges.items())
+        {"from": pair[0], "to": pair[1], "count": count}
+        for pair, count in sorted(edges.items())
     ]
 
     return {
         "symbol": sym,
         "lookback": lookback,
-        "window": {"days": window_days, "from": window_start.isoformat(), "to": latest_as_of.isoformat()},
+        "window": {
+            "days": window_days,
+            "from": window_start.isoformat(),
+            "to": latest_as_of.isoformat(),
+        },
         "nodes": nodes_list,
         "edges": edges_list,
         "series_sample": series[:50],
@@ -823,5 +893,8 @@ async def graph_universe():
     except db.DBError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
 
-    data = [{"symbol": row[0], "rows": int(row[1]) if row[1] is not None else 0} for row in rows]
+    data = [
+        {"symbol": row[0], "rows": int(row[1]) if row[1] is not None else 0}
+        for row in rows
+    ]
     return {"symbols": data}

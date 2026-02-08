@@ -51,15 +51,30 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     monkeypatch.setattr(
         orchestrator,
         "fetch_quality",
-        lambda *_args, **_kwargs: {"bars_ok": True, "news_ok": True, "sentiment_ok": True, "warnings": []},
+        lambda *_args, **_kwargs: {
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "warnings": [],
+        },
     )
 
     with TestClient(app) as client:
-        resp = client.post("/assistant/analyze", json={"symbol": "NVDA", "horizon": "swing", "risk_mode": "balanced"})
+        resp = client.post(
+            "/assistant/analyze",
+            json={"symbol": "NVDA", "horizon": "swing", "risk_mode": "balanced"},
+        )
         assert resp.status_code == 200
         data = resp.json()
 
-    assert set(data.keys()) == {"symbol", "as_of_date", "signal", "key_features", "quality", "evidence"}
+    assert set(data.keys()) == {
+        "symbol",
+        "as_of_date",
+        "signal",
+        "key_features",
+        "quality",
+        "evidence",
+    }
     assert data["signal"]["action"] == "BUY"
 
 
@@ -69,14 +84,32 @@ def test_assistant_top_picks_schema(monkeypatch):
     monkeypatch.setattr(
         orchestrator,
         "fetch_top_picks",
-        lambda limit: (dt.date(2024, 1, 2), [{"symbol": "NVDA", "direction": "long", "score": 0.7, "confidence": 0.6, "reason_codes": ["MOMO_UP"]}]),
+        lambda limit: (
+            dt.date(2024, 1, 2),
+            [
+                {
+                    "symbol": "NVDA",
+                    "direction": "long",
+                    "score": 0.7,
+                    "confidence": 0.6,
+                    "reason_codes": ["MOMO_UP"],
+                }
+            ],
+        ),
     )
-    monkeypatch.setattr(orchestrator, "universe_coverage", lambda *_args, **_kwargs: 0.95)
+    monkeypatch.setattr(
+        orchestrator, "universe_coverage", lambda *_args, **_kwargs: 0.95
+    )
 
     with TestClient(app) as client:
         resp = client.post(
             "/assistant/top-picks",
-            json={"universe": "sp500", "horizon": "swing", "risk_mode": "balanced", "limit": 1},
+            json={
+                "universe": "sp500",
+                "horizon": "swing",
+                "risk_mode": "balanced",
+                "limit": 1,
+            },
         )
         assert resp.status_code == 200
         data = resp.json()

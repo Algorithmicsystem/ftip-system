@@ -1,6 +1,5 @@
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from api.assistant import service
@@ -73,7 +72,15 @@ def test_explain_signal_mocked(monkeypatch):
     monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    monkeypatch.setattr(service, "_safe_completion", lambda messages: ("mocked reply", "model", {"prompt_tokens": 1, "completion_tokens": 1}))
+    monkeypatch.setattr(
+        service,
+        "_safe_completion",
+        lambda messages: (
+            "mocked reply",
+            "model",
+            {"prompt_tokens": 1, "completion_tokens": 1},
+        ),
+    )
     result = service.explain_signal(
         {"symbol": "AAPL", "as_of": "2024-01-01", "lookback": 10},
         signal_fetcher=lambda symbol, as_of, lookback: DummySignal(symbol),
@@ -86,7 +93,15 @@ def test_explain_backtest_mocked(monkeypatch):
     monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    monkeypatch.setattr(service, "_safe_completion", lambda messages: ("backtest reply", "model", {"prompt_tokens": 1, "completion_tokens": 1}))
+    monkeypatch.setattr(
+        service,
+        "_safe_completion",
+        lambda messages: (
+            "backtest reply",
+            "model",
+            {"prompt_tokens": 1, "completion_tokens": 1},
+        ),
+    )
     result = service.explain_backtest(
         {
             "symbols": ["AAPL"],

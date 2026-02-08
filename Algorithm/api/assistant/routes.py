@@ -55,7 +55,9 @@ def rate_limit(request: Request) -> None:
         return
     ip = request.client.host if request.client else "unknown"
     if not _limiter.allow(ip):
-        raise HTTPException(status_code=429, detail="Too many requests. Please slow down.")
+        raise HTTPException(
+            status_code=429, detail="Too many requests. Please slow down."
+        )
 
 
 def request_id_dependency(request: Request) -> str:
@@ -66,7 +68,10 @@ def request_id_dependency(request: Request) -> str:
 
 def ensure_enabled() -> None:
     if not config.llm_enabled():
-        raise HTTPException(status_code=503, detail="Assistant is disabled (set FTIP_LLM_ENABLED=1 to enable)")
+        raise HTTPException(
+            status_code=503,
+            detail="Assistant is disabled (set FTIP_LLM_ENABLED=1 to enable)",
+        )
 
 
 @router.get("/health")
@@ -97,7 +102,12 @@ async def session_details(session_id: str, __: None = Depends(rate_limit)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     messages = storage.get_messages(session_id=session_id)
-    return SessionResponse(session_id=session_id, title=session.get("title"), metadata=session.get("metadata"), messages=messages)
+    return SessionResponse(
+        session_id=session_id,
+        title=session.get("title"),
+        metadata=session.get("metadata"),
+        messages=messages,
+    )
 
 
 @router.post("/explain/signal")
@@ -151,7 +161,9 @@ async def analyze_endpoint(
 
     signal = orchestrator.fetch_signal(symbol, as_of_date)
     if not signal:
-        raise HTTPException(status_code=404, detail="signal not available after compute")
+        raise HTTPException(
+            status_code=404, detail="signal not available after compute"
+        )
 
     key_features = orchestrator.fetch_key_features(symbol, as_of_date)
     quality = orchestrator.fetch_quality(symbol, as_of_date, freshness)
@@ -165,7 +177,11 @@ async def analyze_endpoint(
     return {
         "symbol": symbol,
         "as_of_date": as_of_date.isoformat(),
-        "signal": {**signal, "horizon": payload.horizon, "risk_mode": payload.risk_mode},
+        "signal": {
+            **signal,
+            "horizon": payload.horizon,
+            "risk_mode": payload.risk_mode,
+        },
         "key_features": key_features,
         "quality": quality,
         "evidence": evidence,
@@ -185,7 +201,10 @@ async def top_picks_endpoint(
         "horizon": payload.horizon,
         "risk_mode": payload.risk_mode,
         "picks": picks,
-        "quality": {"universe_coverage_pct": coverage, "warnings": [] if picks else ["no picks available"]},
+        "quality": {
+            "universe_coverage_pct": coverage,
+            "warnings": [] if picks else ["no picks available"],
+        },
     }
 
 
@@ -196,6 +215,8 @@ async def narrate_endpoint(
     __: None = Depends(rate_limit),
 ):
     ensure_enabled()
-    narration_result = narration.narrate_payload(payload.payload, payload.user_message, trace_id=request_id)
+    narration_result = narration.narrate_payload(
+        payload.payload, payload.user_message, trace_id=request_id
+    )
     logger.info("assistant.narrate", extra={"request_id": request_id})
     return NarrateResponse(**narration_result.model_dump())

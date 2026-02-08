@@ -1,5 +1,6 @@
 from ftip.pipeline import FatTailPipeline
 
+
 def test_pipeline_run(sample_data):
     pipeline = FatTailPipeline(horizon=1, threshold=0)
     output = pipeline.run(sample_data)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List, Tuple, TYPE_CHECKING
+from typing import Dict, List, TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover - typing aid
     from api.main import Candle
@@ -37,7 +37,7 @@ def compute_strategy_graph(
     *,
     audit_no_lookahead: bool = True,
 ) -> StrategyGraphResult:
-    from api.main import Candle, compute_features
+    from api.main import compute_features
 
     candles = _filter_candles(candles_all, as_of_date)
     if len(candles) < max(10, min(lookback, 30)):

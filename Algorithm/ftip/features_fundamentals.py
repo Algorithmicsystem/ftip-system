@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def compute_fundamental_features(data):
     features = pd.DataFrame(index=data.index)
     if "fundamental" in data.columns:

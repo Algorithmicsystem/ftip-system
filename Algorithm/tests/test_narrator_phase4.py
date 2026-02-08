@@ -64,12 +64,32 @@ def test_strategy_graph_explanation(monkeypatch):
     monkeypatch.setattr(db, "db_enabled", lambda: True)
     monkeypatch.setattr(db, "db_read_enabled", lambda: True)
     history = [
-        {"as_of": "2024-12-29", "signal": "HOLD", "score": 0.1, "regime": "NEUTRAL", "confidence": 0.5},
-        {"as_of": "2024-12-30", "signal": "BUY", "score": 0.6, "regime": "TRENDING", "confidence": 0.7},
-        {"as_of": "2024-12-31", "signal": "BUY", "score": 0.65, "regime": "TRENDING", "confidence": 0.8},
+        {
+            "as_of": "2024-12-29",
+            "signal": "HOLD",
+            "score": 0.1,
+            "regime": "NEUTRAL",
+            "confidence": 0.5,
+        },
+        {
+            "as_of": "2024-12-30",
+            "signal": "BUY",
+            "score": 0.6,
+            "regime": "TRENDING",
+            "confidence": 0.7,
+        },
+        {
+            "as_of": "2024-12-31",
+            "signal": "BUY",
+            "score": 0.65,
+            "regime": "TRENDING",
+            "confidence": 0.8,
+        },
     ]
     monkeypatch.setattr(query, "signal_history", lambda *_, **__: history)
-    monkeypatch.setattr(narrator_client, "complete_chat", lambda *_, **__: ("Graph summary", "gpt", {}))
+    monkeypatch.setattr(
+        narrator_client, "complete_chat", lambda *_, **__: ("Graph summary", "gpt", {})
+    )
 
     client = TestClient(app)
     resp = client.post(
@@ -92,7 +112,9 @@ def test_diagnose_reports_checks(monkeypatch):
     monkeypatch.setattr(db, "db_read_enabled", lambda: True)
     monkeypatch.setattr(db, "db_write_enabled", lambda: True)
     monkeypatch.setattr(migrations, "ensure_schema", lambda: [])
-    monkeypatch.setattr(db, "safe_fetchall", lambda *_args, **_kwargs: [("001", dt.datetime.utcnow())])
+    monkeypatch.setattr(
+        db, "safe_fetchall", lambda *_args, **_kwargs: [("001", dt.datetime.utcnow())]
+    )
     monkeypatch.setattr(query, "latest_signal", lambda *_, **__: {"signal": "BUY"})
 
     client = TestClient(app)
@@ -101,6 +123,12 @@ def test_diagnose_reports_checks(monkeypatch):
     body = resp.json()
     assert body["status"] in {"ok", "degraded"}
     check_names = {item["name"] for item in body["checks"]}
-    assert {"auth", "database", "migrations", "latest_signal", "openai_api_key"}.issubset(check_names)
+    assert {
+        "auth",
+        "database",
+        "migrations",
+        "latest_signal",
+        "openai_api_key",
+    }.issubset(check_names)
     auth_check = next(item for item in body["checks"] if item["name"] == "auth")
     assert auth_check["details"]["auth_enabled"] is True

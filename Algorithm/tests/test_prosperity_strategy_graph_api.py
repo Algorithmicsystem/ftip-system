@@ -1,5 +1,4 @@
 import datetime as dt
-import os
 from typing import List
 
 import pytest
@@ -26,14 +25,21 @@ def client(monkeypatch: pytest.MonkeyPatch):
         yield client
 
 
-def test_strategy_graph_run_without_db(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+def test_strategy_graph_run_without_db(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
     _disable_db(monkeypatch)
 
-    monkeypatch.setattr(strategy_graph_db, "upsert_strategy_rows", lambda rows: len(list(rows)))
+    monkeypatch.setattr(
+        strategy_graph_db, "upsert_strategy_rows", lambda rows: len(list(rows))
+    )
     monkeypatch.setattr(strategy_graph_db, "upsert_ensemble_row", lambda row: None)
 
     sample = [
-        Candle(timestamp=(dt.date(2024, 1, 1) + dt.timedelta(days=i)).isoformat(), close=100 + i)
+        Candle(
+            timestamp=(dt.date(2024, 1, 1) + dt.timedelta(days=i)).isoformat(),
+            close=100 + i,
+        )
         for i in range(60)
     ]
 
@@ -43,8 +49,12 @@ def test_strategy_graph_run_without_db(monkeypatch: pytest.MonkeyPatch, client: 
     def fake_massive(sym: str, start: str, end: str):
         return sample
 
-    monkeypatch.setattr("api.prosperity.strategy_graph.query.fetch_bars", fake_fetch, raising=False)
-    monkeypatch.setattr("api.main.massive_fetch_daily_bars", fake_massive, raising=False)
+    monkeypatch.setattr(
+        "api.prosperity.strategy_graph.query.fetch_bars", fake_fetch, raising=False
+    )
+    monkeypatch.setattr(
+        "api.main.massive_fetch_daily_bars", fake_massive, raising=False
+    )
 
     payload = {
         "symbols": ["AAPL"],
@@ -63,18 +73,33 @@ def test_strategy_graph_run_without_db(monkeypatch: pytest.MonkeyPatch, client: 
     assert set(body["result"]["rows_written"].keys()) == {"strategies", "ensembles"}
 
 
-def test_strategy_graph_latest_endpoints(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+def test_strategy_graph_latest_endpoints(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
     monkeypatch.setattr(db, "db_enabled", lambda: True)
     monkeypatch.setattr(db, "db_write_enabled", lambda: True)
     monkeypatch.setattr(db, "db_read_enabled", lambda: True)
 
     sample_ensemble = {"symbol": "AAPL", "as_of_date": "2024-01-10", "lookback": 30}
-    sample_strategies: List[dict] = [{"symbol": "AAPL", "as_of_date": "2024-01-10", "lookback": 30}]
-    monkeypatch.setattr("api.prosperity.strategy_graph.latest_ensemble", lambda s, lb: sample_ensemble)
-    monkeypatch.setattr("api.prosperity.strategy_graph.latest_strategies", lambda s, lb: sample_strategies)
+    sample_strategies: List[dict] = [
+        {"symbol": "AAPL", "as_of_date": "2024-01-10", "lookback": 30}
+    ]
+    monkeypatch.setattr(
+        "api.prosperity.strategy_graph.latest_ensemble", lambda s, lb: sample_ensemble
+    )
+    monkeypatch.setattr(
+        "api.prosperity.strategy_graph.latest_strategies",
+        lambda s, lb: sample_strategies,
+    )
 
-    res_e = client.get("/prosperity/strategy_graph/latest/ensemble", params={"symbol": "AAPL", "lookback": 30})
-    res_s = client.get("/prosperity/strategy_graph/latest/strategies", params={"symbol": "AAPL", "lookback": 30})
+    res_e = client.get(
+        "/prosperity/strategy_graph/latest/ensemble",
+        params={"symbol": "AAPL", "lookback": 30},
+    )
+    res_s = client.get(
+        "/prosperity/strategy_graph/latest/strategies",
+        params={"symbol": "AAPL", "lookback": 30},
+    )
 
     assert res_e.status_code == 200
     assert res_s.status_code == 200

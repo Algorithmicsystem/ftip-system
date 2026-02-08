@@ -1,5 +1,6 @@
 import pandas as pd
 
+
 def compute_sentiment_features(data):
     features = pd.DataFrame(index=data.index)
     sentiment = data.get("sentiment")

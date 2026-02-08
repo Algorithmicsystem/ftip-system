@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -58,8 +57,12 @@ def compute_daily_features(
     ret_1d = _ret(1)
     ret_5d = _ret(5)
     ret_21d = _ret(21)
-    vol_21d = float(returns.tail(21).std() * np.sqrt(252)) if len(returns) >= 21 else None
-    vol_63d = float(returns.tail(63).std() * np.sqrt(252)) if len(returns) >= 63 else None
+    vol_21d = (
+        float(returns.tail(21).std() * np.sqrt(252)) if len(returns) >= 21 else None
+    )
+    vol_63d = (
+        float(returns.tail(63).std() * np.sqrt(252)) if len(returns) >= 63 else None
+    )
 
     tr = pd.DataFrame(
         {
@@ -133,7 +136,13 @@ def compute_intraday_features(
     df["close"] = df["close"].astype(float)
     df["ret_1bar"] = df["close"].pct_change()
     df["vol_n"] = df["ret_1bar"].rolling(5).std()
-    df["trend_slope_n"] = df["close"].rolling(5).apply(lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0, raw=False)
+    df["trend_slope_n"] = (
+        df["close"]
+        .rolling(5)
+        .apply(
+            lambda x: np.polyfit(range(len(x)), x, 1)[0] if len(x) > 1 else 0, raw=False
+        )
+    )
 
     rows = []
     for _, row in df.iterrows():
@@ -142,9 +151,15 @@ def compute_intraday_features(
                 "symbol": row["symbol"],
                 "ts": row["ts"],
                 "timeframe": timeframe,
-                "ret_1bar": float(row["ret_1bar"]) if pd.notna(row["ret_1bar"]) else None,
+                "ret_1bar": (
+                    float(row["ret_1bar"]) if pd.notna(row["ret_1bar"]) else None
+                ),
                 "vol_n": float(row["vol_n"]) if pd.notna(row["vol_n"]) else None,
-                "trend_slope_n": float(row["trend_slope_n"]) if pd.notna(row["trend_slope_n"]) else None,
+                "trend_slope_n": (
+                    float(row["trend_slope_n"])
+                    if pd.notna(row["trend_slope_n"])
+                    else None
+                ),
             }
         )
     return rows

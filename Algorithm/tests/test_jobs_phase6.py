@@ -1,5 +1,4 @@
 import datetime as dt
-import os
 from typing import Any, Dict
 
 import pytest
@@ -40,9 +39,15 @@ def stub_job_run_tables(monkeypatch: pytest.MonkeyPatch):
         "api.jobs.prosperity._acquire_job_lock",
         lambda *args, **kwargs: (True, {"locked_until": None, "lock_owner": "test"}),
     )
-    monkeypatch.setattr("api.jobs.prosperity._release_job_lock", lambda *args, **kwargs: None)
-    monkeypatch.setattr("api.jobs.prosperity._insert_job_run", lambda *args, **kwargs: None)
-    monkeypatch.setattr("api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "api.jobs.prosperity._release_job_lock", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "api.jobs.prosperity._insert_job_run", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        "api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None
+    )
 
 
 def test_daily_snapshot_requires_api_key(monkeypatch: pytest.MonkeyPatch):
@@ -104,6 +109,7 @@ def test_daily_snapshot_invokes_retention(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("FTIP_RETENTION_DAYS", "730")
 
     called: Dict[str, Any] = {}
+
     async def fake_snapshot(req, request, **_kwargs):
         return {
             "status": "ok",

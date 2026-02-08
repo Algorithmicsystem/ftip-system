@@ -115,14 +115,19 @@ def test_endpoints_require_auth_when_enabled(monkeypatch: pytest.MonkeyPatch):
     security.reset_auth_cache()
 
     with TestClient(app) as client:
-        res_jobs = client.post("/jobs/data/bars-daily", json={"from_date": "2024-01-01", "to_date": "2024-01-02"})
+        res_jobs = client.post(
+            "/jobs/data/bars-daily",
+            json={"from_date": "2024-01-01", "to_date": "2024-01-02"},
+        )
         assert res_jobs.status_code == 401
         res_signals = client.get("/signals/latest", params={"symbol": "AAPL"})
         assert res_signals.status_code == 401
 
 
 def test_milestoneB_verify_script_is_posix():
-    script_path = Path(__file__).resolve().parents[1] / "scripts" / "milestoneB_verify.sh"
+    script_path = (
+        Path(__file__).resolve().parents[1] / "scripts" / "milestoneB_verify.sh"
+    )
     assert script_path.exists()
     content = script_path.read_text()
     assert content.startswith("#!/usr/bin/env sh")

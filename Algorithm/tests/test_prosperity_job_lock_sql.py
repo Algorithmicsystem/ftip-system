@@ -107,7 +107,13 @@ def test_acquire_job_lock_sql_uses_row_locking(monkeypatch):
     fetchone_values = [
         None,  # no locked active rows
         None,  # no pending rows
-        ("run-id", inserted_started_at, "tester", inserted_lock_time, inserted_expires_at),
+        (
+            "run-id",
+            inserted_started_at,
+            "tester",
+            inserted_lock_time,
+            inserted_expires_at,
+        ),
     ]
     captured = {}
 
@@ -163,7 +169,9 @@ def test_acquire_job_lock_enforces_cooldown_window(monkeypatch):
 
     monkeypatch.setenv("FTIP_JOB_LOCK_WINDOW_SEC", str(lock_window))
     monkeypatch.setattr(db, "with_connection", fake_with_connection)
-    monkeypatch.setattr(prosperity, "_cleanup_stale_job_runs", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        prosperity, "_cleanup_stale_job_runs", lambda *args, **kwargs: []
+    )
 
     acquired, info = prosperity._acquire_job_lock(
         "run-id",

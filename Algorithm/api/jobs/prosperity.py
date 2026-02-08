@@ -27,9 +27,7 @@ logger = logging.getLogger(__name__)
 
 JOB_NAME = "prosperity_daily_snapshot"
 
-DEFAULT_UNIVERSE = (
-    "AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B"
-)
+DEFAULT_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B"
 CORE5_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,TSLA"
 SP500_SAMPLE_UNIVERSE = (
     "AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B,JNJ,UNH,V,PG,HD"
@@ -77,9 +75,7 @@ def _lock_window_seconds() -> int:
 
 def _job_lock_owner() -> str:
     return (
-        config.env("FTIP_JOB_LOCK_OWNER")
-        or socket.gethostname()
-        or "ftip-job-runner"
+        config.env("FTIP_JOB_LOCK_OWNER") or socket.gethostname() or "ftip-job-runner"
     )
 
 
@@ -163,15 +159,19 @@ def _acquire_job_lock(
         existing_locked = cur.fetchone()
         if existing_locked:
             conn.commit()
-            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing_locked
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = (
+                existing_locked
+            )
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat()
-                if lock_acquired_at
-                else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         cur.execute(
@@ -187,15 +187,19 @@ def _acquire_job_lock(
         existing_pending = cur.fetchone()
         if existing_pending:
             conn.commit()
-            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = existing_pending
+            existing_run_id, started_at, owner, lock_acquired_at, lock_expires_at = (
+                existing_pending
+            )
             return False, {
                 "run_id": str(existing_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat()
-                if lock_acquired_at
-                else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         cur.execute(
@@ -253,10 +257,12 @@ def _acquire_job_lock(
                 "run_id": str(inserted_run_id),
                 "started_at": started_at.isoformat() if started_at else None,
                 "lock_owner": owner,
-                "lock_acquired_at": lock_acquired_at.isoformat()
-                if lock_acquired_at
-                else None,
-                "lock_expires_at": lock_expires_at.isoformat() if lock_expires_at else None,
+                "lock_acquired_at": (
+                    lock_acquired_at.isoformat() if lock_acquired_at else None
+                ),
+                "lock_expires_at": (
+                    lock_expires_at.isoformat() if lock_expires_at else None
+                ),
             }
 
         return False, {
@@ -431,7 +437,9 @@ async def _run_daily_snapshot(
                     "lock_owner": lock_info.get("lock_owner"),
                 },
             )
-            return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
+            return JSONResponse(
+                status_code=409, content={"error": "locked", **lock_info}
+            )
 
         run_recorded = True
 
@@ -486,7 +494,9 @@ async def _run_daily_snapshot(
         return response_body
     except UndefinedColumn as exc:
         error_message = str(exc)
-        logger.exception("jobs.prosperity.daily_snapshot.error", extra={"run_id": run_id})
+        logger.exception(
+            "jobs.prosperity.daily_snapshot.error", extra={"run_id": run_id}
+        )
         return JSONResponse(
             status_code=500,
             content={
@@ -496,7 +506,9 @@ async def _run_daily_snapshot(
         )
     except Exception as exc:
         error_message = str(exc)
-        logger.exception("jobs.prosperity.daily_snapshot.error", extra={"run_id": run_id})
+        logger.exception(
+            "jobs.prosperity.daily_snapshot.error", extra={"run_id": run_id}
+        )
         return JSONResponse(
             status_code=500,
             content={"error": "unexpected_error", "detail": error_message},
@@ -504,9 +516,14 @@ async def _run_daily_snapshot(
     finally:
         try:
             if run_recorded:
-                _update_job_run(run_id, status=status, result=result_record, error=error_message)
+                _update_job_run(
+                    run_id, status=status, result=result_record, error=error_message
+                )
         except Exception:
-            logger.warning("jobs.prosperity.daily_snapshot.run_update_failed", extra={"run_id": run_id})
+            logger.warning(
+                "jobs.prosperity.daily_snapshot.run_update_failed",
+                extra={"run_id": run_id},
+            )
         finally:
             if run_recorded:
                 logger.info(
@@ -550,7 +567,10 @@ async def prosperity_daily_snapshot_cron(request: Request):
     try:
         params = CronSnapshotParams.model_validate(payload)
     except ValidationError as exc:
-        return JSONResponse(status_code=400, content={"error": "invalid_request", "detail": exc.errors()})
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_request", "detail": exc.errors()},
+        )
 
     symbols_mode = (params.symbols_mode or "core10").strip()
     if symbols_mode not in SYMBOLS_MODES:
@@ -631,7 +651,8 @@ def _coverage_response(*, as_of_date: dt.date | None = None, run_id: str | None 
     params_tuple = tuple(params)
 
     attempted_row = db.safe_fetchone(
-        f"SELECT COUNT(*) FROM prosperity_symbol_coverage WHERE {where_clause}", params_tuple
+        f"SELECT COUNT(*) FROM prosperity_symbol_coverage WHERE {where_clause}",
+        params_tuple,
     )
     attempted = int(attempted_row[0]) if attempted_row else 0
 

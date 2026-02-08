@@ -38,7 +38,9 @@ def test_narrator_signal_uses_disclaimer(monkeypatch):
     def fake_complete_chat(messages, **kwargs):
         return "Mocked narration", "model", {"prompt_tokens": 1, "completion_tokens": 1}
 
-    def fake_resolver(symbol: str, as_of: dt.date, lookback: int, **_: Any) -> Dict[str, Any]:
+    def fake_resolver(
+        symbol: str, as_of: dt.date, lookback: int, **_: Any
+    ) -> Dict[str, Any]:
         return {
             "symbol": symbol,
             "as_of": as_of.isoformat(),
@@ -73,7 +75,9 @@ def test_narrator_ask_returns_citations(monkeypatch):
     def fake_complete_chat(messages, **kwargs):
         return "Answer", "model", {"prompt_tokens": 1, "completion_tokens": 1}
 
-    def fake_resolver(symbol: str, as_of: dt.date, lookback: int, **_: Any) -> Dict[str, Any]:
+    def fake_resolver(
+        symbol: str, as_of: dt.date, lookback: int, **_: Any
+    ) -> Dict[str, Any]:
         return {
             "symbol": symbol,
             "as_of": as_of.isoformat(),
@@ -84,7 +88,12 @@ def test_narrator_ask_returns_citations(monkeypatch):
             "regime": "CHOPPY",
             "confidence": 0.4,
             "thresholds": {"buy": 0.2, "sell": -0.2},
-            "features": {"mom_21": 0.01, "last_close": 100.0, "volatility_ann": 0.2, "rsi14": 50.0},
+            "features": {
+                "mom_21": 0.01,
+                "last_close": 100.0,
+                "volatility_ann": 0.2,
+                "rsi14": 50.0,
+            },
             "history": [],
         }
 

@@ -25,7 +25,9 @@ def _style_instruction(style: str) -> str:
 
 
 def feature_driver_lines(features: Dict[str, float], top_n: int = 3) -> List[str]:
-    items = sorted(features.items(), key=lambda kv: abs(float(kv[1] or 0.0)), reverse=True)
+    items = sorted(
+        features.items(), key=lambda kv: abs(float(kv[1] or 0.0)), reverse=True
+    )
     drivers: List[str] = []
     for name, val in items[:top_n]:
         desc = FEATURE_HINTS.get(name, name)
@@ -44,7 +46,12 @@ def system_prompt() -> str:
     )
 
 
-def build_signal_prompt(signal: Dict[str, object], drivers: List[str], history: List[Dict[str, object]], style: str) -> List[Dict[str, str]]:
+def build_signal_prompt(
+    signal: Dict[str, object],
+    drivers: List[str],
+    history: List[Dict[str, object]],
+    style: str,
+) -> List[Dict[str, str]]:
     history_lines = []
     for row in history:
         history_lines.append(
@@ -54,7 +61,8 @@ def build_signal_prompt(signal: Dict[str, object], drivers: List[str], history: 
     prompt = (
         f"Summarize the signal for {signal.get('symbol')} as of {signal.get('as_of')} with lookback {signal.get('lookback')}. "
         f"Signal={signal.get('signal')} (score_mode={signal.get('score_mode')}, score={signal.get('score')}, "
-        f"thresholds={signal.get('thresholds')}). Regime={signal.get('regime')} and confidence={signal.get('confidence')}.")
+        f"thresholds={signal.get('thresholds')}). Regime={signal.get('regime')} and confidence={signal.get('confidence')}."
+    )
     if drivers:
         prompt += " Top drivers: " + "; ".join(drivers) + "."
     if history_lines:
@@ -70,7 +78,9 @@ def build_signal_prompt(signal: Dict[str, object], drivers: List[str], history: 
     ]
 
 
-def build_portfolio_prompt(summary: Dict[str, object], style: str) -> List[Dict[str, str]]:
+def build_portfolio_prompt(
+    summary: Dict[str, object], style: str
+) -> List[Dict[str, str]]:
     perf = summary.get("performance") or {}
     contributors = summary.get("contributors") or []
     exposures = summary.get("exposures") or []
@@ -78,7 +88,10 @@ def build_portfolio_prompt(summary: Dict[str, object], style: str) -> List[Dict[
     sections: List[str] = []
     sections.append(
         "Portfolio backtest summary: return={return_} sharpe={sharpe} max_drawdown={mdd} turnover={turnover}.".format(
-            return_=perf.get("return"), sharpe=perf.get("sharpe"), mdd=perf.get("max_drawdown"), turnover=perf.get("turnover")
+            return_=perf.get("return"),
+            sharpe=perf.get("sharpe"),
+            mdd=perf.get("max_drawdown"),
+            turnover=perf.get("turnover"),
         )
     )
     if contributors:
@@ -88,7 +101,9 @@ def build_portfolio_prompt(summary: Dict[str, object], style: str) -> List[Dict[
 
     prompt = " ".join(sections)
     prompt += " Provide a narrative and bullet takeaways. " + _style_instruction(style)
-    prompt += " Close with a disclaimer and note uncertainty; do not promise performance."
+    prompt += (
+        " Close with a disclaimer and note uncertainty; do not promise performance."
+    )
 
     return [
         {"role": "system", "content": system_prompt()},

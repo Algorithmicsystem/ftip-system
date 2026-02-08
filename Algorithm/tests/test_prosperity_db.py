@@ -1,5 +1,4 @@
 import datetime as dt
-from types import SimpleNamespace
 
 from typing import Any
 
@@ -43,7 +42,16 @@ def test_compute_features_uses_as_of(monkeypatch):
 
     def fake_compute(candles):
         calls["candles"] = candles
-        return {"mom_5": 0.0, "mom_21": 0.0, "mom_63": 0.0, "trend_sma20_50": 0.0, "volatility_ann": 0.0, "rsi14": 50.0, "volume_z20": 0.0, "last_close": candles[-1].close}
+        return {
+            "mom_5": 0.0,
+            "mom_21": 0.0,
+            "mom_63": 0.0,
+            "trend_sma20_50": 0.0,
+            "volatility_ann": 0.0,
+            "rsi14": 50.0,
+            "volume_z20": 0.0,
+            "last_close": candles[-1].close,
+        }
 
     def fake_regime(_):
         return "TEST"
@@ -72,7 +80,10 @@ def test_ingest_identifies_missing(monkeypatch):
         recorded.append((sql, params))
 
     def fake_massive(symbol, f, t):
-        return [DummyCandle("2024-01-01", 10.0, 100), DummyCandle("2024-01-02", 11.0, 110)]
+        return [
+            DummyCandle("2024-01-01", 10.0, 100),
+            DummyCandle("2024-01-02", 11.0, 110),
+        ]
 
     monkeypatch.setattr(db, "safe_fetchall", fake_fetch)
     monkeypatch.setattr(db, "safe_execute", fake_execute)

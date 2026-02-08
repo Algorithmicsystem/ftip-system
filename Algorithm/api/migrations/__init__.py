@@ -64,7 +64,12 @@ def _migration_prosperity_core(cur: Any) -> None:
         )
         """
     )
-    _ensure_column(cur, "prosperity_universe", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+    _ensure_column(
+        cur,
+        "prosperity_universe",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
     cur.execute("ALTER TABLE prosperity_universe ALTER COLUMN active SET DEFAULT TRUE")
     cur.execute("ALTER TABLE prosperity_universe ALTER COLUMN active SET NOT NULL")
 
@@ -103,15 +108,44 @@ def _migration_prosperity_core(cur: Any) -> None:
         """
     )
     _rename_column_if_exists(cur, "prosperity_features_daily", "as_of_date", "as_of")
-    _ensure_column(cur, "prosperity_features_daily", "as_of", "IF NOT EXISTS as_of DATE NOT NULL DEFAULT CURRENT_DATE")
-    _ensure_column(cur, "prosperity_features_daily", "lookback", "IF NOT EXISTS lookback INT NOT NULL")
-    _ensure_column(cur, "prosperity_features_daily", "features", "IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb")
+    _ensure_column(
+        cur,
+        "prosperity_features_daily",
+        "as_of",
+        "IF NOT EXISTS as_of DATE NOT NULL DEFAULT CURRENT_DATE",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_features_daily",
+        "lookback",
+        "IF NOT EXISTS lookback INT NOT NULL",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_features_daily",
+        "features",
+        "IF NOT EXISTS features JSONB NOT NULL DEFAULT '{}'::jsonb",
+    )
     _ensure_column(cur, "prosperity_features_daily", "meta", "IF NOT EXISTS meta JSONB")
-    _ensure_column(cur, "prosperity_features_daily", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-    _ensure_column(cur, "prosperity_features_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-    cur.execute("ALTER TABLE prosperity_features_daily ALTER COLUMN features SET NOT NULL")
+    _ensure_column(
+        cur,
+        "prosperity_features_daily",
+        "created_at",
+        "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_features_daily",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
+    cur.execute(
+        "ALTER TABLE prosperity_features_daily ALTER COLUMN features SET NOT NULL"
+    )
     cur.execute("ALTER TABLE prosperity_features_daily ALTER COLUMN as_of DROP DEFAULT")
-    _ensure_primary_key(cur, "prosperity_features_daily", ("symbol", "as_of", "lookback"))
+    _ensure_primary_key(
+        cur, "prosperity_features_daily", ("symbol", "as_of", "lookback")
+    )
 
     cur.execute(
         """
@@ -135,37 +169,113 @@ def _migration_prosperity_core(cur: Any) -> None:
         """
     )
     _rename_column_if_exists(cur, "prosperity_signals_daily", "as_of_date", "as_of")
-    _ensure_column(cur, "prosperity_signals_daily", "as_of", "IF NOT EXISTS as_of DATE NOT NULL DEFAULT CURRENT_DATE")
-    _ensure_column(cur, "prosperity_signals_daily", "lookback", "IF NOT EXISTS lookback INT NOT NULL")
-    _ensure_column(cur, "prosperity_signals_daily", "score_mode", "IF NOT EXISTS score_mode TEXT NOT NULL DEFAULT 'single'")
-    _ensure_column(cur, "prosperity_signals_daily", "score", "IF NOT EXISTS score DOUBLE PRECISION NOT NULL DEFAULT 0")
-    _ensure_column(cur, "prosperity_signals_daily", "base_score", "IF NOT EXISTS base_score DOUBLE PRECISION")
-    _ensure_column(cur, "prosperity_signals_daily", "stacked_score", "IF NOT EXISTS stacked_score DOUBLE PRECISION")
-    _ensure_column(cur, "prosperity_signals_daily", "signal", "IF NOT EXISTS signal TEXT NOT NULL DEFAULT 'HOLD'")
-    _ensure_column(cur, "prosperity_signals_daily", "thresholds", "IF NOT EXISTS thresholds JSONB NOT NULL DEFAULT '{}'::jsonb")
-    _ensure_column(cur, "prosperity_signals_daily", "regime", "IF NOT EXISTS regime TEXT")
-    _ensure_column(cur, "prosperity_signals_daily", "confidence", "IF NOT EXISTS confidence DOUBLE PRECISION")
-    _ensure_column(cur, "prosperity_signals_daily", "notes", "IF NOT EXISTS notes JSONB")
-    _ensure_column(cur, "prosperity_signals_daily", "features", "IF NOT EXISTS features JSONB")
-    _ensure_column(cur, "prosperity_signals_daily", "calibration_meta", "IF NOT EXISTS calibration_meta JSONB")
-    _ensure_column(cur, "prosperity_signals_daily", "signal_hash", "IF NOT EXISTS signal_hash TEXT")
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "as_of",
+        "IF NOT EXISTS as_of DATE NOT NULL DEFAULT CURRENT_DATE",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "lookback",
+        "IF NOT EXISTS lookback INT NOT NULL",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "score_mode",
+        "IF NOT EXISTS score_mode TEXT NOT NULL DEFAULT 'single'",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "score",
+        "IF NOT EXISTS score DOUBLE PRECISION NOT NULL DEFAULT 0",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "base_score",
+        "IF NOT EXISTS base_score DOUBLE PRECISION",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "stacked_score",
+        "IF NOT EXISTS stacked_score DOUBLE PRECISION",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "signal",
+        "IF NOT EXISTS signal TEXT NOT NULL DEFAULT 'HOLD'",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "thresholds",
+        "IF NOT EXISTS thresholds JSONB NOT NULL DEFAULT '{}'::jsonb",
+    )
+    _ensure_column(
+        cur, "prosperity_signals_daily", "regime", "IF NOT EXISTS regime TEXT"
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "confidence",
+        "IF NOT EXISTS confidence DOUBLE PRECISION",
+    )
+    _ensure_column(
+        cur, "prosperity_signals_daily", "notes", "IF NOT EXISTS notes JSONB"
+    )
+    _ensure_column(
+        cur, "prosperity_signals_daily", "features", "IF NOT EXISTS features JSONB"
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "calibration_meta",
+        "IF NOT EXISTS calibration_meta JSONB",
+    )
+    _ensure_column(
+        cur, "prosperity_signals_daily", "signal_hash", "IF NOT EXISTS signal_hash TEXT"
+    )
     _ensure_column(cur, "prosperity_signals_daily", "meta", "IF NOT EXISTS meta JSONB")
-    _ensure_column(cur, "prosperity_signals_daily", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-    _ensure_column(cur, "prosperity_signals_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
-    cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN thresholds SET NOT NULL")
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "created_at",
+        "IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_signals_daily",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
+    cur.execute(
+        "ALTER TABLE prosperity_signals_daily ALTER COLUMN thresholds SET NOT NULL"
+    )
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN score SET NOT NULL")
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN signal SET NOT NULL")
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN as_of DROP DEFAULT")
-    _ensure_primary_key(cur, "prosperity_signals_daily", ("symbol", "as_of", "lookback", "score_mode"))
+    _ensure_primary_key(
+        cur, "prosperity_signals_daily", ("symbol", "as_of", "lookback", "score_mode")
+    )
 
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_prosperity_universe_active ON prosperity_universe(active)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prosperity_universe_active ON prosperity_universe(active)"
+    )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_prosperity_features_symbol_asof ON prosperity_features_daily(symbol, as_of DESC)"
     )
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_prosperity_signals_symbol_asof ON prosperity_signals_daily(symbol, as_of DESC)"
     )
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_prosperity_bars_symbol_date ON prosperity_daily_bars(symbol, date DESC)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_prosperity_bars_symbol_date ON prosperity_daily_bars(symbol, date DESC)"
+    )
 
 
 def _migration_strategy_graph(cur: Any) -> None:
@@ -191,8 +301,18 @@ def _migration_strategy_graph(cur: Any) -> None:
         )
         """
     )
-    _ensure_column(cur, "prosperity_strategy_signals_daily", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
-    _ensure_column(cur, "prosperity_strategy_signals_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
+    _ensure_column(
+        cur,
+        "prosperity_strategy_signals_daily",
+        "created_at",
+        "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_strategy_signals_daily",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
+    )
 
     cur.execute(
         """
@@ -216,8 +336,18 @@ def _migration_strategy_graph(cur: Any) -> None:
         )
         """
     )
-    _ensure_column(cur, "prosperity_ensemble_signals_daily", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
-    _ensure_column(cur, "prosperity_ensemble_signals_daily", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
+    _ensure_column(
+        cur,
+        "prosperity_ensemble_signals_daily",
+        "created_at",
+        "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()",
+    )
+    _ensure_column(
+        cur,
+        "prosperity_ensemble_signals_daily",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
+    )
 
 
 def _migration_job_metadata(cur: Any) -> None:
@@ -231,9 +361,24 @@ def _migration_job_metadata(cur: Any) -> None:
         )
         """
     )
-    _ensure_column(cur, "ftip_job_locks", "locked_until", "IF NOT EXISTS locked_until TIMESTAMPTZ NOT NULL")
-    _ensure_column(cur, "ftip_job_locks", "lock_owner", "IF NOT EXISTS lock_owner TEXT NOT NULL DEFAULT 'unknown'")
-    _ensure_column(cur, "ftip_job_locks", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
+    _ensure_column(
+        cur,
+        "ftip_job_locks",
+        "locked_until",
+        "IF NOT EXISTS locked_until TIMESTAMPTZ NOT NULL",
+    )
+    _ensure_column(
+        cur,
+        "ftip_job_locks",
+        "lock_owner",
+        "IF NOT EXISTS lock_owner TEXT NOT NULL DEFAULT 'unknown'",
+    )
+    _ensure_column(
+        cur,
+        "ftip_job_locks",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    )
 
     cur.execute(
         """
@@ -257,17 +402,49 @@ def _migration_job_metadata(cur: Any) -> None:
     )
     _ensure_column(cur, "ftip_job_runs", "job_name", "IF NOT EXISTS job_name TEXT")
     _ensure_column(cur, "ftip_job_runs", "as_of_date", "IF NOT EXISTS as_of_date DATE")
-    _ensure_column(cur, "ftip_job_runs", "started_at", "IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT now()")
-    _ensure_column(cur, "ftip_job_runs", "finished_at", "IF NOT EXISTS finished_at TIMESTAMPTZ")
+    _ensure_column(
+        cur,
+        "ftip_job_runs",
+        "started_at",
+        "IF NOT EXISTS started_at TIMESTAMPTZ DEFAULT now()",
+    )
+    _ensure_column(
+        cur, "ftip_job_runs", "finished_at", "IF NOT EXISTS finished_at TIMESTAMPTZ"
+    )
     _ensure_column(cur, "ftip_job_runs", "status", "IF NOT EXISTS status TEXT")
-    _ensure_column(cur, "ftip_job_runs", "requested", "IF NOT EXISTS requested JSONB DEFAULT '{}'::jsonb")
+    _ensure_column(
+        cur,
+        "ftip_job_runs",
+        "requested",
+        "IF NOT EXISTS requested JSONB DEFAULT '{}'::jsonb",
+    )
     _ensure_column(cur, "ftip_job_runs", "result", "IF NOT EXISTS result JSONB")
     _ensure_column(cur, "ftip_job_runs", "error", "IF NOT EXISTS error TEXT")
     _ensure_column(cur, "ftip_job_runs", "lock_owner", "IF NOT EXISTS lock_owner TEXT")
-    _ensure_column(cur, "ftip_job_runs", "lock_acquired_at", "IF NOT EXISTS lock_acquired_at TIMESTAMPTZ")
-    _ensure_column(cur, "ftip_job_runs", "lock_expires_at", "IF NOT EXISTS lock_expires_at TIMESTAMPTZ")
-    _ensure_column(cur, "ftip_job_runs", "created_at", "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()")
-    _ensure_column(cur, "ftip_job_runs", "updated_at", "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()")
+    _ensure_column(
+        cur,
+        "ftip_job_runs",
+        "lock_acquired_at",
+        "IF NOT EXISTS lock_acquired_at TIMESTAMPTZ",
+    )
+    _ensure_column(
+        cur,
+        "ftip_job_runs",
+        "lock_expires_at",
+        "IF NOT EXISTS lock_expires_at TIMESTAMPTZ",
+    )
+    _ensure_column(
+        cur,
+        "ftip_job_runs",
+        "created_at",
+        "IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()",
+    )
+    _ensure_column(
+        cur,
+        "ftip_job_runs",
+        "updated_at",
+        "IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now()",
+    )
 
 
 def _migration_job_lock_owner(cur: Any) -> None:
@@ -382,7 +559,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     ("016_features_intraday", _migration_features_intraday),
     ("017_signals_daily", _migration_signals_daily),
     ("018_signals_intraday", _migration_signals_intraday),
-    ("019_fix_prosperity_signals_score_mode_pk", _migration_fix_prosperity_signals_score_mode_pk),
+    (
+        "019_fix_prosperity_signals_score_mode_pk",
+        _migration_fix_prosperity_signals_score_mode_pk,
+    ),
     ("020_backtest_tables", _migration_backtest_tables),
 ]
 
@@ -420,7 +600,9 @@ def ensure_schema() -> List[str]:
             cur.execute("SELECT pg_try_advisory_lock(87123)")
             locked = cur.fetchone()[0]
             if not locked:
-                logger.info("[migrations] another instance is applying migrations; skipping")
+                logger.info(
+                    "[migrations] another instance is applying migrations; skipping"
+                )
                 return applied
 
             try:
@@ -515,7 +697,11 @@ def _verify_job_run_schema(cur: Any) -> None:
     is_unique, predicate, index_def = index_row
     predicate = predicate or ""
     index_def = index_def or ""
-    if is_unique or "finished_at IS NULL" not in predicate or "(job_name)" not in index_def:
+    if (
+        is_unique
+        or "finished_at IS NULL" not in predicate
+        or "(job_name)" not in index_def
+    ):
         raise RuntimeError(
             "idx_ftip_job_runs_active must be a non-unique partial index on job_name where finished_at IS NULL"
         )

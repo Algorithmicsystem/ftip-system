@@ -32,6 +32,7 @@ class _ValidatedRequest(BaseModel):
             raise ValueError("symbol must be alphanumeric (.+-) up to 10 chars")
         return cleaned
 
+
 class NarratorAskRequest(_ValidatedRequest):
     question: str = Field(..., description="User question")
     symbols: List[str]
@@ -150,14 +151,22 @@ def _ensure_openai_key(trace_id: str) -> None:
 
 def _ensure_db(trace_id: str) -> None:
     if not (db.db_enabled() and db.db_read_enabled()):
-        raise HTTPException(status_code=503, detail={"message": "Prosperity DB read access required", "trace_id": trace_id})
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Prosperity DB read access required",
+                "trace_id": trace_id,
+            },
+        )
 
 
 def _clean_symbol(symbol: str) -> str:
     return (symbol or "").strip().upper()
 
 
-def _load_symbol_context(symbol: str, as_of_date: dt.date, lookback: int, days: int) -> Dict[str, Any]:
+def _load_symbol_context(
+    symbol: str, as_of_date: dt.date, lookback: int, days: int
+) -> Dict[str, Any]:
     days = min(max(days, 1), 3650)
     sig = query.signal_as_of(symbol, lookback, as_of_date)
     feats = query.features_as_of(symbol, lookback, as_of_date)
@@ -173,7 +182,9 @@ def _load_symbol_context(symbol: str, as_of_date: dt.date, lookback: int, days: 
     }
 
 
-def _load_strategy_graph(symbol: str, lookback: int, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
+def _load_strategy_graph(
+    symbol: str, lookback: int, as_of_date: dt.date
+) -> Optional[Dict[str, Any]]:
     ensemble = strategy_graph_db.ensemble_as_of(symbol, lookback, as_of_date)
     strategies = strategy_graph_db.strategies_as_of(symbol, lookback, as_of_date)
     if not ensemble:
@@ -181,14 +192,18 @@ def _load_strategy_graph(symbol: str, lookback: int, as_of_date: dt.date) -> Opt
     return {"ensemble": ensemble, "strategies": strategies}
 
 
-def _build_transition_graph(symbol: str, lookback: int, to_date: dt.date, days: int) -> Optional[Dict[str, Any]]:
+def _build_transition_graph(
+    symbol: str, lookback: int, to_date: dt.date, days: int
+) -> Optional[Dict[str, Any]]:
     window_days = min(max(days, 1), 3650)
     history = query.signal_history(symbol, lookback, to_date, window_days)
     if not history:
         return None
 
     try:
-        ordered = sorted(history, key=lambda item: dt.date.fromisoformat(str(item.get("as_of"))))
+        ordered = sorted(
+            history, key=lambda item: dt.date.fromisoformat(str(item.get("as_of")))
+        )
     except Exception:  # pragma: no cover - defensive
         ordered = history[::-1]
 
@@ -217,13 +232,18 @@ def _build_transition_graph(symbol: str, lookback: int, to_date: dt.date, days: 
     window_from = to_date - dt.timedelta(days=window_days)
     nodes_list = [{"id": key, "count": count} for key, count in sorted(nodes.items())]
     edges_list = [
-        {"from": pair[0], "to": pair[1], "count": count} for pair, count in sorted(edges.items())
+        {"from": pair[0], "to": pair[1], "count": count}
+        for pair, count in sorted(edges.items())
     ]
 
     return {
         "symbol": symbol,
         "lookback": lookback,
-        "window": {"days": window_days, "from": window_from.isoformat(), "to": to_date.isoformat()},
+        "window": {
+            "days": window_days,
+            "from": window_from.isoformat(),
+            "to": to_date.isoformat(),
+        },
         "nodes": nodes_list,
         "edges": edges_list,
         "series_sample": series[-120:],
@@ -243,17 +263,25 @@ def _build_context(req: NarratorAskRequest) -> Dict[str, Any]:
     symbols_packet: List[Dict[str, Any]] = []
     for raw_sym in req.symbols:
         sym = _clean_symbol(raw_sym)
-        symbols_packet.append(_load_symbol_context(sym, req.as_of_date, req.lookback, req.days))
+        symbols_packet.append(
+            _load_symbol_context(sym, req.as_of_date, req.lookback, req.days)
+        )
 
     strategy_graph = None
     if symbols_packet:
-        strategy_graph = _load_strategy_graph(symbols_packet[0]["symbol"], req.lookback, req.as_of_date)
+        strategy_graph = _load_strategy_graph(
+            symbols_packet[0]["symbol"], req.lookback, req.as_of_date
+        )
 
     return prompts.build_context_packet(
         question=req.question,
         symbols=symbols_packet,
         strategy_graph=strategy_graph,
-        meta={"as_of_date": req.as_of_date.isoformat(), "lookback": req.lookback, "days": req.days},
+        meta={
+            "as_of_date": req.as_of_date.isoformat(),
+            "lookback": req.lookback,
+            "days": req.days,
+        },
     )
 
 
@@ -288,16 +316,22 @@ def _reason_mapping() -> Dict[str, str]:
     }
 
 
-def _render_explain_signal(req: NarratorExplainSignalRequest, trace_id: str) -> NarratorExplainSignalResponse:
+def _render_explain_signal(
+    req: NarratorExplainSignalRequest, trace_id: str
+) -> NarratorExplainSignalResponse:
     signal = req.signal or {}
     action = (signal.get("action") or "HOLD").upper()
     confidence = signal.get("confidence")
     reason_codes = signal.get("reason_codes") or []
-    reasons = [_reason_mapping().get(code, f"Signal reason: {code}.") for code in reason_codes]
+    reasons = [
+        _reason_mapping().get(code, f"Signal reason: {code}.") for code in reason_codes
+    ]
 
     quality = req.quality or {}
     missing_notes = []
-    if quality.get("sentiment_ok") is False or (req.sentiment or {}).get("headline_count") in (0, None):
+    if quality.get("sentiment_ok") is False or (req.sentiment or {}).get(
+        "headline_count"
+    ) in (0, None):
         missing_notes.append("Sentiment coverage is thin or missing.")
     if quality.get("intraday_ok") is False:
         missing_notes.append("Intraday coverage is missing.")
@@ -310,9 +344,13 @@ def _render_explain_signal(req: NarratorExplainSignalRequest, trace_id: str) -> 
         if isinstance(stop_loss, (int, float))
         else "Invalidated if risk limits are hit."
     )
-    risks = missing_notes or ["Normal market volatility applies. Use position sizing and risk limits."]
+    risks = missing_notes or [
+        "Normal market volatility applies. Use position sizing and risk limits."
+    ]
     explanation = (
-        f"{action} signal with confidence {confidence:.2f}." if confidence is not None else f"{action} signal generated."
+        f"{action} signal with confidence {confidence:.2f}."
+        if confidence is not None
+        else f"{action} signal generated."
     )
     explanation += " This summary is informational only."
 
@@ -336,7 +374,9 @@ def _migrations_status() -> tuple[bool, Dict[str, Any]]:
         return False, {"message": "database read access disabled"}
     try:
         migrations.ensure_schema()
-        rows = db.safe_fetchall("SELECT version, applied_at FROM schema_migrations ORDER BY version ASC")
+        rows = db.safe_fetchall(
+            "SELECT version, applied_at FROM schema_migrations ORDER BY version ASC"
+        )
         versions = [row[0] for row in rows]
         return True, {"versions": versions}
     except Exception as exc:  # pragma: no cover - defensive
@@ -362,18 +402,26 @@ def _latest_signal_exists(symbol: str, lookback: int) -> tuple[bool, Dict[str, A
 async def narrator_health(request: Request) -> NarratorHealthResponse:
     trace_id = _trace_id(request)
     logger.info("narrator.health", extra={"trace_id": trace_id})
-    return NarratorHealthResponse(status="ok", has_api_key=bool(config.openai_api_key()), trace_id=trace_id)
+    return NarratorHealthResponse(
+        status="ok", has_api_key=bool(config.openai_api_key()), trace_id=trace_id
+    )
 
 
 @router.post("/ask", response_model=NarratorAskResponse)
-async def narrator_ask(req: NarratorAskRequest, request: Request) -> NarratorAskResponse:
+async def narrator_ask(
+    req: NarratorAskRequest, request: Request
+) -> NarratorAskResponse:
     trace_id = _trace_id(request)
     _ensure_db(trace_id)
     _ensure_openai_key(trace_id)
 
     logger.info(
         "narrator.ask.start",
-        extra={"trace_id": trace_id, "symbols": req.symbols, "as_of_date": req.as_of_date.isoformat()},
+        extra={
+            "trace_id": trace_id,
+            "symbols": req.symbols,
+            "as_of_date": req.as_of_date.isoformat(),
+        },
     )
 
     context_packet = _build_context(req)
@@ -390,11 +438,17 @@ async def narrator_ask(req: NarratorAskRequest, request: Request) -> NarratorAsk
 
 
 @router.post("/explain-signal", response_model=NarratorExplainSignalResponse)
-async def narrator_explain_signal(req: NarratorExplainSignalRequest, request: Request) -> NarratorExplainSignalResponse:
+async def narrator_explain_signal(
+    req: NarratorExplainSignalRequest, request: Request
+) -> NarratorExplainSignalResponse:
     trace_id = _trace_id(request)
     logger.info(
         "narrator.explain_signal.start",
-        extra={"trace_id": trace_id, "symbol": req.symbol, "as_of_date": req.as_of_date.isoformat()},
+        extra={
+            "trace_id": trace_id,
+            "symbol": req.symbol,
+            "as_of_date": req.as_of_date.isoformat(),
+        },
     )
     return _render_explain_signal(req, trace_id)
 
@@ -409,17 +463,26 @@ async def narrator_explain_strategy_graph(
 
     logger.info(
         "narrator.explain_strategy_graph.start",
-        extra={"trace_id": trace_id, "symbol": req.symbol, "to_date": req.to_date.isoformat()},
+        extra={
+            "trace_id": trace_id,
+            "symbol": req.symbol,
+            "to_date": req.to_date.isoformat(),
+        },
     )
 
     graph = _build_transition_graph(req.symbol, req.lookback, req.to_date, req.days)
     if not graph:
-        raise HTTPException(status_code=404, detail={"message": "graph context not found", "trace_id": trace_id})
+        raise HTTPException(
+            status_code=404,
+            detail={"message": "graph context not found", "trace_id": trace_id},
+        )
 
     trimmed_graph = _trim_graph_for_prompt(graph)
     messages = prompts.build_strategy_graph_prompt(trimmed_graph, safe_mode=True)
     max_tokens = min(config.llm_max_tokens(), 500)
-    reply, model, _ = narrator_client.complete_chat(messages, trace_id=trace_id, max_tokens=max_tokens)
+    reply, model, _ = narrator_client.complete_chat(
+        messages, trace_id=trace_id, max_tokens=max_tokens
+    )
 
     metrics_tracker.record_narrator_call()
     return NarratorExplainStrategyResponse(
@@ -437,8 +500,14 @@ async def narrator_diagnose(request: Request) -> NarratorDiagnoseResponse:
     trace_id = _trace_id(request)
     checks: List[Dict[str, Any]] = []
 
-    auth_env = [name for name in ("FTIP_API_KEY", "FTIP_API_KEYS", "FTIP_API_KEY_PRIMARY") if os.getenv(name)]
-    openai_env = [name for name in ("OPENAI_API_KEY", "OpenAI_ftip-system") if os.getenv(name)]
+    auth_env = [
+        name
+        for name in ("FTIP_API_KEY", "FTIP_API_KEYS", "FTIP_API_KEY_PRIMARY")
+        if os.getenv(name)
+    ]
+    openai_env = [
+        name for name in ("OPENAI_API_KEY", "OpenAI_ftip-system") if os.getenv(name)
+    ]
 
     checks.append(
         _check(
@@ -453,7 +522,11 @@ async def narrator_diagnose(request: Request) -> NarratorDiagnoseResponse:
         _check(
             "database",
             db_ok,
-            {"enabled": db.db_enabled(), "read_enabled": db.db_read_enabled(), "write_enabled": db.db_write_enabled()},
+            {
+                "enabled": db.db_enabled(),
+                "read_enabled": db.db_read_enabled(),
+                "write_enabled": db.db_write_enabled(),
+            },
         )
     )
 
@@ -466,8 +539,12 @@ async def narrator_diagnose(request: Request) -> NarratorDiagnoseResponse:
     openai_ok = bool(config.openai_api_key())
     checks.append(_check("openai_api_key", openai_ok, {"env_vars": openai_env}))
 
-    overall_status = "ok" if all(item.get("status") == "pass" for item in checks) else "degraded"
-    return NarratorDiagnoseResponse(status=overall_status, checks=checks, trace_id=trace_id)
+    overall_status = (
+        "ok" if all(item.get("status") == "pass" for item in checks) else "degraded"
+    )
+    return NarratorDiagnoseResponse(
+        status=overall_status, checks=checks, trace_id=trace_id
+    )
 
 
 __all__ = ["router"]

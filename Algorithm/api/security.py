@@ -130,14 +130,30 @@ class RateLimiter:
         return True, None
 
 
-def json_error_response(err_type: str, message: str, trace_id: str, status_code: int) -> JSONResponse:
-    payload = {"error": {"type": err_type, "message": message, "trace_id": trace_id}, "trace_id": trace_id}
-    return JSONResponse(status_code=status_code, content=payload, headers={"X-Trace-Id": trace_id})
+def json_error_response(
+    err_type: str, message: str, trace_id: str, status_code: int
+) -> JSONResponse:
+    payload = {
+        "error": {"type": err_type, "message": message, "trace_id": trace_id},
+        "trace_id": trace_id,
+    }
+    return JSONResponse(
+        status_code=status_code, content=payload, headers={"X-Trace-Id": trace_id}
+    )
 
 
 def unauthorized_response(trace_id: str) -> JSONResponse:
-    payload = {"error": {"type": "http_error", "message": "unauthorized", "trace_id": trace_id}, "trace_id": trace_id}
-    return JSONResponse(status_code=401, content=payload, headers={"X-Trace-Id": trace_id})
+    payload = {
+        "error": {
+            "type": "http_error",
+            "message": "unauthorized",
+            "trace_id": trace_id,
+        },
+        "trace_id": trace_id,
+    }
+    return JSONResponse(
+        status_code=401, content=payload, headers={"X-Trace-Id": trace_id}
+    )
 
 
 def get_provided_api_key(request: Request) -> Optional[str]:
@@ -180,7 +196,9 @@ def require_prosperity_api_key(request: Request) -> Optional[str]:
     return validate_api_key(request)
 
 
-def require_api_key_if_needed(request: Request, trace_id: str) -> Optional[JSONResponse]:
+def require_api_key_if_needed(
+    request: Request, trace_id: str
+) -> Optional[JSONResponse]:
     path = request.url.path
     method = request.method.upper()
     public_docs = allow_public_docs()
@@ -209,7 +227,9 @@ def require_api_key_if_needed(request: Request, trace_id: str) -> Optional[JSONR
     return None
 
 
-def enforce_rate_limit(request: Request, limiter: RateLimiter, trace_id: str) -> Optional[JSONResponse]:
+def enforce_rate_limit(
+    request: Request, limiter: RateLimiter, trace_id: str
+) -> Optional[JSONResponse]:
     path = request.url.path
     if path in {"/health", "/version", "/db/health"}:
         return None
@@ -224,7 +244,14 @@ def enforce_rate_limit(request: Request, limiter: RateLimiter, trace_id: str) ->
 
     metrics_tracker.record_rate_limit_hit()
     headers = {"Retry-After": str(retry_after or 60), "X-Trace-Id": trace_id}
-    payload = {"error": {"type": "rate_limit", "message": "rate limit exceeded", "trace_id": trace_id}, "trace_id": trace_id}
+    payload = {
+        "error": {
+            "type": "rate_limit",
+            "message": "rate limit exceeded",
+            "trace_id": trace_id,
+        },
+        "trace_id": trace_id,
+    }
     return JSONResponse(status_code=429, content=payload, headers=headers)
 
 

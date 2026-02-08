@@ -7,7 +7,12 @@ from api.main import app
 
 
 def _clear_auth(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ["FTIP_API_KEY", "FTIP_API_KEYS", "FTIP_API_KEY_PRIMARY", "FTIP_ALLOW_QUERY_KEY"]:
+    for var in [
+        "FTIP_API_KEY",
+        "FTIP_API_KEYS",
+        "FTIP_API_KEY_PRIMARY",
+        "FTIP_ALLOW_QUERY_KEY",
+    ]:
         monkeypatch.delenv(var, raising=False)
     security.reset_auth_cache()
 
@@ -15,7 +20,9 @@ def _clear_auth(monkeypatch: pytest.MonkeyPatch) -> None:
 def _make_request(headers=None, query_string: str = "") -> Request:
     scope = {
         "type": "http",
-        "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+        "headers": [
+            (k.lower().encode(), v.encode()) for k, v in (headers or {}).items()
+        ],
         "query_string": query_string.encode(),
         "method": "GET",
         "path": "/prosperity/health",
@@ -74,7 +81,9 @@ def test_prosperity_routes_require_key_when_enabled(monkeypatch: pytest.MonkeyPa
         body = res.json()
         assert body["error"]["message"] == "unauthorized"
 
-        res_ok = client.get("/prosperity/health", headers={"X-FTIP-API-Key": "demo-key"})
+        res_ok = client.get(
+            "/prosperity/health", headers={"X-FTIP-API-Key": "demo-key"}
+        )
         assert res_ok.status_code == 200
         assert res_ok.json()["status"] == "ok"
 

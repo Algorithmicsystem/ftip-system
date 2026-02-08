@@ -31,7 +31,9 @@ def test_prosperity_signals_primary_key_includes_score_mode():
 
 
 def test_prosperity_signals_pk_migration_avoids_ambiguous_constraint_name():
-    sql_path = Path(migrations.__file__).with_name("019_fix_prosperity_signals_score_mode_pk.sql")
+    sql_path = Path(migrations.__file__).with_name(
+        "019_fix_prosperity_signals_score_mode_pk.sql"
+    )
     sql = sql_path.read_text()
 
     assert "v_existing_pk" in sql

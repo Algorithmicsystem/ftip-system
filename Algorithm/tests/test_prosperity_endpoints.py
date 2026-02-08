@@ -23,7 +23,13 @@ def _weekday_bars(end_date: dt.date, count: int) -> List[Dict[str, float]]:
     close_price = 100.0
     while len(bars) < count:
         if day.weekday() < 5:
-            bars.append({"date": day.isoformat(), "close": close_price, "volume": 1_000 + len(bars)})
+            bars.append(
+                {
+                    "date": day.isoformat(),
+                    "close": close_price,
+                    "volume": 1_000 + len(bars),
+                }
+            )
             close_price += 1.0
         day -= dt.timedelta(days=1)
     return list(reversed(bars))
@@ -45,11 +51,15 @@ def test_prosperity_health(client: TestClient):
     assert body["status"] == "ok"
 
 
-def test_latest_signal_missing_returns_404(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+def test_latest_signal_missing_returns_404(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
     _enable_db_flags(monkeypatch)
     monkeypatch.setattr(query, "latest_signal", lambda symbol, lookback: None)
 
-    res = client.get("/prosperity/latest/signal", params={"symbol": "ZZZ_MISSING", "lookback": 5})
+    res = client.get(
+        "/prosperity/latest/signal", params={"symbol": "ZZZ_MISSING", "lookback": 5}
+    )
     assert res.status_code == 404
     body = res.json()
     assert "trace_id" in body
@@ -87,7 +97,15 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
         ),
     )
 
-    def fake_persist(symbol: str, as_of_date: dt.date, lookback: int, feats, feature_meta, signal_payload, **_kwargs):
+    def fake_persist(
+        symbol: str,
+        as_of_date: dt.date,
+        lookback: int,
+        feats,
+        feature_meta,
+        signal_payload,
+        **_kwargs,
+    ):
         meta = {"regime": "TEST"}
         features_store[symbol] = {
             "symbol": symbol,
@@ -110,11 +128,17 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
         }
         return {"features": 1, "signals": 1, "strategies": 0, "ensembles": 0}
 
-    monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {"inserted": 1, "updated": 0})
+    monkeypatch.setattr(
+        ingest, "ingest_bars", lambda *args, **kwargs: {"inserted": 1, "updated": 0}
+    )
     monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
     monkeypatch.setattr("api.prosperity.routes._persist_symbol_outputs", fake_persist)
-    monkeypatch.setattr("api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None)
-    monkeypatch.setattr(query, "latest_features", lambda sym, lb: features_store.get(sym))
+    monkeypatch.setattr(
+        "api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        query, "latest_features", lambda sym, lb: features_store.get(sym)
+    )
     monkeypatch.setattr(query, "latest_signal", lambda sym, lb: signals_store.get(sym))
 
     payload = {
@@ -134,22 +158,32 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     assert body["requested"]["concurrency"] == 5  # clamped
     assert body["trace_id"]
 
-    sig_res = client.get("/prosperity/latest/signal", params={"symbol": "AAPL", "lookback": 5})
+    sig_res = client.get(
+        "/prosperity/latest/signal", params={"symbol": "AAPL", "lookback": 5}
+    )
     assert sig_res.status_code == 200
     assert sig_res.json()["signal"] == "BUY"
 
-    feat_res = client.get("/prosperity/latest/features", params={"symbol": "AAPL", "lookback": 5})
+    feat_res = client.get(
+        "/prosperity/latest/features", params={"symbol": "AAPL", "lookback": 5}
+    )
     assert feat_res.status_code == 200
     assert feat_res.json()["meta"]["regime"] == "TEST"
 
 
-def test_snapshot_run_with_insufficient_bars(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+def test_snapshot_run_with_insufficient_bars(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
     _enable_db_flags(monkeypatch)
 
     monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
     monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {})
-    monkeypatch.setattr("api.prosperity.routes._persist_symbol_outputs", lambda *args, **kwargs: {})
-    monkeypatch.setattr("api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "api.prosperity.routes._persist_symbol_outputs", lambda *args, **kwargs: {}
+    )
+    monkeypatch.setattr(
+        "api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(
         query,
         "fetch_bars",
@@ -177,12 +211,18 @@ def test_snapshot_run_with_insufficient_bars(monkeypatch: pytest.MonkeyPatch, cl
     assert "window=" in failure["reason_detail"]
 
 
-def test_snapshot_run_uses_latest_trading_day(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+def test_snapshot_run_uses_latest_trading_day(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
     _enable_db_flags(monkeypatch)
 
     monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
-    monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {"inserted": 1, "updated": 0})
-    monkeypatch.setattr("api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        ingest, "ingest_bars", lambda *args, **kwargs: {"inserted": 1, "updated": 0}
+    )
+    monkeypatch.setattr(
+        "api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None
+    )
 
     friday = dt.date(2024, 1, 5)
     sunday = dt.date(2024, 1, 7)
@@ -232,13 +272,19 @@ def test_snapshot_run_uses_latest_trading_day(monkeypatch: pytest.MonkeyPatch, c
     assert captured_as_of["AAPL"] == friday
 
 
-def test_latest_endpoints_return_404(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+def test_latest_endpoints_return_404(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
     _enable_db_flags(monkeypatch)
     monkeypatch.setattr(query, "latest_signal", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(query, "latest_features", lambda *_args, **_kwargs: None)
 
-    sig_res = client.get("/prosperity/latest/signal", params={"symbol": "MSFT", "lookback": 10})
-    feat_res = client.get("/prosperity/latest/features", params={"symbol": "MSFT", "lookback": 10})
+    sig_res = client.get(
+        "/prosperity/latest/signal", params={"symbol": "MSFT", "lookback": 10}
+    )
+    feat_res = client.get(
+        "/prosperity/latest/features", params={"symbol": "MSFT", "lookback": 10}
+    )
 
     assert sig_res.status_code == 404
     assert feat_res.status_code == 404
@@ -266,7 +312,10 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
     db.safe_execute("DELETE FROM prosperity_features_daily WHERE symbol=%s", (symbol,))
 
     def _fake_bars(sym: str, from_date: dt.date, to_date: dt.date, **_kwargs):
-        for day in [from_date + dt.timedelta(days=i) for i in range((to_date - from_date).days + 1)]:
+        for day in [
+            from_date + dt.timedelta(days=i)
+            for i in range((to_date - from_date).days + 1)
+        ]:
             db.safe_execute(
                 """
                 INSERT INTO prosperity_daily_bars(symbol, date, close, volume, source)
@@ -286,29 +335,40 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
             """,
             (sym, as_of_date, lookback_val, "{}", "{}"),
         )
-        return {"symbol": sym, "as_of": as_of_date.isoformat(), "lookback": lookback_val, "features": {}, "regime": None, "stored": True, "meta": {}}
+        return {
+            "symbol": sym,
+            "as_of": as_of_date.isoformat(),
+            "lookback": lookback_val,
+            "features": {},
+            "regime": None,
+            "stored": True,
+            "meta": {},
+        }
 
     def _fake_signal(sym: str, as_of_date: dt.date, lookback_val: int):
         return ingest.compute_and_store_signal(sym, as_of_date, lookback_val)
 
     monkeypatch.setattr(ingest, "ingest_bars", _fake_bars)
     monkeypatch.setattr(ingest, "compute_and_store_features", _fake_features)
-    monkeypatch.setattr("api.main.compute_signal_for_symbol_from_candles", lambda *args, **kwargs: SignalResponse(
-        symbol=kwargs.get("symbol") or args[0],
-        as_of=kwargs.get("as_of") or args[1],
-        lookback=kwargs.get("lookback_val") or args[2],
-        effective_lookback=lookback,
-        regime="TRENDING",
-        thresholds={"buy": 1.0, "sell": -1.0},
-        score=0.4,
-        base_score=0.4,
-        stacked_score=0.4,
-        signal="BUY",
-        confidence=0.6,
-        features={"foo": 1.0},
-        notes=["Score mode: STACKED"],
-        calibration_meta={"score_mode": "stacked", "base_score": 0.4},
-    ))
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles",
+        lambda *args, **kwargs: SignalResponse(
+            symbol=kwargs.get("symbol") or args[0],
+            as_of=kwargs.get("as_of") or args[1],
+            lookback=kwargs.get("lookback_val") or args[2],
+            effective_lookback=lookback,
+            regime="TRENDING",
+            thresholds={"buy": 1.0, "sell": -1.0},
+            score=0.4,
+            base_score=0.4,
+            stacked_score=0.4,
+            signal="BUY",
+            confidence=0.6,
+            features={"foo": 1.0},
+            notes=["Score mode: STACKED"],
+            calibration_meta={"score_mode": "stacked", "base_score": 0.4},
+        ),
+    )
 
     with TestClient(app) as client:
         res = client.post(
@@ -324,6 +384,8 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
         assert res.status_code == 200
-        sig_res = client.get("/prosperity/latest/signal", params={"symbol": symbol, "lookback": lookback})
+        sig_res = client.get(
+            "/prosperity/latest/signal", params={"symbol": symbol, "lookback": lookback}
+        )
         assert sig_res.status_code == 200
         assert sig_res.json().get("score_mode") == "stacked"

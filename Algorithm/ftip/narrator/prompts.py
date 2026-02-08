@@ -34,10 +34,14 @@ def build_context_packet(
     }
 
 
-def build_ask_prompt(question: str, context: Dict[str, Any], *, safe_mode: bool = True) -> List[Dict[str, str]]:
+def build_ask_prompt(
+    question: str, context: Dict[str, Any], *, safe_mode: bool = True
+) -> List[Dict[str, str]]:
     system_lines = [SYSTEM_PERSONA]
     if safe_mode:
-        system_lines.append("Always remind the user this is informational only and avoid promises of returns.")
+        system_lines.append(
+            "Always remind the user this is informational only and avoid promises of returns."
+        )
     system_prompt = " ".join(system_lines)
 
     user_content = (
@@ -51,7 +55,9 @@ def build_ask_prompt(question: str, context: Dict[str, Any], *, safe_mode: bool 
     ]
 
 
-def build_explain_prompt(context: Dict[str, Any], *, safe_mode: bool = True) -> List[Dict[str, str]]:
+def build_explain_prompt(
+    context: Dict[str, Any], *, safe_mode: bool = True
+) -> List[Dict[str, str]]:
     system_lines = [SYSTEM_PERSONA]
     if safe_mode:
         system_lines.append(
@@ -70,14 +76,18 @@ def build_explain_prompt(context: Dict[str, Any], *, safe_mode: bool = True) -> 
     ]
 
 
-def build_strategy_graph_prompt(graph: Dict[str, Any], *, safe_mode: bool = True) -> List[Dict[str, str]]:
+def build_strategy_graph_prompt(
+    graph: Dict[str, Any], *, safe_mode: bool = True
+) -> List[Dict[str, str]]:
     system_lines = [
         "You are the FTIP analyst narrator.",
         "Explain the strategy graph transitions, highlight signal persistence, and summarize notable regime shifts.",
         "Ground the explanation strictly in the provided graph statistics.",
     ]
     if safe_mode:
-        system_lines.append("Keep it concise (6-10 sentences) and remind that this is informational only.")
+        system_lines.append(
+            "Keep it concise (6-10 sentences) and remind that this is informational only."
+        )
     system_prompt = " ".join(system_lines)
 
     serialized = _safe_json(graph)
@@ -97,7 +107,9 @@ def build_strategy_graph_prompt(graph: Dict[str, Any], *, safe_mode: bool = True
 
 
 def summarize_context_used(context: Dict[str, Any]) -> Dict[str, Any]:
-    symbols = [item.get("symbol") for item in context.get("symbols", []) if item.get("symbol")]
+    symbols = [
+        item.get("symbol") for item in context.get("symbols", []) if item.get("symbol")
+    ]
     strategy_graph = context.get("strategy_graph") or {}
     return {
         "symbols": symbols,

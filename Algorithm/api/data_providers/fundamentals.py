@@ -27,7 +27,11 @@ def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
     results: List[Dict[str, object]] = []
     for col in financials.columns:
         try:
-            fiscal_end = col.date() if hasattr(col, "date") else dt.date.fromisoformat(str(col)[:10])
+            fiscal_end = (
+                col.date()
+                if hasattr(col, "date")
+                else dt.date.fromisoformat(str(col)[:10])
+            )
         except Exception:
             continue
         revenue = financials.get("Total Revenue", {}).get(col)
@@ -40,12 +44,14 @@ def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
                 "report_date": fiscal_end,
                 "revenue": float(revenue) if revenue is not None else None,
                 "eps": None,
-                "gross_margin": float(gross_profit) / float(revenue)
-                if revenue and gross_profit
-                else None,
-                "op_margin": float(op_income) / float(revenue)
-                if revenue and op_income
-                else None,
+                "gross_margin": (
+                    float(gross_profit) / float(revenue)
+                    if revenue and gross_profit
+                    else None
+                ),
+                "op_margin": (
+                    float(op_income) / float(revenue) if revenue and op_income else None
+                ),
                 "fcf": None,
                 "source": "yfinance",
             }
