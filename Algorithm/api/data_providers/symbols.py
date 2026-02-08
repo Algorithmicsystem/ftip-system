@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict
+from typing import Dict, Optional
 
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
@@ -21,7 +21,7 @@ def normalize_symbol(symbol: str) -> str:
     return canonical_symbol(symbol)
 
 
-def detect_country_exchange(symbol: str) -> Dict[str, str | None]:
+def detect_country_exchange(symbol: str) -> Dict[str, Optional[str]]:
     cleaned = canonical_symbol(symbol)
     if cleaned.endswith(".TO"):
         return {"country": "CA", "exchange": "TSX", "currency": "CAD"}

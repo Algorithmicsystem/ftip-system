@@ -4,7 +4,7 @@ import datetime as dt
 import logging
 import socket
 import uuid
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -389,7 +389,7 @@ async def _run_daily_snapshot(
     lookback_days: int,
     symbols: List[str],
     concurrency: int,
-) -> JSONResponse | Dict[str, object]:
+) -> Union[JSONResponse, Dict[str, object]]:
     _require_db_enabled(write=True, read=True)
 
     run_id = str(uuid.uuid4())
@@ -638,7 +638,9 @@ async def prosperity_daily_snapshot_summary():
     }
 
 
-def _coverage_response(*, as_of_date: dt.date | None = None, run_id: str | None = None):
+def _coverage_response(
+    *, as_of_date: Optional[dt.date] = None, run_id: Optional[str] = None
+):
     filters = ["job_name=%s"]
     params: List[object] = [JOB_NAME]
     if as_of_date:

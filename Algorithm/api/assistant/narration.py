@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
@@ -79,7 +79,10 @@ def _parse_json(raw: str) -> Dict[str, Any]:
 
 
 def narrate_payload(
-    payload: Dict[str, Any], user_message: str, *, trace_id: str | None = None
+    payload: Dict[str, Any],
+    user_message: str,
+    *,
+    trace_id: Optional[str] = None,
 ) -> NarrationPayload:
     messages = _build_prompt(payload, user_message)
     reply, _model, _usage = narrator_client.complete_chat(
