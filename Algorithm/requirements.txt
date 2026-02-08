@@ -15,5 +15,3 @@ itsdangerous>=2.1.2
 requests>=2.32.0
 psycopg[binary,pool]==3.2.9
 yfinance>=0.2.38
-
-psycopg[binary,pool]==3.2.9
