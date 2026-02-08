@@ -9,7 +9,7 @@ make migrate
 uvicorn api.main:app --reload --port 8000
 ```
 
-The API will be available at `http://localhost:8000` (try `/health`). If your Docker CLI supports the v2 plugin, `docker compose up -d db` works as well. Prefer `make dev` to automate startup on a clean checkout.
+The API will be available at `http://localhost:8000` (try `/health`). Prefer `make dev` to automate startup on a clean checkout.
 
 ### Make targets (recommended)
 
@@ -18,6 +18,7 @@ make dev       # start Postgres, run migrations, launch API
 make db-reset  # drop/recreate schema and re-run migrations
 make migrate   # run migrations only
 make db-check  # verify database connectivity
+make db-down   # stop Postgres and remove volumes
 make test      # pytest -q
 ```
 
@@ -36,7 +37,7 @@ If you are running against a local Postgres instance, use the reset helper:
 ```bash
 export FTIP_DB_ENABLED=1
 export FTIP_MIGRATIONS_AUTO=1
-export DATABASE_URL=postgresql://ftip:ftip@localhost:5432/ftip
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ftip
 python tools/reset_db.py
 ```
 
@@ -86,7 +87,7 @@ Set the environment for database access (for local testing you can point `DATABA
 
 ```bash
 export FTIP_DB_ENABLED=1
-export DATABASE_URL=postgresql://user:pass@host:5432/ftip
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ftip
 ```
 
 Then run a few smoke checks against a running server (default port 8000):
