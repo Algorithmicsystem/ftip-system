@@ -120,7 +120,7 @@ def set_statement_timeout(cur: Any, timeout_ms: int, *, local: bool = True) -> i
 # ---------------------------------------------------------------------------
 
 
-def safe_execute(sql: str, params: Sequence[Any] | None = None) -> None:
+def safe_execute(sql: str, params: Optional[Sequence[Any]] = None) -> None:
     try:
         with with_connection() as (conn, cur):
             cur.execute(sql, params or ())
@@ -131,7 +131,9 @@ def safe_execute(sql: str, params: Sequence[Any] | None = None) -> None:
         raise DBError(f"database error during execute: {exc}") from exc
 
 
-def safe_fetchall(sql: str, params: Sequence[Any] | None = None) -> List[Sequence[Any]]:
+def safe_fetchall(
+    sql: str, params: Optional[Sequence[Any]] = None
+) -> List[Sequence[Any]]:
     try:
         with with_connection() as (_conn, cur):
             cur.execute(sql, params or ())
@@ -143,7 +145,7 @@ def safe_fetchall(sql: str, params: Sequence[Any] | None = None) -> List[Sequenc
 
 
 def safe_fetchone(
-    sql: str, params: Sequence[Any] | None = None
+    sql: str, params: Optional[Sequence[Any]] = None
 ) -> Optional[Sequence[Any]]:
     try:
         with with_connection() as (_conn, cur):
@@ -160,7 +162,7 @@ def safe_fetchone(
 # ---------------------------------------------------------------------------
 
 
-def exec1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
+def exec1(sql: str, params: Optional[Sequence[Any]] = None) -> Optional[Sequence[Any]]:
     try:
         with with_connection() as (conn, cur):
             cur.execute(sql, params or ())
@@ -177,11 +179,13 @@ def exec1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[An
         raise DBError(f"database error during exec1: {exc}") from exc
 
 
-def fetch1(sql: str, params: Sequence[Any] | None = None) -> Optional[Sequence[Any]]:
+def fetch1(sql: str, params: Optional[Sequence[Any]] = None) -> Optional[Sequence[Any]]:
     return safe_fetchone(sql, params)
 
 
-def fetchall(sql: str, params: Sequence[Any] | None = None) -> Iterable[Sequence[Any]]:
+def fetchall(
+    sql: str, params: Optional[Sequence[Any]] = None
+) -> Iterable[Sequence[Any]]:
     return safe_fetchall(sql, params)
 
 
