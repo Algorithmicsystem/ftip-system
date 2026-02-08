@@ -268,7 +268,9 @@ def fetch_top_picks(limit: int) -> Tuple[Optional[dt.date], List[Dict[str, Any]]
         direction = (
             "long"
             if (row[1] or "").upper() == "BUY"
-            else "short" if (row[1] or "").upper() == "SELL" else "hold"
+            else "short"
+            if (row[1] or "").upper() == "SELL"
+            else "hold"
         )
         picks.append(
             {

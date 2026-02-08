@@ -53,7 +53,7 @@ class StructuralAlphaKernel:
         return pd.DataFrame(
             scores,
             index=features.index,
-            columns=[f"factor_{i+1}" for i in range(scores.shape[1])],
+            columns=[f"factor_{i + 1}" for i in range(scores.shape[1])],
         )
 
     def detect_anomalies(self, features: pd.DataFrame) -> pd.Series:

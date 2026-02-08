@@ -1,13 +1,13 @@
 import datetime as dt
 
-from typing import Any
+from typing import Any, Optional
 
 import api.db as db
 from api.prosperity import ingest
 
 
 class DummyCandle:
-    def __init__(self, timestamp: str, close: float, volume: float | None = None):
+    def __init__(self, timestamp: str, close: float, volume: Optional[float] = None):
         self.timestamp = timestamp
         self.close = close
         self.volume = volume
