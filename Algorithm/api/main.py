@@ -1972,7 +1972,27 @@ def db_health() -> Dict[str, Any]:
 
     try:
         row = db.fetch1("SELECT 1")
-        return {"status": "ok", "db_enabled": True, "select_1": row[0] if row else None}
+        schema_info: Dict[str, Any] = {"schema_migrations": None, "latest_migration": None}
+        try:
+            table_row = db.fetch1("SELECT to_regclass('public.schema_migrations')")
+            if table_row and table_row[0]:
+                versions = [r[0] for r in db.fetchall("SELECT version FROM schema_migrations ORDER BY applied_at ASC")]
+                latest = db.fetch1(
+                    "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1"
+                )
+                schema_info = {
+                    "schema_migrations": versions,
+                    "latest_migration": latest[0] if latest else None,
+                }
+        except Exception as exc:
+            schema_info = {"schema_migrations_error": f"{type(exc).__name__}: {exc}"}
+
+        return {
+            "status": "ok",
+            "db_enabled": True,
+            "select_1": row[0] if row else None,
+            **schema_info,
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"db_health failed: {type(e).__name__}: {e}")
 
