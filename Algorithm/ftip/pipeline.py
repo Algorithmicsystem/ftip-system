@@ -34,8 +34,10 @@ class FatTailPipeline:
 
         scores["composite"] = scores["alpha_score"] + scores["risk_score"]
         scores["rank"] = scores["composite"].rank(ascending=False)
-        n = len(scores)
-        scores["weight"] = (n - scores["rank"] + 1) / (n * (n + 1) / 2)
+        num_scores = len(scores)
+        scores["weight"] = (num_scores - scores["rank"] + 1) / (
+            num_scores * (num_scores + 1) / 2
+        )
 
         return scores
 
