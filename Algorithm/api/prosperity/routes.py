@@ -558,6 +558,10 @@ def _classify_error(exc: Exception) -> Tuple[str, str, bool]:
     return "UNEXPECTED_ERROR", str(exc), False
 
 
+def _is_data_unavailable(reason_code: str) -> bool:
+    return reason_code in {"NO_DATA", "INSUFFICIENT_BARS"}
+
+
 def _retry_sleep(attempt: int) -> None:
     base_sleep = 1.0
     jitter = random.uniform(0.0, 0.5)
@@ -711,16 +715,6 @@ async def snapshot_run(
                     _retry_sleep(attempts)
                     continue
 
-                symbols_failed.append(
-                    {
-                        "symbol": sym,
-                        "reason": reason_detail or reason_code,
-                        "reason_code": reason_code,
-                        "reason_detail": reason_detail or reason_code,
-                        "attempts": attempts,
-                        "retryable": bool(retryable),
-                    }
-                )
                 if isinstance(exc, SymbolFailure):
                     bars_required = exc.bars_required or bars_required
                     bars_returned = (
@@ -728,6 +722,27 @@ async def snapshot_run(
                         if exc.bars_returned is not None
                         else bars_returned
                     )
+                symbols_failed.append(
+                    {
+                        "symbol": sym,
+                        "status": (
+                            "data_unavailable"
+                            if _is_data_unavailable(reason_code)
+                            else "failed"
+                        ),
+                        "reason": reason_detail or reason_code,
+                        "reason_code": reason_code,
+                        "reason_detail": reason_detail or reason_code,
+                        "attempts": attempts,
+                        "retryable": bool(retryable),
+                        "required_bars": bars_required,
+                        "available_bars": bars_returned,
+                        "lookback_days": req.lookback,
+                        # Backwards-compatible aliases.
+                        "bars_required": bars_required,
+                        "bars_returned": bars_returned,
+                    }
+                )
                 _log_symbol_coverage(
                     run_id,
                     job_name,

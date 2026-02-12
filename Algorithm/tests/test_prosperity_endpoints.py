@@ -1,6 +1,6 @@
 import datetime as dt
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import pytest
 from fastapi.testclient import TestClient
@@ -206,8 +206,15 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     assert feat_res.json()["meta"]["regime"] == "TEST"
 
 
+@pytest.mark.parametrize(
+    "bars",
+    [
+        [],
+        [{"date": "2024-01-02", "close": 100.0, "volume": 1_000}],
+    ],
+)
 def test_snapshot_run_with_insufficient_bars(
-    monkeypatch: pytest.MonkeyPatch, client: TestClient
+    monkeypatch: pytest.MonkeyPatch, client: TestClient, bars: List[Dict[str, Any]]
 ):
     _enable_db_flags(monkeypatch)
 
@@ -219,13 +226,7 @@ def test_snapshot_run_with_insufficient_bars(
     monkeypatch.setattr(
         "api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(
-        query,
-        "fetch_bars",
-        lambda *args, **kwargs: [
-            {"date": "2024-01-02", "close": 100.0, "volume": 1_000},
-        ],
-    )
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
 
     payload = {
         "symbols": ["SHORT"],
@@ -240,10 +241,13 @@ def test_snapshot_run_with_insufficient_bars(
     body = res.json()
     assert body["status"] == "partial"
     failure = body["result"]["symbols_failed"][0]
-    assert failure["reason_code"] == "INSUFFICIENT_BARS"
-    assert "required=252" in failure["reason_detail"]
-    assert "returned=1" in failure["reason_detail"]
-    assert "window=" in failure["reason_detail"]
+    assert failure["status"] == "data_unavailable"
+    assert failure["reason_code"] in {"INSUFFICIENT_BARS", "NO_DATA"}
+    assert failure["required_bars"] == 252
+    assert failure["available_bars"] == len(bars)
+    assert failure["lookback_days"] == 5
+    assert failure["bars_required"] == 252
+    assert failure["bars_returned"] == len(bars)
 
 
 def test_snapshot_run_uses_latest_trading_day(
