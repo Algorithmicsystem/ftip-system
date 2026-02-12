@@ -30,6 +30,7 @@ from api.prosperity.models import (
     SnapshotRunRequest,
     UniverseUpsertRequest,
 )
+from ftip.risk import correlation_guard_stub, volatility_targeting
 
 router = APIRouter(dependencies=[Depends(security.require_prosperity_api_key)])
 logger = logging.getLogger(__name__)
@@ -676,6 +677,14 @@ async def backtest(req: ProsperityBacktestRequest):
 
     symbols = _normalize_symbols(req.symbols)
     response_symbols: Dict[str, Any] = {}
+    symbol_payloads: Dict[str, Dict[str, Any]] = {}
+
+    max_weight = float(config.env("FTIP_PROSPERITY_BACKTEST_MAX_WEIGHT", "1.0") or 1.0)
+    max_weight = min(max(max_weight, 0.0), 1.0)
+    target_vol = float(
+        config.env("FTIP_PROSPERITY_BACKTEST_TARGET_VOL", "0.20") or 0.20
+    )
+    target_vol = max(target_vol, 1e-6)
 
     for symbol in symbols:
         bars = _resolve_backtest_bars(
@@ -699,9 +708,51 @@ async def backtest(req: ProsperityBacktestRequest):
                     "sharpe": None,
                     "max_drawdown": None,
                     "turnover": None,
+                    "final_weight": 0.0,
                 },
             }
             continue
+        symbol_payloads[symbol] = {"bars": bars, "in_window": in_window}
+
+    final_weights: Dict[str, float] = {}
+    if symbol_payloads:
+        base_weights = {symbol: 1.0 for symbol in symbol_payloads.keys()}
+        vol_estimates: Dict[str, float] = {}
+        for symbol, payload in symbol_payloads.items():
+            in_window = payload["in_window"]
+            returns: List[float] = []
+            for idx in range(1, len(in_window)):
+                close_prev = float(in_window[idx - 1]["close"])
+                close_cur = float(in_window[idx]["close"])
+                if close_prev == 0.0:
+                    continue
+                returns.append((close_cur / close_prev) - 1.0)
+
+            if len(returns) > 1:
+                mean_r = sum(returns) / float(len(returns))
+                var_r = sum((r - mean_r) ** 2 for r in returns) / float(
+                    len(returns) - 1
+                )
+                vol_estimates[symbol] = max(math.sqrt(var_r) * math.sqrt(252.0), 1e-8)
+            else:
+                vol_estimates[symbol] = target_vol
+
+        final_weights = volatility_targeting(
+            weights=base_weights,
+            vol_estimates=vol_estimates,
+            target_vol=target_vol,
+            max_weight=max_weight,
+        )
+        final_weights = correlation_guard_stub(final_weights)
+
+    for symbol in symbols:
+        if symbol not in symbol_payloads:
+            continue
+
+        payload = symbol_payloads[symbol]
+        bars = payload["bars"]
+        in_window = payload["in_window"]
+        symbol_weight = float(final_weights.get(symbol, 0.0))
 
         candles_all = _candles_from_bars(bars)
         position = 0
@@ -737,7 +788,9 @@ async def backtest(req: ProsperityBacktestRequest):
                 trades += 1
                 turnover += trade_delta
 
-            ret = ((close_cur / close_prev) - 1.0) * float(prev_position)
+            ret = (
+                ((close_cur / close_prev) - 1.0) * float(prev_position) * symbol_weight
+            )
             cost = trade_delta * (float(req.costs_bps) / 10000.0)
             net_ret = ret - cost
             strategy_returns.append(net_ret)
@@ -757,6 +810,7 @@ async def backtest(req: ProsperityBacktestRequest):
                 "sharpe": _annualized_sharpe(strategy_returns),
                 "max_drawdown": _max_drawdown_from_equity(equity),
                 "turnover": float(turnover / periods),
+                "final_weight": symbol_weight,
             },
         }
 
@@ -766,6 +820,7 @@ async def backtest(req: ProsperityBacktestRequest):
         "end_date": req.end_date.isoformat(),
         "lookback_days": int(req.lookback_days),
         "costs_bps": float(req.costs_bps),
+        "final_weights": final_weights,
         "symbols": response_symbols,
     }
 
