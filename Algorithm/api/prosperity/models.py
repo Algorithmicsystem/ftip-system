@@ -85,3 +85,11 @@ class SnapshotResult(BaseModel):
     features: Dict[str, Any]
     signals: Dict[str, Any]
     timings: Dict[str, float]
+
+
+class ProsperityBacktestRequest(BaseModel):
+    symbols: List[str]
+    start_date: date
+    end_date: date
+    lookback_days: int = Field(63, ge=5, le=5000)
+    costs_bps: float = Field(5.0, ge=0.0)

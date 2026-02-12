@@ -4,6 +4,7 @@ import datetime as dt
 import hashlib
 import json
 import logging
+import math
 import random
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -24,6 +25,7 @@ from api.prosperity.models import (
     CoverageResponse,
     FeaturesComputeRequest,
     HealthResponse,
+    ProsperityBacktestRequest,
     SignalsComputeRequest,
     SnapshotRunRequest,
     UniverseUpsertRequest,
@@ -599,6 +601,173 @@ def _dataset_fingerprint(symbol_snapshots: List[Dict[str, Any]]) -> str:
         )
     aggregated = sorted(per_symbol, key=lambda row: row["symbol"])
     return _hash_json([row["hash"] for row in aggregated])
+
+
+def _sample_bars(
+    symbol: str, from_date: dt.date, to_date: dt.date
+) -> List[Dict[str, Any]]:
+    bars: List[Dict[str, Any]] = []
+    day = from_date
+    base = 100.0 + float(sum(ord(ch) for ch in symbol) % 17)
+    idx = 0
+    while day <= to_date:
+        if day.weekday() < 5:
+            close = base + (0.15 * idx) + (0.75 if idx % 9 == 0 else 0.0)
+            bars.append(
+                {
+                    "date": day.isoformat(),
+                    "open": close - 0.25,
+                    "high": close + 0.40,
+                    "low": close - 0.40,
+                    "close": close,
+                    "adj_close": close,
+                    "volume": 1_000_000 + (idx * 100),
+                    "source": "in_memory",
+                }
+            )
+            idx += 1
+        day += dt.timedelta(days=1)
+    return bars
+
+
+def _resolve_backtest_bars(
+    symbol: str,
+    start_date: dt.date,
+    end_date: dt.date,
+    lookback_days: int,
+) -> List[Dict[str, Any]]:
+    from_date = start_date - dt.timedelta(days=max(lookback_days * 2, 30))
+    if db.db_enabled() and db.db_read_enabled():
+        return query.fetch_bars(symbol, from_date, end_date)
+    return _sample_bars(symbol, from_date, end_date)
+
+
+def _max_drawdown_from_equity(equity: List[float]) -> float:
+    if not equity:
+        return 0.0
+    peak = equity[0]
+    mdd = 0.0
+    for value in equity:
+        if value > peak:
+            peak = value
+        dd = (peak - value) / peak if peak else 0.0
+        if dd > mdd:
+            mdd = dd
+    return float(mdd)
+
+
+def _annualized_sharpe(returns: List[float]) -> float:
+    if len(returns) < 2:
+        return 0.0
+    mean_r = sum(returns) / float(len(returns))
+    var_r = sum((r - mean_r) ** 2 for r in returns) / float(max(1, len(returns) - 1))
+    std_r = math.sqrt(var_r)
+    if std_r == 0.0:
+        return 0.0
+    return float((mean_r / std_r) * math.sqrt(252.0))
+
+
+@router.post("/backtest")
+async def backtest(req: ProsperityBacktestRequest):
+    if req.start_date > req.end_date:
+        raise HTTPException(
+            status_code=400, detail="start_date must be on/before end_date"
+        )
+
+    symbols = _normalize_symbols(req.symbols)
+    response_symbols: Dict[str, Any] = {}
+
+    for symbol in symbols:
+        bars = _resolve_backtest_bars(
+            symbol, req.start_date, req.end_date, req.lookback_days
+        )
+        in_window = [
+            bar
+            for bar in bars
+            if req.start_date
+            <= dt.date.fromisoformat(str(bar.get("date")))
+            <= req.end_date
+        ]
+        required = max(30, int(req.lookback_days))
+        if len(in_window) < required:
+            response_symbols[symbol] = {
+                "status": "data_unavailable",
+                "metrics": {
+                    "bars": len(in_window),
+                    "trades": 0,
+                    "cagr": None,
+                    "sharpe": None,
+                    "max_drawdown": None,
+                    "turnover": None,
+                },
+            }
+            continue
+
+        candles_all = _candles_from_bars(bars)
+        position = 0
+        prev_position = 0
+        trades = 0
+        turnover = 0.0
+        equity = [1.0]
+        strategy_returns: List[float] = []
+
+        for idx in range(1, len(in_window)):
+            bar_date = dt.date.fromisoformat(str(in_window[idx]["date"]))
+            close_prev = float(in_window[idx - 1]["close"])
+            close_cur = float(in_window[idx]["close"])
+            if close_prev == 0.0:
+                continue
+
+            signal_payload = _compute_signal_payload(
+                symbol=symbol,
+                as_of_date=bar_date,
+                lookback=req.lookback_days,
+                candles_all=candles_all,
+            )
+            signal = str(signal_payload["signal_dict"].get("signal") or "HOLD").upper()
+            if signal == "BUY":
+                position = 1
+            elif signal == "SELL":
+                position = -1
+            else:
+                position = 0
+
+            trade_delta = abs(position - prev_position)
+            if trade_delta > 0:
+                trades += 1
+                turnover += trade_delta
+
+            ret = ((close_cur / close_prev) - 1.0) * float(prev_position)
+            cost = trade_delta * (float(req.costs_bps) / 10000.0)
+            net_ret = ret - cost
+            strategy_returns.append(net_ret)
+            equity.append(equity[-1] * (1.0 + net_ret))
+            prev_position = position
+
+        periods = max(1, len(strategy_returns))
+        years = periods / 252.0
+        final_equity = equity[-1] if equity else 1.0
+        cagr = float(final_equity ** (1.0 / years) - 1.0) if years > 0 else 0.0
+        response_symbols[symbol] = {
+            "status": "ok",
+            "metrics": {
+                "bars": len(in_window),
+                "trades": trades,
+                "cagr": cagr,
+                "sharpe": _annualized_sharpe(strategy_returns),
+                "max_drawdown": _max_drawdown_from_equity(equity),
+                "turnover": float(turnover / periods),
+            },
+        }
+
+    return {
+        "status": "ok",
+        "start_date": req.start_date.isoformat(),
+        "end_date": req.end_date.isoformat(),
+        "lookback_days": int(req.lookback_days),
+        "costs_bps": float(req.costs_bps),
+        "symbols": response_symbols,
+    }
 
 
 @router.post("/snapshot/run")
