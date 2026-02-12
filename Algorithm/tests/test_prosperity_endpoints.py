@@ -544,3 +544,49 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
         )
         assert sig_res.status_code == 200
         assert sig_res.json().get("score_mode") == "stacked"
+
+
+def test_prosperity_backtest_uses_in_memory_bars(client: TestClient):
+    payload = {
+        "symbols": ["AAPL", "MSFT"],
+        "start_date": "2024-01-01",
+        "end_date": "2024-06-30",
+        "lookback_days": 30,
+        "costs_bps": 5,
+    }
+    res = client.post("/prosperity/backtest", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert set(body["symbols"].keys()) == {"AAPL", "MSFT"}
+
+    per_symbol = body["symbols"]["AAPL"]
+    assert set(per_symbol.keys()) == {"status", "metrics"}
+    assert per_symbol["status"] == "ok"
+    assert set(per_symbol["metrics"].keys()) == {
+        "bars",
+        "trades",
+        "cagr",
+        "sharpe",
+        "max_drawdown",
+        "turnover",
+    }
+
+
+def test_prosperity_backtest_data_unavailable(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
+    _enable_db_flags(monkeypatch)
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: [])
+
+    payload = {
+        "symbols": ["NOPE"],
+        "start_date": "2024-01-01",
+        "end_date": "2024-01-15",
+        "lookback_days": 30,
+    }
+    res = client.post("/prosperity/backtest", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["symbols"]["NOPE"]["status"] == "data_unavailable"
+    assert "metrics" in body["symbols"]["NOPE"]
