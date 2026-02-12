@@ -14,6 +14,7 @@ from psycopg.errors import UndefinedColumn
 from psycopg.types.json import Json
 
 from api import config, db, security
+from api.prosperity.constants import FEATURE_VERSION
 from api.prosperity.models import SnapshotRunRequest
 from api.prosperity.routes import _require_db_enabled, snapshot_run
 
@@ -332,6 +333,9 @@ def _fetch_last_job_run(job_name: str) -> Optional[Dict[str, object]]:
             error,
             lock_owner,
         ) = row
+        response_payload = {}
+        if isinstance(result, dict):
+            response_payload = result.get("response") or {}
         return {
             "run_id": str(run_id),
             "job_name": jname,
@@ -343,6 +347,9 @@ def _fetch_last_job_run(job_name: str) -> Optional[Dict[str, object]]:
             "result": result,
             "error": error,
             "lock_owner": lock_owner,
+            "dataset_fingerprint": response_payload.get("dataset_fingerprint"),
+            "feature_version": response_payload.get("feature_version")
+            or FEATURE_VERSION,
         }
 
 
@@ -476,6 +483,8 @@ async def _run_daily_snapshot(
             "symbols_failed": result_payload.get("symbols_failed", []),
             "rows_written": result_payload.get("rows_written", {}),
             "timings": result.get("timings", {}),
+            "dataset_fingerprint": result.get("dataset_fingerprint"),
+            "feature_version": result.get("feature_version"),
         }
 
         if retention_info:

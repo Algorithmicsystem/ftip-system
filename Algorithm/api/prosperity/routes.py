@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import logging
 import random
@@ -12,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api import config, db, security
 from api.ops import metrics_tracker
+from api.prosperity.constants import FEATURE_VERSION
 from api.prosperity import ingest, query
 from api.prosperity.narrator import router as narrator_router
 from api.prosperity.strategy_graph import router as strategy_graph_router
@@ -568,6 +570,37 @@ def _retry_sleep(attempt: int) -> None:
     time.sleep(base_sleep * (2 ** (attempt - 1)) + jitter)
 
 
+def _as_iso_date(value: Any) -> str:
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    return str(value)
+
+
+def _hash_json(payload: Any) -> str:
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _dataset_fingerprint(symbol_snapshots: List[Dict[str, Any]]) -> str:
+    per_symbol: List[Dict[str, Any]] = []
+    for item in symbol_snapshots:
+        normalized = {
+            "symbol": str(item.get("symbol") or "").upper(),
+            "from_date": str(item.get("from_date") or ""),
+            "to_date": str(item.get("to_date") or ""),
+            "provider": str(item.get("provider") or "unknown"),
+            "bar_count": int(item.get("bar_count") or 0),
+        }
+        per_symbol.append(
+            {
+                **normalized,
+                "hash": _hash_json(normalized),
+            }
+        )
+    aggregated = sorted(per_symbol, key=lambda row: row["symbol"])
+    return _hash_json([row["hash"] for row in aggregated])
+
+
 @router.post("/snapshot/run")
 async def snapshot_run(
     req: SnapshotRunRequest,
@@ -576,7 +609,11 @@ async def snapshot_run(
     job_name: Optional[str] = None,
     lock_owner: Optional[str] = None,
 ):
-    _require_db_enabled(write=True, read=True)
+    db_enabled_for_run = (
+        db.db_enabled() and db.db_write_enabled() and db.db_read_enabled()
+    )
+    if db_enabled_for_run:
+        _require_db_enabled(write=True, read=True)
     trace_id = getattr(request.state, "trace_id", None)
     if req.from_date > req.to_date:
         raise HTTPException(
@@ -610,10 +647,14 @@ async def snapshot_run(
     symbols_failed: List[Dict[str, str]] = []
 
     t0 = time.time()
-    try:
-        ingest.upsert_universe(symbols)
-    except Exception as exc:  # pragma: no cover - guarded via validation
-        raise HTTPException(status_code=503, detail=f"failed to upsert universe: {exc}")
+    symbol_snapshots: List[Dict[str, Any]] = []
+    if db_enabled_for_run:
+        try:
+            ingest.upsert_universe(symbols)
+        except Exception as exc:  # pragma: no cover - guarded via validation
+            raise HTTPException(
+                status_code=503, detail=f"failed to upsert universe: {exc}"
+            )
     timings["upsert_universe"] = time.time() - t0
 
     max_attempts = 3
@@ -627,7 +668,7 @@ async def snapshot_run(
         while attempts < max_attempts:
             attempts += 1
             try:
-                ingest.ingest_bars(
+                ingest_result = ingest.ingest_bars(
                     sym, req.from_date, req.to_date, force_refresh=req.force_refresh
                 )
                 initial_bars, effective_as_of = query.fetch_bars_with_latest(
@@ -649,6 +690,20 @@ async def snapshot_run(
                     window_end=effective_as_of,
                 )
                 bars = bars[-bars_required:]
+                bar_start = _as_iso_date(bars[0]["date"]) if bars else ""
+                bar_end = _as_iso_date(bars[-1]["date"]) if bars else ""
+                provider_name = "unknown"
+                if isinstance(ingest_result, dict):
+                    provider_name = str(ingest_result.get("source") or "unknown")
+                symbol_snapshots.append(
+                    {
+                        "symbol": sym,
+                        "from_date": bar_start,
+                        "to_date": bar_end,
+                        "provider": provider_name,
+                        "bar_count": len(bars),
+                    }
+                )
 
                 candles = _candles_from_bars(bars)
                 feats, feat_meta, regime = _compute_features_payload(
@@ -664,31 +719,37 @@ async def snapshot_run(
                         sym, effective_as_of, req.lookback, candles
                     )
 
-                written = _persist_symbol_outputs(
-                    sym,
-                    effective_as_of,
-                    req.lookback,
-                    feats,
-                    {**feat_meta, "regime": regime},
-                    signal_payload,
-                    strategy_rows=strategy_rows if req.compute_strategy_graph else None,
-                    ensemble_row=ensemble_row if req.compute_strategy_graph else None,
-                )
-                rows_written["features"] += written.get("features", 0)
-                rows_written["signals"] += written.get("signals", 0)
-                strategy_graph_rows["strategies"] += written.get("strategies", 0)
-                strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
+                if db_enabled_for_run:
+                    written = _persist_symbol_outputs(
+                        sym,
+                        effective_as_of,
+                        req.lookback,
+                        feats,
+                        {**feat_meta, "regime": regime},
+                        signal_payload,
+                        strategy_rows=(
+                            strategy_rows if req.compute_strategy_graph else None
+                        ),
+                        ensemble_row=(
+                            ensemble_row if req.compute_strategy_graph else None
+                        ),
+                    )
+                    rows_written["features"] += written.get("features", 0)
+                    rows_written["signals"] += written.get("signals", 0)
+                    strategy_graph_rows["strategies"] += written.get("strategies", 0)
+                    strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
                 symbols_ok.append(sym)
-                _log_symbol_coverage(
-                    run_id,
-                    job_name,
-                    effective_as_of,
-                    sym,
-                    "OK",
-                    bars_required=bars_required,
-                    bars_returned=bars_returned,
-                    lock_owner=lock_owner,
-                )
+                if db_enabled_for_run:
+                    _log_symbol_coverage(
+                        run_id,
+                        job_name,
+                        effective_as_of,
+                        sym,
+                        "OK",
+                        bars_required=bars_required,
+                        bars_returned=bars_returned,
+                        lock_owner=lock_owner,
+                    )
                 logger.info(
                     "jobs.prosperity.daily_snapshot.symbol_ok",
                     extra={
@@ -743,18 +804,19 @@ async def snapshot_run(
                         "bars_returned": bars_returned,
                     }
                 )
-                _log_symbol_coverage(
-                    run_id,
-                    job_name,
-                    effective_as_of or req.as_of_date,
-                    sym,
-                    "FAILED",
-                    reason_code=reason_code,
-                    reason_detail=reason_detail,
-                    bars_required=bars_required,
-                    bars_returned=bars_returned,
-                    lock_owner=lock_owner,
-                )
+                if db_enabled_for_run:
+                    _log_symbol_coverage(
+                        run_id,
+                        job_name,
+                        effective_as_of or req.as_of_date,
+                        sym,
+                        "FAILED",
+                        reason_code=reason_code,
+                        reason_detail=reason_detail,
+                        bars_required=bars_required,
+                        bars_returned=bars_returned,
+                        lock_owner=lock_owner,
+                    )
                 logger.warning(
                     "jobs.prosperity.daily_snapshot.symbol_failed",
                     extra={
@@ -773,6 +835,8 @@ async def snapshot_run(
         "symbols_ok": symbols_ok,
         "symbols_failed": symbols_failed,
         "rows_written": rows_written,
+        "dataset_fingerprint": _dataset_fingerprint(symbol_snapshots),
+        "feature_version": FEATURE_VERSION,
     }
     if req.compute_strategy_graph:
         result_payload["strategy_graph_rows"] = strategy_graph_rows
@@ -795,6 +859,8 @@ async def snapshot_run(
         "requested": requested,
         "result": result_payload,
         "timings": timings,
+        "dataset_fingerprint": result_payload["dataset_fingerprint"],
+        "feature_version": FEATURE_VERSION,
     }
 
 

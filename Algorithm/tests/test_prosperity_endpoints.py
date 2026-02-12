@@ -4,10 +4,12 @@ from typing import Any, Dict, List
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from api import db
 from api import migrations
-from api.prosperity import ingest, query
+from api.prosperity import ingest, query, routes
+from api.prosperity.constants import FEATURE_VERSION
 from api.main import SignalResponse, app
 
 
@@ -327,6 +329,120 @@ def test_latest_endpoints_return_404(
 
     assert sig_res.status_code == 404
     assert feat_res.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_snapshot_run_dataset_fingerprint_stable_without_db(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(db, "db_enabled", lambda: False)
+    monkeypatch.setattr(db, "db_write_enabled", lambda: False)
+    monkeypatch.setattr(db, "db_read_enabled", lambda: False)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
+
+    bars = _weekday_bars(dt.date(2024, 1, 5), 260)
+
+    monkeypatch.setattr(
+        ingest, "ingest_bars", lambda *args, **kwargs: {"source": "massive"}
+    )
+    monkeypatch.setattr(
+        query,
+        "fetch_bars_with_latest",
+        lambda *args, **kwargs: (bars, dt.date(2024, 1, 5)),
+    )
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles",
+        lambda *args, **kwargs: SignalResponse(
+            symbol="AAPL",
+            as_of="2024-01-05",
+            lookback=252,
+            effective_lookback=252,
+            regime="TRENDING",
+            thresholds={"buy": 0.1, "sell": -0.1},
+            score=0.5,
+            base_score=0.5,
+            stacked_score=0.5,
+            signal="BUY",
+            confidence=0.7,
+            features={"mom_21": 0.1},
+            notes=["Score mode: STACKED"],
+            calibration_meta={"score_mode": "stacked", "base_score": 0.5},
+        ),
+    )
+
+    req = routes.SnapshotRunRequest(
+        symbols=["AAPL", "MSFT"],
+        from_date=dt.date(2023, 1, 1),
+        to_date=dt.date(2024, 1, 5),
+        as_of_date=dt.date(2024, 1, 5),
+        lookback=252,
+        concurrency=2,
+    )
+
+    run_one = await routes.snapshot_run(req, Request(scope={"type": "http"}))
+    run_two = await routes.snapshot_run(req, Request(scope={"type": "http"}))
+
+    assert run_one["dataset_fingerprint"]
+    assert run_one["dataset_fingerprint"] == run_two["dataset_fingerprint"]
+    assert run_one["result"]["dataset_fingerprint"] == run_one["dataset_fingerprint"]
+
+
+@pytest.mark.anyio
+async def test_snapshot_run_includes_feature_version_without_db(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(db, "db_enabled", lambda: False)
+    monkeypatch.setattr(db, "db_write_enabled", lambda: False)
+    monkeypatch.setattr(db, "db_read_enabled", lambda: False)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
+
+    bars = _weekday_bars(dt.date(2024, 1, 5), 260)
+    monkeypatch.setattr(
+        ingest, "ingest_bars", lambda *args, **kwargs: {"source": "massive"}
+    )
+    monkeypatch.setattr(
+        query,
+        "fetch_bars_with_latest",
+        lambda *args, **kwargs: (bars, dt.date(2024, 1, 5)),
+    )
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles",
+        lambda *args, **kwargs: SignalResponse(
+            symbol="AAPL",
+            as_of="2024-01-05",
+            lookback=252,
+            effective_lookback=252,
+            regime="TRENDING",
+            thresholds={"buy": 0.1, "sell": -0.1},
+            score=0.5,
+            base_score=0.5,
+            stacked_score=0.5,
+            signal="BUY",
+            confidence=0.7,
+            features={"mom_21": 0.1},
+            notes=["Score mode: STACKED"],
+            calibration_meta={"score_mode": "stacked", "base_score": 0.5},
+        ),
+    )
+
+    req = routes.SnapshotRunRequest(
+        symbols=["AAPL"],
+        from_date=dt.date(2023, 1, 1),
+        to_date=dt.date(2024, 1, 5),
+        as_of_date=dt.date(2024, 1, 5),
+        lookback=252,
+        concurrency=1,
+    )
+
+    result = await routes.snapshot_run(req, Request(scope={"type": "http"}))
+    assert result["feature_version"] == FEATURE_VERSION
+    assert result["result"]["feature_version"] == FEATURE_VERSION
 
 
 @pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
