@@ -51,6 +51,41 @@ def test_prosperity_health(client: TestClient):
     assert body["status"] == "ok"
 
 
+def test_prosperity_coverage_db_disabled(client: TestClient):
+    res = client.get("/prosperity/coverage")
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body.keys()) == {"db_enabled", "coverage"}
+    assert body["db_enabled"] is False
+    assert body["coverage"] == []
+
+
+def test_prosperity_coverage_db_enabled(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
+    _enable_db_flags(monkeypatch)
+    monkeypatch.setattr(
+        query,
+        "coverage_for_universe",
+        lambda: [
+            {
+                "symbol": "AAPL",
+                "first_date": dt.date(2024, 1, 2),
+                "last_date": dt.date(2024, 1, 5),
+                "bars": 4,
+                "missing_days_estimate": 0,
+            }
+        ],
+    )
+
+    res = client.get("/prosperity/coverage")
+    assert res.status_code == 200
+    body = res.json()
+    assert set(body.keys()) == {"db_enabled", "coverage"}
+    assert body["db_enabled"] is True
+    assert body["coverage"][0]["symbol"] == "AAPL"
+
+
 def test_latest_signal_missing_returns_404(
     monkeypatch: pytest.MonkeyPatch, client: TestClient
 ):

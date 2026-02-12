@@ -19,6 +19,7 @@ from api.prosperity.models import (
     BarsIngestBulkRequest,
     BarsIngestRequest,
     BarsResponse,
+    CoverageResponse,
     FeaturesComputeRequest,
     HealthResponse,
     SignalsComputeRequest,
@@ -65,6 +66,20 @@ async def health() -> HealthResponse:
         db_write_enabled=db.db_write_enabled(),
         db_read_enabled=db.db_read_enabled(),
     )
+
+
+@router.get("/coverage", response_model=CoverageResponse)
+async def coverage() -> CoverageResponse:
+    if not db.db_enabled():
+        return CoverageResponse(db_enabled=False, coverage=[])
+
+    _require_db_enabled(read=True)
+    try:
+        coverage_rows = query.coverage_for_universe()
+    except db.DBError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
+
+    return CoverageResponse(db_enabled=True, coverage=coverage_rows)
 
 
 @router.post("/bootstrap")

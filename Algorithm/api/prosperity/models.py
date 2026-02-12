@@ -61,6 +61,19 @@ class HealthResponse(BaseModel):
     db_read_enabled: bool
 
 
+class CoverageRow(BaseModel):
+    symbol: str
+    first_date: Optional[date] = None
+    last_date: Optional[date] = None
+    bars: int = 0
+    missing_days_estimate: Optional[int] = None
+
+
+class CoverageResponse(BaseModel):
+    db_enabled: bool
+    coverage: List[CoverageRow]
+
+
 class BacktestAudit(BaseModel):
     request: Dict[str, Any]
     response: Dict[str, Any]

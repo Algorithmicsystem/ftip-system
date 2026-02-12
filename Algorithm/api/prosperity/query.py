@@ -6,6 +6,53 @@ from typing import Any, Dict, List, Optional, Tuple
 from api import db
 
 
+def _estimate_missing_weekdays(
+    first_date: Optional[dt.date], last_date: Optional[dt.date], bars: int
+) -> Optional[int]:
+    if first_date is None or last_date is None or bars <= 0:
+        return None
+    if last_date < first_date:
+        return None
+
+    day = first_date
+    weekday_count = 0
+    while day <= last_date:
+        if day.weekday() < 5:
+            weekday_count += 1
+        day += dt.timedelta(days=1)
+
+    return max(0, weekday_count - bars)
+
+
+def coverage_for_universe() -> List[Dict[str, Any]]:
+    rows = db.safe_fetchall(
+        """
+        SELECT u.symbol, MIN(b.date) AS first_date, MAX(b.date) AS last_date, COUNT(b.date) AS bars
+        FROM prosperity_universe u
+        LEFT JOIN prosperity_daily_bars b ON b.symbol = u.symbol
+        WHERE u.active = TRUE
+        GROUP BY u.symbol
+        ORDER BY u.symbol ASC
+        """
+    )
+
+    coverage: List[Dict[str, Any]] = []
+    for symbol, first_date, last_date, bars in rows:
+        bars_count = int(bars) if bars is not None else 0
+        coverage.append(
+            {
+                "symbol": symbol,
+                "first_date": first_date,
+                "last_date": last_date,
+                "bars": bars_count,
+                "missing_days_estimate": _estimate_missing_weekdays(
+                    first_date, last_date, bars_count
+                ),
+            }
+        )
+    return coverage
+
+
 def fetch_bars(
     symbol: str, from_date: dt.date, to_date: dt.date
 ) -> List[Dict[str, Any]]:
