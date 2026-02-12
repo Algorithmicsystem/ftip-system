@@ -559,6 +559,8 @@ def test_prosperity_backtest_uses_in_memory_bars(client: TestClient):
     body = res.json()
     assert body["status"] == "ok"
     assert set(body["symbols"].keys()) == {"AAPL", "MSFT"}
+    assert set(body["final_weights"].keys()) == {"AAPL", "MSFT"}
+    assert abs(sum(body["final_weights"].values()) - 1.0) < 1e-9
 
     per_symbol = body["symbols"]["AAPL"]
     assert set(per_symbol.keys()) == {"status", "metrics"}
@@ -570,6 +572,7 @@ def test_prosperity_backtest_uses_in_memory_bars(client: TestClient):
         "sharpe",
         "max_drawdown",
         "turnover",
+        "final_weight",
     }
 
 
@@ -590,3 +593,20 @@ def test_prosperity_backtest_data_unavailable(
     body = res.json()
     assert body["symbols"]["NOPE"]["status"] == "data_unavailable"
     assert "metrics" in body["symbols"]["NOPE"]
+    assert body["final_weights"] == {}
+
+
+def test_prosperity_backtest_final_weights_deterministic(client: TestClient):
+    payload = {
+        "symbols": ["MSFT", "AAPL"],
+        "start_date": "2024-01-01",
+        "end_date": "2024-06-30",
+        "lookback_days": 30,
+        "costs_bps": 5,
+    }
+    res1 = client.post("/prosperity/backtest", json=payload)
+    res2 = client.post("/prosperity/backtest", json=payload)
+
+    assert res1.status_code == 200
+    assert res2.status_code == 200
+    assert res1.json()["final_weights"] == res2.json()["final_weights"]
