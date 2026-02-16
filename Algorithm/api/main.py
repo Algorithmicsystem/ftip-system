@@ -2100,6 +2100,7 @@ def root() -> Dict[str, Any]:
         "db_pool_ready": _db_pool_ready(),
         "endpoints": [
             "/health",
+            "/providers/health",
             "/ready",
             "/db/health",
             "/db/save_signal",
