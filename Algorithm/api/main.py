@@ -2138,21 +2138,26 @@ def health() -> Dict[str, Any]:
     return {"status": "ok"}
 
 
-@app.get("/providers/health")
-def providers_health(request: Request) -> Dict[str, Any]:
-    return {
-        "providers": {
-            "massive": {
-                "configured": bool(_env("MASSIVE_API_KEY") or _env("POLYGON_API_KEY"))
-            },
-            "finnhub": {"configured": bool(_env("FINNHUB_API_KEY"))},
-            "fred": {"configured": bool(_env("FRED_API_KEY"))},
-            "secedgar": {"configured": bool(_env("SECEDGAR_API_KEY"))},
-            "openai": {
-                "configured": bool(_env("OPENAI_API_KEY") or _env("OpenAI_ftip-system"))
-            },
-        }
+@app.get("/providers/health", include_in_schema=True)
+def providers_health() -> Dict[str, Any]:
+    provider_envs: Dict[str, List[str]] = {
+        "openai": ["OPENAI_API_KEY", "OpenAI_ftip-system"],
+        "massive": ["MASSIVE_API_KEY", "POLYGON_API_KEY"],
+        "finnhub": ["FINNHUB_API_KEY"],
+        "fred": ["FRED_API_KEY"],
+        "secedgar": ["SECEDGAR_API_KEY"],
     }
+    providers: Dict[str, Dict[str, Any]] = {}
+
+    for name, env_names in provider_envs.items():
+        providers[name] = {
+            "configured": any(
+                os.getenv(env_name) not in (None, "") for env_name in env_names
+            ),
+            "env": env_names,
+        }
+
+    return {"providers": providers}
 
 
 @app.get("/ready")
