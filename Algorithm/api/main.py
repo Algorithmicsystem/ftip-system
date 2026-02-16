@@ -2139,8 +2139,7 @@ def health() -> Dict[str, Any]:
     return {"status": "ok"}
 
 
-@app.get("/providers/health", include_in_schema=True)
-def providers_health() -> Dict[str, Any]:
+def _providers_health_payload() -> Dict[str, Any]:
     provider_envs: Dict[str, List[str]] = {
         "openai": ["OPENAI_API_KEY", "OpenAI_ftip-system"],
         "massive": ["MASSIVE_API_KEY", "POLYGON_API_KEY"],
@@ -2159,6 +2158,10 @@ def providers_health() -> Dict[str, Any]:
         }
 
     return {"providers": providers}
+
+
+def _providers_health() -> Dict[str, Any]:
+    return _providers_health_payload()
 
 
 @app.get("/ready")
@@ -2869,3 +2872,19 @@ def universe_top(
         )
 
     return {"as_of_date": as_of_date, "name": name, "count": len(items), "items": items}
+
+
+def _ensure_providers_health_route_registered() -> None:
+    paths = [getattr(route, "path", None) for route in app.router.routes]
+    if "/providers/health" in paths:
+        return
+
+    app.add_api_route(
+        "/providers/health",
+        _providers_health,
+        methods=["GET"],
+        include_in_schema=True,
+    )
+
+
+_ensure_providers_health_route_registered()
