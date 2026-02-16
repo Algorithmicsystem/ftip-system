@@ -31,6 +31,7 @@ from api.jobs.market_data import router as market_data_jobs_router
 from api.jobs.features import router as features_jobs_router
 from api.jobs.signals import router as signals_jobs_router
 from api.signals.routes import router as signals_router
+from api.providers.routes import router as providers_router
 
 # =============================================================================
 # App + environment helpers
@@ -2078,6 +2079,7 @@ app.include_router(signals_jobs_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(ops_router)
+app.include_router(providers_router)
 
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
 if WEBAPP_DIR.exists():
