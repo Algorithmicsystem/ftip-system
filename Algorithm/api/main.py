@@ -2874,17 +2874,23 @@ def universe_top(
     return {"as_of_date": as_of_date, "name": name, "count": len(items), "items": items}
 
 
-def _ensure_providers_health_route_registered() -> None:
-    paths = [getattr(route, "path", None) for route in app.router.routes]
-    if "/providers/health" in paths:
-        return
-
-    app.add_api_route(
-        "/providers/health",
-        _providers_health,
-        methods=["GET"],
-        include_in_schema=True,
-    )
+def _register_providers_health(app_obj: FastAPI) -> None:
+    paths = {getattr(route, "path", None) for route in app_obj.router.routes}
+    if "/providers/health" not in paths:
+        app_obj.add_api_route(
+            "/providers/health",
+            _providers_health,
+            methods=["GET"],
+            include_in_schema=True,
+        )
 
 
-_ensure_providers_health_route_registered()
+_register_providers_health(app)
+_providers_paths = {getattr(route, "path", None) for route in app.router.routes}
+logger.info(
+    "providers.health.route_check",
+    extra={
+        "route_count": len(app.router.routes),
+        "providers_health_registered": "/providers/health" in _providers_paths,
+    },
+)
