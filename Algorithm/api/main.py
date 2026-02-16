@@ -31,7 +31,6 @@ from api.jobs.market_data import router as market_data_jobs_router
 from api.jobs.features import router as features_jobs_router
 from api.jobs.signals import router as signals_jobs_router
 from api.signals.routes import router as signals_router
-from api.providers.routes import router as providers_router
 
 # =============================================================================
 # App + environment helpers
@@ -2079,7 +2078,6 @@ app.include_router(signals_jobs_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(ops_router)
-app.include_router(providers_router)
 
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
 if WEBAPP_DIR.exists():
@@ -2138,6 +2136,23 @@ def root() -> Dict[str, Any]:
 @app.get("/health")
 def health() -> Dict[str, Any]:
     return {"status": "ok"}
+
+
+@app.get("/providers/health")
+def providers_health(request: Request) -> Dict[str, Any]:
+    return {
+        "providers": {
+            "massive": {
+                "configured": bool(_env("MASSIVE_API_KEY") or _env("POLYGON_API_KEY"))
+            },
+            "finnhub": {"configured": bool(_env("FINNHUB_API_KEY"))},
+            "fred": {"configured": bool(_env("FRED_API_KEY"))},
+            "secedgar": {"configured": bool(_env("SECEDGAR_API_KEY"))},
+            "openai": {
+                "configured": bool(_env("OPENAI_API_KEY") or _env("OpenAI_ftip-system"))
+            },
+        }
+    }
 
 
 @app.get("/ready")
