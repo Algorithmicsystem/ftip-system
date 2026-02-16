@@ -120,3 +120,18 @@ def test_explain_backtest_mocked(monkeypatch):
         store=AssistantStorage(use_memory=True),
     )
     assert result["reply"] == "backtest reply"
+
+
+def test_providers_health_is_registered_and_in_openapi() -> None:
+    from fastapi.testclient import TestClient
+    from api.main import app
+
+    client = TestClient(app)
+    r = client.get("/providers/health")
+    assert r.status_code == 200
+    data = r.json()
+    assert "providers" in data
+    for k in ("openai", "massive", "finnhub", "fred", "secedgar"):
+        assert k in data["providers"]
+    openapi = client.get("/openapi.json").json()
+    assert "/providers/health" in openapi.get("paths", {})
