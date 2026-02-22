@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import contextmanager
-from typing import Any, Iterable, List, Optional, Sequence
+from typing import Any, Iterable, List, Optional, Sequence, Tuple
 
 import psycopg
 from psycopg import OperationalError
@@ -367,6 +367,45 @@ def ensure_schema() -> None:
         safe_execute(stmt)
 
 
+def upsert_universe(
+    symbols: Sequence[str], source: Optional[str] = None
+) -> Tuple[int, int]:
+    cleaned = [str(s).strip() for s in symbols if s and str(s).strip()]
+    received = len(cleaned)
+    if not cleaned:
+        return 0, 0
+    unique = sorted(set(cleaned))
+    for sym in unique:
+        safe_execute(
+            """
+            INSERT INTO prosperity_universe(symbol, active)
+            VALUES (%s, TRUE)
+            ON CONFLICT(symbol) DO UPDATE SET active=EXCLUDED.active, updated_at=now()
+            """,
+            (sym,),
+        )
+    return received, len(unique)
+
+
+def get_universe(*, active_only: bool = True, limit: Optional[int] = None) -> List[str]:
+    where = "WHERE active = TRUE" if active_only else ""
+    limit_sql = "LIMIT %s" if limit else ""
+    params: List[Any] = []
+    if limit:
+        params.append(int(limit))
+    rows = safe_fetchall(
+        f"""
+        SELECT symbol
+        FROM prosperity_universe
+        {where}
+        ORDER BY updated_at DESC, symbol ASC
+        {limit_sql}
+        """,
+        tuple(params) if params else None,
+    )
+    return [row[0] for row in rows]
+
+
 __all__ = [
     "db_enabled",
     "db_write_enabled",
@@ -382,4 +421,6 @@ __all__ = [
     "fetch1",
     "fetchall",
     "DBError",
+    "get_universe",
+    "upsert_universe",
 ]

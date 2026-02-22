@@ -41,4 +41,11 @@ BEGIN
         'prosperity_signals_daily',
         v_as_of_column
     );
+
+    EXECUTE format(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_prosperity_signals_daily_symbol_asof_lookback ON %I.%I (symbol, %I, lookback)',
+        current_schema(),
+        'prosperity_signals_daily',
+        v_as_of_column
+    );
 END $$;

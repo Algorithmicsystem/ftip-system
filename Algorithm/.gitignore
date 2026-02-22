@@ -3,3 +3,7 @@
 clients/
 __pycache__/
 *.pyc
+
+# local env
+.env
+.env.local

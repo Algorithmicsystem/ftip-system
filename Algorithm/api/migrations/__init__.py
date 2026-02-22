@@ -278,6 +278,16 @@ def _migration_prosperity_core(cur: Any) -> None:
     )
 
 
+def _migration_assistant(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("001_assistant.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_assistant_indexes(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("002_assistant_indexes.sql")
+    cur.execute(sql_path.read_text())
+
+
 def _migration_strategy_graph(cur: Any) -> None:
     cur.execute(
         """
@@ -540,8 +550,15 @@ def _migration_backtest_tables(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_prosperity_signals_unique_index(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("021_prosperity_signals_unique_index.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
+    ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
+    ("002_assistant_indexes", _migration_assistant_indexes),
     ("002_strategy_graph", _migration_strategy_graph),
     ("003_job_metadata", _migration_job_metadata),
     ("004_job_lock_owner", _migration_job_lock_owner),
@@ -564,13 +581,11 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         _migration_fix_prosperity_signals_score_mode_pk,
     ),
     ("020_backtest_tables", _migration_backtest_tables),
+    ("021_prosperity_signals_unique_index", _migration_prosperity_signals_unique_index),
 ]
 
 
 def ensure_schema() -> List[str]:
-    if not config.migrations_auto():
-        logger.info("[migrations] migrations disabled; skipping")
-        return []
     if not db.db_enabled():
         return []
     if not config.env("DATABASE_URL"):
