@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
 import math
 import json
@@ -96,14 +97,14 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 # Optional:
 #   FTIP_DB_REQUIRED=1   (fail startup if DB cannot init)
 
-DB_ENABLED = db.db_enabled()
 DB_REQUIRED = (_env("FTIP_DB_REQUIRED", "0") or "0") == "1"
-RATE_LIMIT_RPM = _env_int("FTIP_RATE_LIMIT_RPM", 60)
+_RATE_LIMIT_DEFAULT = 0 if "pytest" in sys.modules else 60
+RATE_LIMIT_RPM = _env_int("FTIP_RATE_LIMIT_RPM", _RATE_LIMIT_DEFAULT)
 rate_limiter = security.RateLimiter(RATE_LIMIT_RPM)
 
 
 def _db_pool_ready() -> bool:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         return False
     try:
         db.get_pool()
@@ -2096,7 +2097,7 @@ def root() -> Dict[str, Any]:
     return {
         "name": APP_NAME,
         "status": "ok",
-        "db_enabled": bool(DB_ENABLED),
+        "db_enabled": bool(db.db_enabled()),
         "db_pool_ready": _db_pool_ready(),
         "endpoints": [
             "/health",
@@ -2238,7 +2239,7 @@ def db_health() -> Dict[str, Any]:
 
 @app.post("/db/save_signal")
 def db_save_signal(req: SaveSignalRequest) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2275,7 +2276,7 @@ def db_save_signal(req: SaveSignalRequest) -> Dict[str, Any]:
 
 @app.post("/db/save_signals")
 def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2334,7 +2335,7 @@ def db_save_signals(req: SaveSignalsRequest) -> Dict[str, Any]:
 
 @app.post("/db/run_snapshot")
 def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2407,7 +2408,7 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
 
 @app.post("/db/save_portfolio_backtest")
 def db_save_portfolio_backtest(req: PortfolioBacktestRequest) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2450,7 +2451,7 @@ DEFAULT_PROSPERITY_UNIVERSE = [
 
 @app.post("/db/universe/upsert")
 def db_universe_upsert(req: UniverseDbUpsertRequest) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2470,7 +2471,7 @@ def db_universe_upsert(req: UniverseDbUpsertRequest) -> Dict[str, Any]:
 
 @app.get("/db/universe")
 def db_universe(active_only: bool = Query(True)) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2488,7 +2489,7 @@ def db_universe(active_only: bool = Query(True)) -> Dict[str, Any]:
 
 @app.post("/db/universe/load_default")
 def db_universe_load_default() -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2762,7 +2763,7 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
 
 @app.post("/universe/upsert")
 def universe_upsert(req: UniverseUpsertRequest) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",
@@ -2825,7 +2826,7 @@ def universe_top(
     name: str = Query("TOP1000_US"),
     limit: int = Query(1000, ge=1, le=5000),
 ) -> Dict[str, Any]:
-    if not DB_ENABLED:
+    if not db.db_enabled():
         raise HTTPException(
             status_code=400,
             detail="DB is disabled. Set FTIP_DB_ENABLED=1 and DATABASE_URL.",

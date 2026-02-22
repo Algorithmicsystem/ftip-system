@@ -367,7 +367,9 @@ def ensure_schema() -> None:
         safe_execute(stmt)
 
 
-def upsert_universe(symbols: Sequence[str], source: Optional[str] = None) -> Tuple[int, int]:
+def upsert_universe(
+    symbols: Sequence[str], source: Optional[str] = None
+) -> Tuple[int, int]:
     cleaned = [str(s).strip() for s in symbols if s and str(s).strip()]
     received = len(cleaned)
     if not cleaned:

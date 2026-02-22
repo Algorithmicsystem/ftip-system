@@ -110,11 +110,13 @@ def reset_auth_cache() -> None:
 
 class RateLimiter:
     def __init__(self, rpm: int = 60) -> None:
-        self.rpm = max(1, int(rpm))
+        self.rpm = int(rpm)
         self.window_seconds = 60
         self._hits: Dict[str, deque] = {}
 
     def check(self, key: str) -> Tuple[bool, Optional[int]]:
+        if self.rpm <= 0:
+            return True, None
         now = time.monotonic()
         window_start = now - self.window_seconds
         bucket = self._hits.get(key) or deque()
