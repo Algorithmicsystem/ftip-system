@@ -46,3 +46,9 @@
 - **PASS:** 116 passed, 4 skipped.
 - `python -m ruff check .` -> PASS
 - `python -m ruff format --check .` -> PASS
+
+## Verification Result (Final)
+- `DATABASE_URL=postgresql://macuser@localhost:5432/postgres pytest -q`
+- **PASS:** 116 passed, 4 skipped.
+- `python -m ruff check .` -> PASS
+- `python -m ruff format --check .` -> PASS
