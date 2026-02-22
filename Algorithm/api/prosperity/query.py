@@ -236,3 +236,36 @@ def features_as_of(
         "features": row[3],
         "meta": row[4],
     }
+
+
+def coverage_for_universe() -> List[Dict[str, Any]]:
+    rows = db.safe_fetchall(
+        """
+        SELECT u.symbol,
+               MIN(b.date) AS first_date,
+               MAX(b.date) AS last_date,
+               COUNT(b.date) AS bars
+        FROM prosperity_universe u
+        LEFT JOIN prosperity_daily_bars b ON b.symbol = u.symbol
+        WHERE u.active = TRUE
+        GROUP BY u.symbol
+        ORDER BY u.symbol ASC
+        """
+    )
+    results: List[Dict[str, Any]] = []
+    for symbol, first_date, last_date, bars in rows:
+        missing_days_estimate = None
+        bars_count = int(bars or 0)
+        if first_date and last_date and bars_count > 0:
+            span_days = (last_date - first_date).days + 1
+            missing_days_estimate = max(span_days - bars_count, 0)
+        results.append(
+            {
+                "symbol": symbol,
+                "first_date": first_date.isoformat() if first_date else None,
+                "last_date": last_date.isoformat() if last_date else None,
+                "bars": bars_count,
+                "missing_days_estimate": missing_days_estimate,
+            }
+        )
+    return results

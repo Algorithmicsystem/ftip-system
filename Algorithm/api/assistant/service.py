@@ -25,6 +25,11 @@ def _build_client() -> OpenAI:
     )
 
 
+def _require_api_key() -> None:
+    if not config.openai_api_key():
+        raise HTTPException(status_code=500, detail="LLM API key not configured")
+
+
 def _safe_completion(
     messages: List[ChatCompletionMessageParam],
 ) -> Tuple[str, str, Dict[str, Optional[int]]]:
@@ -86,6 +91,7 @@ def chat_with_assistant(
     request: Dict[str, Any], store: AssistantStorage = storage
 ) -> Dict[str, Any]:
     _ensure_llm_enabled()
+    _require_api_key()
 
     session_id = request.get("session_id")
     message = request.get("message") or ""
@@ -123,6 +129,7 @@ def explain_signal(
     store: AssistantStorage = storage,
 ) -> Dict[str, Any]:
     _ensure_llm_enabled()
+    _require_api_key()
 
     if signal_fetcher is None:
         from api import main as api_main  # late import to avoid circular
@@ -174,6 +181,7 @@ def explain_backtest(
     store: AssistantStorage = storage,
 ) -> Dict[str, Any]:
     _ensure_llm_enabled()
+    _require_api_key()
 
     backtest_request_model = None
     if backtest_runner is None:

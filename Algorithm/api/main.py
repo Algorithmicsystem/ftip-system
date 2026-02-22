@@ -1993,7 +1993,7 @@ async def security_and_tracing_middleware(request: Request, call_next):
     try:
         response = await call_next(request)
     except DBError as exc:
-        logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
+        logger.warning("db.error", extra={"trace_id": trace_id, "error": str(exc)})
         response = security.json_error_response(
             "database_error", str(exc), trace_id, exc.status_code
         )
@@ -2037,7 +2037,7 @@ async def security_and_tracing_middleware(request: Request, call_next):
 @app.exception_handler(DBError)
 async def db_exception_handler(request: Request, exc: DBError):
     trace_id = security.trace_id_from_request(request)
-    logger.warning("db.error", extra={"trace_id": trace_id, "message": str(exc)})
+    logger.warning("db.error", extra={"trace_id": trace_id, "error": str(exc)})
     return security.json_error_response(
         "database_error", str(exc), trace_id, exc.status_code
     )
@@ -2366,10 +2366,11 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
     sleep_ms = max(0, _env_int("FTIP_SNAPSHOT_SLEEP_MS", 0))
 
     for sym in symbols:
-        s = (sym or "").strip().upper()
-        if not s:
+        raw_sym = (sym or "").strip()
+        if not raw_sym:
             skipped_count += 1
             continue
+        s = raw_sym.upper()
 
         try:
             sig = compute_signal_for_symbol(s, req.as_of, req.lookback)
@@ -2377,17 +2378,17 @@ def db_run_snapshot(req: RunSnapshotRequest) -> Dict[str, Any]:
             if row_id is None:
                 error_count += 1
                 if len(errors) < 25:
-                    errors[s] = "persist_signal_record returned no id"
+                    errors[raw_sym] = "persist_signal_record returned no id"
             else:
                 saved_count += 1
         except HTTPException as e:
             error_count += 1
             if len(errors) < 25:
-                errors[s] = str(e.detail)
+                errors[raw_sym] = str(e.detail)
         except Exception as e:
             error_count += 1
             if len(errors) < 25:
-                errors[s] = f"{type(e).__name__}: {e}"
+                errors[raw_sym] = f"{type(e).__name__}: {e}"
 
         if sleep_ms > 0:
             time.sleep(float(sleep_ms) / 1000.0)
@@ -2502,16 +2503,13 @@ def db_universe_load_default() -> Dict[str, Any]:
         with pool.connection(timeout=10) as conn:
             with conn.cursor() as cur:
                 db.set_statement_timeout(cur, 5000)
-                params = [
-                    (sym, True, "default_top1000_seed")
-                    for sym in DEFAULT_PROSPERITY_UNIVERSE
-                ]
+                params = [(sym, True) for sym in DEFAULT_PROSPERITY_UNIVERSE]
                 cur.executemany(
                     """
-                    INSERT INTO prosperity_universe(symbol, active, source)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO prosperity_universe(symbol, active)
+                    VALUES (%s, %s)
                     ON CONFLICT (symbol)
-                    DO UPDATE SET active=EXCLUDED.active, source=EXCLUDED.source
+                    DO UPDATE SET active=EXCLUDED.active
                     """,
                     params,
                 )
