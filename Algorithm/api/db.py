@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
+import datetime as dt
+import hashlib
 from contextlib import contextmanager
-from typing import Any, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import psycopg
 from psycopg import OperationalError
@@ -187,6 +190,220 @@ def fetchall(
     sql: str, params: Optional[Sequence[Any]] = None
 ) -> Iterable[Sequence[Any]]:
     return safe_fetchall(sql, params)
+
+
+# ---------------------------------------------------------------------------
+# Versioned reality helpers (Phase 1)
+# ---------------------------------------------------------------------------
+
+
+def _code_sha() -> str:
+    return (
+        os.getenv("RAILWAY_GIT_COMMIT_SHA")
+        or os.getenv("GIT_COMMIT_SHA")
+        or os.getenv("COMMIT_SHA")
+        or "unknown"
+    )
+
+
+def record_data_version(
+    source_name: str, source_snapshot_hash: str, notes: str = ""
+) -> Dict[str, Any]:
+    row = exec1(
+        """
+        INSERT INTO data_versions (source_name, source_snapshot_hash, code_sha, notes)
+        VALUES (%s, %s, %s, %s)
+        ON CONFLICT (source_name, source_snapshot_hash, code_sha)
+        DO UPDATE SET notes = EXCLUDED.notes
+        RETURNING id, source_name, source_snapshot_hash, code_sha, notes, created_at
+        """,
+        (source_name.strip(), source_snapshot_hash.strip(), _code_sha(), notes or ""),
+    )
+    if not row:
+        raise DBError("failed to record data version", status_code=500)
+    return {
+        "id": int(row[0]),
+        "source_name": str(row[1]),
+        "source_snapshot_hash": str(row[2]),
+        "code_sha": str(row[3]),
+        "notes": str(row[4] or ""),
+        "created_at": row[5],
+    }
+
+
+def get_prices_daily(
+    symbol: str,
+    start_date: dt.date,
+    end_date: dt.date,
+    as_of_ts: dt.datetime,
+    adjusted: bool = False,
+) -> List[Dict[str, Any]]:
+    del adjusted
+    rows = safe_fetchall(
+        """
+        SELECT p.symbol, p.date, p.open, p.high, p.low, p.close, p.volume, p.currency,
+               p.as_of_ts, p.data_version_id
+        FROM prices_daily_versioned p
+        JOIN (
+            SELECT symbol, date, MAX(as_of_ts) AS latest_as_of_ts
+            FROM prices_daily_versioned
+            WHERE symbol = %s
+              AND date BETWEEN %s AND %s
+              AND as_of_ts <= %s
+            GROUP BY symbol, date
+        ) latest
+          ON p.symbol = latest.symbol
+         AND p.date = latest.date
+         AND p.as_of_ts = latest.latest_as_of_ts
+        ORDER BY p.date ASC
+        """,
+        (symbol, start_date, end_date, as_of_ts),
+    )
+    return [
+        {
+            "symbol": row[0],
+            "date": row[1],
+            "open": row[2],
+            "high": row[3],
+            "low": row[4],
+            "close": row[5],
+            "volume": row[6],
+            "currency": row[7],
+            "as_of_ts": row[8],
+            "data_version_id": row[9],
+        }
+        for row in rows
+    ]
+
+
+def get_latest_fundamentals(
+    symbol: str, as_of_ts: dt.datetime, metric_keys: Optional[Sequence[str]] = None
+) -> List[Dict[str, Any]]:
+    normalized_keys = [k.strip() for k in (metric_keys or []) if k and k.strip()]
+    if normalized_keys:
+        sql = """
+            SELECT f.symbol, f.metric_key, f.metric_value, f.period_end, f.published_ts,
+                   f.as_of_ts, f.data_version_id
+            FROM fundamentals_pit f
+            JOIN (
+                SELECT metric_key, MAX(published_ts) AS latest_published_ts
+                FROM fundamentals_pit
+                WHERE symbol = %s
+                  AND as_of_ts <= %s
+                  AND published_ts <= %s
+                  AND metric_key = ANY(%s)
+                GROUP BY metric_key
+            ) latest
+              ON f.metric_key = latest.metric_key
+             AND f.published_ts = latest.latest_published_ts
+            WHERE f.symbol = %s
+              AND f.as_of_ts <= %s
+              AND f.published_ts <= %s
+            ORDER BY f.metric_key ASC
+        """
+        params = (
+            symbol,
+            as_of_ts,
+            as_of_ts,
+            normalized_keys,
+            symbol,
+            as_of_ts,
+            as_of_ts,
+        )
+    else:
+        sql = """
+            SELECT f.symbol, f.metric_key, f.metric_value, f.period_end, f.published_ts,
+                   f.as_of_ts, f.data_version_id
+            FROM fundamentals_pit f
+            JOIN (
+                SELECT metric_key, MAX(published_ts) AS latest_published_ts
+                FROM fundamentals_pit
+                WHERE symbol = %s
+                  AND as_of_ts <= %s
+                  AND published_ts <= %s
+                GROUP BY metric_key
+            ) latest
+              ON f.metric_key = latest.metric_key
+             AND f.published_ts = latest.latest_published_ts
+            WHERE f.symbol = %s
+              AND f.as_of_ts <= %s
+              AND f.published_ts <= %s
+            ORDER BY f.metric_key ASC
+        """
+        params = (symbol, as_of_ts, as_of_ts, symbol, as_of_ts, as_of_ts)
+
+    rows = safe_fetchall(sql, params)
+    return [
+        {
+            "symbol": row[0],
+            "metric_key": row[1],
+            "metric_value": row[2],
+            "period_end": row[3],
+            "published_ts": row[4],
+            "as_of_ts": row[5],
+            "data_version_id": row[6],
+        }
+        for row in rows
+    ]
+
+
+def get_news(
+    symbol: str,
+    as_of_ts: dt.datetime,
+    start_ts: Optional[dt.datetime] = None,
+    end_ts: Optional[dt.datetime] = None,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    bounded_limit = max(1, min(int(limit), 1000))
+    rows = safe_fetchall(
+        """
+        SELECT symbol, published_ts, as_of_ts, source, credibility, headline, full_text,
+               data_version_id
+        FROM news_items
+        WHERE symbol = %s
+          AND as_of_ts <= %s
+          AND published_ts <= %s
+          AND (%s::timestamptz IS NULL OR published_ts >= %s::timestamptz)
+          AND (%s::timestamptz IS NULL OR published_ts <= %s::timestamptz)
+        ORDER BY published_ts DESC, id DESC
+        LIMIT %s
+        """,
+        (symbol, as_of_ts, as_of_ts, start_ts, start_ts, end_ts, end_ts, bounded_limit),
+    )
+    return [
+        {
+            "symbol": row[0],
+            "published_ts": row[1],
+            "as_of_ts": row[2],
+            "source": row[3],
+            "credibility": row[4],
+            "headline": row[5],
+            "full_text": row[6],
+            "data_version_id": row[7],
+        }
+        for row in rows
+    ]
+
+
+def get_universe_pit(
+    as_of_ts: dt.datetime, universe_name: str = "default"
+) -> List[str]:
+    rows = safe_fetchall(
+        """
+        SELECT DISTINCT symbol
+        FROM universe_membership
+        WHERE universe_name = %s
+          AND start_ts <= %s
+          AND (end_ts IS NULL OR end_ts > %s)
+        ORDER BY symbol ASC
+        """,
+        (universe_name, as_of_ts, as_of_ts),
+    )
+    return [str(row[0]) for row in rows]
+
+
+def headline_hash(value: str) -> str:
+    return hashlib.sha256((value or "").strip().encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------

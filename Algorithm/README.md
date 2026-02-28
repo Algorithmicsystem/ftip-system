@@ -513,3 +513,65 @@ Run the end-to-end Milestone B+C+D checks (uses POSIX sh + python3 helpers):
 chmod +x scripts/milestoneB_verify.sh
 BASE="http://localhost:8000" KEY="demo-key" ./scripts/milestoneB_verify.sh
 ```
+
+## Phase 1: Versioned Reality Quickstart (US + Canada, daily PIT)
+
+This phase adds a replayable point-in-time (PIT) data layer with strict no-lookahead semantics.
+
+### Environment
+
+```bash
+cd Algorithm
+source .venv/bin/activate
+export FTIP_DB_ENABLED=1
+export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
+export FTIP_MIGRATIONS_AUTO=1
+```
+
+Run migrations:
+
+```bash
+python -c "from api.migrations.runner import apply_migrations; apply_migrations()"
+```
+
+### Create a data version
+
+```bash
+curl -X POST http://localhost:8000/data/version/create \
+  -H "Content-Type: application/json" \
+  -d '{"source_name":"manual","source_snapshot_hash":"snap-2026-01-01","notes":"daily load"}'
+```
+
+### Ingest sample daily prices
+
+```bash
+curl -X POST http://localhost:8000/data/prices/ingest_daily \
+  -H "Content-Type: application/json" \
+  -d '{"data_version_id":1,"items":[{"symbol":"AAPL","date":"2024-05-01","open":170,"high":172,"low":169,"close":171.5,"volume":1000000}]}'
+```
+
+### Ingest sample fundamentals (PIT)
+
+```bash
+curl -X POST http://localhost:8000/data/fundamentals/ingest_pit \
+  -H "Content-Type: application/json" \
+  -d '{"data_version_id":1,"items":[{"symbol":"AAPL","metric_key":"EPS","metric_value":1.9,"period_end":"2024-03-31","published_ts":"2024-04-30T00:00:00Z"}]}'
+```
+
+### Ingest sample news (PIT)
+
+```bash
+curl -X POST http://localhost:8000/data/news/ingest \
+  -H "Content-Type: application/json" \
+  -d '{"data_version_id":1,"items":[{"symbol":"AAPL","published_ts":"2024-05-01T13:00:00Z","source":"wire","credibility":0.88,"headline":"Sample headline"}]}'
+```
+
+### Query as-of (time travel)
+
+```bash
+curl "http://localhost:8000/data/prices/query_daily?symbol=AAPL&start_date=2024-05-01&end_date=2024-05-01&as_of_ts=2024-05-02T00:00:00Z"
+curl "http://localhost:8000/data/fundamentals/query_pit?symbol=AAPL&as_of_ts=2024-05-15T00:00:00Z&metric_keys=EPS"
+curl "http://localhost:8000/data/news/query?symbol=AAPL&as_of_ts=2024-05-15T00:00:00Z&limit=50"
+```
+
+No lookahead is enforced in PIT query helpers: fundamentals and news are filtered by `published_ts <= as_of_ts` and `as_of_ts <= query_as_of_ts`.
