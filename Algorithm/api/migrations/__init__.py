@@ -555,6 +555,11 @@ def _migration_prosperity_signals_unique_index(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_versioned_reality_core(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("022_versioned_reality_core.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -582,6 +587,7 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     ),
     ("020_backtest_tables", _migration_backtest_tables),
     ("021_prosperity_signals_unique_index", _migration_prosperity_signals_unique_index),
+    ("022_versioned_reality_core", _migration_versioned_reality_core),
 ]
 
 
