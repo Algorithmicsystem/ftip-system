@@ -23,6 +23,7 @@ from api import db, lifecycle, security
 from api.db import DBError
 from api.assistant.routes import router as assistant_router
 from api.backtest.routes import router as backtest_router
+from api.friction.routes import router as friction_router
 from api.llm.routes import router as llm_router
 from api.prosperity.routes import router as prosperity_router
 from api.narrator.routes import router as narrator_router
@@ -2079,6 +2080,7 @@ app.include_router(features_jobs_router)
 app.include_router(signals_jobs_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
+app.include_router(friction_router)
 app.include_router(ops_router)
 app.include_router(data_router)
 
