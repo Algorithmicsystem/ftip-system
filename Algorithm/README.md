@@ -575,3 +575,33 @@ curl "http://localhost:8000/data/news/query?symbol=AAPL&as_of_ts=2024-05-15T00:0
 ```
 
 No lookahead is enforced in PIT query helpers: fundamentals and news are filtered by `published_ts <= as_of_ts` and `as_of_ts <= query_as_of_ts`.
+
+## Phase 2: Market Microstructure + Trading Friction
+
+Phase 2 adds a modular daily-bar friction engine under `ftip/friction/` with pluggable slippage, spread, impact, fill, cost, and constraints components. It is deterministic under fixed seed and supports US/Canada daily strategies only (no intraday execution).
+
+### Friction simulation endpoint
+
+Use the new debugging endpoint:
+
+```bash
+curl -X POST http://localhost:8000/friction/simulate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cost_model": {"fee_bps": 1, "slippage_bps": 5, "seed": 42},
+    "market_state": {
+      "date": "2024-01-02", "open": 100, "high": 102, "low": 99,
+      "close": 101, "volume": 1000000
+    },
+    "execution_plan": {
+      "symbol": "AAPL", "date": "2024-01-02", "side": "BUY",
+      "notional": 10000, "order_type": "MARKET"
+    }
+  }'
+```
+
+### Backtesting with friction enabled
+
+Existing `/backtest/run` accepts old `cost_model` payloads (`fee_bps`, `slippage_bps`) and now also supports enhanced friction fields (spread, impact, ADV/participation, overnight gap penalty, limit order controls, and seed). Backtest costs are now executed via the friction engine.
+
+> Note: execution model is daily-only and does not support intraday routing/fills.

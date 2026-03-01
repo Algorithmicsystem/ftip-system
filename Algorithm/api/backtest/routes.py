@@ -13,6 +13,17 @@ router = APIRouter(tags=["backtest"])
 class CostModel(BaseModel):
     fee_bps: float = Field(1, ge=0)
     slippage_bps: float = Field(5, ge=0)
+    spread_bps: float = Field(2, ge=0)
+    impact: Optional[Dict[str, float]] = None
+    participation_rate: float = Field(0.02, ge=0, le=1)
+    max_adv_pct: float = Field(0.1, ge=0, le=1)
+    volatility_window: int = Field(20, ge=2)
+    use_close_to_close_vol: bool = True
+    allow_market_orders: bool = True
+    allow_limit_orders: bool = True
+    limit_fill_probability: float = Field(0.65, ge=0, le=1)
+    overnight_gap_risk_bps: float = Field(1, ge=0)
+    seed: int = 42
 
 
 class BacktestRunRequest(BaseModel):

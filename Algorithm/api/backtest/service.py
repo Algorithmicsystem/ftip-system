@@ -9,6 +9,8 @@ from fastapi import HTTPException
 
 from api import config, db
 from api.data_providers import canonical_symbol
+from ftip.friction import CostModel as FrictionCostModel
+from ftip.friction import ExecutionPlan, FrictionEngine, MarketStateInputs
 
 
 def _require_db_enabled(write: bool = False, read: bool = False) -> None:
@@ -49,6 +51,33 @@ def _fetch_bars(
     out: Dict[str, Dict[dt.date, float]] = {}
     for sym, as_of_date, close in rows:
         out.setdefault(sym, {})[as_of_date] = float(close)
+    return out
+
+
+def _fetch_market_states(
+    symbols: List[str], start: dt.date, end: dt.date
+) -> Dict[str, Dict[dt.date, Dict[str, float]]]:
+    if not symbols:
+        return {}
+    rows = db.safe_fetchall(
+        """
+        SELECT symbol, as_of_date, open, high, low, close, volume
+        FROM market_bars_daily
+        WHERE symbol = ANY(%s)
+          AND as_of_date BETWEEN %s AND %s
+        ORDER BY symbol, as_of_date
+        """,
+        (symbols, start, end),
+    )
+    out: Dict[str, Dict[dt.date, Dict[str, float]]] = {}
+    for symbol, as_of_date, open_px, high_px, low_px, close_px, volume in rows:
+        out.setdefault(symbol, {})[as_of_date] = {
+            "open": float(open_px or close_px),
+            "high": float(high_px or close_px),
+            "low": float(low_px or close_px),
+            "close": float(close_px),
+            "volume": float(volume or 0.0),
+        }
     return out
 
 
@@ -275,9 +304,9 @@ def run_backtest(
             status_code=400, detail="not enough data points for backtest"
         )
 
-    cost_rate = (
-        float(cost_model.get("fee_bps", 0)) + float(cost_model.get("slippage_bps", 0))
-    ) / 10000.0
+    friction_cost_model = FrictionCostModel.from_legacy(cost_model)
+    friction_engine = FrictionEngine(friction_cost_model)
+    market_states = _fetch_market_states(symbols, start, end)
     positions: Dict[str, Dict[str, Any]] = {}
     trades: List[Dict[str, Any]] = []
     equity_curve: List[Dict[str, Any]] = []
@@ -326,7 +355,19 @@ def run_backtest(
                         "holding_days": (date - current["entry_dt"]).days,
                     }
                 )
-                trade_cost += cost_rate
+                exit_market = market_states.get(sym, {}).get(date)
+                if exit_market:
+                    exit_result = friction_engine.simulate(
+                        MarketStateInputs(date=date, **exit_market),
+                        ExecutionPlan(
+                            symbol=sym,
+                            date=date,
+                            side="SELL" if current["side"] == "LONG" else "BUY",
+                            notional=current["qty"] * exit_market["close"],
+                            order_type="MARKET",
+                        ),
+                    )
+                    trade_cost += exit_result.total_cost
                 trades_notional += current["qty"]
                 positions.pop(sym, None)
 
@@ -337,7 +378,19 @@ def run_backtest(
                     "entry_px": closes[date],
                     "qty": 1.0,
                 }
-                trade_cost += cost_rate
+                entry_market = market_states.get(sym, {}).get(date)
+                if entry_market:
+                    entry_result = friction_engine.simulate(
+                        MarketStateInputs(date=date, **entry_market),
+                        ExecutionPlan(
+                            symbol=sym,
+                            date=date,
+                            side="BUY" if desired == "LONG" else "SELL",
+                            notional=entry_market["close"],
+                            order_type="MARKET",
+                        ),
+                    )
+                    trade_cost += entry_result.total_cost
                 trades_notional += 1.0
 
             current = positions.get(sym)
@@ -348,11 +401,26 @@ def run_backtest(
                         1.0 if current["side"] == "LONG" else -1.0
                     )
                     active_returns.append(ret)
+                current_market = market_states.get(sym, {}).get(date)
+                if current_market:
+                    overnight_result = friction_engine.simulate(
+                        MarketStateInputs(date=date, **current_market),
+                        ExecutionPlan(
+                            symbol=sym,
+                            date=date,
+                            side="BUY",
+                            notional=current_market["close"],
+                            order_type="MARKET",
+                        ),
+                        apply_overnight=True,
+                        held_notional=current_market["close"],
+                    )
+                    trade_cost += overnight_result.overnight_risk_paid
 
         portfolio_return = (
             sum(active_returns) / len(active_returns) if active_returns else 0.0
         )
-        portfolio_return -= trade_cost
+        portfolio_return -= trade_cost / max(equity, 1e-12)
         equity *= 1.0 + portfolio_return
         daily_returns.append(portfolio_return)
         daily_equity.append(equity)

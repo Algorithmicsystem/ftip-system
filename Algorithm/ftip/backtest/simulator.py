@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from ..friction import CostModel, ExecutionPlan, FrictionEngine, MarketStateInputs
+
 import numpy as np
 import pandas as pd
 
@@ -38,7 +40,12 @@ class BacktestSimulator:
         self.trailing_stop = trailing_stop
         self.trading_days = trading_days
 
-    def run(self, prices: pd.Series, weights: pd.Series) -> BacktestResult:
+    def run(
+        self,
+        prices: pd.Series,
+        weights: pd.Series,
+        friction_model: Optional[CostModel] = None,
+    ) -> BacktestResult:
         returns = prices.pct_change().fillna(0.0)
         weights = weights.reindex(prices.index).fillna(0.0)
 
@@ -46,6 +53,8 @@ class BacktestSimulator:
         peak = 1.0
         equity_curve = []
         current_weight = 0.0
+
+        friction_engine = FrictionEngine(friction_model) if friction_model else None
 
         for date, r in returns.items():
             w = float(weights.loc[date])
@@ -64,6 +73,30 @@ class BacktestSimulator:
                 drawdown = 1 - equity / peak
                 if drawdown >= self.trailing_stop:
                     w = 0.0
+
+            if friction_engine is not None:
+                turnover = abs(w - current_weight)
+                if turnover > 0:
+                    px = float(prices.loc[date])
+                    market = MarketStateInputs(
+                        date=pd.Timestamp(date).date(),
+                        close=px,
+                        open=px,
+                        high=px,
+                        low=px,
+                        volume=1_000_000.0,
+                        adv_20=1_000_000.0,
+                        rv_20=max(abs(r), 0.01),
+                    )
+                    plan = ExecutionPlan(
+                        symbol="PORT",
+                        date=pd.Timestamp(date).date(),
+                        side="BUY" if w >= current_weight else "SELL",
+                        notional=turnover,
+                        order_type="MARKET",
+                    )
+                    exec_result = friction_engine.simulate(market, plan)
+                    equity -= exec_result.total_cost
 
             current_weight = w
             equity_curve.append((date, equity))
@@ -93,7 +126,10 @@ class BacktestSimulator:
 
 
 def evaluate_backtest(
-    prices: pd.Series, weights: pd.Series, **kwargs
+    prices: pd.Series,
+    weights: pd.Series,
+    friction_model: Optional[CostModel] = None,
+    **kwargs,
 ) -> BacktestResult:
     simulator = BacktestSimulator(**kwargs)
-    return simulator.run(prices, weights)
+    return simulator.run(prices, weights, friction_model=friction_model)
