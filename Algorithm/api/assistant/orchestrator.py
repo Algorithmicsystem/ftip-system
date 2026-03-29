@@ -36,6 +36,72 @@ def _latest_bar_info(symbol: str) -> Tuple[Optional[dt.date], Optional[dt.dateti
     return row[0], row[1]
 
 
+def _latest_prosperity_bar_info(
+    symbol: str,
+) -> Tuple[Optional[dt.date], Optional[dt.datetime]]:
+    try:
+        row = db.safe_fetchone(
+            """
+            SELECT MAX(date), MAX(updated_at)
+            FROM prosperity_daily_bars
+            WHERE symbol = %s
+            """,
+            (symbol,),
+        )
+    except Exception:
+        return None, None
+    if not row:
+        return None, None
+    return row[0], row[1]
+
+
+def _hydrate_market_bars_from_prosperity(symbol: str, from_date: dt.date) -> int:
+    rows = db.safe_fetchall(
+        """
+        SELECT symbol, date, open, high, low, close, volume, source
+        FROM prosperity_daily_bars
+        WHERE symbol = %s AND date >= %s
+        ORDER BY date ASC
+        """,
+        (symbol, from_date),
+    )
+    if not rows:
+        return 0
+
+    inserted = 0
+    with db.with_connection() as (conn, cur):
+        for row in rows:
+            cur.execute(
+                """
+                INSERT INTO market_bars_daily(
+                    symbol, as_of_date, open, high, low, close, volume, source, ingested_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,now())
+                ON CONFLICT (symbol, as_of_date)
+                DO UPDATE SET
+                    open = EXCLUDED.open,
+                    high = EXCLUDED.high,
+                    low = EXCLUDED.low,
+                    close = EXCLUDED.close,
+                    volume = EXCLUDED.volume,
+                    source = EXCLUDED.source,
+                    ingested_at = now()
+                """,
+                (
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    row[7] or "prosperity_daily_bars",
+                ),
+            )
+            inserted += 1
+        conn.commit()
+    return inserted
+
+
 def _latest_news_info(
     symbol: str,
 ) -> Tuple[Optional[dt.datetime], Optional[dt.datetime]]:
@@ -93,6 +159,13 @@ async def ensure_freshness(symbol: str, *, refresh: bool = True) -> Dict[str, An
                     status_code=resp.status_code, detail=resp.body.decode()
                 )
             bars_date, bars_updated = _latest_bar_info(symbol)
+            if bars_date is None:
+                fallback_bars_date, _ = _latest_prosperity_bar_info(symbol)
+                if fallback_bars_date is not None:
+                    _hydrate_market_bars_from_prosperity(
+                        symbol, today - dt.timedelta(days=30)
+                    )
+                    bars_date, bars_updated = _latest_bar_info(symbol)
 
         if news_date is None or (today - news_date.date()).days > 5:
             request = market_data_job.NewsRequest(
