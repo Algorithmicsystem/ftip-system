@@ -833,11 +833,7 @@ async def snapshot_run(
     job_name: Optional[str] = None,
     lock_owner: Optional[str] = None,
 ):
-    db_enabled_for_run = (
-        db.db_enabled() and db.db_write_enabled() and db.db_read_enabled()
-    )
-    if db_enabled_for_run:
-        _require_db_enabled(write=True, read=True)
+    _require_db_enabled(write=True, read=True)
     trace_id = getattr(request.state, "trace_id", None)
     if req.from_date > req.to_date:
         raise HTTPException(
@@ -872,13 +868,10 @@ async def snapshot_run(
 
     t0 = time.time()
     symbol_snapshots: List[Dict[str, Any]] = []
-    if db_enabled_for_run:
-        try:
-            ingest.upsert_universe(symbols)
-        except Exception as exc:  # pragma: no cover - guarded via validation
-            raise HTTPException(
-                status_code=503, detail=f"failed to upsert universe: {exc}"
-            )
+    try:
+        ingest.upsert_universe(symbols)
+    except Exception as exc:  # pragma: no cover - guarded via validation
+        raise HTTPException(status_code=503, detail=f"failed to upsert universe: {exc}")
     timings["upsert_universe"] = time.time() - t0
 
     max_attempts = 3
@@ -943,37 +936,31 @@ async def snapshot_run(
                         sym, effective_as_of, req.lookback, candles
                     )
 
-                if db_enabled_for_run:
-                    written = _persist_symbol_outputs(
-                        sym,
-                        effective_as_of,
-                        req.lookback,
-                        feats,
-                        {**feat_meta, "regime": regime},
-                        signal_payload,
-                        strategy_rows=(
-                            strategy_rows if req.compute_strategy_graph else None
-                        ),
-                        ensemble_row=(
-                            ensemble_row if req.compute_strategy_graph else None
-                        ),
-                    )
-                    rows_written["features"] += written.get("features", 0)
-                    rows_written["signals"] += written.get("signals", 0)
-                    strategy_graph_rows["strategies"] += written.get("strategies", 0)
-                    strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
+                written = _persist_symbol_outputs(
+                    sym,
+                    effective_as_of,
+                    req.lookback,
+                    feats,
+                    {**feat_meta, "regime": regime},
+                    signal_payload,
+                    strategy_rows=(strategy_rows if req.compute_strategy_graph else None),
+                    ensemble_row=(ensemble_row if req.compute_strategy_graph else None),
+                )
+                rows_written["features"] += written.get("features", 0)
+                rows_written["signals"] += written.get("signals", 0)
+                strategy_graph_rows["strategies"] += written.get("strategies", 0)
+                strategy_graph_rows["ensembles"] += written.get("ensembles", 0)
                 symbols_ok.append(sym)
-                if db_enabled_for_run:
-                    _log_symbol_coverage(
-                        run_id,
-                        job_name,
-                        effective_as_of,
-                        sym,
-                        "OK",
-                        bars_required=bars_required,
-                        bars_returned=bars_returned,
-                        lock_owner=lock_owner,
-                    )
+                _log_symbol_coverage(
+                    run_id,
+                    job_name,
+                    effective_as_of,
+                    sym,
+                    "OK",
+                    bars_required=bars_required,
+                    bars_returned=bars_returned,
+                    lock_owner=lock_owner,
+                )
                 logger.info(
                     "jobs.prosperity.daily_snapshot.symbol_ok",
                     extra={
@@ -1028,19 +1015,18 @@ async def snapshot_run(
                         "bars_returned": bars_returned,
                     }
                 )
-                if db_enabled_for_run:
-                    _log_symbol_coverage(
-                        run_id,
-                        job_name,
-                        effective_as_of or req.as_of_date,
-                        sym,
-                        "FAILED",
-                        reason_code=reason_code,
-                        reason_detail=reason_detail,
-                        bars_required=bars_required,
-                        bars_returned=bars_returned,
-                        lock_owner=lock_owner,
-                    )
+                _log_symbol_coverage(
+                    run_id,
+                    job_name,
+                    effective_as_of or req.as_of_date,
+                    sym,
+                    "FAILED",
+                    reason_code=reason_code,
+                    reason_detail=reason_detail,
+                    bars_required=bars_required,
+                    bars_returned=bars_returned,
+                    lock_owner=lock_owner,
+                )
                 logger.warning(
                     "jobs.prosperity.daily_snapshot.symbol_failed",
                     extra={
