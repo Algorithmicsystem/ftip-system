@@ -132,3 +132,70 @@ async def test_ensure_freshness_raises_404_when_no_market_or_prosperity_bars(mon
 
     assert excinfo.value.status_code == 404
     assert "no market bars available" in excinfo.value.detail
+
+
+@pytest.mark.anyio
+async def test_ensure_freshness_hydrates_when_prosperity_only_has_stale_window(monkeypatch):
+    symbol = "AAPL"
+    today = dt.datetime.now(dt.timezone.utc).date()
+    # Simulate the reported runtime state: prosperity has data, but latest row
+    # is older than today-30 so the old hydration window would return no rows.
+    prosperity_latest = today - dt.timedelta(days=120)
+
+    state = {"hydrated": False}
+    hydrate_calls = {"from_date": None}
+
+    def fake_fetchone(query, params):
+        if "FROM market_bars_daily" in query:
+            if state["hydrated"]:
+                return (prosperity_latest, dt.datetime.now(dt.timezone.utc))
+            return (None, None)
+        if "FROM prosperity_daily_bars" in query:
+            return (prosperity_latest, dt.datetime.now(dt.timezone.utc))
+        if "FROM news_raw" in query:
+            return (None, None)
+        if "FROM sentiment_daily" in query:
+            return (None, None)
+        return None
+
+    def fake_fetchall(query, params):
+        if "FROM prosperity_daily_bars" in query:
+            hydrate_calls["from_date"] = params[1]
+            if params[1] <= prosperity_latest:
+                return [
+                    (symbol, prosperity_latest, 1.0, 1.2, 0.9, 1.1, 1000, "massive"),
+                ]
+            return []
+        return []
+
+    cursor = _DummyCursor()
+
+    def fake_with_connection():
+        state["hydrated"] = True
+        return _ConnCtx(cursor)
+
+    async def fake_ingest(_req):
+        return {"status": "failed", "symbols_ok": [], "symbols_failed": []}
+
+    async def fake_ok(_req):
+        return {"status": "ok"}
+
+    monkeypatch.setattr("api.assistant.orchestrator.db.safe_fetchone", fake_fetchone)
+    monkeypatch.setattr("api.assistant.orchestrator.db.safe_fetchall", fake_fetchall)
+    monkeypatch.setattr("api.assistant.orchestrator.db.with_connection", fake_with_connection)
+    monkeypatch.setattr("api.assistant.orchestrator.db.db_enabled", lambda: True)
+    monkeypatch.setattr("api.assistant.orchestrator.db.db_read_enabled", lambda: True)
+    monkeypatch.setattr("api.assistant.orchestrator.db.db_write_enabled", lambda: True)
+    monkeypatch.setattr(
+        "api.assistant.orchestrator.market_data_job.ingest_bars_daily", fake_ingest
+    )
+    monkeypatch.setattr("api.assistant.orchestrator.market_data_job.ingest_news", fake_ok)
+    monkeypatch.setattr(
+        "api.assistant.orchestrator.market_data_job.compute_sentiment", fake_ok
+    )
+
+    freshness = await orchestrator.ensure_freshness(symbol)
+
+    assert freshness["as_of_date"] == prosperity_latest
+    assert hydrate_calls["from_date"] == prosperity_latest - dt.timedelta(days=30)
+    assert cursor.executed == 1
