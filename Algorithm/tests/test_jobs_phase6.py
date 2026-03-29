@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from api.main import app
 from api import security
+from api.jobs import prosperity
 
 
 def _set_db_flags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -138,3 +139,34 @@ def test_daily_snapshot_invokes_retention(monkeypatch: pytest.MonkeyPatch):
     assert resp.status_code == 200
     assert called["args"] == (dt.date(2024, 5, 19), 730)
     assert resp.json()["retention_deleted"] == {"prosperity_features_daily": 5}
+
+
+def test_cleanup_retention_targets_v1_strategy_tables(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    called = []
+
+    def fake_delete(table: str, cutoff: dt.date) -> int:
+        called.append((table, cutoff))
+        return 0
+
+    monkeypatch.setattr("api.jobs.prosperity._delete_older_than", fake_delete)
+
+    as_of_date = dt.date(2024, 5, 19)
+    retention_days = 30
+    cutoff = dt.date(2024, 4, 19)
+
+    result = prosperity.cleanup_retention(as_of_date, retention_days)
+
+    assert called == [
+        ("prosperity_features_daily", cutoff),
+        ("prosperity_signals_daily", cutoff),
+        ("prosperity_strategy_signals_daily", cutoff),
+        ("prosperity_ensemble_signals_daily", cutoff),
+    ]
+    assert result == {
+        "prosperity_features_daily": 0,
+        "prosperity_signals_daily": 0,
+        "prosperity_strategy_signals_daily": 0,
+        "prosperity_ensemble_signals_daily": 0,
+    }
