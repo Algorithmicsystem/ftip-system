@@ -3,132 +3,74 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FTIP Assistant</title>
+    <title>FTIP Prosperity v1 Console</title>
     <link rel="stylesheet" href="/app/static/styles.css" />
   </head>
   <body>
     <header>
-      <h1>FTIP Chat Orchestrator</h1>
+      <h1>FTIP Prosperity v1 Console</h1>
+      <p class="subtitle">Official v1 flow: bootstrap → snapshot run → latest signal/features.</p>
     </header>
-    <main>
-      <div class="panel chart-placeholder">Chart panel (placeholder)</div>
 
+    <main>
       <div class="panel">
+        <h2>Official v1 Controls</h2>
         <div class="input-row">
-          <input id="symbol-input" placeholder="Symbol (e.g. NVDA)" />
-          <select id="horizon-input">
-            <option value="swing">swing</option>
-            <option value="position">position</option>
-          </select>
-          <select id="risk-input">
-            <option value="balanced">balanced</option>
-            <option value="conservative">conservative</option>
-            <option value="aggressive">aggressive</option>
-          </select>
-          <button id="analyze-btn">Analyze</button>
+          <input id="api-key-input" placeholder="X-API-Key (optional for local dev)" />
+          <input id="symbol-input" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
+          <input id="lookback-input" type="number" min="5" max="5000" value="252" />
+          <input id="from-date-input" type="date" />
+          <input id="to-date-input" type="date" />
+          <input id="as-of-date-input" type="date" />
         </div>
+
+        <div class="actions-row">
+          <button id="bootstrap-btn">1) Bootstrap</button>
+          <button id="snapshot-btn">2) Run Snapshot</button>
+          <button id="refresh-btn">3/4) Refresh Latest Signal + Features</button>
+          <button id="daily-snapshot-btn" class="secondary">Optional Daily Snapshot Job</button>
+        </div>
+
+        <p class="muted" id="status-line">Ready.</p>
       </div>
 
       <div class="tabs">
-        <button class="tab active" data-tab="overview">Overview</button>
-        <button class="tab" data-tab="features">Features</button>
-        <button class="tab" data-tab="sentiment">Sentiment</button>
-        <button class="tab" data-tab="fundamentals">Fundamentals</button>
-        <button class="tab" data-tab="backtest">Backtest</button>
+        <button class="tab active" data-tab="signal">Latest Signal (official v1)</button>
+        <button class="tab" data-tab="features">Latest Features (official v1)</button>
+        <button class="tab" data-tab="legacy">Non-v1 / legacy tools</button>
       </div>
 
-      <div id="overview" class="panel tab-panel">
-        <h3 id="narration-headline"></h3>
-        <p id="narration-summary"></p>
-        <ul id="narration-bullets"></ul>
-        <p id="narration-disclaimer"></p>
-        <ul id="narration-followups"></ul>
+      <div id="signal" class="panel tab-panel">
+        <h3>Latest Signal</h3>
+        <div class="signal-grid">
+          <div>Symbol: <strong id="signal-symbol">N/A</strong></div>
+          <div>As Of: <strong id="signal-asof">N/A</strong></div>
+          <div>Signal: <strong id="signal-direction">N/A</strong></div>
+          <div>Score: <strong id="signal-score">N/A</strong></div>
+          <div>Confidence: <strong id="signal-confidence">N/A</strong></div>
+          <div>Regime: <strong id="signal-regime">N/A</strong></div>
+        </div>
+        <pre id="signal-json" class="json-block">{}</pre>
       </div>
 
       <div id="features" class="panel tab-panel hidden">
-        <p>Feature summary will render from /assistant/analyze payload.</p>
-      </div>
-
-      <div id="sentiment" class="panel tab-panel hidden">
-        <p>Sentiment panel placeholder.</p>
-      </div>
-
-      <div id="fundamentals" class="panel tab-panel hidden">
-        <p>Fundamentals panel placeholder.</p>
-      </div>
-
-      <div id="backtest" class="panel tab-panel hidden">
-        <div class="input-row">
-          <input id="backtest-symbol" placeholder="Symbol (optional)" />
-          <select id="backtest-universe">
-            <option value="sp500">sp500</option>
-            <option value="nasdaq100">nasdaq100</option>
-            <option value="custom">custom</option>
-          </select>
-          <input id="backtest-start" type="date" />
-          <input id="backtest-end" type="date" />
-          <select id="backtest-horizon">
-            <option value="swing">swing</option>
-            <option value="position">position</option>
-          </select>
-          <select id="backtest-risk">
-            <option value="balanced">balanced</option>
-            <option value="conservative">conservative</option>
-            <option value="aggressive">aggressive</option>
-          </select>
-          <button id="backtest-run">Run backtest</button>
+        <h3>Latest Features</h3>
+        <div class="signal-grid">
+          <div>Symbol: <strong id="features-symbol">N/A</strong></div>
+          <div>As Of: <strong id="features-asof">N/A</strong></div>
+          <div>Lookback: <strong id="features-lookback">N/A</strong></div>
         </div>
+        <pre id="features-json" class="json-block">{}</pre>
+      </div>
 
-        <div class="row" style="margin-top: 16px;">
-          <div class="col metric-card">
-            <div>CAGR: <span id="metric-cagr">0</span></div>
-            <div>Sharpe: <span id="metric-sharpe">0</span></div>
-            <div>Sortino: <span id="metric-sortino">0</span></div>
-            <div>MaxDD: <span id="metric-maxdd">0</span></div>
-            <div>Turnover: <span id="metric-turnover">0</span></div>
-          </div>
-          <div class="col">
-            <canvas id="equity-canvas" class="equity-chart" width="620" height="260"></canvas>
-          </div>
-        </div>
-
-        <table class="panel" style="width: 100%; margin-top: 16px;">
-          <thead>
-            <tr>
-              <th>Regime</th>
-              <th>CAGR</th>
-              <th>Sharpe</th>
-              <th>MaxDD</th>
-              <th>WinRate</th>
-              <th>Trades</th>
-            </tr>
-          </thead>
-          <tbody id="regime-table"></tbody>
-        </table>
+      <div id="legacy" class="panel tab-panel hidden">
+        <h3>Legacy / Non-v1 Areas</h3>
+        <p class="muted">
+          Assistant chat, sentiment/fundamentals placeholders, and backtest sandbox are intentionally
+          de-emphasized for official v1. Backend routes remain available.
+        </p>
       </div>
     </main>
-
-    <div class="chat-shell">
-      <div class="signal-card">
-        <strong>Signal card</strong>
-        <div>Direction: <span id="signal-direction">N/A</span></div>
-        <div>Score: <span id="signal-score">N/A</span></div>
-        <div>Confidence: <span id="signal-confidence">N/A</span></div>
-        <div>Horizon: <span id="signal-horizon">N/A</span></div>
-        <div>Risk Mode: <span id="signal-risk">N/A</span></div>
-        <div class="confidence-bar"><span></span></div>
-        <div>Confidence: <span id="confidence-value">0%</span></div>
-        <ul id="reason-codes" class="reason-list"></ul>
-      </div>
-
-      <div>
-        <div id="chat-log" class="chat-log"></div>
-        <div class="chat-input">
-          <input id="chat-message" placeholder="Ask the narrator..." style="flex: 1;" />
-          <button id="chat-send">Send</button>
-        </div>
-      </div>
-    </div>
 
     <script src="/app/static/app.js"></script>
   </body>
