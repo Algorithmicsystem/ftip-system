@@ -167,7 +167,10 @@ def _normalize_symbols(symbols: List[str]) -> List[str]:
 
 
 def _bars_required(lookback: int) -> int:
-    return max(int(lookback), 252)
+    # Keep a small quality floor, but honor the caller's requested lookback.
+    # The previous hard floor of 252 caused a mismatch where lookback<252
+    # requests still failed with required=252.
+    return max(int(lookback), 30)
 
 
 def _validate_bars(
