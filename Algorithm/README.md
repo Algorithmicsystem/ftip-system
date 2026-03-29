@@ -164,9 +164,19 @@ setopt interactivecomments
 
 If you see `command not found: #`, re-run the command above and try again.
 
-## Prosperity DB v1
+## Official API v1 quickstart (Prosperity)
 
-Prosperity DB adds a durable research warehouse (Postgres) for caching market data, features, and signals. Enable it with:
+The official v1 integration flow is exactly:
+
+1. `POST /prosperity/bootstrap`
+2. `POST /prosperity/snapshot/run`
+3. `GET /prosperity/latest/signal`
+4. `GET /prosperity/latest/features`
+5. Optional scheduler equivalent: `POST /jobs/prosperity/daily-snapshot`
+
+See `docs/official_api_v1.md` for the full contract and operator notes.
+
+Prosperity DB uses Postgres for durable feature/signal snapshots. Enable it with:
 
 ```bash
 export FTIP_DB_ENABLED=1
@@ -176,17 +186,21 @@ export FTIP_DB_READ_ENABLED=1
 export FTIP_MIGRATIONS_AUTO=1
 ```
 
-Example calls:
+Quickstart calls (official v1 path):
 
 ```bash
-curl http://localhost:8000/prosperity/health
+curl -X POST http://localhost:8000/prosperity/bootstrap
 curl -X POST http://localhost:8000/prosperity/snapshot/run \
   -H "Content-Type: application/json" \
-  -d '{"symbols":["AAPL","MSFT","GOOGL","AMZN","NVDA"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
+  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
 curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
+curl "http://localhost:8000/prosperity/latest/features?symbol=AAPL&lookback=252"
+curl -X POST http://localhost:8000/jobs/prosperity/daily-snapshot \
+  -H "Content-Type: application/json" \
+  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
 ```
 
-To smoke test the snapshot->latest round trip on a fresh database, run:
+To smoke test only the core v1 round trip on a fresh database, run:
 
 ```bash
 curl -X POST http://localhost:8000/prosperity/bootstrap
@@ -194,9 +208,10 @@ curl -X POST http://localhost:8000/prosperity/snapshot/run \
   -H "Content-Type: application/json" \
   -d '{"symbols":["AAPL"],"from_date":"2024-01-01","to_date":"2024-01-05","as_of_date":"2024-01-05","lookback":252}'
 curl "http://localhost:8000/prosperity/latest/signal?symbol=AAPL&lookback=252"
+curl "http://localhost:8000/prosperity/latest/features?symbol=AAPL&lookback=252"
 ```
 
-Each call should return HTTP 200 with the latest signal containing `score_mode`.
+Each call should return HTTP 200. `latest/signal` should include `score_mode`.
 
 Prosperity endpoints require an API key when any of the following are set (merged + trimmed in this order):
 
@@ -219,6 +234,14 @@ Production verification (after setting Railway variables):
 ```
 BASE="https://ftip-system-production.up.railway.app" KEY="cfotwin-dev-2025-12-29" ./scripts/phase2_verify.sh
 ```
+
+### Non-v1 / legacy surfaces (kept for compatibility)
+
+The following APIs remain available but are **not** part of the official v1 contract:
+
+- `/signals/*` (legacy parallel signal namespace)
+- `/assistant/*`, `/narrator/*`, `/backtest/*`, `/friction/*`, `/data/*`
+- Additional jobs/admin routes beyond `POST /jobs/prosperity/daily-snapshot`
 
 ## Milestone E/F quickstart
 
