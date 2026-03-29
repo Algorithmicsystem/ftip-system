@@ -8,7 +8,7 @@ from api import migrations
 
 
 @pytest.mark.skipif(os.getenv("DATABASE_URL") is None, reason="DATABASE_URL not set")
-def test_prosperity_signals_primary_key_includes_score_mode():
+def test_prosperity_signals_primary_key_is_symbol_asof_lookback():
     os.environ.setdefault("FTIP_DB_ENABLED", "1")
     migrations.ensure_schema()
 
@@ -27,15 +27,15 @@ def test_prosperity_signals_primary_key_includes_score_mode():
             )
             columns = [row[0] for row in cur.fetchall()]
 
-    assert "score_mode" in columns
+    assert columns == ["symbol", "as_of", "lookback"]
 
 
-def test_prosperity_signals_pk_migration_avoids_ambiguous_constraint_name():
+def test_prosperity_signals_v1_uniqueness_migration_dedupes_and_updates_pk():
     sql_path = Path(migrations.__file__).with_name(
-        "019_fix_prosperity_signals_score_mode_pk.sql"
+        "023_prosperity_signals_v1_uniqueness.sql"
     )
     sql = sql_path.read_text()
 
-    assert "v_existing_pk" in sql
-    assert "constraint_name text" not in sql
-    assert "information_schema.table_constraints" not in sql
+    assert "row_number() OVER" in sql
+    assert "PARTITION BY symbol" in sql
+    assert "PRIMARY KEY (symbol, %I, lookback)" in sql

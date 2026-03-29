@@ -164,7 +164,7 @@ def _migration_prosperity_core(cur: Any) -> None:
             meta JSONB,
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-            PRIMARY KEY (symbol, as_of, lookback, score_mode)
+            PRIMARY KEY (symbol, as_of, lookback)
         )
         """
     )
@@ -260,9 +260,7 @@ def _migration_prosperity_core(cur: Any) -> None:
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN score SET NOT NULL")
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN signal SET NOT NULL")
     cur.execute("ALTER TABLE prosperity_signals_daily ALTER COLUMN as_of DROP DEFAULT")
-    _ensure_primary_key(
-        cur, "prosperity_signals_daily", ("symbol", "as_of", "lookback", "score_mode")
-    )
+    _ensure_primary_key(cur, "prosperity_signals_daily", ("symbol", "as_of", "lookback"))
 
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_prosperity_universe_active ON prosperity_universe(active)"
@@ -560,6 +558,11 @@ def _migration_versioned_reality_core(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_prosperity_signals_v1_uniqueness(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("023_prosperity_signals_v1_uniqueness.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -588,6 +591,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     ("020_backtest_tables", _migration_backtest_tables),
     ("021_prosperity_signals_unique_index", _migration_prosperity_signals_unique_index),
     ("022_versioned_reality_core", _migration_versioned_reality_core),
+    (
+        "023_prosperity_signals_v1_uniqueness",
+        _migration_prosperity_signals_v1_uniqueness,
+    ),
 ]
 
 

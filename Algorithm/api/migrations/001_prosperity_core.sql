@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS prosperity_signals_daily (
     signal_hash TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now(),
-    PRIMARY KEY (symbol, as_of_date, lookback, score_mode)
+    PRIMARY KEY (symbol, as_of_date, lookback)
 );
 
 CREATE TABLE IF NOT EXISTS prosperity_backtest_runs (
