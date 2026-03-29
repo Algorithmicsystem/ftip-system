@@ -629,26 +629,51 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
 
     max_retries = _env_int("FTIP_MD_MAX_RETRIES", 4)
     base_sleep = _env_float("FTIP_MD_RETRY_BASE_SLEEP", 2.0)
+    request_timeout_sec = float(
+        _env("FTIP_MD_REQUEST_TIMEOUT_SEC", "25") or "25"
+    )
+    max_backoff_sec = float(_env("FTIP_MD_MAX_BACKOFF_SEC", "20") or "20")
 
     last_err: Optional[str] = None
 
     for attempt in range(max_retries + 1):
+        backoff = min(base_sleep * (2**attempt), max_backoff_sec)
         try:
-            resp = requests.get(url, params=params, timeout=60)
+            resp = requests.get(url, params=params, timeout=request_timeout_sec)
+        except requests.exceptions.Timeout as e:
+            last_err = f"Market data timeout ({request_timeout_sec:.1f}s): {e}"
+            if attempt >= max_retries:
+                break
+            time.sleep(backoff)
+            continue
         except Exception as e:
             last_err = f"Market data request failed: {e}"
-            time.sleep(base_sleep * (2**attempt))
+            if attempt >= max_retries:
+                break
+            time.sleep(backoff)
             continue
 
         if resp.status_code == 429:
-            last_err = f"Market data rate-limited 429: {resp.text}"
-            time.sleep(base_sleep * (2**attempt))
+            last_err = f"Market data rate-limited (429): {resp.text}"
+            if attempt >= max_retries:
+                break
+            retry_after = resp.headers.get("Retry-After")
+            if retry_after and retry_after.isdigit():
+                backoff = min(float(retry_after), max_backoff_sec)
+            time.sleep(backoff)
+            continue
+
+        if 500 <= resp.status_code <= 599:
+            last_err = f"Market data upstream 5xx ({resp.status_code}): {resp.text}"
+            if attempt >= max_retries:
+                break
+            time.sleep(backoff)
             continue
 
         if resp.status_code != 200:
             raise HTTPException(
                 status_code=502,
-                detail=f"Market data error {resp.status_code}: {resp.text}",
+                detail=f"Market data non-retryable error {resp.status_code}: {resp.text}",
             )
 
         js = resp.json()
@@ -681,7 +706,9 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
         return candles
 
     raise HTTPException(
-        status_code=502, detail=last_err or "Market data failed after retries."
+        status_code=502,
+        detail=last_err
+        or "Market data provider unavailable after retries (retry or use cached DB bars).",
     )
 
 
