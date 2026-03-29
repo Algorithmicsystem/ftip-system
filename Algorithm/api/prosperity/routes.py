@@ -570,6 +570,37 @@ def _is_data_unavailable(reason_code: str) -> bool:
     return reason_code in {"NO_DATA", "INSUFFICIENT_BARS"}
 
 
+def _failure_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str, int]:
+    summary: Dict[str, int] = {}
+    for failure in symbols_failed:
+        reason = str(failure.get("reason_code") or "UNKNOWN")
+        summary[reason] = summary.get(reason, 0) + 1
+    return summary
+
+
+def _try_cached_bars_recovery(
+    symbol: str, from_date: dt.date, to_date: dt.date, required: int
+) -> Optional[Dict[str, Any]]:
+    initial_bars, effective_as_of = query.fetch_bars_with_latest(symbol, from_date, to_date)
+    if effective_as_of is None:
+        _validate_bars(symbol, initial_bars, required)
+
+    window_start = effective_as_of - dt.timedelta(days=420)
+    bars = query.fetch_bars(symbol, window_start, effective_as_of)
+    _validate_bars(
+        symbol,
+        bars,
+        required,
+        window_start=window_start,
+        window_end=effective_as_of,
+    )
+    return {
+        "bars": bars[-required:],
+        "effective_as_of": effective_as_of,
+        "bars_returned": len(bars),
+    }
+
+
 def _retry_sleep(attempt: int) -> None:
     base_sleep = 1.0
     jitter = random.uniform(0.0, 0.5)
@@ -868,6 +899,7 @@ async def snapshot_run(
     strategy_graph_rows = {"strategies": 0, "ensembles": 0}
     symbols_ok: List[str] = []
     symbols_failed: List[Dict[str, str]] = []
+    degraded_symbols: List[Dict[str, str]] = []
 
     t0 = time.time()
     symbol_snapshots: List[Dict[str, Any]] = []
@@ -891,25 +923,17 @@ async def snapshot_run(
                 ingest_result = ingest.ingest_bars(
                     sym, req.from_date, req.to_date, force_refresh=req.force_refresh
                 )
-                initial_bars, effective_as_of = query.fetch_bars_with_latest(
-                    sym, req.from_date, req.to_date
-                )
-                if effective_as_of is None:
-                    bars_returned = len(initial_bars)
-                    _validate_bars(sym, initial_bars, bars_required)
-
-                # Over-fetch to cover weekend/holiday gaps, then slice to the required lookback window.
-                window_start = effective_as_of - dt.timedelta(days=420)
-                bars = query.fetch_bars(sym, window_start, effective_as_of)
-                bars_returned = len(bars)
-                _validate_bars(
+                recovered = _try_cached_bars_recovery(
                     sym,
-                    bars,
+                    req.from_date,
+                    req.to_date,
                     bars_required,
-                    window_start=window_start,
-                    window_end=effective_as_of,
                 )
-                bars = bars[-bars_required:]
+                if recovered is None:
+                    raise SymbolFailure("NO_DATA", f"no bars available for {sym}")
+                bars = recovered["bars"]
+                effective_as_of = recovered["effective_as_of"]
+                bars_returned = recovered["bars_returned"]
                 bar_start = _as_iso_date(bars[0]["date"]) if bars else ""
                 bar_end = _as_iso_date(bars[-1]["date"]) if bars else ""
                 provider_name = "unknown"
@@ -975,6 +999,91 @@ async def snapshot_run(
                 break
             except Exception as exc:
                 reason_code, reason_detail, retryable = _classify_error(exc)
+                cached_recovered = False
+                if retryable:
+                    try:
+                        recovered = _try_cached_bars_recovery(
+                            sym,
+                            req.from_date,
+                            req.to_date,
+                            bars_required,
+                        )
+                        if recovered is not None:
+                            bars = recovered["bars"]
+                            effective_as_of = recovered["effective_as_of"]
+                            bars_returned = recovered["bars_returned"]
+                            bar_start = _as_iso_date(bars[0]["date"]) if bars else ""
+                            bar_end = _as_iso_date(bars[-1]["date"]) if bars else ""
+                            symbol_snapshots.append(
+                                {
+                                    "symbol": sym,
+                                    "from_date": bar_start,
+                                    "to_date": bar_end,
+                                    "provider": "db_cache_fallback",
+                                    "bar_count": len(bars),
+                                }
+                            )
+                            candles = _candles_from_bars(bars)
+                            feats, feat_meta, regime = _compute_features_payload(
+                                sym, effective_as_of, req.lookback, candles
+                            )
+                            signal_payload = _compute_signal_payload(
+                                sym, effective_as_of, req.lookback, candles
+                            )
+                            strategy_rows = None
+                            ensemble_row = None
+                            if req.compute_strategy_graph:
+                                strategy_rows, ensemble_row = _compute_strategy_graph(
+                                    sym, effective_as_of, req.lookback, candles
+                                )
+                            written = _persist_symbol_outputs(
+                                sym,
+                                effective_as_of,
+                                req.lookback,
+                                feats,
+                                {**feat_meta, "regime": regime},
+                                signal_payload,
+                                strategy_rows=(
+                                    strategy_rows if req.compute_strategy_graph else None
+                                ),
+                                ensemble_row=(
+                                    ensemble_row if req.compute_strategy_graph else None
+                                ),
+                            )
+                            rows_written["features"] += written.get("features", 0)
+                            rows_written["signals"] += written.get("signals", 0)
+                            strategy_graph_rows["strategies"] += written.get(
+                                "strategies", 0
+                            )
+                            strategy_graph_rows["ensembles"] += written.get(
+                                "ensembles", 0
+                            )
+                            symbols_ok.append(sym)
+                            degraded_symbols.append(
+                                {
+                                    "symbol": sym,
+                                    "degraded_mode": "db_cache_fallback",
+                                    "provider_error_code": reason_code,
+                                    "provider_error_detail": reason_detail,
+                                }
+                            )
+                            _log_symbol_coverage(
+                                run_id,
+                                job_name,
+                                effective_as_of,
+                                sym,
+                                "OK",
+                                reason_code="PROVIDER_FALLBACK",
+                                reason_detail=f"{reason_code}: {reason_detail}",
+                                bars_required=bars_required,
+                                bars_returned=bars_returned,
+                                lock_owner=lock_owner,
+                            )
+                            cached_recovered = True
+                    except Exception:
+                        cached_recovered = False
+                if cached_recovered:
+                    break
                 if retryable and attempts < max_attempts:
                     logger.info(
                         "daily_snapshot.retry",
@@ -1047,6 +1156,9 @@ async def snapshot_run(
     result_payload = {
         "symbols_ok": symbols_ok,
         "symbols_failed": symbols_failed,
+        "symbols_degraded": degraded_symbols,
+        "degraded_mode": bool(degraded_symbols),
+        "failure_summary": _failure_summary(symbols_failed),
         "rows_written": rows_written,
         "dataset_fingerprint": _dataset_fingerprint(symbol_snapshots),
         "feature_version": FEATURE_VERSION,
@@ -1080,24 +1192,30 @@ async def snapshot_run(
 @router.get("/latest/signal")
 async def latest_signal(symbol: str, lookback: int = 252):
     _require_db_enabled(read=True)
+    sym = symbol.upper()
     try:
-        res = query.latest_signal(symbol.upper(), lookback)
+        res = query.latest_signal(sym, lookback)
     except db.DBError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if not res:
-        raise HTTPException(status_code=404, detail="not found")
+        raise HTTPException(
+            status_code=404, detail=f"not found for symbol={sym} lookback={lookback}"
+        )
     return res
 
 
 @router.get("/latest/features")
 async def latest_features(symbol: str, lookback: int = 252):
     _require_db_enabled(read=True)
+    sym = symbol.upper()
     try:
-        res = query.latest_features(symbol.upper(), lookback)
+        res = query.latest_features(sym, lookback)
     except db.DBError as exc:  # pragma: no cover - defensive
         raise HTTPException(status_code=exc.status_code, detail=str(exc))
     if not res:
-        raise HTTPException(status_code=404, detail="not found")
+        raise HTTPException(
+            status_code=404, detail=f"not found for symbol={sym} lookback={lookback}"
+        )
     return res
 
 

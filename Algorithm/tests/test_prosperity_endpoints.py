@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict, List
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api import db
@@ -107,6 +108,7 @@ def test_latest_signal_missing_returns_404(
     body = res.json()
     assert "trace_id" in body
     assert body["error"]["type"] == "http_error"
+    assert "symbol=ZZZ_MISSING" in body["error"]["message"]
 
 
 def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestClient):
@@ -256,6 +258,70 @@ def test_snapshot_run_with_insufficient_bars(
     assert failure["lookback_days"] == 5
     assert failure["bars_required"] == 252
     assert failure["bars_returned"] == len(bars)
+    assert body["result"]["failure_summary"][failure["reason_code"]] == 1
+
+
+def test_snapshot_run_provider_failure_uses_db_cache_fallback(
+    monkeypatch: pytest.MonkeyPatch, client: TestClient
+):
+    _enable_db_flags(monkeypatch)
+
+    monkeypatch.setattr(ingest, "upsert_universe", lambda syms: (len(syms), syms))
+
+    def _raise_provider_error(*_args, **_kwargs):
+        raise HTTPException(status_code=502, detail="provider unavailable")
+
+    monkeypatch.setattr(ingest, "ingest_bars", _raise_provider_error)
+    monkeypatch.setattr(
+        "api.prosperity.routes._log_symbol_coverage", lambda *args, **kwargs: None
+    )
+
+    bars = _weekday_bars(dt.date(2024, 1, 5), 300)
+    monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
+    monkeypatch.setattr(
+        "api.main.compute_signal_for_symbol_from_candles",
+        lambda *args, **kwargs: SignalResponse(
+            symbol="AAPL",
+            as_of="2024-01-05",
+            lookback=252,
+            effective_lookback=252,
+            regime="TRENDING",
+            thresholds={"buy": 0.1, "sell": -0.1},
+            score=0.5,
+            base_score=0.5,
+            stacked_score=0.5,
+            signal="BUY",
+            confidence=0.7,
+            features={"mom_21": 0.1},
+            notes=["fallback"],
+            calibration_meta={"score_mode": "single", "base_score": 0.5},
+        ),
+    )
+    monkeypatch.setattr(
+        "api.prosperity.routes._persist_symbol_outputs",
+        lambda *args, **kwargs: {
+            "features": 1,
+            "signals": 1,
+            "strategies": 0,
+            "ensembles": 0,
+        },
+    )
+
+    payload = {
+        "symbols": ["AAPL"],
+        "from_date": "2023-01-01",
+        "to_date": "2024-01-05",
+        "as_of_date": "2024-01-05",
+        "lookback": 252,
+    }
+    res = client.post("/prosperity/snapshot/run", json=payload)
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "ok"
+    assert body["result"]["degraded_mode"] is True
+    assert body["result"]["symbols_ok"] == ["AAPL"]
+    assert body["result"]["symbols_failed"] == []
+    assert body["result"]["symbols_degraded"][0]["degraded_mode"] == "db_cache_fallback"
 
 
 def test_snapshot_run_uses_latest_trading_day(
