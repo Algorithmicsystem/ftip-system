@@ -1,5 +1,7 @@
 # FTIP Runbook
 
+> Official v1 (Prosperity, strict DB-backed) now has a focused runbook at `docs/official_v1_runbook.md`. Use that as the primary path for developer/operator v1 work and signoff.
+
 ## Milestone E: Assistant Orchestrator + UI
 
 ### Endpoints
