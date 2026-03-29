@@ -6,6 +6,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
@@ -165,7 +166,14 @@ def _acquire_job_lock(
                 'RUNNING', now(), now(), NULL
             )
             """,
-            (run_id, job_name, as_of_date, Json(requested), lock_owner, ttl_seconds),
+            (
+                run_id,
+                job_name,
+                as_of_date,
+                Json(jsonable_encoder(requested)),
+                lock_owner,
+                ttl_seconds,
+            ),
         )
         conn.commit()
         return True, {"run_id": run_id}
