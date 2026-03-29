@@ -162,8 +162,12 @@ async def ensure_freshness(symbol: str, *, refresh: bool = True) -> Dict[str, An
             if bars_date is None:
                 fallback_bars_date, _ = _latest_prosperity_bar_info(symbol)
                 if fallback_bars_date is not None:
+                    # Use the prosperity recency anchor (not "today") so hydration
+                    # still works when the only available prosperity history is stale.
+                    # If we anchor on today-30 and prosperity has no rows in that window,
+                    # market_bars_daily stays empty and /assistant/analyze incorrectly 404s.
                     _hydrate_market_bars_from_prosperity(
-                        symbol, today - dt.timedelta(days=30)
+                        symbol, fallback_bars_date - dt.timedelta(days=30)
                     )
                     bars_date, bars_updated = _latest_bar_info(symbol)
 
