@@ -20,8 +20,13 @@ is_truthy() {
 DB_ENABLED="${FTIP_DB_ENABLED:-}"
 MIGRATIONS_AUTO="${FTIP_MIGRATIONS_AUTO:-}"
 DATABASE_URL="${DATABASE_URL:-}"
+DB_REQUIRED="${FTIP_DB_REQUIRED:-}"
 
 if is_truthy "$DB_ENABLED"; then
+  if [ -z "$DB_REQUIRED" ]; then
+    export FTIP_DB_REQUIRED=1
+    echo "FTIP_DB_REQUIRED not set; defaulting to 1 for DB-backed runtime safety."
+  fi
   if [ -z "$DATABASE_URL" ]; then
     echo "DATABASE_URL is required when FTIP_DB_ENABLED is true." >&2
     exit 1
@@ -30,7 +35,7 @@ if is_truthy "$DB_ENABLED"; then
     echo "Running migrations..."
     python -c "from api import db; db.apply_migrations()"
   else
-    echo "Migrations disabled; skipping."
+    echo "Migrations disabled; skipping (ensure POST /prosperity/bootstrap ran successfully)."
   fi
 else
   echo "Database disabled; skipping migrations."

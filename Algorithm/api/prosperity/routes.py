@@ -94,7 +94,10 @@ async def bootstrap(request: Request):
         raise HTTPException(status_code=403, detail="forbidden")
 
     if not db.db_enabled():
-        return {"status": "ok", "db_enabled": False, "migrated": False, "versions": []}
+        raise HTTPException(
+            status_code=503,
+            detail="database disabled (set FTIP_DB_ENABLED=1 for official v1 bootstrap)",
+        )
 
     from api import migrations
 

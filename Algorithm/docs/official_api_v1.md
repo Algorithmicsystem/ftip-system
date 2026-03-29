@@ -21,6 +21,23 @@ When any API key env var is set (`FTIP_API_KEY`, `FTIP_API_KEYS`, `FTIP_API_KEY_
 
 Use `Content-Type: application/json` on `POST` requests.
 
+## Required runtime configuration (DB-backed v1)
+
+For deployed official v1 behavior (no misleading non-DB mode), set:
+
+- `FTIP_DB_ENABLED=1`
+- `FTIP_DB_WRITE_ENABLED=1`
+- `FTIP_DB_READ_ENABLED=1`
+- `DATABASE_URL=postgresql://...`
+- `FTIP_DB_REQUIRED=1` (recommended safe default for deployment)
+
+Migration/bootstrap expectation:
+
+- Choose one:
+  - `FTIP_MIGRATIONS_AUTO=1` (startup auto-applies migrations), or
+  - `FTIP_MIGRATIONS_AUTO=0` and run `POST /prosperity/bootstrap` before serving traffic.
+- With `FTIP_DB_REQUIRED=1`, startup fails fast if DB flags are inconsistent, DB is unreachable, or required v1 tables are missing when auto-migrations are off.
+
 ## Example end-to-end (official v1)
 
 ```bash
