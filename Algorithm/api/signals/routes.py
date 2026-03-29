@@ -10,7 +10,7 @@ from api.data_providers import canonical_symbol
 
 router = APIRouter(
     prefix="/signals",
-    tags=["signals"],
+    tags=["signals-legacy-non-v1"],
     dependencies=[Depends(security.require_prosperity_api_key)],
 )
 
@@ -24,6 +24,7 @@ def _require_db_enabled(read: bool = True) -> None:
 
 @router.get("/latest")
 async def latest_signal(symbol: str):
+    """Legacy/non-v1 endpoint. Prefer GET /prosperity/latest/signal for official v1 integrations."""
     _require_db_enabled(read=True)
     symbol = canonical_symbol(symbol)
     row = db.safe_fetchone(
@@ -62,6 +63,7 @@ async def top_picks(
     limit: int = Query(10, ge=1, le=50),
     country: str = Query("ALL"),
 ):
+    """Legacy/non-v1 endpoint. Kept for compatibility; not part of official v1 surface."""
     _require_db_enabled(read=True)
     mode_upper = mode.upper()
     if mode_upper not in {"BUY", "SELL"}:
@@ -122,6 +124,7 @@ async def top_picks(
 
 @router.get("/evidence")
 async def signal_evidence(symbol: str, as_of_date: dt.date):
+    """Legacy/non-v1 endpoint. Kept for compatibility; not part of official v1 surface."""
     _require_db_enabled(read=True)
     symbol = canonical_symbol(symbol)
 
