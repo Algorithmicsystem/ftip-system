@@ -102,7 +102,8 @@ def cleanup_retention(as_of_date: dt.date, retention_days: int) -> Dict[str, int
     for table in (
         "prosperity_features_daily",
         "prosperity_signals_daily",
-        "prosperity_strategy_graph_daily",
+        "prosperity_strategy_signals_daily",
+        "prosperity_ensemble_signals_daily",
     ):
         deleted[table] = _delete_older_than(table, cutoff)
     return deleted
