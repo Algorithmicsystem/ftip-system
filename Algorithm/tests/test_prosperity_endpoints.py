@@ -60,6 +60,14 @@ def test_prosperity_coverage_db_disabled(client: TestClient):
     assert body["coverage"] == []
 
 
+def test_prosperity_bootstrap_db_disabled_returns_503(client: TestClient):
+    res = client.post("/prosperity/bootstrap")
+    assert res.status_code == 503
+    body = res.json()
+    assert body["error"]["type"] == "http_error"
+    assert "database disabled" in body["error"]["message"]
+
+
 def test_prosperity_coverage_db_enabled(
     monkeypatch: pytest.MonkeyPatch, client: TestClient
 ):

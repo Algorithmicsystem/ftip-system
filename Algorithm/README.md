@@ -183,8 +183,11 @@ export FTIP_DB_ENABLED=1
 export DATABASE_URL=postgresql://user:pass@host:5432/ftip
 export FTIP_DB_WRITE_ENABLED=1
 export FTIP_DB_READ_ENABLED=1
+export FTIP_DB_REQUIRED=1
 export FTIP_MIGRATIONS_AUTO=1
 ```
+
+Safe deployment note: if `FTIP_MIGRATIONS_AUTO=0`, run `POST /prosperity/bootstrap` successfully before serving v1 traffic. With `FTIP_DB_REQUIRED=1`, startup fails fast when DB flags are inconsistent, DB is unreachable, or required v1 tables are missing.
 
 Quickstart calls (official v1 path):
 
