@@ -252,7 +252,31 @@ def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
         (symbol, as_of_date),
     )
     if not row:
-        return None
+        prosperity_row = db.safe_fetchone(
+            """
+            SELECT signal, score, confidence
+            FROM prosperity_signals_daily
+            WHERE symbol = %s AND as_of_date = %s
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (symbol, as_of_date),
+        )
+        if not prosperity_row:
+            return None
+        return {
+            "action": prosperity_row[0],
+            "score": prosperity_row[1],
+            "confidence": prosperity_row[2],
+            "entry_low": None,
+            "entry_high": None,
+            "stop_loss": None,
+            "take_profit_1": None,
+            "take_profit_2": None,
+            "horizon_days": None,
+            "reason_codes": [],
+            "reason_details": {},
+        }
     return {
         "action": row[0],
         "score": row[1],

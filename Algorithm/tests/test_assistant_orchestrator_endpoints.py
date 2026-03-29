@@ -116,3 +116,37 @@ def test_assistant_top_picks_schema(monkeypatch):
 
     assert "picks" in data
     assert data["picks"][0]["symbol"] == "NVDA"
+
+
+def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):
+    from api.assistant import orchestrator
+
+    calls = {"count": 0}
+
+    def _fake_fetchone(query, params):
+        calls["count"] += 1
+        if "FROM signals_daily" in query:
+            return None
+        if "FROM prosperity_signals_daily" in query:
+            assert params == ("AAPL", dt.date(2024, 1, 2))
+            return ("BUY", 0.81, 0.64)
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(orchestrator.db, "safe_fetchone", _fake_fetchone)
+
+    signal = orchestrator.fetch_signal("AAPL", dt.date(2024, 1, 2))
+
+    assert calls["count"] == 2
+    assert signal == {
+        "action": "BUY",
+        "score": 0.81,
+        "confidence": 0.64,
+        "entry_low": None,
+        "entry_high": None,
+        "stop_loss": None,
+        "take_profit_1": None,
+        "take_profit_2": None,
+        "horizon_days": None,
+        "reason_codes": [],
+        "reason_details": {},
+    }
