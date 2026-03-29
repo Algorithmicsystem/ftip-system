@@ -174,7 +174,7 @@ The official v1 integration flow is exactly:
 4. `GET /prosperity/latest/features`
 5. Optional scheduler equivalent: `POST /jobs/prosperity/daily-snapshot`
 
-See `docs/official_api_v1.md` for the full contract and operator notes.
+See `docs/official_v1_runbook.md` for the operator/developer path and `docs/official_api_v1.md` for the compact contract.
 
 Prosperity DB uses Postgres for durable feature/signal snapshots. Enable it with:
 

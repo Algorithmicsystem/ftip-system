@@ -2,7 +2,7 @@
 
 _Last updated: 2026-03-29._
 
-This document defines the official FTIP API v1 path. For v1 integrations, use this flow only.
+This document defines the official FTIP API v1 contract. For local run, DB-backed signoff, and deployment-safe operations, follow `docs/official_v1_runbook.md`.
 
 ## Official v1 path (strict)
 
@@ -21,56 +21,34 @@ When any API key env var is set (`FTIP_API_KEY`, `FTIP_API_KEYS`, `FTIP_API_KEY_
 
 Use `Content-Type: application/json` on `POST` requests.
 
-## Required runtime configuration (DB-backed v1)
+## Runtime contract (DB-backed v1)
 
-For deployed official v1 behavior (no misleading non-DB mode), set:
+The official v1 contract assumes DB-backed runtime:
 
 - `FTIP_DB_ENABLED=1`
 - `FTIP_DB_WRITE_ENABLED=1`
 - `FTIP_DB_READ_ENABLED=1`
 - `DATABASE_URL=postgresql://...`
-- `FTIP_DB_REQUIRED=1` (recommended safe default for deployment)
 
-Migration/bootstrap expectation:
+Safe deployment default:
 
-- Choose one:
-  - `FTIP_MIGRATIONS_AUTO=1` (startup auto-applies migrations), or
-  - `FTIP_MIGRATIONS_AUTO=0` and run `POST /prosperity/bootstrap` before serving traffic.
-- With `FTIP_DB_REQUIRED=1`, startup fails fast if DB flags are inconsistent, DB is unreachable, or required v1 tables are missing when auto-migrations are off.
+- `FTIP_DB_REQUIRED=1`
 
-## Example end-to-end (official v1)
+Migration/bootstrap policy:
 
-```bash
-BASE=http://localhost:8000
+- either `FTIP_MIGRATIONS_AUTO=1`, or
+- `FTIP_MIGRATIONS_AUTO=0` and run `POST /prosperity/bootstrap` successfully before serving traffic
 
-curl -X POST "$BASE/prosperity/bootstrap"
+With `FTIP_DB_REQUIRED=1`, startup is fail-fast for inconsistent DB flags, unreachable DB, or missing required v1 tables when auto migrations are disabled.
 
-curl -X POST "$BASE/prosperity/snapshot/run" \
-  -H "Content-Type: application/json" \
-  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
+## Out of scope for official v1
 
-curl "$BASE/prosperity/latest/signal?symbol=AAPL&lookback=252"
+These may remain available but are not part of the official v1 product contract:
 
-curl "$BASE/prosperity/latest/features?symbol=AAPL&lookback=252"
-```
-
-Optional scheduler path:
-
-```bash
-curl -X POST "$BASE/jobs/prosperity/daily-snapshot" \
-  -H "Content-Type: application/json" \
-  -d '{"symbols":["AAPL","MSFT"],"from_date":"2024-01-01","to_date":"2024-01-31","as_of_date":"2024-01-31","lookback":252}'
-```
-
-## Non-v1 surfaces (kept, not removed)
-
-The following remain supported for compatibility and internal/operator workflows, but are not part of the official v1 product contract:
-
-- `/signals/*` (legacy parallel signal namespace; prefer `/prosperity/latest/signal`)
-- Assistant/Narrator/Backtest/Friction/Data families (`/assistant/*`, `/narrator/*`, `/backtest/*`, `/friction/*`, `/data/*`)
-- Extended jobs/admin/diagnostic surfaces beyond `POST /jobs/prosperity/daily-snapshot`
-- Prosperity operator endpoints outside the v1 sequence (for example ingest/control/coverage/health routes)
+- `/signals/*` and other legacy/parallel signal surfaces
+- assistant/narrator/backtest/friction/data families
+- non-v1 prosperity operator/admin/diagnostic endpoints
 
 ## Compatibility note
 
-This is a presentation and onboarding contract update only. Non-v1 routes are not removed in Tier 0.
+This is a contract/surface definition. Non-v1 routes are not removed by this document.
