@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 import uuid
 from typing import Any, Dict
@@ -27,6 +28,18 @@ from api.assistant.storage import storage
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["assistant"])
+
+
+def _sanitize_non_finite_floats(value: Any) -> Any:
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {k: _sanitize_non_finite_floats(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_non_finite_floats(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_non_finite_floats(item) for item in value)
+    return value
 
 
 class MemoryRateLimiter:
@@ -174,7 +187,7 @@ async def analyze_endpoint(
         "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
     }
 
-    return {
+    response_payload = {
         "symbol": symbol,
         "as_of_date": as_of_date.isoformat(),
         "signal": {
@@ -186,6 +199,7 @@ async def analyze_endpoint(
         "quality": quality,
         "evidence": evidence,
     }
+    return _sanitize_non_finite_floats(response_payload)
 
 
 @router.post("/top-picks")
