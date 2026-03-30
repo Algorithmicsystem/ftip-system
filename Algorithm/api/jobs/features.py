@@ -86,18 +86,17 @@ def _acquire_job_lock(
 ) -> tuple[bool, Dict[str, Optional[str]]]:
     with db.with_connection() as (conn, cur):
         _cleanup_stale_job_runs(cur, job_name, ttl_seconds)
-        lock_window_seconds = _lock_window_seconds()
 
         cur.execute(
             """
             SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
             FROM ftip_job_runs
             WHERE job_name = %s
-              AND (finished_at IS NULL OR finished_at > now() - (%s || ' seconds')::interval)
+              AND finished_at IS NULL
             FOR UPDATE SKIP LOCKED
             LIMIT 1
             """,
-            (job_name, lock_window_seconds),
+            (job_name,),
         )
         existing_locked = cur.fetchone()
         if existing_locked:
@@ -122,10 +121,10 @@ def _acquire_job_lock(
             SELECT run_id, started_at, lock_owner, lock_acquired_at, lock_expires_at
             FROM ftip_job_runs
             WHERE job_name = %s
-              AND (finished_at IS NULL OR finished_at > now() - (%s || ' seconds')::interval)
+              AND finished_at IS NULL
             LIMIT 1
             """,
-            (job_name, lock_window_seconds),
+            (job_name,),
         )
         existing_pending = cur.fetchone()
         if existing_pending:
