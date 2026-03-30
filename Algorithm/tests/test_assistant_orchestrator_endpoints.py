@@ -128,6 +128,7 @@ def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):
         if "FROM signals_daily" in query:
             return None
         if "FROM prosperity_signals_daily" in query:
+            assert "as_of = %s" in query
             assert params == ("AAPL", dt.date(2024, 1, 2))
             return ("BUY", 0.81, 0.64)
         raise AssertionError(f"unexpected query: {query}")
