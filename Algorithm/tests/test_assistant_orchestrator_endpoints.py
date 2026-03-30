@@ -1,4 +1,5 @@
 import datetime as dt
+import math
 
 from fastapi.testclient import TestClient
 
@@ -116,6 +117,80 @@ def test_assistant_top_picks_schema(monkeypatch):
 
     assert "picks" in data
     assert data["picks"][0]["symbol"] == "NVDA"
+
+
+def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
+    from api.assistant import orchestrator
+
+    async def _fake_freshness(symbol: str, refresh: bool = True):
+        return {
+            "as_of_date": dt.date(2024, 1, 2),
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "bars_updated_at": "2024-01-02T00:00:00Z",
+            "news_updated_at": "2024-01-02T00:00:00Z",
+            "sentiment_updated_at": "2024-01-02T00:00:00Z",
+            "warnings": [],
+        }
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(orchestrator, "ensure_freshness", _fake_freshness)
+    monkeypatch.setattr(orchestrator, "run_features", _noop)
+    monkeypatch.setattr(orchestrator, "run_signals", _noop)
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_signal",
+        lambda *_args, **_kwargs: {
+            "action": "BUY",
+            "score": math.nan,
+            "confidence": math.inf,
+            "entry_low": 100.0,
+            "entry_high": 110.0,
+            "stop_loss": 90.0,
+            "take_profit_1": 130.0,
+            "take_profit_2": 150.0,
+            "horizon_days": 10,
+            "reason_codes": ["MOMO_UP"],
+            "reason_details": {"MOMO_UP": "Momentum rising"},
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_key_features",
+        lambda *_args, **_kwargs: {
+            "ret_5d": float("-inf"),
+            "vol_21d": 0.3,
+            "nested": {"feature": float("nan")},
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_quality",
+        lambda *_args, **_kwargs: {
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "risk": {"drawdown": float("inf")},
+            "warnings": [],
+        },
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/assistant/analyze",
+            json={"symbol": "NVDA", "horizon": "swing", "risk_mode": "balanced"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["signal"]["score"] is None
+    assert data["signal"]["confidence"] is None
+    assert data["key_features"]["ret_5d"] is None
+    assert data["key_features"]["nested"]["feature"] is None
+    assert data["quality"]["risk"]["drawdown"] is None
 
 
 def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):
