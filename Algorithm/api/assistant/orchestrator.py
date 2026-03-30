@@ -12,6 +12,9 @@ from api.jobs import features as features_job
 from api.jobs import market_data as market_data_job
 from api.jobs import signals as signals_job
 
+_PROSPERITY_SIGNAL_ASOF_COLUMN: Optional[str] = None
+_PROSPERITY_SIGNAL_ACTION_COLUMN: Optional[str] = None
+
 
 def _require_db_enabled(write: bool = False, read: bool = False) -> None:
     if not db.db_enabled():
@@ -241,6 +244,54 @@ async def run_signals(symbol: str, as_of_date: dt.date) -> None:
         raise HTTPException(status_code=resp.status_code, detail=resp.body.decode())
 
 
+def _prosperity_signal_asof_column() -> str:
+    global _PROSPERITY_SIGNAL_ASOF_COLUMN
+    if _PROSPERITY_SIGNAL_ASOF_COLUMN:
+        return _PROSPERITY_SIGNAL_ASOF_COLUMN
+    try:
+        row = db.safe_fetchone(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'prosperity_signals_daily'
+              AND column_name IN ('as_of', 'as_of_date')
+            ORDER BY CASE WHEN column_name = 'as_of' THEN 1 ELSE 2 END
+            LIMIT 1
+            """
+        )
+    except Exception:
+        row = None
+    _PROSPERITY_SIGNAL_ASOF_COLUMN = (
+        str(row[0]) if row and row[0] in {"as_of", "as_of_date"} else "as_of"
+    )
+    return _PROSPERITY_SIGNAL_ASOF_COLUMN
+
+
+def _prosperity_signal_action_column() -> str:
+    global _PROSPERITY_SIGNAL_ACTION_COLUMN
+    if _PROSPERITY_SIGNAL_ACTION_COLUMN:
+        return _PROSPERITY_SIGNAL_ACTION_COLUMN
+    try:
+        row = db.safe_fetchone(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = 'prosperity_signals_daily'
+              AND column_name IN ('signal', 'action')
+            ORDER BY CASE WHEN column_name = 'signal' THEN 1 ELSE 2 END
+            LIMIT 1
+            """
+        )
+    except Exception:
+        row = None
+    _PROSPERITY_SIGNAL_ACTION_COLUMN = (
+        str(row[0]) if row and row[0] in {"signal", "action"} else "signal"
+    )
+    return _PROSPERITY_SIGNAL_ACTION_COLUMN
+
+
 def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
@@ -252,11 +303,13 @@ def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
         (symbol, as_of_date),
     )
     if not row:
+        as_of_column = _prosperity_signal_asof_column()
+        action_column = _prosperity_signal_action_column()
         prosperity_row = db.safe_fetchone(
-            """
-            SELECT signal, score, confidence
+            f"""
+            SELECT {action_column}, score, confidence
             FROM prosperity_signals_daily
-            WHERE symbol = %s AND as_of = %s
+            WHERE symbol = %s AND {as_of_column} = %s
             ORDER BY updated_at DESC NULLS LAST
             LIMIT 1
             """,

@@ -151,3 +151,31 @@ def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):
         "reason_codes": [],
         "reason_details": {},
     }
+
+
+def test_fetch_signal_falls_back_to_prosperity_row_with_as_of_date(monkeypatch):
+    from api.assistant import orchestrator
+
+    orchestrator._PROSPERITY_SIGNAL_ASOF_COLUMN = None
+    orchestrator._PROSPERITY_SIGNAL_ACTION_COLUMN = None
+
+    def _fake_fetchone(query, params=None):
+        if "FROM signals_daily" in query:
+            return None
+        if "FROM information_schema.columns" in query and "as_of_date" in query:
+            return ("as_of_date",)
+        if "FROM information_schema.columns" in query and "signal', 'action" in query:
+            return ("signal",)
+        if "FROM prosperity_signals_daily" in query:
+            assert "as_of_date = %s" in query
+            return ("SELL", -0.22, 0.51)
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(orchestrator.db, "safe_fetchone", _fake_fetchone)
+
+    signal = orchestrator.fetch_signal("AAPL", dt.date(2024, 1, 2))
+
+    assert signal is not None
+    assert signal["action"] == "SELL"
+    assert signal["score"] == -0.22
+    assert signal["confidence"] == 0.51
