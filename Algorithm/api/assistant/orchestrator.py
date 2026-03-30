@@ -256,7 +256,7 @@ def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
             """
             SELECT signal, score, confidence
             FROM prosperity_signals_daily
-            WHERE symbol = %s AND as_of_date = %s
+            WHERE symbol = %s AND as_of = %s
             ORDER BY updated_at DESC NULLS LAST
             LIMIT 1
             """,
