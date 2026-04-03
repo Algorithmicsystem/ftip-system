@@ -120,7 +120,7 @@ def test_assistant_top_picks_schema(monkeypatch):
     assert data["picks"][0]["symbol"] == "NVDA"
 
 
-def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
+def test_assistant_analyze_sanitizes_non_finite_numeric_values(monkeypatch):
     from api.assistant import orchestrator
 
     async def _fake_freshness(symbol: str, refresh: bool = True):
@@ -146,7 +146,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
         "fetch_signal",
         lambda *_args, **_kwargs: {
             "action": "BUY",
-            "score": Decimal("NaN"),
+            "score": Decimal("0.7"),
             "confidence": Decimal("Infinity"),
             "entry_low": 100.0,
             "entry_high": 110.0,
@@ -163,9 +163,13 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
         "fetch_key_features",
         lambda *_args, **_kwargs: {
             "ret_5d": Decimal("-Infinity"),
-            "vol_21d": 0.3,
             "finite_decimal": Decimal("1.25"),
-            "nested": {"feature": Decimal("NaN")},
+            "vol_21d": Decimal("0.3"),
+            "nested": {
+                "feature": float("nan"),
+                "decimal_feature": Decimal("NaN"),
+                "items": [Decimal("1.5"), float("-inf"), {"z": Decimal("Infinity")}],
+            },
         },
     )
     monkeypatch.setattr(
@@ -175,7 +179,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
             "bars_ok": True,
             "news_ok": True,
             "sentiment_ok": True,
-            "risk": {"drawdown": Decimal("Infinity")},
+            "risk": {"drawdown": float("inf"), "sharpe": Decimal("1.2")},
             "trace": [0.1, math.nan, {"z": Decimal("NaN"), "w": math.inf}],
             "warnings": [],
         },
@@ -189,14 +193,17 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["signal"]["score"] is None
+    assert data["signal"]["score"] == 0.7
     assert data["signal"]["confidence"] is None
     assert data["signal"]["entry_low"] == 100.0
     assert data["key_features"]["ret_5d"] is None
     assert data["key_features"]["vol_21d"] == 0.3
     assert data["key_features"]["finite_decimal"] == 1.25
     assert data["key_features"]["nested"]["feature"] is None
+    assert data["key_features"]["nested"]["decimal_feature"] is None
+    assert data["key_features"]["nested"]["items"] == [1.5, None, {"z": None}]
     assert data["quality"]["risk"]["drawdown"] is None
+    assert data["quality"]["risk"]["sharpe"] == 1.2
     assert data["quality"]["trace"] == [0.1, None, {"z": None, "w": None}]
 
 
