@@ -4,6 +4,8 @@ import logging
 import math
 import time
 import uuid
+from decimal import Decimal
+from numbers import Real
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -31,8 +33,15 @@ router = APIRouter(tags=["assistant"])
 
 
 def _sanitize_non_finite_floats(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        if value.is_nan() or value.is_infinite():
+            return None
+        return value
     if isinstance(value, float):
         return value if math.isfinite(value) else None
+    if isinstance(value, Real):
+        numeric = float(value)
+        return value if math.isfinite(numeric) else None
     if isinstance(value, dict):
         return {k: _sanitize_non_finite_floats(v) for k, v in value.items()}
     if isinstance(value, list):

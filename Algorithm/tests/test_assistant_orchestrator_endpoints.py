@@ -1,5 +1,6 @@
 import datetime as dt
 import math
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
@@ -145,8 +146,8 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
         "fetch_signal",
         lambda *_args, **_kwargs: {
             "action": "BUY",
-            "score": math.nan,
-            "confidence": math.inf,
+            "score": Decimal("NaN"),
+            "confidence": Decimal("Infinity"),
             "entry_low": 100.0,
             "entry_high": 110.0,
             "stop_loss": 90.0,
@@ -161,9 +162,9 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
         orchestrator,
         "fetch_key_features",
         lambda *_args, **_kwargs: {
-            "ret_5d": float("-inf"),
+            "ret_5d": Decimal("-Infinity"),
             "vol_21d": 0.3,
-            "nested": {"feature": float("nan")},
+            "nested": {"feature": Decimal("NaN")},
         },
     )
     monkeypatch.setattr(
@@ -173,8 +174,8 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
             "bars_ok": True,
             "news_ok": True,
             "sentiment_ok": True,
-            "risk": {"drawdown": float("inf")},
-            "trace": [0.1, float("-inf"), {"z": float("nan")}],
+            "risk": {"drawdown": Decimal("Infinity")},
+            "trace": [0.1, math.nan, {"z": Decimal("NaN")}],
             "warnings": [],
         },
     )
