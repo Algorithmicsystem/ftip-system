@@ -164,6 +164,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
         lambda *_args, **_kwargs: {
             "ret_5d": Decimal("-Infinity"),
             "vol_21d": 0.3,
+            "finite_decimal": Decimal("1.25"),
             "nested": {"feature": Decimal("NaN")},
         },
     )
@@ -193,6 +194,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
     assert data["signal"]["entry_low"] == 100.0
     assert data["key_features"]["ret_5d"] is None
     assert data["key_features"]["vol_21d"] == 0.3
+    assert data["key_features"]["finite_decimal"] == 1.25
     assert data["key_features"]["nested"]["feature"] is None
     assert data["quality"]["risk"]["drawdown"] is None
     assert data["quality"]["trace"] == [0.1, None, {"z": None}]
