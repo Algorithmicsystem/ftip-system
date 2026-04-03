@@ -174,6 +174,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
             "news_ok": True,
             "sentiment_ok": True,
             "risk": {"drawdown": float("inf")},
+            "trace": [0.1, float("-inf"), {"z": float("nan")}],
             "warnings": [],
         },
     )
@@ -188,9 +189,12 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
     data = resp.json()
     assert data["signal"]["score"] is None
     assert data["signal"]["confidence"] is None
+    assert data["signal"]["entry_low"] == 100.0
     assert data["key_features"]["ret_5d"] is None
+    assert data["key_features"]["vol_21d"] == 0.3
     assert data["key_features"]["nested"]["feature"] is None
     assert data["quality"]["risk"]["drawdown"] is None
+    assert data["quality"]["trace"] == [0.1, None, {"z": None}]
 
 
 def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):

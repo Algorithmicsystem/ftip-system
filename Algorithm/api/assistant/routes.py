@@ -39,6 +39,8 @@ def _sanitize_non_finite_floats(value: Any) -> Any:
         return [_sanitize_non_finite_floats(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_sanitize_non_finite_floats(item) for item in value)
+    if isinstance(value, set):
+        return [_sanitize_non_finite_floats(item) for item in value]
     return value
 
 
