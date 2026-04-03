@@ -176,7 +176,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
             "news_ok": True,
             "sentiment_ok": True,
             "risk": {"drawdown": Decimal("Infinity")},
-            "trace": [0.1, math.nan, {"z": Decimal("NaN")}],
+            "trace": [0.1, math.nan, {"z": Decimal("NaN"), "w": math.inf}],
             "warnings": [],
         },
     )
@@ -197,7 +197,7 @@ def test_assistant_analyze_sanitizes_non_finite_floats(monkeypatch):
     assert data["key_features"]["finite_decimal"] == 1.25
     assert data["key_features"]["nested"]["feature"] is None
     assert data["quality"]["risk"]["drawdown"] is None
-    assert data["quality"]["trace"] == [0.1, None, {"z": None}]
+    assert data["quality"]["trace"] == [0.1, None, {"z": None, "w": None}]
 
 
 def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):

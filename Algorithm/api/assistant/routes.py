@@ -37,19 +37,19 @@ def _sanitize_non_finite_floats(value: Any) -> Any:
         return value if value.is_finite() else None
     if isinstance(value, float):
         return value if math.isfinite(value) else None
-    if isinstance(value, Real):
-        try:
-            return value if math.isfinite(value) else None
-        except (TypeError, ValueError, OverflowError):
-            return value
     if isinstance(value, dict):
         return {k: _sanitize_non_finite_floats(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_sanitize_non_finite_floats(item) for item in value]
     if isinstance(value, tuple):
         return tuple(_sanitize_non_finite_floats(item) for item in value)
-    if isinstance(value, set):
+    if isinstance(value, (set, frozenset)):
         return [_sanitize_non_finite_floats(item) for item in value]
+    if isinstance(value, Real):
+        try:
+            return value if math.isfinite(value) else None
+        except (TypeError, ValueError, OverflowError):
+            return value
     return value
 
 
