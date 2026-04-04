@@ -64,6 +64,11 @@ button {
   border-color: #2563eb;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 button.secondary {
   background: #1f2937;
   border-color: #374151;
@@ -76,6 +81,10 @@ button.secondary {
 
 .error {
   color: #fca5a5;
+}
+
+.success {
+  color: #86efac;
 }
 
 .tabs {
@@ -121,4 +130,74 @@ button.secondary {
   font-size: 12px;
   max-height: 420px;
   overflow: auto;
+}
+
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  margin-top: 10px;
+  font-family: inherit;
+}
+
+.legacy-note {
+  margin-bottom: 16px;
+}
+
+.legacy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+
+.legacy-card {
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 14px;
+}
+
+.legacy-card h4 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.legacy-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.legacy-badge {
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid #374151;
+  background: #111827;
+  color: #cbd5e1;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.legacy-status {
+  min-height: 20px;
+  margin: 12px 0 8px;
+}
+
+.session-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.session-row input {
+  flex: 1 1 280px;
+}
+
+.response-block {
+  min-height: 200px;
 }

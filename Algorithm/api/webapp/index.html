@@ -64,11 +64,78 @@
       </div>
 
       <div id="legacy" class="panel tab-panel hidden">
-        <h3>Legacy / Non-v1 Areas</h3>
-        <p class="muted">
-          Assistant chat, sentiment/fundamentals placeholders, and backtest sandbox are intentionally
-          de-emphasized for official v1. Backend routes remain available.
+        <h3>Non-v1 / Legacy / Advanced Tools</h3>
+        <p class="muted legacy-note">
+          These assistant tools remain available for internal and advanced usage. The official
+          Prosperity v1 console above stays unchanged and is still the primary experience.
         </p>
+
+        <datalist id="assistant-horizon-options">
+          <option value="swing"></option>
+          <option value="position"></option>
+          <option value="tactical"></option>
+        </datalist>
+
+        <datalist id="assistant-risk-mode-options">
+          <option value="balanced"></option>
+          <option value="conservative"></option>
+          <option value="aggressive"></option>
+        </datalist>
+
+        <div class="legacy-grid">
+          <section class="legacy-card">
+            <div class="legacy-card-head">
+              <h4>Assistant Analyze</h4>
+              <span class="legacy-badge">Non-v1 / legacy</span>
+            </div>
+            <p class="muted">Calls <code>POST /assistant/analyze</code>.</p>
+            <div class="input-row">
+              <input id="assistant-analyze-symbol" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
+              <input
+                id="assistant-analyze-horizon"
+                list="assistant-horizon-options"
+                placeholder="Horizon"
+                value="swing"
+              />
+              <input
+                id="assistant-analyze-risk-mode"
+                list="assistant-risk-mode-options"
+                placeholder="Risk mode"
+                value="balanced"
+              />
+              <button id="assistant-analyze-btn" class="secondary">Run Analyze</button>
+            </div>
+            <p class="muted legacy-status" id="assistant-analyze-status">Ready.</p>
+            <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
+          </section>
+
+          <section class="legacy-card">
+            <div class="legacy-card-head">
+              <h4>Assistant Chat</h4>
+              <span class="legacy-badge">Non-v1 / advanced</span>
+            </div>
+            <p class="muted">Calls <code>POST /assistant/chat</code>.</p>
+            <div class="session-row">
+              <input
+                id="assistant-chat-session-id"
+                placeholder="Session ID"
+                readonly
+                aria-label="Assistant chat session ID"
+              />
+              <button id="assistant-chat-reset-btn" class="secondary">New Session</button>
+            </div>
+            <textarea
+              id="assistant-chat-message"
+              rows="4"
+              placeholder="Ask the legacy assistant a question..."
+            ></textarea>
+            <div class="actions-row">
+              <button id="assistant-chat-btn" class="secondary">Send</button>
+            </div>
+            <p class="muted legacy-status" id="assistant-chat-status">Ready.</p>
+            <pre id="assistant-chat-response" class="json-block response-block">No messages yet.</pre>
+          </section>
+        </div>
       </div>
     </main>
 
