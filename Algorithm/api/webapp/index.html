@@ -89,6 +89,9 @@
               <span class="legacy-badge">Non-v1 / legacy</span>
             </div>
             <p class="muted">Calls <code>POST /assistant/analyze</code>.</p>
+            <p class="muted active-analysis-label" id="assistant-analyze-active-label">
+              Active analysis: none yet.
+            </p>
             <div class="input-row">
               <input id="assistant-analyze-symbol" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
               <input
@@ -106,7 +109,15 @@
               <button id="assistant-analyze-btn" class="secondary">Run Analyze</button>
             </div>
             <p class="muted legacy-status" id="assistant-analyze-status">Ready.</p>
-            <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
+            <div id="assistant-analyze-report" class="analysis-report empty">
+              <div class="analysis-report-empty">
+                Run Assistant Analyze to generate a grounded system report.
+              </div>
+            </div>
+            <details class="report-raw">
+              <summary>Raw analysis JSON</summary>
+              <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
+            </details>
           </section>
 
           <section class="legacy-card">
@@ -115,6 +126,9 @@
               <span class="legacy-badge">Non-v1 / advanced</span>
             </div>
             <p class="muted">Calls <code>POST /assistant/chat</code>.</p>
+            <p class="muted active-analysis-label" id="assistant-chat-active-label">
+              Active analysis: none yet.
+            </p>
             <div class="session-row">
               <input
                 id="assistant-chat-session-id"

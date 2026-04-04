@@ -187,6 +187,10 @@ textarea {
   margin: 12px 0 8px;
 }
 
+.active-analysis-label {
+  margin-top: 4px;
+}
+
 .session-row {
   display: flex;
   gap: 10px;
@@ -200,4 +204,107 @@ textarea {
 
 .response-block {
   min-height: 200px;
+}
+
+.analysis-report {
+  margin-top: 10px;
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-report.empty {
+  border: 1px dashed #374151;
+  border-radius: 10px;
+  padding: 14px;
+  color: #9ca3af;
+}
+
+.analysis-report-empty {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+}
+
+.report-hero {
+  background: linear-gradient(135deg, #111827 0%, #0f172a 100%);
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+.report-kicker {
+  color: #93c5fd;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.report-title {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.report-subtitle {
+  margin: 0;
+  color: #cbd5e1;
+}
+
+.report-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.report-metric {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.report-metric-label {
+  color: #9ca3af;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.report-metric-value {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.report-sections {
+  display: grid;
+  gap: 10px;
+}
+
+.report-section {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.report-section h5 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.report-section p {
+  margin: 0;
+  color: #d1d5db;
+  line-height: 1.5;
+}
+
+.report-raw {
+  margin-top: 12px;
+}
+
+.report-raw summary {
+  cursor: pointer;
+  color: #9ca3af;
+  margin-bottom: 8px;
 }

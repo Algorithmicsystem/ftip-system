@@ -69,15 +69,30 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         assert resp.status_code == 200
         data = resp.json()
 
-    assert set(data.keys()) == {
+    assert {
         "symbol",
         "as_of_date",
+        "horizon",
+        "risk_mode",
         "signal",
         "key_features",
         "quality",
         "evidence",
-    }
+        "signal_summary",
+        "technical_analysis",
+        "fundamental_analysis",
+        "statistical_analysis",
+        "sentiment_analysis",
+        "risk_quality_analysis",
+        "overall_analysis",
+        "strategy_view",
+        "session_id",
+        "report_id",
+        "active_analysis",
+    }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
+    assert data["active_analysis"]["symbol"] == "NVDA"
+    assert data["overall_analysis"]
 
 
 def test_assistant_top_picks_schema(monkeypatch):
@@ -205,6 +220,8 @@ def test_assistant_analyze_sanitizes_non_finite_numeric_values(monkeypatch):
     assert data["quality"]["risk"]["drawdown"] is None
     assert data["quality"]["risk"]["sharpe"] == 1.2
     assert data["quality"]["trace"] == [0.1, None, {"z": None, "w": None}]
+    assert data["signal_summary"]
+    assert data["strategy_view"]
 
 
 def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):

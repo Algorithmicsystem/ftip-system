@@ -11,10 +11,21 @@ class ChatRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+class AnalysisReference(BaseModel):
+    report_id: Optional[str] = None
+    session_id: Optional[str] = None
+    symbol: Optional[str] = None
+    as_of_date: Optional[str] = None
+    horizon: Optional[str] = None
+    risk_mode: Optional[str] = None
+
+
 class ChatResponse(BaseModel):
     session_id: str
     reply: str
     citations: Optional[List[str]] = None
+    active_analysis: Optional[AnalysisReference] = None
+    report_found: bool = False
 
 
 class SessionResponse(BaseModel):
@@ -55,6 +66,7 @@ class TitleSessionResponse(BaseModel):
 
 
 class AnalyzeRequest(BaseModel):
+    session_id: Optional[str] = None
     symbol: str
     horizon: str
     risk_mode: str

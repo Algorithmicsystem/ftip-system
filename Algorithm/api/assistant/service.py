@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -8,10 +9,11 @@ from openai import APIError, APIStatusError, OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from api import config
-from api.assistant import prompts
+from api.assistant import orchestrator, prompts, reports
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
+_SYMBOL_PATTERN = re.compile(r"\b[A-Z]{1,5}\b")
 
 
 def _build_client() -> OpenAI:
@@ -87,6 +89,222 @@ def _prepare_history(
     return session_id, history
 
 
+def _normalize_active_analysis_context(context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not context:
+        return {}
+
+    active = context.get("active_analysis")
+    if isinstance(active, dict):
+        return {k: v for k, v in active.items() if v not in (None, "")}
+
+    keys = ("report_id", "symbol", "as_of_date", "horizon", "risk_mode", "session_id")
+    return {key: context.get(key) for key in keys if context.get(key) not in (None, "")}
+
+
+def _extract_symbol_from_message(message: str) -> Optional[str]:
+    if not message:
+        return None
+    ignored = {
+        "I",
+        "A",
+        "AN",
+        "THE",
+        "IT",
+        "AND",
+        "OR",
+        "TO",
+        "FOR",
+        "OF",
+        "BUY",
+        "SELL",
+        "HOLD",
+        "BASED",
+        "ON",
+        "WHAT",
+        "WHY",
+        "HOW",
+        "THIS",
+        "THAT",
+    }
+    for match in _SYMBOL_PATTERN.findall(message):
+        symbol = match.upper()
+        if symbol not in ignored:
+            return symbol
+    return None
+
+
+def _load_report_from_reference(
+    reference: Dict[str, Any],
+    *,
+    session_id: Optional[str],
+    store: AssistantStorage,
+    require_exact_symbol: bool = False,
+) -> Optional[Dict[str, Any]]:
+    report_id = reference.get("report_id")
+    if report_id:
+        report = store.get_latest_analysis_report(
+            report_id=report_id,
+            session_id=reference.get("session_id") or session_id,
+        )
+        if report:
+            return report
+
+    symbol = reference.get("symbol")
+    as_of_date = reference.get("as_of_date")
+    horizon = reference.get("horizon")
+    risk_mode = reference.get("risk_mode")
+
+    if symbol or as_of_date or horizon or risk_mode:
+        report = store.get_latest_analysis_report(
+            session_id=session_id,
+            symbol=symbol,
+            as_of_date=as_of_date,
+            horizon=horizon,
+            risk_mode=risk_mode,
+        )
+        if report:
+            return report
+
+        report = store.get_latest_analysis_report(
+            symbol=symbol,
+            as_of_date=as_of_date,
+            horizon=horizon,
+            risk_mode=risk_mode,
+        )
+        if report:
+            return report
+
+        if symbol and not require_exact_symbol:
+            report = store.get_latest_analysis_report(session_id=session_id, symbol=symbol)
+            if report:
+                return report
+            return store.get_latest_analysis_report(symbol=symbol)
+
+    return None
+
+
+def _resolve_active_report(
+    *,
+    session_id: str,
+    message: str,
+    context: Optional[Dict[str, Any]],
+    store: AssistantStorage,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+    session = store.get_session(session_id)
+    session_metadata = (session or {}).get("metadata") or {}
+    context_ref = _normalize_active_analysis_context(context)
+    session_ref = _normalize_active_analysis_context(
+        session_metadata if isinstance(session_metadata, dict) else None
+    )
+    explicit_symbol = _extract_symbol_from_message(message)
+
+    if explicit_symbol:
+        explicit_ref = {
+            "symbol": explicit_symbol,
+            "horizon": context_ref.get("horizon") or session_ref.get("horizon"),
+            "risk_mode": context_ref.get("risk_mode") or session_ref.get("risk_mode"),
+        }
+        report = _load_report_from_reference(
+            explicit_ref,
+            session_id=session_id,
+            store=store,
+            require_exact_symbol=True,
+        )
+        return report, explicit_ref
+
+    for candidate in (context_ref, session_ref):
+        if candidate:
+            report = _load_report_from_reference(candidate, session_id=session_id, store=store)
+            if report:
+                return report, candidate
+
+    if context_ref.get("symbol") or session_ref.get("symbol"):
+        return None, context_ref or session_ref
+
+    report = store.get_latest_analysis_report(session_id=session_id)
+    if report:
+        return report, reports.build_active_analysis_reference(report)
+
+    report = store.get_latest_analysis_report()
+    if report:
+        return report, reports.build_active_analysis_reference(report)
+
+    return None, context_ref or session_ref
+
+
+def _no_analysis_reply(reference: Dict[str, Any]) -> str:
+    symbol = reference.get("symbol")
+    if symbol:
+        return (
+            f"No stored analysis report exists for {symbol} yet. "
+            "Run Assistant Analyze first, then ask follow-up questions about that report."
+        )
+    return (
+        "No analysis report has been generated yet. "
+        "Run Assistant Analyze first, then I can explain the signal, drivers, risks, and strategy view from that report."
+    )
+
+
+async def generate_analysis_report(
+    request: Dict[str, Any],
+    store: AssistantStorage = storage,
+) -> Dict[str, Any]:
+    session_id = request.get("session_id")
+    sid, _history = _prepare_history(session_id, store)
+
+    symbol = orchestrator.normalize_symbol(request.get("symbol") or "")
+    horizon = str(request.get("horizon") or "").strip()
+    risk_mode = str(request.get("risk_mode") or "").strip()
+    freshness = await orchestrator.ensure_freshness(symbol)
+    as_of_date = freshness["as_of_date"]
+
+    await orchestrator.run_features(symbol, as_of_date)
+    await orchestrator.run_signals(symbol, as_of_date)
+
+    signal = orchestrator.fetch_signal(symbol, as_of_date)
+    if not signal:
+        raise HTTPException(status_code=404, detail="signal not available after compute")
+
+    key_features = orchestrator.fetch_key_features(symbol, as_of_date)
+    quality = orchestrator.fetch_quality(symbol, as_of_date, freshness)
+    evidence = {
+        "reason_codes": signal.get("reason_codes") or [],
+        "reason_details": signal.get("reason_details") or {},
+        "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
+    }
+    report = reports.build_analysis_report(
+        symbol=symbol,
+        as_of_date=as_of_date,
+        horizon=horizon,
+        risk_mode=risk_mode,
+        signal=signal,
+        key_features=key_features,
+        quality=quality,
+        evidence=evidence,
+    )
+    report_id = store.save_artifact(sid, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=sid, report_id=report_id
+    )
+    store.upsert_session_metadata(sid, {"active_analysis": active_analysis})
+    store.add_message(
+        sid,
+        "system",
+        prompts.summarize_analysis_report(report),
+        extra={
+            "artifact_id": report_id,
+            "artifact_kind": reports.ANALYSIS_REPORT_KIND,
+            "active_analysis": active_analysis,
+        },
+    )
+    return {
+        **report,
+        "session_id": sid,
+        "report_id": report_id,
+        "active_analysis": active_analysis,
+    }
+
+
 def chat_with_assistant(
     request: Dict[str, Any], store: AssistantStorage = storage
 ) -> Dict[str, Any]:
@@ -98,11 +316,55 @@ def chat_with_assistant(
     context = request.get("context")
 
     sid, history = _prepare_history(session_id, store)
-    if message:
-        store.add_message(sid, "user", message)
+    report, requested_reference = _resolve_active_report(
+        session_id=sid,
+        message=message,
+        context=context,
+        store=store,
+    )
 
-    messages: List[ChatCompletionMessageParam] = prompts.build_chat_messages(
-        history, message, context
+    active_analysis = (
+        reports.build_active_analysis_reference(
+            report,
+            session_id=report.get("session_id") or sid,
+            report_id=report.get("report_id"),
+        )
+        if report
+        else {
+            **requested_reference,
+            "session_id": sid,
+        }
+        if requested_reference
+        else None
+    )
+
+    if message:
+        store.add_message(
+            sid,
+            "user",
+            message,
+            extra={"active_analysis": active_analysis},
+        )
+
+    if not report:
+        reply = _no_analysis_reply(requested_reference)
+        store.add_message(
+            sid,
+            "assistant",
+            reply,
+            extra={"active_analysis": active_analysis, "report_found": False},
+        )
+        return {
+            "session_id": sid,
+            "reply": reply,
+            "citations": ["no_analysis_report"],
+            "active_analysis": active_analysis,
+            "report_found": False,
+        }
+
+    store.upsert_session_metadata(sid, {"active_analysis": active_analysis})
+    messages: List[ChatCompletionMessageParam] = prompts.build_grounded_chat_messages(
+        history, message, report, context
     )
     reply, model_used, usage = _safe_completion(messages)
 
@@ -113,12 +375,25 @@ def chat_with_assistant(
         model=model_used,
         tokens_in=usage.get("prompt_tokens"),
         tokens_out=usage.get("completion_tokens"),
+        extra={
+            "artifact_id": report.get("report_id"),
+            "artifact_kind": reports.ANALYSIS_REPORT_KIND,
+            "active_analysis": active_analysis,
+            "report_found": True,
+        },
     )
 
     return {
         "session_id": sid,
         "reply": reply,
-        "citations": [prompts.system_capabilities()],
+        "citations": [
+            f"analysis_report:{report.get('report_id')}",
+            "signal_summary",
+            "overall_analysis",
+            "strategy_view",
+        ],
+        "active_analysis": active_analysis,
+        "report_found": True,
     }
 
 

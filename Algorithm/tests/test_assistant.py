@@ -1,8 +1,9 @@
+import asyncio
 from typing import Any
 
 from fastapi.testclient import TestClient
 
-from api.assistant import service
+from api.assistant import reports, service
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -57,6 +58,17 @@ def test_storage_memory_roundtrip():
     session_id = store.create_session(metadata={"foo": "bar"})
     store.add_message(session_id, "user", "hello")
     store.upsert_session_metadata(session_id, {"title": "Test"})
+    artifact_id = store.save_artifact(
+        session_id,
+        reports.ANALYSIS_REPORT_KIND,
+        {
+          "symbol": "AAPL",
+          "as_of_date": "2024-01-01",
+          "horizon": "swing",
+          "risk_mode": "balanced",
+          "overall_analysis": "Stored report.",
+        },
+    )
 
     session = store.get_session(session_id)
     assert session is not None
@@ -66,6 +78,223 @@ def test_storage_memory_roundtrip():
     messages = store.get_messages(session_id)
     assert len(messages) == 1
     assert messages[0]["content"] == "hello"
+    report = store.get_latest_analysis_report(
+        session_id=session_id,
+        symbol="AAPL",
+        horizon="swing",
+        risk_mode="balanced",
+    )
+    assert report is not None
+    assert report["report_id"] == artifact_id
+    assert report["overall_analysis"] == "Stored report."
+
+
+def test_generate_analysis_report_persists_artifact(monkeypatch):
+    store = AssistantStorage(use_memory=True)
+
+    async def _fake_freshness(symbol: str, refresh: bool = True):
+        return {
+            "as_of_date": "2024-01-02",
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "bars_updated_at": "2024-01-02T00:00:00Z",
+            "news_updated_at": "2024-01-02T00:00:00Z",
+            "sentiment_updated_at": "2024-01-02T00:00:00Z",
+            "warnings": [],
+        }
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(service.orchestrator, "ensure_freshness", _fake_freshness)
+    monkeypatch.setattr(service.orchestrator, "run_features", _noop)
+    monkeypatch.setattr(service.orchestrator, "run_signals", _noop)
+    monkeypatch.setattr(
+        service.orchestrator,
+        "fetch_signal",
+        lambda *_args, **_kwargs: {
+            "action": "BUY",
+            "score": 0.9,
+            "confidence": 0.7,
+            "entry_low": 100,
+            "entry_high": 104,
+            "stop_loss": 95,
+            "take_profit_1": 112,
+            "take_profit_2": 120,
+            "horizon_days": 21,
+            "reason_codes": ["TREND_UP"],
+            "reason_details": {"TREND_UP": "Trend is rising"},
+        },
+    )
+    monkeypatch.setattr(
+        service.orchestrator,
+        "fetch_key_features",
+        lambda *_args, **_kwargs: {
+            "ret_1d": 0.01,
+            "ret_5d": 0.03,
+            "ret_21d": 0.12,
+            "vol_21d": 0.25,
+            "vol_63d": 0.22,
+            "atr_pct": 0.04,
+            "trend_slope_21d": 0.2,
+            "trend_slope_63d": 0.1,
+            "mom_vol_adj_21d": 0.8,
+            "sentiment_score": 0.4,
+            "sentiment_surprise": 0.1,
+            "regime_label": "trend",
+            "regime_strength": 0.6,
+        },
+    )
+    monkeypatch.setattr(
+        service.orchestrator,
+        "fetch_quality",
+        lambda *_args, **_kwargs: {
+            "bars_ok": True,
+            "fundamentals_ok": False,
+            "sentiment_ok": True,
+            "intraday_ok": False,
+            "missingness": 0.02,
+            "anomaly_flags": [],
+            "quality_score": 88,
+            "news_ok": True,
+            "bars_updated_at": "2024-01-02T00:00:00Z",
+            "news_updated_at": "2024-01-02T00:00:00Z",
+            "sentiment_updated_at": "2024-01-02T00:00:00Z",
+            "warnings": [],
+        },
+    )
+
+    result = asyncio.run(
+        service.generate_analysis_report(
+            {
+                "symbol": "NVDA",
+                "horizon": "swing",
+                "risk_mode": "balanced",
+            },
+            store=store,
+        )
+    )
+
+    assert result["report_id"]
+    assert result["session_id"]
+    assert result["overall_analysis"]
+    assert result["strategy_view"]
+
+    session = store.get_session(result["session_id"])
+    assert session is not None
+    assert session["metadata"]["active_analysis"]["report_id"] == result["report_id"]
+
+    report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
+    assert report is not None
+    assert report["report_id"] == result["report_id"]
+    assert report["signal_summary"] == result["signal_summary"]
+    assert report["overall_analysis"] == result["overall_analysis"]
+
+
+def test_chat_uses_persisted_analysis_report(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = reports.build_analysis_report(
+        symbol="NVDA",
+        as_of_date="2024-01-02",
+        horizon="swing",
+        risk_mode="balanced",
+        signal={
+            "action": "BUY",
+            "score": 0.8,
+            "confidence": 0.7,
+            "entry_low": 100,
+            "entry_high": 104,
+            "stop_loss": 95,
+            "take_profit_1": 110,
+            "take_profit_2": 118,
+            "horizon_days": 21,
+            "reason_codes": ["TREND_UP"],
+            "reason_details": {"TREND_UP": "Trend is rising"},
+        },
+        key_features={
+            "ret_1d": 0.01,
+            "ret_5d": 0.03,
+            "ret_21d": 0.08,
+            "vol_21d": 0.25,
+            "vol_63d": 0.22,
+            "atr_pct": 0.04,
+            "trend_slope_21d": 0.2,
+            "trend_slope_63d": 0.1,
+            "mom_vol_adj_21d": 0.8,
+            "sentiment_score": 0.4,
+            "sentiment_surprise": 0.1,
+            "regime_label": "trend",
+            "regime_strength": 0.6,
+        },
+        quality={
+            "bars_ok": True,
+            "fundamentals_ok": False,
+            "sentiment_ok": True,
+            "intraday_ok": False,
+            "missingness": 0.02,
+            "anomaly_flags": [],
+            "quality_score": 88,
+            "news_ok": True,
+            "warnings": [],
+        },
+        evidence={
+            "reason_codes": ["TREND_UP"],
+            "reason_details": {"TREND_UP": "Trend is rising"},
+            "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
+        },
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    store.upsert_session_metadata(
+        session_id,
+        {
+            "active_analysis": reports.build_active_analysis_reference(
+                report, session_id=session_id, report_id=report_id
+            )
+        },
+    )
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert "NVDA" in combined
+        assert report["overall_analysis"] in combined
+        assert report["strategy_view"] in combined
+        return (
+            "Grounded reply about the stored NVDA analysis.",
+            "model",
+            {"prompt_tokens": 10, "completion_tokens": 12},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {"session_id": session_id, "message": "Should I buy NVDA based on the analysis?"},
+        store=store,
+    )
+    assert result["reply"] == "Grounded reply about the stored NVDA analysis."
+    assert result["report_found"] is True
+    assert result["active_analysis"]["symbol"] == "NVDA"
+
+
+def test_chat_returns_no_analysis_message_when_report_absent(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+
+    monkeypatch.setattr(
+        service,
+        "_safe_completion",
+        lambda _messages: (_ for _ in ()).throw(AssertionError("completion should not run")),
+    )
+
+    result = service.chat_with_assistant(
+        {"message": "Explain NVDA based on the analysis."},
+        store=store,
+    )
+    assert result["report_found"] is False
+    assert "No stored analysis report exists for NVDA yet." in result["reply"]
 
 
 def test_explain_signal_mocked(monkeypatch):

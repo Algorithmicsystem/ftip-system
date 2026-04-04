@@ -5,13 +5,23 @@ const state = {
   apiKey: "",
   assistantChatSessionId: "",
   assistantChatTranscript: [],
+  assistantActiveAnalysis: null,
+  assistantLatestReport: null,
 };
 
 const ASSISTANT_CHAT_SESSION_STORAGE_KEY = "ftip.assistant.chat.session_id";
+const ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY = "ftip.assistant.active_analysis";
 
 const isoDate = (date) => date.toISOString().slice(0, 10);
 
 const formatJson = (value) => JSON.stringify(value ?? {}, null, 2);
+const escapeHtml = (value) =>
+  String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 
 const setDefaults = () => {
   const now = new Date();
@@ -133,6 +143,105 @@ const persistAssistantSessionId = (sessionId) => {
   window.localStorage.setItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY, sessionId);
 };
 
+const formatActiveAnalysisLabel = (analysis) => {
+  if (!analysis?.symbol) {
+    return "Active analysis: none yet.";
+  }
+  return `Active analysis: ${analysis.symbol} / ${analysis.horizon || "n/a"} / ${
+    analysis.risk_mode || "n/a"
+  } / ${analysis.as_of_date || "n/a"}`;
+};
+
+const renderActiveAnalysisLabels = () => {
+  const label = formatActiveAnalysisLabel(state.assistantActiveAnalysis);
+  qs("#assistant-analyze-active-label").textContent = label;
+  qs("#assistant-chat-active-label").textContent = label;
+};
+
+const persistActiveAnalysis = (analysis) => {
+  state.assistantActiveAnalysis = analysis || null;
+  if (analysis) {
+    window.localStorage.setItem(
+      ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY,
+      JSON.stringify(analysis)
+    );
+  } else {
+    window.localStorage.removeItem(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY);
+  }
+  renderActiveAnalysisLabels();
+};
+
+const renderAssistantReport = (report) => {
+  const container = qs("#assistant-analyze-report");
+  state.assistantLatestReport = report || null;
+
+  if (!report) {
+    container.classList.add("empty");
+    container.innerHTML = `
+      <div class="analysis-report-empty">
+        Run Assistant Analyze to generate a grounded system report.
+      </div>
+    `;
+    return;
+  }
+
+  container.classList.remove("empty");
+  const metrics = [
+    { label: "Signal", value: report.signal?.action || "N/A" },
+    { label: "Score", value: report.signal?.score ?? "N/A" },
+    { label: "Confidence", value: report.signal?.confidence ?? "N/A" },
+    { label: "As Of", value: report.as_of_date || "N/A" },
+    { label: "Horizon", value: report.horizon || "N/A" },
+    { label: "Risk Mode", value: report.risk_mode || "N/A" },
+  ];
+  const sections = [
+    ["Signal Summary", report.signal_summary],
+    ["Technical Analysis", report.technical_analysis],
+    ["Fundamental Analysis", report.fundamental_analysis],
+    ["Statistical Analysis", report.statistical_analysis],
+    ["Sentiment Analysis", report.sentiment_analysis],
+    ["Risk & Quality Analysis", report.risk_quality_analysis],
+    ["Overall Analysis", report.overall_analysis],
+    ["Strategy View", report.strategy_view],
+  ];
+
+  container.innerHTML = `
+    <div class="report-hero">
+      <div class="report-kicker">Grounded Analysis Report</div>
+      <h5 class="report-title">${escapeHtml(report.symbol || "Unknown Symbol")}</h5>
+      <p class="report-subtitle">${escapeHtml(
+        `${report.as_of_date || "n/a"} · ${report.horizon || "n/a"} horizon · ${
+          report.risk_mode || "n/a"
+        } risk mode`
+      )}</p>
+    </div>
+    <div class="report-metrics">
+      ${metrics
+        .map(
+          (metric) => `
+            <div class="report-metric">
+              <div class="report-metric-label">${escapeHtml(metric.label)}</div>
+              <div class="report-metric-value">${escapeHtml(metric.value)}</div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+    <div class="report-sections">
+      ${sections
+        .map(
+          ([title, body]) => `
+            <section class="report-section">
+              <h5>${escapeHtml(title)}</h5>
+              <p>${escapeHtml(body || "No section text available.")}</p>
+            </section>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
 const renderAssistantChatTranscript = () => {
   if (!state.assistantChatTranscript.length) {
     qs("#assistant-chat-response").textContent = "No messages yet.";
@@ -152,6 +261,8 @@ const renderAssistantChatTranscript = () => {
 const resetAssistantChatSession = (message = "New local session prepared.") => {
   persistAssistantSessionId(generateUuid());
   state.assistantChatTranscript = [];
+  persistActiveAnalysis(null);
+  renderAssistantReport(null);
   renderAssistantChatTranscript();
   setLegacyStatus("#assistant-chat-status", message, "success");
 };
@@ -175,14 +286,26 @@ const runAssistantAnalyze = async () => {
     return;
   }
 
+  const pendingSessionId = state.assistantChatSessionId || generateUuid();
+  persistAssistantSessionId(pendingSessionId);
   setButtonLoading("#assistant-analyze-btn", true, "Running...");
   setLegacyStatus("#assistant-analyze-status", `Running assistant analyze for ${symbol}...`);
   try {
     const data = await callJson("/assistant/analyze", {
       method: "POST",
       headers: getHeaders(),
-      body: JSON.stringify({ symbol, horizon, risk_mode }),
+      body: JSON.stringify({
+        session_id: pendingSessionId,
+        symbol,
+        horizon,
+        risk_mode,
+      }),
     });
+    if (data.session_id) {
+      persistAssistantSessionId(data.session_id);
+    }
+    persistActiveAnalysis(data.active_analysis || null);
+    renderAssistantReport(data);
     qs("#assistant-analyze-response").textContent = formatJson(data);
     setLegacyStatus(
       "#assistant-analyze-status",
@@ -221,11 +344,17 @@ const sendAssistantChat = async () => {
       body: JSON.stringify({
         session_id: pendingSessionId,
         message,
+        context: {
+          active_analysis: state.assistantActiveAnalysis,
+        },
       }),
     });
 
     if (data.session_id) {
       persistAssistantSessionId(data.session_id);
+    }
+    if (data.active_analysis) {
+      persistActiveAnalysis(data.active_analysis);
     }
 
     state.assistantChatTranscript.push({ role: "User", content: message });
@@ -355,5 +484,13 @@ setDefaults();
 persistAssistantSessionId(
   window.localStorage.getItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY) || generateUuid()
 );
+try {
+  persistActiveAnalysis(
+    JSON.parse(window.localStorage.getItem(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY) || "null")
+  );
+} catch {
+  persistActiveAnalysis(null);
+}
+renderAssistantReport(null);
 renderAssistantChatTranscript();
 setActiveTab("signal");

@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import logging
-import math
 import time
 import uuid
-from decimal import Decimal
-from numbers import Real
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -25,32 +22,12 @@ from api.assistant.models import (
     TitleSessionResponse,
     TopPicksRequest,
 )
+from api.assistant.reports import sanitize_payload
 from api.assistant.storage import storage
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["assistant"])
-
-
-def _sanitize_non_finite_floats(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {k: _sanitize_non_finite_floats(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_non_finite_floats(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(_sanitize_non_finite_floats(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return [_sanitize_non_finite_floats(item) for item in value]
-    if isinstance(value, Decimal):
-        return value if value.is_finite() else None
-    if isinstance(value, Real):
-        try:
-            return value if math.isfinite(value) else None
-        except (TypeError, ValueError, OverflowError):
-            return value
-    return value
-
-
 class MemoryRateLimiter:
     def __init__(self, max_requests: int, window_seconds: int = 60):
         self.max_requests = max_requests
@@ -174,41 +151,9 @@ async def analyze_endpoint(
     request_id: str = Depends(request_id_dependency),
     __: None = Depends(rate_limit),
 ):
-    symbol = orchestrator.normalize_symbol(payload.symbol)
-    freshness = await orchestrator.ensure_freshness(symbol)
-    as_of_date = freshness["as_of_date"]
-
-    await orchestrator.run_features(symbol, as_of_date)
-    await orchestrator.run_signals(symbol, as_of_date)
-
-    signal = orchestrator.fetch_signal(symbol, as_of_date)
-    if not signal:
-        raise HTTPException(
-            status_code=404, detail="signal not available after compute"
-        )
-
-    key_features = orchestrator.fetch_key_features(symbol, as_of_date)
-    quality = orchestrator.fetch_quality(symbol, as_of_date, freshness)
-
-    evidence = {
-        "reason_codes": signal.get("reason_codes") or [],
-        "reason_details": signal.get("reason_details") or {},
-        "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
-    }
-
-    response_payload = {
-        "symbol": symbol,
-        "as_of_date": as_of_date.isoformat(),
-        "signal": {
-            **signal,
-            "horizon": payload.horizon,
-            "risk_mode": payload.risk_mode,
-        },
-        "key_features": key_features,
-        "quality": quality,
-        "evidence": evidence,
-    }
-    return _sanitize_non_finite_floats(response_payload)
+    result = await service.generate_analysis_report(payload.model_dump())
+    logger.info("assistant.analyze", extra={"request_id": request_id})
+    return sanitize_payload(result)
 
 
 @router.post("/top-picks")
