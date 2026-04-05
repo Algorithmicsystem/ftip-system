@@ -8,7 +8,7 @@ BASE_SYSTEM_PROMPT = (
     "You are the FTIP narrator. You speak as the voice of the system's computed analysis artifacts, not as a generic assistant. "
     "Never provide personalized financial advice or tell the user what they personally should do. "
     "When a grounded analysis report is present, treat it as source of truth and explain the actual computed signal, drivers, risks, and strategy logic. "
-    "Do not claim that you lack the analysis if the report is present. Use concise, careful language and distinguish system output from personal advice."
+    "Do not claim that you lack the analysis if the report is present. Use concise, careful language, cite the actual report sections when helpful, and distinguish system output from personal advice."
 )
 
 
@@ -29,12 +29,13 @@ def build_chat_messages(
 
 
 def summarize_analysis_report(report: Dict[str, Any]) -> str:
+    strategy = report.get("strategy") or {}
     return " ".join(
         [
             f"Analysis report for {report.get('symbol', '?')} as of {report.get('as_of_date', '?')}.",
-            f"Signal: {(report.get('signal') or {}).get('action', 'n/a')}.",
+            f"Signal: {(report.get('signal') or {}).get('action', 'n/a')} -> {strategy.get('final_signal', 'n/a')}.",
             f"Score: {(report.get('signal') or {}).get('score', 'n/a')}.",
-            f"Confidence: {(report.get('signal') or {}).get('confidence', 'n/a')}.",
+            f"Confidence: {strategy.get('confidence', (report.get('signal') or {}).get('confidence', 'n/a'))}.",
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
     )
@@ -46,10 +47,18 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "as_of_date": report.get("as_of_date"),
         "horizon": report.get("horizon"),
         "risk_mode": report.get("risk_mode"),
+        "scenario": report.get("scenario"),
+        "analysis_depth": report.get("analysis_depth"),
+        "refresh_mode": report.get("refresh_mode"),
+        "market_regime": report.get("market_regime"),
+        "freshness_summary": report.get("freshness_summary"),
         "signal": report.get("signal"),
+        "strategy": report.get("strategy"),
+        "why_this_signal": report.get("why_this_signal"),
         "key_features": report.get("key_features"),
         "quality": report.get("quality"),
         "evidence": report.get("evidence"),
+        "evidence_map": report.get("evidence_map"),
     }
     section_context = {
         "signal_summary": report.get("signal_summary"),
@@ -57,9 +66,12 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "fundamental_analysis": report.get("fundamental_analysis"),
         "statistical_analysis": report.get("statistical_analysis"),
         "sentiment_analysis": report.get("sentiment_analysis"),
+        "macro_geopolitical_analysis": report.get("macro_geopolitical_analysis"),
         "risk_quality_analysis": report.get("risk_quality_analysis"),
         "overall_analysis": report.get("overall_analysis"),
         "strategy_view": report.get("strategy_view"),
+        "risks_weaknesses_invalidators": report.get("risks_weaknesses_invalidators"),
+        "evidence_provenance": report.get("evidence_provenance"),
     }
     blocks = [
         "Grounding report metadata and machine-readable fields:",
@@ -90,7 +102,8 @@ def build_grounded_chat_messages(
             "content": (
                 "You are answering from a stored FTIP analysis report. Explain the system signal, drivers, strengths, weaknesses, "
                 "risk/quality caveats, and strategy logic implied by that report. If asked whether the user should buy or sell, "
-                "translate the report into the system's stance while clearly stating that this is not personalized financial advice."
+                "translate the report into the system's stance while clearly stating that this is not personalized financial advice. "
+                "Prefer referencing the report's signal summary, overall analysis, strategy view, risks/weaknesses/invalidators, and evidence provenance sections."
             ),
         },
         {"role": "system", "content": _grounding_block(report, context)},
@@ -151,6 +164,6 @@ def summarize_backtest(payload: Dict[str, Any]) -> str:
 
 def system_capabilities() -> str:
     return (
-        "I can explain stored analysis reports, signal drivers, thresholds, calibration metadata, risk caveats, "
-        "strategy logic, and backtest summaries. I never provide personalized investment advice."
+        "I can explain stored analysis reports, canonical strategy artifacts, why-this-signal drilldowns, evidence provenance, thresholds, "
+        "risk caveats, scenario framing, and backtest summaries. I never provide personalized investment advice."
     )

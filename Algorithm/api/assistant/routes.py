@@ -151,7 +151,9 @@ async def analyze_endpoint(
     request_id: str = Depends(request_id_dependency),
     __: None = Depends(rate_limit),
 ):
-    result = await service.generate_analysis_report(payload.model_dump())
+    result = await service.generate_analysis_report(
+        {**payload.model_dump(), "trace_id": request_id}
+    )
     logger.info("assistant.analyze", extra={"request_id": request_id})
     return sanitize_payload(result)
 

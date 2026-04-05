@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from api.assistant import reports, service
+from api.assistant import intelligence, reports, service, strategy
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -180,16 +180,49 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["session_id"]
     assert result["overall_analysis"]
     assert result["strategy_view"]
+    assert result["analysis_job"]["trace_id"]
+    assert result["freshness_summary"]["overall_status"]
+    assert result["data_bundle"]["quality_provenance"]
+    assert result["feature_factor_bundle"]["composite_intelligence"]
+    assert result["strategy"]["final_signal"]
+    assert result["why_this_signal"]["top_positive_drivers"] is not None
+    assert result["evidence_provenance"]
 
     session = store.get_session(result["session_id"])
     assert session is not None
     assert session["metadata"]["active_analysis"]["report_id"] == result["report_id"]
+    assert session["metadata"]["active_analysis"]["signal"]
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
     assert report["report_id"] == result["report_id"]
     assert report["signal_summary"] == result["signal_summary"]
     assert report["overall_analysis"] == result["overall_analysis"]
+    assert (
+        store.get_latest_artifact(
+            kind=intelligence.ANALYSIS_JOB_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=intelligence.DATA_BUNDLE_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=intelligence.FEATURE_FACTOR_BUNDLE_KIND,
+            session_id=result["session_id"],
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=strategy.STRATEGY_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
 
 
 def test_chat_uses_persisted_analysis_report(monkeypatch):
@@ -262,6 +295,7 @@ def test_chat_uses_persisted_analysis_report(monkeypatch):
         assert "NVDA" in combined
         assert report["overall_analysis"] in combined
         assert report["strategy_view"] in combined
+        assert report["evidence_provenance"] in combined
         return (
             "Grounded reply about the stored NVDA analysis.",
             "model",
@@ -276,6 +310,10 @@ def test_chat_uses_persisted_analysis_report(monkeypatch):
     assert result["reply"] == "Grounded reply about the stored NVDA analysis."
     assert result["report_found"] is True
     assert result["active_analysis"]["symbol"] == "NVDA"
+    assert (
+        store.get_latest_artifact(kind=strategy.CHAT_GROUNDING_CONTEXT_KIND, session_id=session_id)
+        is not None
+    )
 
 
 def test_chat_returns_no_analysis_message_when_report_absent(monkeypatch):
@@ -349,6 +387,124 @@ def test_explain_backtest_mocked(monkeypatch):
         store=AssistantStorage(use_memory=True),
     )
     assert result["reply"] == "backtest reply"
+
+
+def test_feature_factor_and_strategy_layers_produce_structured_outputs():
+    data_bundle = {
+        "market_price_volume": {
+            "day_return": 0.01,
+            "ret_5d": 0.04,
+            "ret_10d": 0.05,
+            "ret_21d": 0.1,
+            "ret_63d": 0.2,
+            "ret_126d": 0.3,
+            "ret_252d": 0.45,
+            "realized_vol_5d": 0.22,
+            "realized_vol_21d": 0.25,
+            "realized_vol_63d": 0.24,
+            "atr_pct": 0.04,
+            "gap_pct": 0.01,
+            "breakout_distance_63d": 0.03,
+            "volume_anomaly": 1.4,
+            "support_21d": 100.0,
+            "resistance_21d": 118.0,
+            "compression_ratio": 0.07,
+        },
+        "technical_market_structure": {
+            "moving_averages": {"ma_10": 112, "ma_21": 109, "ma_63": 101, "ma_126": 92},
+            "trend_slope_21d": 0.12,
+            "trend_slope_63d": 0.08,
+            "trend_curvature": 0.04,
+            "mean_reversion_gap": 0.05,
+            "breakout_state": "trend_extension",
+            "volume_price_alignment": 0.09,
+            "regime_label": "trend",
+            "regime_strength": 0.6,
+        },
+        "fundamental_filing": {
+            "latest_quarter": {"revenue": 1000, "op_margin": 0.24, "gross_margin": 0.61},
+            "revenue_growth_yoy": 0.18,
+            "margin_stability": 0.78,
+            "positive_fcf_ratio": 0.75,
+            "filing_recency_days": 54,
+        },
+        "sentiment_narrative_flow": {
+            "sentiment_score": 0.32,
+            "sentiment_surprise": 0.08,
+            "sentiment_trend": 0.02,
+            "headline_count": 14,
+            "attention_crowding": 1.4,
+            "novelty_ratio": 0.7,
+            "narrative_concentration": 0.32,
+            "disagreement_score": 0.18,
+            "hype_price_divergence": 0.04,
+        },
+        "macro_cross_asset": {
+            "benchmark_proxy": "XLK",
+            "benchmark_ret_21d": 0.07,
+            "benchmark_vol_21d": 0.19,
+            "inferred_market_regime": "risk_on",
+            "macro_alignment_score": 72.0,
+            "risk_on_score": 0.06,
+            "stress_overlay": -0.01,
+            "meta": {"status": "fresh", "coverage_score": 0.85},
+        },
+        "geopolitical_policy": {
+            "category_counts": {"rates_policy": 1, "regulation_policy": 0},
+            "exogenous_event_score": 0.12,
+        },
+        "relative_context": {
+            "sector": "Technology",
+            "peer_count": 8,
+            "relative_ret_21d": 0.05,
+            "relative_momentum": 0.09,
+            "relative_strength_percentile": 0.82,
+            "peer_dispersion_score": 0.11,
+            "meta": {"status": "fresh", "coverage_score": 0.9},
+        },
+        "quality_provenance": {
+            "quality_score": 88,
+            "missingness": 0.03,
+            "warnings": [],
+            "freshness_summary": {
+                "bars": {"status": "fresh", "updated_at": "2026-04-05T00:00:00Z"},
+                "news": {"status": "fresh", "updated_at": "2026-04-05T00:00:00Z"},
+                "sentiment": {"status": "fresh", "updated_at": "2026-04-05T00:00:00Z"},
+            },
+        },
+    }
+    feature_bundle = intelligence.build_feature_factor_bundle(
+        data_bundle=data_bundle,
+        signal={"action": "BUY", "score": 0.8, "confidence": 0.74},
+        key_features={
+            "ret_1d": 0.01,
+            "ret_5d": 0.04,
+            "ret_21d": 0.1,
+            "mom_vol_adj_21d": 0.75,
+            "sentiment_score": 0.32,
+            "regime_label": "trend",
+        },
+        quality={
+            "missingness": 0.03,
+            "fundamentals_ok": True,
+        },
+    )
+    strategy_bundle = strategy.build_strategy_artifact(
+        job_context={
+            "horizon": "swing",
+            "scenario": "base",
+        },
+        signal={"action": "BUY", "score": 0.8, "confidence": 0.74},
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_bundle,
+    )
+
+    assert "multi_horizon_price_momentum" in feature_bundle
+    assert "composite_intelligence" in feature_bundle
+    assert "Opportunity Quality Score" in feature_bundle["composite_intelligence"]
+    assert strategy_bundle["final_signal"] in {"BUY", "HOLD", "SELL"}
+    assert strategy_bundle["component_scores"]["trend_following"]["weight"] > 0
+    assert strategy_bundle["top_contributors"]
 
 
 def test_providers_health_is_registered_and_in_openapi() -> None:

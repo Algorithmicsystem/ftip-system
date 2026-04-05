@@ -18,6 +18,13 @@ class AnalysisReference(BaseModel):
     as_of_date: Optional[str] = None
     horizon: Optional[str] = None
     risk_mode: Optional[str] = None
+    scenario: Optional[str] = None
+    analysis_depth: Optional[str] = None
+    refresh_mode: Optional[str] = None
+    market_regime: Optional[str] = None
+    signal: Optional[str] = None
+    freshness_status: Optional[str] = None
+    report_version: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -70,6 +77,10 @@ class AnalyzeRequest(BaseModel):
     symbol: str
     horizon: str
     risk_mode: str
+    scenario_mode: str = "base"
+    analysis_depth: str = "standard"
+    refresh_mode: str = "refresh_stale"
+    market_regime: str = "auto"
 
 
 class TopPicksRequest(BaseModel):

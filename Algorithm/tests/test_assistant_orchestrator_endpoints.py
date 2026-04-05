@@ -74,24 +74,34 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "as_of_date",
         "horizon",
         "risk_mode",
+        "analysis_job",
+        "freshness_summary",
         "signal",
         "key_features",
         "quality",
         "evidence",
+        "data_bundle",
+        "feature_factor_bundle",
+        "strategy",
+        "why_this_signal",
         "signal_summary",
         "technical_analysis",
         "fundamental_analysis",
         "statistical_analysis",
         "sentiment_analysis",
+        "macro_geopolitical_analysis",
         "risk_quality_analysis",
         "overall_analysis",
         "strategy_view",
+        "risks_weaknesses_invalidators",
+        "evidence_provenance",
         "session_id",
         "report_id",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
     assert data["active_analysis"]["symbol"] == "NVDA"
+    assert data["strategy"]["final_signal"] in {"BUY", "HOLD", "SELL"}
     assert data["overall_analysis"]
 
 
@@ -222,6 +232,8 @@ def test_assistant_analyze_sanitizes_non_finite_numeric_values(monkeypatch):
     assert data["quality"]["trace"] == [0.1, None, {"z": None, "w": None}]
     assert data["signal_summary"]
     assert data["strategy_view"]
+    assert data["freshness_summary"]["overall_status"]
+    assert data["why_this_signal"]["top_positive_drivers"] is not None
 
 
 def test_fetch_signal_falls_back_to_prosperity_row(monkeypatch):

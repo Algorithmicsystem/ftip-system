@@ -178,7 +178,7 @@ class AssistantStorage:
                     "id": aid,
                     "session_id": session_id,
                     "kind": kind,
-                    "payload": payload,
+                    "payload": sanitize_payload(payload),
                     "created_at": self._now(),
                 }
             )
@@ -207,6 +207,49 @@ class AssistantStorage:
             WHERE id=%s
             """,
             (artifact_id,),
+        )
+        if not row:
+            return None
+        return {
+            "id": str(row[0]),
+            "session_id": str(row[1]),
+            "kind": row[2],
+            "payload": sanitize_payload(row[3]) if row[3] is not None else row[3],
+            "created_at": row[4],
+        }
+
+    def get_latest_artifact(
+        self,
+        *,
+        kind: str,
+        session_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            candidates = [
+                artifact
+                for artifact in self._artifacts
+                if artifact.get("kind") == kind
+                and (session_id is None or str(artifact.get("session_id")) == str(session_id))
+            ]
+            if not candidates:
+                return None
+            candidates.sort(key=lambda item: item.get("created_at", 0), reverse=True)
+            return candidates[0]
+
+        where_clauses = ["kind=%s"]
+        params: List[Any] = [kind]
+        if session_id:
+            where_clauses.append("session_id=%s")
+            params.append(session_id)
+        row = db.fetch1(
+            f"""
+            SELECT id, session_id, kind, payload, created_at
+            FROM assistant_artifacts
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            tuple(params),
         )
         if not row:
             return None

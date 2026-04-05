@@ -20,6 +20,12 @@ def sanitize_payload(value: Any) -> Any:
         return tuple(sanitize_payload(item) for item in value)
     if isinstance(value, (set, frozenset)):
         return [sanitize_payload(item) for item in value]
+    if isinstance(value, dt.datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=dt.timezone.utc)
+        return value.astimezone(dt.timezone.utc).isoformat()
+    if isinstance(value, dt.date):
+        return value.isoformat()
     if isinstance(value, Decimal):
         return float(value) if value.is_finite() else None
     if isinstance(value, bool):
@@ -93,6 +99,64 @@ def _entry_text(signal: Dict[str, Any]) -> str:
     return f"Entry reference is {_fmt_num(entry_high, digits=2)}."
 
 
+def _first_available(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _freshness_status(data_bundle: Optional[Dict[str, Any]]) -> str:
+    quality = (data_bundle or {}).get("quality_provenance") or {}
+    freshness = quality.get("freshness_summary") or {}
+    statuses = [item.get("status") for item in freshness.values() if item.get("status")]
+    if not statuses:
+        return "unknown"
+    if all(status == "fresh" for status in statuses):
+        return "fresh"
+    if any(status == "stale" for status in statuses):
+        return "mixed_stale"
+    return "mixed"
+
+
+def _fmt_driver_list(drivers: Iterable[Dict[str, Any]]) -> str:
+    parts = []
+    for item in drivers:
+        label = item.get("label") or "driver"
+        detail = item.get("detail") or ""
+        score = item.get("score")
+        if score is None:
+            parts.append(f"{label}: {detail}")
+        else:
+            parts.append(f"{label} ({_fmt_num(score, digits=1)}): {detail}")
+    return "; ".join(parts) if parts else "none"
+
+
+def _why_this_signal(
+    strategy: Dict[str, Any],
+    data_bundle: Optional[Dict[str, Any]],
+    feature_factor_bundle: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    quality = (data_bundle or {}).get("quality_provenance") or {}
+    warnings = list(quality.get("warnings") or [])
+    freshness = quality.get("freshness_summary") or {}
+    freshness_warnings = []
+    for domain, summary in freshness.items():
+        status = summary.get("status")
+        if status in {"stale", "stale_but_usable"}:
+            freshness_warnings.append(f"{domain} is {status.replace('_', ' ')}.")
+    return {
+        "top_positive_drivers": strategy.get("top_contributors") or [],
+        "top_negative_drivers": strategy.get("top_detractors") or [],
+        "confidence_modifiers": strategy.get("confidence_degraders") or [],
+        "missing_data_warnings": warnings,
+        "freshness_warnings": freshness_warnings,
+        "composite_scores": (
+            (feature_factor_bundle or {}).get("composite_intelligence") or {}
+        ),
+    }
+
+
 def build_active_analysis_reference(
     report: Dict[str, Any],
     *,
@@ -107,6 +171,20 @@ def build_active_analysis_reference(
             "as_of_date": report.get("as_of_date"),
             "horizon": report.get("horizon"),
             "risk_mode": report.get("risk_mode"),
+            "scenario": report.get("scenario"),
+            "analysis_depth": report.get("analysis_depth"),
+            "refresh_mode": report.get("refresh_mode"),
+            "market_regime": report.get("market_regime"),
+            "signal": _first_available(
+                (report.get("strategy") or {}).get("final_signal"),
+                (report.get("signal") or {}).get("final_action"),
+                (report.get("signal") or {}).get("action"),
+            ),
+            "freshness_status": _first_available(
+                (report.get("freshness_summary") or {}).get("overall_status"),
+                _freshness_status(report.get("data_bundle")),
+            ),
+            "report_version": report.get("report_version"),
         }
     )
 
@@ -121,126 +199,246 @@ def build_analysis_report(
     key_features: Dict[str, Any],
     quality: Dict[str, Any],
     evidence: Dict[str, Any],
+    job_context: Optional[Dict[str, Any]] = None,
+    data_bundle: Optional[Dict[str, Any]] = None,
+    feature_factor_bundle: Optional[Dict[str, Any]] = None,
+    strategy: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     as_of_text = _iso_date(as_of_date)
     action = (signal.get("action") or "HOLD").upper()
     score = signal.get("score")
     confidence = signal.get("confidence")
-    regime = key_features.get("regime_label") or "unknown"
-    quality_score = quality.get("quality_score")
+    strategy = strategy or {}
+    job_context = job_context or {}
+    data_bundle = data_bundle or {}
+    feature_factor_bundle = feature_factor_bundle or {}
+
+    strategy_signal = (strategy.get("final_signal") or action).upper()
+    strategy_confidence = _first_available(strategy.get("confidence"), confidence)
+    conviction_tier = strategy.get("conviction_tier") or "unknown"
+    fragility_tier = strategy.get("fragility_tier") or "unknown"
+    regime = _first_available(
+        (feature_factor_bundle.get("regime_engine") or {}).get("regime_label"),
+        key_features.get("regime_label"),
+        "unknown",
+    )
+    quality_score = _first_available(
+        (data_bundle.get("quality_provenance") or {}).get("quality_score"),
+        quality.get("quality_score"),
+    )
     warnings = quality.get("warnings") or []
     reason_codes = signal.get("reason_codes") or []
+    why_signal = _why_this_signal(strategy, data_bundle, feature_factor_bundle)
+    freshness_summary = {
+        "overall_status": _freshness_status(data_bundle),
+        "domains": ((data_bundle.get("quality_provenance") or {}).get("freshness_summary") or {}),
+    }
+    market = data_bundle.get("market_price_volume") or {}
+    technical = data_bundle.get("technical_market_structure") or {}
+    fundamentals = data_bundle.get("fundamental_filing") or {}
+    sentiment = data_bundle.get("sentiment_narrative_flow") or {}
+    macro = data_bundle.get("macro_cross_asset") or {}
+    geopolitical = data_bundle.get("geopolitical_policy") or {}
+    relative = data_bundle.get("relative_context") or {}
+    composites = feature_factor_bundle.get("composite_intelligence") or {}
+    strategy_component_scores = strategy.get("component_scores") or {}
     signal_view = {
         **signal,
         "horizon": horizon,
         "risk_mode": risk_mode,
+        "final_action": strategy_signal,
+        "strategy_confidence": strategy_confidence,
+        "conviction_tier": conviction_tier,
+        "fragility_tier": fragility_tier,
     }
 
     signal_summary = " ".join(
         [
-            f"As of {as_of_text}, FTIP's stored signal for {symbol} is {action}.",
-            f"The model bias is {_signal_bias(action)} with score {_fmt_num(score)} and confidence {_fmt_num(confidence)}.",
-            f"This report is framed on the {horizon} horizon with {risk_mode} risk mode.",
-            f"Primary reason codes: {_fmt_list(reason_codes)}.",
+            f"As of {as_of_text}, the assistant pipeline lands on a {strategy_signal} posture for {symbol}, framed on the {horizon} horizon under {risk_mode} risk mode.",
+            f"The underlying signal engine prints {action} with score {_fmt_num(score)} and confidence {_fmt_num(confidence)}, while the strategy layer converts that into {strategy_signal} with {_fmt_num(strategy_confidence)} confidence, {conviction_tier} conviction, and {fragility_tier} fragility.",
+            f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
+            f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'}.",
         ]
     )
 
     technical_analysis = " ".join(
         [
-            f"Short-term returns are {_fmt_pct(key_features.get('ret_1d'))} over 1 day, {_fmt_pct(key_features.get('ret_5d'))} over 5 days, and {_fmt_pct(key_features.get('ret_21d'))} over 21 days.",
-            f"Trend slopes are {_fmt_num(key_features.get('trend_slope_21d'), signed=True)} on 21 days and {_fmt_num(key_features.get('trend_slope_63d'), signed=True)} on 63 days.",
-            f"Volatility reads {_fmt_pct(key_features.get('vol_21d'))} on 21 days and {_fmt_pct(key_features.get('vol_63d'))} on 63 days, while ATR percent is {_fmt_pct(key_features.get('atr_pct'))}.",
-            f"The regime label is {regime} with strength {_fmt_num(key_features.get('regime_strength'))}.",
+            f"Price is carrying {_fmt_pct(market.get('day_return'))} over 1 day, {_fmt_pct(market.get('ret_5d'))} over 5 days, {_fmt_pct(market.get('ret_21d'))} over 21 days, and {_fmt_pct(market.get('ret_63d'))} over 63 days.",
+            f"The structure stack shows moving averages at 10/21/63/126 days of {_fmt_num((technical.get('moving_averages') or {}).get('ma_10'), digits=2)}, {_fmt_num((technical.get('moving_averages') or {}).get('ma_21'), digits=2)}, {_fmt_num((technical.get('moving_averages') or {}).get('ma_63'), digits=2)}, and {_fmt_num((technical.get('moving_averages') or {}).get('ma_126'), digits=2)}.",
+            f"Trend slope is {_fmt_num(technical.get('trend_slope_21d'), signed=True)} on 21 days and {_fmt_num(technical.get('trend_slope_63d'), signed=True)} on 63 days, with curvature {_fmt_num(technical.get('trend_curvature'), signed=True)} and breakout state {technical.get('breakout_state') or 'n/a'}.",
+            f"Support and resistance cluster around {_fmt_num(market.get('support_21d'), digits=2)} and {_fmt_num(market.get('resistance_21d'), digits=2)}, while volume anomaly is {_fmt_num(market.get('volume_anomaly'))} and compression ratio is {_fmt_pct(market.get('compression_ratio'), digits=2)}.",
         ]
     )
 
-    fundamentals_ok = quality.get("fundamentals_ok")
-    if fundamentals_ok is True:
-        fundamental_analysis = (
-            "Dedicated fundamentals were marked available in quality data, but this assistant report does not yet carry a richer PIT fundamentals block. "
-            "Treat the current view as primarily driven by prices, features, signal construction, and sentiment freshness."
+    if fundamentals.get("latest_quarter"):
+        fundamental_analysis = " ".join(
+            [
+                f"Fundamental coverage is live, with latest quarter revenue at {_fmt_num((fundamentals.get('latest_quarter') or {}).get('revenue'), digits=0)} and operating margin {_fmt_pct((fundamentals.get('latest_quarter') or {}).get('op_margin'))}.",
+                f"Revenue growth versus the year-ago quarter is {_fmt_pct(fundamentals.get('revenue_growth_yoy'))}, gross-margin trend is {_fmt_pct(fundamentals.get('gross_margin_trend'))}, and filing recency is {fundamentals.get('filing_recency_days') or 'n/a'} days.",
+                f"The proprietary durability read is {_fmt_num(composites.get('Fundamental Durability Score'), digits=1)} / 100, which suggests {conviction_tier} business-quality support rather than purely price-led conviction."
+                if composites.get("Fundamental Durability Score") is not None
+                else "Fundamental durability is not fully scored because the quarterly history is partial.",
+            ]
         )
-    elif fundamentals_ok is False:
+    elif quality.get("fundamentals_ok") is False:
         fundamental_analysis = (
-            "Fundamental coverage is flagged as missing in quality data, so this report should be read as mostly technical/statistical rather than fundamentally anchored."
+            "Fundamental coverage is explicitly missing in the quality layer, so the current report is weighted toward market structure, sentiment, and cross-domain signal composition rather than a filing-rich fundamental thesis."
         )
     else:
         fundamental_analysis = (
-            "No dedicated fundamental block is attached to this assistant report. The current output is grounded mainly in price features, signal scores, and news/sentiment availability."
+            "Fundamental data is limited or incomplete. The assistant pipeline preserves the gap as a real coverage constraint and degrades conviction accordingly instead of pretending the filing layer is stronger than it is."
         )
 
     statistical_analysis = " ".join(
         [
-            f"From a statistical perspective, the signal score is {_fmt_num(score)} and confidence is {_fmt_num(confidence)}.",
-            f"Risk-adjusted momentum on 21 days is {_fmt_num(key_features.get('mom_vol_adj_21d'), signed=True)} and the stored horizon_days field is {signal.get('horizon_days') or 'n/a'}.",
-            f"Quality score is {_fmt_num(quality_score, digits=0)} and missingness is {_fmt_num(quality.get('missingness'))}.",
+            f"The quant read is built around realized volatility of {_fmt_pct(market.get('realized_vol_21d'))} on 21 days and {_fmt_pct(market.get('realized_vol_63d'))} on 63 days, with ATR percent {_fmt_pct(market.get('atr_pct'))} and gap behavior {_fmt_pct(market.get('gap_pct'))}.",
+            f"Risk-adjusted momentum on 21 days is {_fmt_num(key_features.get('mom_vol_adj_21d'), signed=True)}, regime stability scores {_fmt_num(composites.get('Regime Stability Score'), digits=1)} / 100, and cross-domain conviction scores {_fmt_num(composites.get('Cross-Domain Conviction Score'), digits=1)} / 100.",
+            f"The statistical posture therefore reads as {'cleaner than average' if (composites.get('Market Structure Integrity Score') or 0) >= 60 else 'mixed or noisy'}, while fragility scores {_fmt_num(composites.get('Signal Fragility Index'), digits=1)} / 100 and missingness sits at {_fmt_num(quality.get('missingness'))}.",
         ]
     )
 
     sentiment_analysis = " ".join(
         [
-            f"Sentiment score is {_fmt_num(key_features.get('sentiment_score'), signed=True)} with surprise {_fmt_num(key_features.get('sentiment_surprise'), signed=True)}.",
-            f"Freshness flags show news_ok={quality.get('news_ok')} and sentiment_ok={quality.get('sentiment_ok')}.",
-            f"Evidence sources currently attached are {_fmt_list(evidence.get('sources') or [])}.",
+            f"Sentiment level is {_fmt_num(sentiment.get('sentiment_score'), signed=True)} with surprise {_fmt_num(sentiment.get('sentiment_surprise'), signed=True)} and short-run trend {_fmt_num(sentiment.get('sentiment_trend'), signed=True)}.",
+            f"Headline flow counts {sentiment.get('headline_count') or 0} recent items, attention crowding is {_fmt_num(sentiment.get('attention_crowding'))}, novelty ratio is {_fmt_num(sentiment.get('novelty_ratio'))}, and disagreement score is {_fmt_num(sentiment.get('disagreement_score'))}.",
+            f"Top narratives currently cluster around {_fmt_list(item.get('topic') for item in sentiment.get('top_narratives') or [])}, which means narrative flow is {'supportive' if (sentiment.get('sentiment_score') or 0) > 0 else 'cautious or contradictory'} rather than detached from price."
+            if sentiment.get("top_narratives")
+            else "Narrative coverage is limited, so sentiment is treated as a low-confidence overlay rather than a dominant driver.",
+        ]
+    )
+
+    macro_geopolitical_analysis = " ".join(
+        [
+            f"Cross-asset context is anchored to {macro.get('benchmark_proxy') or 'limited benchmark coverage'}, with benchmark 21-day return {_fmt_pct(macro.get('benchmark_ret_21d'))}, inferred regime {macro.get('inferred_market_regime') or 'n/a'}, and macro alignment score {_fmt_num(macro.get('macro_alignment_score'), digits=1)} / 100.",
+            f"Geopolitical and policy sensitivity currently shows exogenous-event score {_fmt_num(geopolitical.get('exogenous_event_score'), digits=2)} with category counts {geopolitical.get('category_counts') or {}}.",
+            f"Relative context versus {relative.get('sector') or 'available peers'} is {_fmt_num(relative.get('relative_strength_percentile') * 100 if relative.get('relative_strength_percentile') is not None else None, digits=0)} percentile strength, which means the setup is {'aligned with broader tape' if (macro.get('macro_alignment_score') or 0) >= 55 else 'not receiving much help from the broader tape'}."
+            if relative.get("peer_count")
+            else "Peer and cross-asset coverage is limited, so macro/geopolitical context is present but should be read as lower-confidence framing rather than a fully populated macro model.",
         ]
     )
 
     risk_quality_analysis = " ".join(
         [
-            f"Data quality flags are bars_ok={quality.get('bars_ok')}, news_ok={quality.get('news_ok')}, sentiment_ok={quality.get('sentiment_ok')}, and intraday_ok={quality.get('intraday_ok')}.",
+            f"Quality flags are bars_ok={quality.get('bars_ok')}, fundamentals_ok={quality.get('fundamentals_ok')}, news_ok={quality.get('news_ok')}, sentiment_ok={quality.get('sentiment_ok')}, and intraday_ok={quality.get('intraday_ok')}.",
             _entry_text(signal),
             f"Stop loss is {_fmt_num(signal.get('stop_loss'), digits=2)}, take-profit levels are {_fmt_num(signal.get('take_profit_1'), digits=2)} and {_fmt_num(signal.get('take_profit_2'), digits=2)}.",
-            f"Warnings: {_fmt_list(warnings)}. Anomaly flags: {_fmt_list(quality.get('anomaly_flags') or [])}.",
+            f"Warnings include {_fmt_list(warnings + why_signal['freshness_warnings'])}, anomaly flags {_fmt_list(quality.get('anomaly_flags') or [])}, and confidence degraders {_fmt_list(strategy.get('confidence_degraders') or [])}.",
         ]
     )
 
-    if action == "BUY":
-        overall_analysis = (
-            f"The current system view on {symbol} is constructive, but the edge is only as strong as the reported score/confidence pair. "
-            f"The stored analysis leans bullish because the computed signal is BUY, with regime {regime} and reason codes {_fmt_list(reason_codes)}. "
-            "This should be read as a model state description, not personal trading advice."
-        )
-        strategy_view = (
-            f"The implied strategy stance is to favor long exposure only if the signal remains intact on the {horizon} horizon, data quality stays acceptable, "
-            "and execution respects the stored stop/take-profit structure and any quality warnings."
-        )
-    elif action == "SELL":
-        overall_analysis = (
-            f"The current system view on {symbol} is defensive or bearish. "
-            f"The computed signal is SELL, so the analysis points to downside or de-risking conditions rather than upside conviction. "
-            "This is still a system narrative, not individualized advice."
-        )
-        strategy_view = (
-            f"The implied strategy stance is to avoid bullish positioning or to express a bearish/hedged view only within the {horizon} framework and with strict risk controls."
-        )
-    else:
-        overall_analysis = (
-            f"The current system view on {symbol} is neutral. "
-            f"The computed signal is HOLD, which means the report does not show a strong directional edge after weighing signal score, confidence, and quality context. "
-            "This is a wait-for-better-setup posture rather than a recommendation."
-        )
-        strategy_view = (
-            f"The implied strategy stance is to stay patient, monitor whether score/confidence improve, and only act when a clearer directional setup appears for the {horizon} horizon."
-        )
+    overall_analysis = " ".join(
+        [
+            f"The unified system view on {symbol} is {strategy_signal}. That posture is not coming from one score alone; it is the result of trend, mean-reversion, sentiment, macro-alignment, quality/fundamental, and fragility-veto components being fused inside the strategy layer.",
+            f"The strongest evidence for the thesis is {_fmt_driver_list(why_signal['top_positive_drivers'])}. The strongest evidence against it is {_fmt_driver_list(why_signal['top_negative_drivers'])}.",
+            f"The final posture stays at {strategy_signal} because raw signal action {action}, regime {regime}, and opportunity-quality score {_fmt_num(composites.get('Opportunity Quality Score'), digits=1)} / 100 outweigh the current detractors, but the system is explicitly least certain where {strategy.get('where_least_certain') or 'cross-domain disagreement is highest'}.",
+            "This remains a description of the platform's computed state, not personalized investment advice.",
+        ]
+    )
+    strategy_view = " ".join(
+        [
+            strategy.get("base_case")
+            or f"The base case is to carry a {strategy_signal} stance on the {horizon} horizon.",
+            strategy.get("upside_case") or "",
+            strategy.get("downside_case") or "",
+            f"Participant fit is {_fmt_list(strategy.get('participant_fit') or [])}, and invalidation conditions are {_fmt_list(strategy.get('invalidation_conditions') or [])}.",
+        ]
+    ).strip()
+    risks_weaknesses_invalidators = " ".join(
+        [
+            f"Key weaknesses are {_fmt_driver_list(why_signal['top_negative_drivers'])}.",
+            f"Missing-data warnings are {_fmt_list(why_signal['missing_data_warnings'])}; freshness warnings are {_fmt_list(why_signal['freshness_warnings'])}.",
+            f"Formal invalidators are {_fmt_list(strategy.get('invalidation_conditions') or [])}.",
+        ]
+    )
+    evidence_provenance = " ".join(
+        [
+            f"Evidence provenance spans {_fmt_list(evidence.get('sources') or [])} plus normalized domains for market, technical, fundamentals, sentiment, macro/cross-asset, geopolitical, relative context, and quality.",
+            f"Freshness status is {freshness_summary['overall_status']} with domain states {freshness_summary['domains']}.",
+            f"Reason codes are {_fmt_list(reason_codes)}, strategy components are {strategy_component_scores}, and report version is 2.0.",
+        ]
+    )
+    evidence_map = {
+        "signal_summary": [
+            "signal.action",
+            "strategy.final_signal",
+            "strategy.component_scores",
+            "feature_factor_bundle.composite_intelligence",
+        ],
+        "technical_analysis": [
+            "data_bundle.market_price_volume",
+            "data_bundle.technical_market_structure",
+            "key_features.ret_1d/ret_5d/ret_21d",
+        ],
+        "fundamental_analysis": [
+            "data_bundle.fundamental_filing",
+            "feature_factor_bundle.fundamental_intelligence",
+        ],
+        "statistical_analysis": [
+            "feature_factor_bundle.multi_horizon_price_momentum",
+            "feature_factor_bundle.volatility_risk_microstructure",
+            "feature_factor_bundle.regime_engine",
+        ],
+        "sentiment_analysis": [
+            "data_bundle.sentiment_narrative_flow",
+            "feature_factor_bundle.sentiment_intelligence",
+        ],
+        "macro_geopolitical_analysis": [
+            "data_bundle.macro_cross_asset",
+            "data_bundle.geopolitical_policy",
+            "data_bundle.relative_context",
+        ],
+        "strategy_view": [
+            "strategy.base_case",
+            "strategy.upside_case",
+            "strategy.downside_case",
+            "strategy.invalidation_conditions",
+        ],
+        "risks_weaknesses_invalidators": [
+            "quality.warnings",
+            "quality.anomaly_flags",
+            "strategy.confidence_degraders",
+        ],
+    }
 
     report = {
         "report_kind": ANALYSIS_REPORT_KIND,
+        "report_version": "2.0",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "symbol": symbol,
         "as_of_date": as_of_text,
         "horizon": horizon,
         "risk_mode": risk_mode,
+        "scenario": job_context.get("scenario"),
+        "analysis_depth": job_context.get("analysis_depth"),
+        "refresh_mode": job_context.get("refresh_mode"),
+        "market_regime": job_context.get("market_regime"),
+        "analysis_job": job_context,
+        "freshness_summary": freshness_summary,
         "signal": signal_view,
         "key_features": key_features,
         "quality": quality,
         "evidence": evidence,
+        "data_bundle": data_bundle,
+        "feature_factor_bundle": feature_factor_bundle,
+        "strategy": strategy,
+        "why_this_signal": why_signal,
+        "top_positive_drivers": why_signal["top_positive_drivers"],
+        "top_negative_drivers": why_signal["top_negative_drivers"],
+        "confidence_modifiers": why_signal["confidence_modifiers"],
+        "missing_data_warnings": why_signal["missing_data_warnings"],
+        "freshness_warnings": why_signal["freshness_warnings"],
+        "evidence_map": evidence_map,
         "signal_summary": signal_summary,
         "technical_analysis": technical_analysis,
         "fundamental_analysis": fundamental_analysis,
         "statistical_analysis": statistical_analysis,
         "sentiment_analysis": sentiment_analysis,
+        "macro_geopolitical_analysis": macro_geopolitical_analysis,
         "risk_quality_analysis": risk_quality_analysis,
         "overall_analysis": overall_analysis,
         "strategy_view": strategy_view,
+        "risks_weaknesses_invalidators": risks_weaknesses_invalidators,
+        "evidence_provenance": evidence_provenance,
     }
     return sanitize_payload(report)

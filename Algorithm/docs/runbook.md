@@ -9,9 +9,41 @@
 - `POST /assistant/analyze`
   - Input:
     ```json
-    {"symbol":"NVDA","horizon":"swing","risk_mode":"balanced"}
+    {
+      "symbol": "NVDA",
+      "horizon": "swing",
+      "risk_mode": "balanced",
+      "scenario_mode": "base",
+      "analysis_depth": "standard",
+      "refresh_mode": "refresh_stale",
+      "market_regime": "auto"
+    }
     ```
-  - Response includes `symbol`, `as_of_date`, `signal`, `key_features`, `quality`, `evidence`.
+  - Response includes canonical assistant artifacts:
+    - `analysis_job`
+    - `freshness_summary`
+    - `data_bundle`
+    - `feature_factor_bundle`
+    - `strategy`
+    - presentation sections such as `signal_summary`, `technical_analysis`, `fundamental_analysis`, `statistical_analysis`, `sentiment_analysis`, `macro_geopolitical_analysis`, `strategy_view`, `risks_weaknesses_invalidators`, and `evidence_provenance`
+- `POST /assistant/chat`
+  - Input:
+    ```json
+    {
+      "session_id": "uuid",
+      "message": "What drove the HOLD signal?",
+      "context": {
+        "active_analysis": {
+          "report_id": "uuid",
+          "symbol": "NVDA",
+          "as_of_date": "2026-04-05",
+          "horizon": "swing",
+          "risk_mode": "balanced"
+        }
+      }
+    }
+    ```
+  - Chat loads the active report first and answers as the narrator of the stored analysis artifact instead of as a generic assistant.
 - `POST /assistant/top-picks`
   - Input:
     ```json
@@ -25,7 +57,19 @@
 
 ### UI
 
-Visit `/app` to use the minimal UI. The signal card, confidence gauge, and reason codes are always visible in the pinned chat panel.
+Visit `/app` for the combined console.
+
+- The official Prosperity v1 controls remain the primary surface and are unchanged.
+- The non-v1 assistant area now acts as an advanced research console with:
+  - Dashboard
+  - Analyze
+  - Signal
+  - Strategy
+  - Evidence
+  - Chat / Narrator
+  - Advanced / Research
+  - System Health
+- The active analysis banner, structured report sections, why-this-signal drilldown, and grounded chat all attach to the same persisted assistant report artifact.
 
 ### Environment variables
 

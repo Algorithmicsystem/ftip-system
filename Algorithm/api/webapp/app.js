@@ -7,13 +7,14 @@ const state = {
   assistantChatTranscript: [],
   assistantActiveAnalysis: null,
   assistantLatestReport: null,
+  assistantHealth: null,
+  researchTab: "dashboard",
 };
 
 const ASSISTANT_CHAT_SESSION_STORAGE_KEY = "ftip.assistant.chat.session_id";
 const ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY = "ftip.assistant.active_analysis";
 
 const isoDate = (date) => date.toISOString().slice(0, 10);
-
 const formatJson = (value) => JSON.stringify(value ?? {}, null, 2);
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -23,6 +24,8 @@ const escapeHtml = (value) =>
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 
+const emptyStateCard = (text) => `<div class="empty-state-card">${escapeHtml(text)}</div>`;
+
 const setDefaults = () => {
   const now = new Date();
   const toDate = isoDate(now);
@@ -31,7 +34,8 @@ const setDefaults = () => {
   qs("#to-date-input").value = toDate;
   qs("#as-of-date-input").value = toDate;
   qs("#from-date-input").value = isoDate(from);
-  qs("#assistant-analyze-symbol").value = qs("#symbol-input").value.trim().toUpperCase() || "NVDA";
+  qs("#assistant-analyze-symbol").value =
+    qs("#symbol-input").value.trim().toUpperCase() || "NVDA";
 };
 
 const setStatus = (text, isError = false) => {
@@ -43,6 +47,16 @@ const setStatus = (text, isError = false) => {
 const setActiveTab = (tabId) => {
   qsa(".tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tabId));
   qsa(".tab-panel").forEach((panel) => panel.classList.toggle("hidden", panel.id !== tabId));
+};
+
+const setResearchTab = (tabId) => {
+  state.researchTab = tabId;
+  qsa(".research-tab").forEach((btn) =>
+    btn.classList.toggle("active", btn.dataset.researchTab === tabId)
+  );
+  qsa("[data-research-panel]").forEach((panel) =>
+    panel.classList.toggle("hidden", panel.dataset.researchPanel !== tabId)
+  );
 };
 
 const getHeaders = () => {
@@ -114,7 +128,6 @@ const generateUuid = () => {
   if (window.crypto?.randomUUID) {
     return window.crypto.randomUUID();
   }
-
   if (window.crypto?.getRandomValues) {
     const bytes = new Uint8Array(16);
     window.crypto.getRandomValues(bytes);
@@ -129,7 +142,6 @@ const generateUuid = () => {
       hex.slice(20),
     ].join("-");
   }
-
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
     const rand = Math.floor(Math.random() * 16);
     const value = char === "x" ? rand : (rand & 0x3) | 0x8;
@@ -143,6 +155,18 @@ const persistAssistantSessionId = (sessionId) => {
   window.localStorage.setItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY, sessionId);
 };
 
+const activeSignalLabel = () =>
+  state.assistantLatestReport?.strategy?.final_signal ||
+  state.assistantLatestReport?.signal?.final_action ||
+  state.assistantLatestReport?.signal?.action ||
+  state.assistantActiveAnalysis?.signal ||
+  "n/a";
+
+const activeFreshnessLabel = () =>
+  state.assistantLatestReport?.freshness_summary?.overall_status ||
+  state.assistantActiveAnalysis?.freshness_status ||
+  "unknown";
+
 const formatActiveAnalysisLabel = (analysis) => {
   if (!analysis?.symbol) {
     return "Active analysis: none yet.";
@@ -153,9 +177,29 @@ const formatActiveAnalysisLabel = (analysis) => {
 };
 
 const renderActiveAnalysisLabels = () => {
-  const label = formatActiveAnalysisLabel(state.assistantActiveAnalysis);
+  const analysis = state.assistantActiveAnalysis;
+  const label = formatActiveAnalysisLabel(analysis);
   qs("#assistant-analyze-active-label").textContent = label;
   qs("#assistant-chat-active-label").textContent = label;
+  qs("#assistant-active-analysis-title").textContent = analysis?.symbol
+    ? `${analysis.symbol} · ${analysis.horizon || "n/a"} · ${analysis.risk_mode || "n/a"}`
+    : "No report loaded";
+  const metaChips = [
+    `Signal: ${activeSignalLabel()}`,
+    `Freshness: ${activeFreshnessLabel()}`,
+    `Report: ${analysis?.report_version || state.assistantLatestReport?.report_version || "n/a"}`,
+  ];
+  qs("#assistant-active-analysis-meta").innerHTML = metaChips
+    .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
+    .join("");
+  const chatMeta = [
+    `Signal: ${activeSignalLabel()}`,
+    `Freshness: ${activeFreshnessLabel()}`,
+    `Session: ${state.assistantChatSessionId ? "active" : "local"}`,
+  ];
+  qs("#assistant-chat-analysis-meta").innerHTML = chatMeta
+    .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
+    .join("");
 };
 
 const persistActiveAnalysis = (analysis) => {
@@ -171,6 +215,219 @@ const persistActiveAnalysis = (analysis) => {
   renderActiveAnalysisLabels();
 };
 
+const renderMetricCards = (selector, metrics) => {
+  const el = qs(selector);
+  if (!metrics?.length) {
+    el.innerHTML = emptyStateCard("No active report metrics yet.");
+    return;
+  }
+  el.innerHTML = metrics
+    .map(
+      (metric) => `
+        <div class="summary-card">
+          <div class="summary-card-label">${escapeHtml(metric.label)}</div>
+          <div class="summary-card-value">${escapeHtml(metric.value)}</div>
+          <div class="summary-card-note">${escapeHtml(metric.note || "")}</div>
+        </div>
+      `
+    )
+    .join("");
+};
+
+const renderBullets = (items, emptyText = "No items available.") => {
+  if (!items?.length) {
+    return `<ul class="bullet-list"><li>${escapeHtml(emptyText)}</li></ul>`;
+  }
+  return `<ul class="bullet-list">${items
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("")}</ul>`;
+};
+
+const renderDriverBlock = (title, items, emptyText) => `
+  <section class="drilldown-card">
+    <h5>${escapeHtml(title)}</h5>
+    ${
+      items?.length
+        ? `<ul class="bullet-list">${items
+            .map(
+              (item) => `
+                <li>
+                  <strong>${escapeHtml(item.label || "driver")}</strong>
+                  ${item.score == null ? "" : ` · ${escapeHtml(item.score)}`}
+                  <div class="drilldown-note">${escapeHtml(item.detail || "")}</div>
+                </li>
+              `
+            )
+            .join("")}</ul>`
+        : `<div class="empty-state-card">${escapeHtml(emptyText)}</div>`
+    }
+  </section>
+`;
+
+const renderTextSection = (selector, title, body) => {
+  const el = qs(selector);
+  el.innerHTML = body
+    ? `
+      <div class="section-heading">${escapeHtml(title)}</div>
+      <p>${escapeHtml(body)}</p>
+    `
+    : emptyStateCard(`${title} will render here.`);
+};
+
+const renderDomainStatusGrid = (report) => {
+  const container = qs("#assistant-domain-status-grid");
+  const freshnessDomains = report?.freshness_summary?.domains || {};
+  const bundle = report?.data_bundle || {};
+  const cards = [
+    ["Bars", freshnessDomains.bars?.status, freshnessDomains.bars?.updated_at],
+    ["News", freshnessDomains.news?.status, freshnessDomains.news?.updated_at],
+    ["Sentiment", freshnessDomains.sentiment?.status, freshnessDomains.sentiment?.updated_at],
+    [
+      "Fundamentals",
+      bundle.fundamental_filing?.meta?.status,
+      bundle.fundamental_filing?.meta?.latest_report_date,
+    ],
+    ["Macro", bundle.macro_cross_asset?.meta?.status, bundle.macro_cross_asset?.benchmark_proxy],
+    ["Relative", bundle.relative_context?.meta?.status, bundle.relative_context?.peer_count],
+  ].filter((item) => item[1] != null || item[2] != null);
+
+  if (!cards.length) {
+    container.innerHTML = emptyStateCard("Domain freshness and coverage will render here.");
+    return;
+  }
+  container.innerHTML = cards
+    .map(
+      ([label, status, note]) => `
+        <div class="summary-card">
+          <div class="summary-card-label">${escapeHtml(label)}</div>
+          <div class="summary-card-value">${escapeHtml(status || "n/a")}</div>
+          <div class="summary-card-note">${escapeHtml(note || "no detail")}</div>
+        </div>
+      `
+    )
+    .join("");
+};
+
+const renderFactorGrid = (report) => {
+  const container = qs("#assistant-factor-grid");
+  const composites = report?.feature_factor_bundle?.composite_intelligence;
+  const strategyComponents = report?.strategy?.component_scores;
+  if (!composites && !strategyComponents) {
+    container.innerHTML = emptyStateCard("Composite scores and factor bundles render here.");
+    return;
+  }
+
+  const compositeCards = Object.entries(composites || {}).map(
+    ([label, value]) => `
+      <div class="factor-card">
+        <div class="factor-card-label">${escapeHtml(label)}</div>
+        <div class="factor-card-value">${escapeHtml(
+          value == null ? "n/a" : Number(value).toFixed(1)
+        )}</div>
+      </div>
+    `
+  );
+  const componentCards = Object.entries(strategyComponents || {}).map(
+    ([label, item]) => `
+      <div class="factor-card">
+        <div class="factor-card-label">${escapeHtml(label.replaceAll("_", " "))}</div>
+        <div class="factor-card-value">${escapeHtml(Number(item.score || 0).toFixed(2))}</div>
+        <div class="factor-card-note">weight ${escapeHtml(Number(item.weight || 0).toFixed(2))}</div>
+      </div>
+    `
+  );
+
+  container.innerHTML = [...compositeCards, ...componentCards].join("");
+};
+
+const renderDashboardSummary = (report) => {
+  const container = qs("#assistant-dashboard-summary");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Run Assistant Analyze to populate the executive summary, conviction stack, and report freshness."
+    );
+    return;
+  }
+  const strategy = report.strategy || {};
+  const cards = [
+    {
+      label: "Final Signal",
+      value: strategy.final_signal || report.signal?.final_action || report.signal?.action || "n/a",
+      note: `${report.symbol || "n/a"} · ${report.as_of_date || "n/a"}`,
+    },
+    {
+      label: "Confidence",
+      value:
+        strategy.confidence == null ? "n/a" : Number(strategy.confidence).toFixed(2),
+      note: `conviction ${strategy.conviction_tier || "unknown"}`,
+    },
+    {
+      label: "Fragility",
+      value: strategy.fragility_tier || "unknown",
+      note: `freshness ${report.freshness_summary?.overall_status || "unknown"}`,
+    },
+    {
+      label: "Scenario",
+      value: report.scenario || "base",
+      note: `regime ${report.market_regime || "auto"}`,
+    },
+  ];
+  container.innerHTML = `
+    <div class="summary-grid">
+      ${cards
+        .map(
+          (card) => `
+            <div class="summary-card">
+              <div class="summary-card-label">${escapeHtml(card.label)}</div>
+              <div class="summary-card-value">${escapeHtml(card.value)}</div>
+              <div class="summary-card-note">${escapeHtml(card.note)}</div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+    <div class="section-copy">
+      <div class="section-heading">Executive Summary</div>
+      <p>${escapeHtml(report.overall_analysis || report.signal_summary || "")}</p>
+    </div>
+  `;
+};
+
+const renderWhySignal = (report) => {
+  const container = qs("#assistant-signal-drilldown");
+  const why = report?.why_this_signal;
+  if (!why) {
+    container.innerHTML = emptyStateCard(
+      "The driver panel will list top positives, top negatives, confidence modifiers, missing-data warnings, and freshness warnings for the active report."
+    );
+    return;
+  }
+  container.innerHTML = [
+    renderDriverBlock(
+      "Top Positive Drivers",
+      why.top_positive_drivers,
+      "No positive drivers were surfaced."
+    ),
+    renderDriverBlock(
+      "Top Negative Drivers",
+      why.top_negative_drivers,
+      "No negative drivers were surfaced."
+    ),
+    `<section class="drilldown-card">
+      <h5>Confidence / Risk Modifiers</h5>
+      ${renderBullets(why.confidence_modifiers, "No explicit confidence degraders.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Missing-Data Warnings</h5>
+      ${renderBullets(why.missing_data_warnings, "No missing-data warnings.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Freshness Warnings</h5>
+      ${renderBullets(why.freshness_warnings, "No freshness warnings.")}
+    </section>`,
+  ].join("");
+};
+
 const renderAssistantReport = (report) => {
   const container = qs("#assistant-analyze-report");
   state.assistantLatestReport = report || null;
@@ -182,27 +439,56 @@ const renderAssistantReport = (report) => {
         Run Assistant Analyze to generate a grounded system report.
       </div>
     `;
+    qs("#assistant-analyze-response").textContent = formatJson({});
+    renderDashboardSummary(null);
+    renderWhySignal(null);
+    renderMetricCards("#assistant-signal-summary-cards", null);
+    renderTextSection("#assistant-signal-section", "Signal Summary", "");
+    renderTextSection("#assistant-technical-section", "Technical Analysis", "");
+    renderTextSection("#assistant-statistical-section", "Statistical / Quant Analysis", "");
+    renderTextSection("#assistant-strategy-section", "Strategy View", "");
+    renderTextSection("#assistant-risk-section", "Risks / Weaknesses / Invalidators", "");
+    renderTextSection("#assistant-fundamental-section", "Fundamental Analysis", "");
+    renderTextSection("#assistant-sentiment-section", "Sentiment / Narrative / Flow Analysis", "");
+    renderTextSection(
+      "#assistant-macro-section",
+      "Macro / Geopolitical / Cross-Asset Analysis",
+      ""
+    );
+    renderTextSection("#assistant-evidence-section", "Evidence / Provenance", "");
+    renderDomainStatusGrid(null);
+    renderFactorGrid(null);
+    renderActiveAnalysisLabels();
     return;
   }
 
   container.classList.remove("empty");
-  const metrics = [
-    { label: "Signal", value: report.signal?.action || "N/A" },
-    { label: "Score", value: report.signal?.score ?? "N/A" },
-    { label: "Confidence", value: report.signal?.confidence ?? "N/A" },
+  const heroMetrics = [
+    { label: "Final Signal", value: report.strategy?.final_signal || report.signal?.final_action || report.signal?.action || "N/A" },
+    { label: "Raw Signal", value: report.signal?.action || "N/A" },
+    {
+      label: "Confidence",
+      value:
+        report.strategy?.confidence == null
+          ? "N/A"
+          : Number(report.strategy.confidence).toFixed(2),
+    },
+    { label: "Conviction", value: report.strategy?.conviction_tier || "N/A" },
+    { label: "Fragility", value: report.strategy?.fragility_tier || "N/A" },
+    { label: "Freshness", value: report.freshness_summary?.overall_status || "N/A" },
     { label: "As Of", value: report.as_of_date || "N/A" },
-    { label: "Horizon", value: report.horizon || "N/A" },
-    { label: "Risk Mode", value: report.risk_mode || "N/A" },
+    { label: "Scenario", value: report.scenario || "N/A" },
   ];
   const sections = [
     ["Signal Summary", report.signal_summary],
     ["Technical Analysis", report.technical_analysis],
     ["Fundamental Analysis", report.fundamental_analysis],
-    ["Statistical Analysis", report.statistical_analysis],
-    ["Sentiment Analysis", report.sentiment_analysis],
-    ["Risk & Quality Analysis", report.risk_quality_analysis],
-    ["Overall Analysis", report.overall_analysis],
+    ["Statistical / Quant Analysis", report.statistical_analysis],
+    ["Sentiment / Narrative / Flow Analysis", report.sentiment_analysis],
+    ["Macro / Geopolitical / Cross-Asset Context", report.macro_geopolitical_analysis],
     ["Strategy View", report.strategy_view],
+    ["Risks / Weaknesses / Invalidators", report.risks_weaknesses_invalidators],
+    ["Evidence / Provenance", report.evidence_provenance],
   ];
 
   container.innerHTML = `
@@ -212,11 +498,11 @@ const renderAssistantReport = (report) => {
       <p class="report-subtitle">${escapeHtml(
         `${report.as_of_date || "n/a"} · ${report.horizon || "n/a"} horizon · ${
           report.risk_mode || "n/a"
-        } risk mode`
+        } risk · ${report.analysis_depth || "standard"} depth`
       )}</p>
     </div>
     <div class="report-metrics">
-      ${metrics
+      ${heroMetrics
         .map(
           (metric) => `
             <div class="report-metric">
@@ -240,6 +526,80 @@ const renderAssistantReport = (report) => {
         .join("")}
     </div>
   `;
+
+  const signalMetrics = [
+    {
+      label: "Current Signal",
+      value: report.strategy?.final_signal || report.signal?.final_action || report.signal?.action || "n/a",
+      note: `raw ${report.signal?.action || "n/a"}`,
+    },
+    {
+      label: "Confidence",
+      value:
+        report.strategy?.confidence == null
+          ? "n/a"
+          : Number(report.strategy.confidence).toFixed(2),
+      note: report.strategy?.conviction_tier || "unknown conviction",
+    },
+    {
+      label: "Regime",
+      value:
+        report.feature_factor_bundle?.regime_engine?.regime_label ||
+        report.key_features?.regime_label ||
+        "n/a",
+      note: `scenario ${report.scenario || "base"}`,
+    },
+    {
+      label: "Opportunity Quality",
+      value:
+        report.feature_factor_bundle?.composite_intelligence?.["Opportunity Quality Score"] == null
+          ? "n/a"
+          : Number(
+              report.feature_factor_bundle.composite_intelligence["Opportunity Quality Score"]
+            ).toFixed(1),
+      note: `freshness ${report.freshness_summary?.overall_status || "unknown"}`,
+    },
+  ];
+  qs("#assistant-analyze-response").textContent = formatJson(report);
+  renderDashboardSummary(report);
+  renderWhySignal(report);
+  renderMetricCards("#assistant-signal-summary-cards", signalMetrics);
+  renderTextSection("#assistant-signal-section", "Signal Summary", report.signal_summary);
+  renderTextSection("#assistant-technical-section", "Technical Analysis", report.technical_analysis);
+  renderTextSection(
+    "#assistant-statistical-section",
+    "Statistical / Quant Analysis",
+    report.statistical_analysis
+  );
+  renderTextSection("#assistant-strategy-section", "Strategy View", report.strategy_view);
+  renderTextSection(
+    "#assistant-risk-section",
+    "Risks / Weaknesses / Invalidators",
+    report.risks_weaknesses_invalidators
+  );
+  renderTextSection(
+    "#assistant-fundamental-section",
+    "Fundamental Analysis",
+    report.fundamental_analysis
+  );
+  renderTextSection(
+    "#assistant-sentiment-section",
+    "Sentiment / Narrative / Flow Analysis",
+    report.sentiment_analysis
+  );
+  renderTextSection(
+    "#assistant-macro-section",
+    "Macro / Geopolitical / Cross-Asset Analysis",
+    report.macro_geopolitical_analysis
+  );
+  renderTextSection(
+    "#assistant-evidence-section",
+    "Evidence / Provenance",
+    report.evidence_provenance
+  );
+  renderDomainStatusGrid(report);
+  renderFactorGrid(report);
+  renderActiveAnalysisLabels();
 };
 
 const renderAssistantChatTranscript = () => {
@@ -258,6 +618,68 @@ const renderAssistantChatTranscript = () => {
   qs("#assistant-chat-response").textContent = blocks.join("\n\n");
 };
 
+const renderSystemHealth = (health) => {
+  const container = qs("#assistant-system-health");
+  if (!health) {
+    container.innerHTML = emptyStateCard("Assistant and provider health will render here.");
+    return;
+  }
+  const providerCards = Object.entries(health.providers || {}).map(
+    ([name, provider]) => `
+      <div class="summary-card">
+        <div class="summary-card-label">${escapeHtml(name)}</div>
+        <div class="summary-card-value">${escapeHtml(provider.status || "unknown")}</div>
+        <div class="summary-card-note">${escapeHtml(provider.message || "")}</div>
+      </div>
+    `
+  );
+  const assistantCards = [
+    {
+      label: "assistant",
+      value: health.assistant?.status || "unknown",
+      note: `llm_enabled=${health.assistant?.llm_enabled} db_enabled=${health.assistant?.db_enabled}`,
+    },
+  ];
+  container.innerHTML = [
+    ...assistantCards.map(
+      (item) => `
+        <div class="summary-card">
+          <div class="summary-card-label">${escapeHtml(item.label)}</div>
+          <div class="summary-card-value">${escapeHtml(item.value)}</div>
+          <div class="summary-card-note">${escapeHtml(item.note)}</div>
+        </div>
+      `
+    ),
+    ...providerCards,
+  ].join("");
+};
+
+const refreshAssistantSystemHealth = async () => {
+  setLegacyStatus("#assistant-health-status", "Refreshing assistant and provider health...");
+  setButtonLoading("#assistant-health-refresh-btn", true, "Refreshing...");
+  try {
+    const [assistantHealth, providersHealth] = await Promise.all([
+      callJson("/assistant/health", { headers: getHeaders() }),
+      callJson("/providers/health", { headers: getHeaders() }),
+    ]);
+    state.assistantHealth = {
+      assistant: assistantHealth,
+      providers: providersHealth.providers || {},
+    };
+    renderSystemHealth(state.assistantHealth);
+    setLegacyStatus("#assistant-health-status", "System health refreshed.", "success");
+  } catch (err) {
+    renderSystemHealth(null);
+    setLegacyStatus(
+      "#assistant-health-status",
+      `Health refresh failed: ${err.message}`,
+      "error"
+    );
+  } finally {
+    setButtonLoading("#assistant-health-refresh-btn", false, "Refreshing...");
+  }
+};
+
 const resetAssistantChatSession = (message = "New local session prepared.") => {
   persistAssistantSessionId(generateUuid());
   state.assistantChatTranscript = [];
@@ -271,12 +693,17 @@ const getAnalyzeInputs = () => ({
   symbol: qs("#assistant-analyze-symbol").value.trim().toUpperCase(),
   horizon: qs("#assistant-analyze-horizon").value.trim(),
   risk_mode: qs("#assistant-analyze-risk-mode").value.trim(),
+  market_regime: qs("#assistant-analyze-market-regime").value.trim(),
+  analysis_depth: qs("#assistant-analyze-depth").value.trim(),
+  refresh_mode: qs("#assistant-analyze-refresh-mode").value.trim(),
+  scenario_mode: qs("#assistant-analyze-scenario-mode").value.trim(),
 });
 
 const getAssistantChatMessage = () => qs("#assistant-chat-message").value.trim();
 
 const runAssistantAnalyze = async () => {
-  const { symbol, horizon, risk_mode } = getAnalyzeInputs();
+  const { symbol, horizon, risk_mode, market_regime, analysis_depth, refresh_mode, scenario_mode } =
+    getAnalyzeInputs();
   if (!symbol || !horizon || !risk_mode) {
     setLegacyStatus(
       "#assistant-analyze-status",
@@ -299,6 +726,10 @@ const runAssistantAnalyze = async () => {
         symbol,
         horizon,
         risk_mode,
+        market_regime,
+        analysis_depth,
+        refresh_mode,
+        scenario_mode,
       }),
     });
     if (data.session_id) {
@@ -306,22 +737,29 @@ const runAssistantAnalyze = async () => {
     }
     persistActiveAnalysis(data.active_analysis || null);
     renderAssistantReport(data);
-    qs("#assistant-analyze-response").textContent = formatJson(data);
     setLegacyStatus(
       "#assistant-analyze-status",
       `Assistant analyze complete for ${data.symbol || symbol}.`,
       "success"
     );
+    if (state.researchTab === "dashboard") {
+      setResearchTab("dashboard");
+    }
   } catch (err) {
     qs("#assistant-analyze-response").textContent = formatJson({
       error: err.message,
       symbol,
       horizon,
       risk_mode,
+      market_regime,
+      analysis_depth,
+      refresh_mode,
+      scenario_mode,
     });
     setLegacyStatus("#assistant-analyze-status", `Analyze failed: ${err.message}`, "error");
   } finally {
     setButtonLoading("#assistant-analyze-btn", false, "Running...");
+    renderActiveAnalysisLabels();
   }
 };
 
@@ -370,6 +808,7 @@ const sendAssistantChat = async () => {
     setLegacyStatus("#assistant-chat-status", `Chat failed: ${err.message}`, "error");
   } finally {
     setButtonLoading("#assistant-chat-btn", false, "Sending...");
+    renderActiveAnalysisLabels();
   }
 };
 
@@ -455,12 +894,11 @@ qs("#api-key-input").addEventListener("input", (e) => {
 });
 
 qs("#assistant-analyze-btn").addEventListener("click", runAssistantAnalyze);
-
 qs("#assistant-chat-btn").addEventListener("click", sendAssistantChat);
-
 qs("#assistant-chat-reset-btn").addEventListener("click", () => {
   resetAssistantChatSession("Started a fresh assistant chat session.");
 });
+qs("#assistant-health-refresh-btn").addEventListener("click", refreshAssistantSystemHealth);
 
 qs("#assistant-chat-message").addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
@@ -479,6 +917,9 @@ qs("#symbol-input").addEventListener("input", (event) => {
 qsa(".tab").forEach((tab) => {
   tab.addEventListener("click", () => setActiveTab(tab.dataset.tab));
 });
+qsa(".research-tab").forEach((tab) => {
+  tab.addEventListener("click", () => setResearchTab(tab.dataset.researchTab));
+});
 
 setDefaults();
 persistAssistantSessionId(
@@ -493,4 +934,7 @@ try {
 }
 renderAssistantReport(null);
 renderAssistantChatTranscript();
+renderSystemHealth(null);
+setResearchTab("dashboard");
 setActiveTab("signal");
+refreshAssistantSystemHealth();

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
@@ -9,7 +10,7 @@ from openai import APIError, APIStatusError, OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from api import config
-from api.assistant import orchestrator, prompts, reports
+from api.assistant import intelligence, orchestrator, prompts, reports, strategy
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
@@ -97,7 +98,21 @@ def _normalize_active_analysis_context(context: Optional[Dict[str, Any]]) -> Dic
     if isinstance(active, dict):
         return {k: v for k, v in active.items() if v not in (None, "")}
 
-    keys = ("report_id", "symbol", "as_of_date", "horizon", "risk_mode", "session_id")
+    keys = (
+        "report_id",
+        "symbol",
+        "as_of_date",
+        "horizon",
+        "risk_mode",
+        "session_id",
+        "scenario",
+        "analysis_depth",
+        "refresh_mode",
+        "market_regime",
+        "signal",
+        "freshness_status",
+        "report_version",
+    )
     return {key: context.get(key) for key in keys if context.get(key) not in (None, "")}
 
 
@@ -255,8 +270,16 @@ async def generate_analysis_report(
     symbol = orchestrator.normalize_symbol(request.get("symbol") or "")
     horizon = str(request.get("horizon") or "").strip()
     risk_mode = str(request.get("risk_mode") or "").strip()
+    trace_id = str(request.get("trace_id") or uuid.uuid4())
     freshness = await orchestrator.ensure_freshness(symbol)
     as_of_date = freshness["as_of_date"]
+    job_context = intelligence.build_analysis_job_context(
+        {**request, "symbol": symbol, "horizon": horizon, "risk_mode": risk_mode},
+        session_id=sid,
+        trace_id=trace_id,
+        as_of_date=as_of_date,
+        freshness=freshness,
+    )
 
     await orchestrator.run_features(symbol, as_of_date)
     await orchestrator.run_signals(symbol, as_of_date)
@@ -270,8 +293,36 @@ async def generate_analysis_report(
     evidence = {
         "reason_codes": signal.get("reason_codes") or [],
         "reason_details": signal.get("reason_details") or {},
-        "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
+        "sources": [
+            "market_bars_daily",
+            "market_bars_intraday",
+            "fundamentals_quarterly",
+            "news_raw",
+            "sentiment_daily",
+            "features_daily",
+            "signals_daily",
+            "quality_daily",
+        ],
     }
+    data_bundle = intelligence.build_normalized_data_bundle(
+        job_context=job_context,
+        freshness=freshness,
+        signal=signal,
+        key_features=key_features,
+        quality=quality,
+    )
+    feature_factor_bundle = intelligence.build_feature_factor_bundle(
+        data_bundle=data_bundle,
+        signal=signal,
+        key_features=key_features,
+        quality=quality,
+    )
+    strategy_bundle = strategy.build_strategy_artifact(
+        job_context=job_context,
+        signal=signal,
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_factor_bundle,
+    )
     report = reports.build_analysis_report(
         symbol=symbol,
         as_of_date=as_of_date,
@@ -281,12 +332,32 @@ async def generate_analysis_report(
         key_features=key_features,
         quality=quality,
         evidence=evidence,
+        job_context=job_context,
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_factor_bundle,
+        strategy=strategy_bundle,
     )
+    job_context_id = store.save_artifact(sid, intelligence.ANALYSIS_JOB_KIND, job_context)
+    data_bundle_id = store.save_artifact(sid, intelligence.DATA_BUNDLE_KIND, data_bundle)
+    factor_bundle_id = store.save_artifact(
+        sid, intelligence.FEATURE_FACTOR_BUNDLE_KIND, feature_factor_bundle
+    )
+    strategy_id = store.save_artifact(sid, strategy.STRATEGY_ARTIFACT_KIND, strategy_bundle)
     report_id = store.save_artifact(sid, reports.ANALYSIS_REPORT_KIND, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
     )
-    store.upsert_session_metadata(sid, {"active_analysis": active_analysis})
+    store.upsert_session_metadata(
+        sid,
+        {
+            "active_analysis": active_analysis,
+            "analysis_job_context": {
+                "job_id": job_context.get("job_id"),
+                "trace_id": job_context.get("trace_id"),
+                "artifact_id": job_context_id,
+            },
+        },
+    )
     store.add_message(
         sid,
         "system",
@@ -294,6 +365,10 @@ async def generate_analysis_report(
         extra={
             "artifact_id": report_id,
             "artifact_kind": reports.ANALYSIS_REPORT_KIND,
+            "analysis_job_artifact_id": job_context_id,
+            "data_bundle_artifact_id": data_bundle_id,
+            "feature_factor_artifact_id": factor_bundle_id,
+            "strategy_artifact_id": strategy_id,
             "active_analysis": active_analysis,
         },
     )
@@ -301,6 +376,10 @@ async def generate_analysis_report(
         **report,
         "session_id": sid,
         "report_id": report_id,
+        "analysis_job_artifact_id": job_context_id,
+        "data_bundle_artifact_id": data_bundle_id,
+        "feature_factor_artifact_id": factor_bundle_id,
+        "strategy_artifact_id": strategy_id,
         "active_analysis": active_analysis,
     }
 
@@ -367,6 +446,19 @@ def chat_with_assistant(
         history, message, report, context
     )
     reply, model_used, usage = _safe_completion(messages)
+    grounding_context = {
+        "report_id": report.get("report_id"),
+        "active_analysis": active_analysis,
+        "question": message,
+        "signal_summary": report.get("signal_summary"),
+        "overall_analysis": report.get("overall_analysis"),
+        "strategy_view": report.get("strategy_view"),
+        "risks_weaknesses_invalidators": report.get("risks_weaknesses_invalidators"),
+        "evidence_provenance": report.get("evidence_provenance"),
+    }
+    grounding_artifact_id = store.save_artifact(
+        sid, strategy.CHAT_GROUNDING_CONTEXT_KIND, grounding_context
+    )
 
     store.add_message(
         sid,
@@ -378,6 +470,7 @@ def chat_with_assistant(
         extra={
             "artifact_id": report.get("report_id"),
             "artifact_kind": reports.ANALYSIS_REPORT_KIND,
+            "grounding_artifact_id": grounding_artifact_id,
             "active_analysis": active_analysis,
             "report_found": True,
         },
@@ -389,8 +482,10 @@ def chat_with_assistant(
         "citations": [
             f"analysis_report:{report.get('report_id')}",
             "signal_summary",
+            "macro_geopolitical_analysis",
             "overall_analysis",
             "strategy_view",
+            "risks_weaknesses_invalidators",
         ],
         "active_analysis": active_analysis,
         "report_found": True,

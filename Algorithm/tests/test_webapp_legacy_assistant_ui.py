@@ -11,7 +11,13 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-analyze-active-label"' in html
     assert 'id="assistant-chat-active-label"' in html
     assert 'id="assistant-analyze-report"' in html
+    assert 'data-research-tab="dashboard"' in html
+    assert 'data-research-tab="chat"' in html
+    assert 'id="assistant-signal-drilldown"' in html
+    assert 'id="assistant-system-health"' in html
     assert "assistantActiveAnalysis" in js
     assert "ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY" in js
     assert "session_id: pendingSessionId" in js
     assert "active_analysis: state.assistantActiveAnalysis" in js
+    assert "setResearchTab" in js
+    assert "refreshAssistantSystemHealth" in js
