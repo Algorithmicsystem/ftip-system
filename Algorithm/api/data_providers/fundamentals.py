@@ -5,7 +5,8 @@ from typing import Dict, List
 
 import importlib.util
 
-from .bars import ProviderUnavailable, SymbolNoData
+from .alphavantage import fetch_quarterly_fundamentals as fetch_alphavantage_quarterly
+from .errors import ProviderUnavailable, SymbolNoData
 from .symbols import canonical_symbol
 
 _yf_spec = importlib.util.find_spec("yfinance")
@@ -16,6 +17,13 @@ else:  # pragma: no cover - optional dependency
 
 
 def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
+    try:
+        return fetch_alphavantage_quarterly(symbol)
+    except ProviderUnavailable:
+        pass
+    except SymbolNoData:
+        raise
+
     if yf is None:
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "yfinance not installed")
     symbol = canonical_symbol(symbol)

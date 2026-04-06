@@ -30,7 +30,19 @@ def test_providers_health_runtime_exists_and_in_openapi() -> None:
     assert r.status_code == 200
     data = r.json()
     assert "providers" in data
-    for key in ("openai", "massive", "finnhub", "fred", "secedgar"):
+    for key in (
+        "openai",
+        "massive",
+        "finnhub",
+        "fred",
+        "secedgar",
+        "alphavantage",
+        "gnews",
+        "newsapi",
+        "gdelt",
+        "world_bank",
+        "stooq",
+    ):
         assert key in data["providers"]
 
     openapi = client.get("/openapi.json").json()

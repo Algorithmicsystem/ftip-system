@@ -23,8 +23,17 @@ def test_providers_health_runtime_registration_and_openapi() -> None:
     assert "providers" in payload
 
     providers = payload["providers"]
-    assert "openai" in providers
-    assert "massive" in providers
-    assert "finnhub" in providers
-    assert "fred" in providers
-    assert "secedgar" in providers
+    for key in (
+        "openai",
+        "massive",
+        "finnhub",
+        "fred",
+        "secedgar",
+        "alphavantage",
+        "gnews",
+        "newsapi",
+        "gdelt",
+        "world_bank",
+        "stooq",
+    ):
+        assert key in providers

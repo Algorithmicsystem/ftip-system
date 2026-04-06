@@ -105,6 +105,118 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["overall_analysis"]
 
 
+def test_assistant_analyze_surfaces_enriched_data_fabric(monkeypatch):
+    from api.assistant import orchestrator
+    from api.assistant import intelligence
+
+    monkeypatch.setenv("FTIP_DATA_FABRIC_ENABLED", "1")
+
+    async def _fake_freshness(symbol: str, refresh: bool = True):
+        return {
+            "as_of_date": dt.date(2024, 1, 2),
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "bars_updated_at": "2024-01-02T00:00:00Z",
+            "news_updated_at": "2024-01-02T00:00:00Z",
+            "sentiment_updated_at": "2024-01-02T00:00:00Z",
+            "warnings": [],
+        }
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(orchestrator, "ensure_freshness", _fake_freshness)
+    monkeypatch.setattr(orchestrator, "run_features", _noop)
+    monkeypatch.setattr(orchestrator, "run_signals", _noop)
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_signal",
+        lambda *_args, **_kwargs: {
+            "action": "HOLD",
+            "score": 0.1,
+            "confidence": 0.55,
+            "entry_low": 100,
+            "entry_high": 110,
+            "stop_loss": 95,
+            "take_profit_1": 115,
+            "take_profit_2": 120,
+            "horizon_days": 21,
+            "reason_codes": ["MIXED"],
+            "reason_details": {"MIXED": "Mixed setup"},
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_key_features",
+        lambda *_args, **_kwargs: {"ret_5d": 0.01, "vol_21d": 0.3},
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_quality",
+        lambda *_args, **_kwargs: {
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        intelligence.data_fabric,
+        "enrich_data_bundle",
+        lambda **_kwargs: {
+            "enabled": True,
+            "status": "ok",
+            "domains": {
+                "fundamental_filing": {
+                    "filing_recency_days": 45,
+                    "meta": {"sources": ["sec_edgar", "finnhub_basic_financials"]},
+                },
+                "sentiment_narrative_flow": {
+                    "source_breakdown": {"gnews": 3, "gdelt": 2},
+                    "aggregated_sentiment_bias": 0.12,
+                    "meta": {"sources": ["gnews", "gdelt"]},
+                },
+                "macro_cross_asset": {
+                    "macro_regime_context": {"regime": "growth_supportive"},
+                    "fred_series": {"rates": {"latest": 4.2}},
+                    "meta": {"sources": ["fred", "world_bank"]},
+                },
+                "geopolitical_policy": {
+                    "event_buckets": {"policy_regulation": 2},
+                    "event_intensity_score": 0.4,
+                    "meta": {"sources": ["gdelt"]},
+                },
+                "quality_provenance": {
+                    "source_map": {
+                        "fundamental_filing": ["sec_edgar", "finnhub_basic_financials"],
+                        "sentiment_narrative_flow": ["gnews", "gdelt"],
+                    },
+                    "provider_notes": [],
+                    "meta": {"status": "fresh"},
+                },
+            },
+        },
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/assistant/analyze",
+            json={"symbol": "NVDA", "horizon": "swing", "risk_mode": "balanced"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["data_bundle"]["fundamental_filing"]["filing_recency_days"] == 45
+    assert data["data_bundle"]["sentiment_narrative_flow"]["source_breakdown"]["gnews"] == 3
+    assert data["data_bundle"]["macro_cross_asset"]["macro_regime_context"]["regime"] == "growth_supportive"
+    assert data["data_bundle"]["quality_provenance"]["source_map"]["fundamental_filing"] == [
+        "sec_edgar",
+        "finnhub_basic_financials",
+    ]
+    assert "external data fabric status" in data["evidence_provenance"]
+
+
 def test_assistant_top_picks_schema(monkeypatch):
     from api.assistant import orchestrator
 

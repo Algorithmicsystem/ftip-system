@@ -2196,6 +2196,9 @@ def _providers_health_payload() -> Dict[str, Any]:
         "finnhub": ["FINNHUB_API_KEY"],
         "fred": ["FRED_API_KEY"],
         "secedgar": ["SECEDGAR_API_KEY"],
+        "alphavantage": ["ALPHAVANTAGE_API_KEY"],
+        "gnews": ["GNEWS_API_KEY"],
+        "newsapi": ["NEWS_API_KEY"],
     }
     providers: Dict[str, Dict[str, Any]] = {}
 
@@ -2206,6 +2209,19 @@ def _providers_health_payload() -> Dict[str, Any]:
             ),
             "env": env_names,
         }
+
+    providers["gdelt"] = {
+        "configured": (os.getenv("GDELT_ENABLED", "1") or "1") != "0",
+        "env": ["GDELT_ENABLED"],
+    }
+    providers["world_bank"] = {
+        "configured": (os.getenv("WORLD_BANK_ENABLED", "1") or "1") != "0",
+        "env": ["WORLD_BANK_ENABLED"],
+    }
+    providers["stooq"] = {
+        "configured": (os.getenv("STOOQ_ENABLED", "1") or "1") != "0",
+        "env": ["STOOQ_ENABLED"],
+    }
 
     return {"providers": providers}
 

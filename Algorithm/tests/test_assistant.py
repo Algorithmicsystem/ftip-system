@@ -516,7 +516,19 @@ def test_providers_health_is_registered_and_in_openapi() -> None:
     assert r.status_code == 200
     data = r.json()
     assert "providers" in data
-    for k in ("openai", "massive", "finnhub", "fred", "secedgar"):
+    for k in (
+        "openai",
+        "massive",
+        "finnhub",
+        "fred",
+        "secedgar",
+        "alphavantage",
+        "gnews",
+        "newsapi",
+        "gdelt",
+        "world_bank",
+        "stooq",
+    ):
         assert k in data["providers"]
     openapi = client.get("/openapi.json").json()
     assert "/providers/health" in openapi.get("paths", {})

@@ -78,6 +78,29 @@ Visit `/app` for the combined console.
 - `FTIP_DB_WRITE_ENABLED=1`
 - `FTIP_LLM_ENABLED=1` (required for narration)
 - `OPENAI_API_KEY=...` (required for narration)
+- `FTIP_DATA_FABRIC_ENABLED=1` (enables live multi-source enrichment on assistant analysis)
+- `MASSIVE_API_KEY` or `POLYGON_API_KEY` (primary market data path)
+- `FINNHUB_API_KEY`
+- `FRED_API_KEY`
+- `ALPHAVANTAGE_API_KEY`
+- `GNEWS_API_KEY`
+- `NEWS_API_KEY`
+- `SEC_USER_AGENT`
+- `GDELT_ENABLED=1`
+- `WORLD_BANK_ENABLED=1`
+- `STOOQ_ENABLED=1`
+
+### Assistant data fabric scope
+
+The assistant analysis bundle now layers external enrichment on top of the existing DB-backed signal/feature pipeline:
+
+- Market verification and benchmark context via Massive/Polygon, Alpha Vantage, and Stooq fallback.
+- Filing-aware overlays via SEC EDGAR, Finnhub, and Alpha Vantage overview/basic metrics.
+- News and narrative aggregation via GNews, NewsAPI, Finnhub news, and GDELT.
+- Macro normalization via FRED and World Bank.
+- Geopolitical/event tagging via GDELT-backed headline buckets.
+
+All enriched domains carry source/freshness/coverage/provider-status metadata and degrade gracefully when a provider is unavailable or data is thin.
 
 ## Milestone F: Backtesting + Scorecards
 

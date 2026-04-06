@@ -9,6 +9,7 @@ from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from api import db
+from api.assistant import data_fabric
 
 
 ANALYSIS_JOB_KIND = "analysis_job_context"
@@ -1018,7 +1019,7 @@ def build_normalized_data_bundle(
         as_of_date,
     )
 
-    return {
+    data_bundle = {
         "symbol_meta": symbol_meta,
         "market_price_volume": market_domain,
         "technical_market_structure": technical_domain,
@@ -1039,6 +1040,17 @@ def build_normalized_data_bundle(
             "fundamental_quarters": fundamentals[:4],
         },
     }
+    overlay = data_fabric.enrich_data_bundle(
+        job_context=job_context,
+        symbol_meta=symbol_meta,
+        data_bundle=data_bundle,
+    )
+    merged_bundle = data_fabric.merge_into_data_bundle(
+        data_bundle=data_bundle,
+        overlay=overlay,
+    )
+    merged_bundle["raw_supporting_fields"]["external_data_fabric"] = overlay
+    return merged_bundle
 
 
 def build_feature_factor_bundle(

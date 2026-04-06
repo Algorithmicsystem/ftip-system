@@ -99,6 +99,25 @@ pytest -q
 3. Ensure the service start command uses the default `CMD` in the Dockerfile (runs `scripts/railway_start.sh`).
 4. Configure a Postgres database in Railway and set `DATABASE_URL` accordingly.
 
+### Assistant data fabric providers
+
+The assistant analysis pipeline can enrich its normalized data bundle with a multi-source data fabric. For Railway/local runs, keep these configured where available:
+
+- `MASSIVE_API_KEY` or `POLYGON_API_KEY`
+- `FINNHUB_API_KEY`
+- `FRED_API_KEY`
+- `ALPHAVANTAGE_API_KEY`
+- `GNEWS_API_KEY`
+- `NEWS_API_KEY`
+- `SEC_USER_AGENT`
+- `FTIP_DATA_FABRIC_ENABLED=1`
+
+No-key sources are integrated directly and can be disabled only if needed:
+
+- `GDELT_ENABLED=1`
+- `WORLD_BANK_ENABLED=1`
+- `STOOQ_ENABLED=1`
+
 ## CHANGELOG
 
 ### Unreleased

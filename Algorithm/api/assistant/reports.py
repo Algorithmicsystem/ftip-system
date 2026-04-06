@@ -301,6 +301,9 @@ def build_analysis_report(
         [
             f"Sentiment level is {_fmt_num(sentiment.get('sentiment_score'), signed=True)} with surprise {_fmt_num(sentiment.get('sentiment_surprise'), signed=True)} and short-run trend {_fmt_num(sentiment.get('sentiment_trend'), signed=True)}.",
             f"Headline flow counts {sentiment.get('headline_count') or 0} recent items, attention crowding is {_fmt_num(sentiment.get('attention_crowding'))}, novelty ratio is {_fmt_num(sentiment.get('novelty_ratio'))}, and disagreement score is {_fmt_num(sentiment.get('disagreement_score'))}.",
+            f"Multi-source news coverage is drawing on {_fmt_list((sentiment.get('meta') or {}).get('sources') or sentiment.get('source_breakdown', {}).keys())}, with aggregated bias {_fmt_num(sentiment.get('aggregated_sentiment_bias'), signed=True)} and source breakdown {sentiment.get('source_breakdown') or {}}."
+            if (sentiment.get("source_breakdown") or (sentiment.get("meta") or {}).get("sources"))
+            else "",
             f"Top narratives currently cluster around {_fmt_list(item.get('topic') for item in sentiment.get('top_narratives') or [])}, which means narrative flow is {'supportive' if (sentiment.get('sentiment_score') or 0) > 0 else 'cautious or contradictory'} rather than detached from price."
             if sentiment.get("top_narratives")
             else "Narrative coverage is limited, so sentiment is treated as a low-confidence overlay rather than a dominant driver.",
@@ -310,10 +313,11 @@ def build_analysis_report(
     macro_geopolitical_analysis = " ".join(
         [
             f"Cross-asset context is anchored to {macro.get('benchmark_proxy') or 'limited benchmark coverage'}, with benchmark 21-day return {_fmt_pct(macro.get('benchmark_ret_21d'))}, inferred regime {macro.get('inferred_market_regime') or 'n/a'}, and macro alignment score {_fmt_num(macro.get('macro_alignment_score'), digits=1)} / 100.",
-            f"Geopolitical and policy sensitivity currently shows exogenous-event score {_fmt_num(geopolitical.get('exogenous_event_score'), digits=2)} with category counts {geopolitical.get('category_counts') or {}}.",
+            f"Normalized macro series point to {(macro.get('macro_regime_context') or {}).get('regime') or 'n/a'} conditions, with FRED and World Bank snapshots {(macro.get('fred_series') or {}) or (macro.get('world_bank_series') or {})}.",
+            f"Geopolitical and policy sensitivity currently shows exogenous-event score {_fmt_num(geopolitical.get('exogenous_event_score') or geopolitical.get('event_intensity_score'), digits=2)} with category counts {geopolitical.get('category_counts') or geopolitical.get('event_buckets') or {}}.",
             f"Relative context versus {relative.get('sector') or 'available peers'} is {_fmt_num(relative.get('relative_strength_percentile') * 100 if relative.get('relative_strength_percentile') is not None else None, digits=0)} percentile strength, which means the setup is {'aligned with broader tape' if (macro.get('macro_alignment_score') or 0) >= 55 else 'not receiving much help from the broader tape'}."
             if relative.get("peer_count")
-            else "Peer and cross-asset coverage is limited, so macro/geopolitical context is present but should be read as lower-confidence framing rather than a fully populated macro model.",
+            else f"Cross-asset proxies are {(relative.get('benchmark_context') or {}).get('benchmark_symbol') or 'limited'}, with proxy coverage score {_fmt_num((relative.get('meta') or {}).get('coverage_score'))}.",
         ]
     )
 
@@ -322,6 +326,7 @@ def build_analysis_report(
             f"Quality flags are bars_ok={quality.get('bars_ok')}, fundamentals_ok={quality.get('fundamentals_ok')}, news_ok={quality.get('news_ok')}, sentiment_ok={quality.get('sentiment_ok')}, and intraday_ok={quality.get('intraday_ok')}.",
             _entry_text(signal),
             f"Stop loss is {_fmt_num(signal.get('stop_loss'), digits=2)}, take-profit levels are {_fmt_num(signal.get('take_profit_1'), digits=2)} and {_fmt_num(signal.get('take_profit_2'), digits=2)}.",
+            f"Provider notes include {_fmt_list((data_bundle.get('quality_provenance') or {}).get('provider_notes') or [])}.",
             f"Warnings include {_fmt_list(warnings + why_signal['freshness_warnings'])}, anomaly flags {_fmt_list(quality.get('anomaly_flags') or [])}, and confidence degraders {_fmt_list(strategy.get('confidence_degraders') or [])}.",
         ]
     )
@@ -354,6 +359,7 @@ def build_analysis_report(
         [
             f"Evidence provenance spans {_fmt_list(evidence.get('sources') or [])} plus normalized domains for market, technical, fundamentals, sentiment, macro/cross-asset, geopolitical, relative context, and quality.",
             f"Freshness status is {freshness_summary['overall_status']} with domain states {freshness_summary['domains']}.",
+            f"Domain source map is {(data_bundle.get('quality_provenance') or {}).get('source_map') or {}}, and external data fabric status is {(data_bundle.get('external_data_fabric') or {}).get('status') or 'n/a'}.",
             f"Reason codes are {_fmt_list(reason_codes)}, strategy components are {strategy_component_scores}, and report version is 2.0.",
         ]
     )
