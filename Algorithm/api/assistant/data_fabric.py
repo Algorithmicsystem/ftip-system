@@ -130,7 +130,7 @@ def enrich_data_bundle(
     as_of_date = dt.date.fromisoformat(str(job_context.get("as_of_date")))
 
     market_overlay = _build_market_overlay(symbol, as_of_date, data_bundle.get("market_price_volume") or {})
-    fundamentals_overlay = _build_fundamental_overlay(symbol, symbol_meta)
+    fundamentals_overlay = _build_fundamental_overlay(symbol, symbol_meta, as_of_date)
     news_overlay = _build_news_overlay(symbol, symbol_meta, as_of_date)
     macro_overlay = _build_macro_overlay(symbol_meta)
     cross_asset_overlay = _build_cross_asset_overlay(symbol_meta, as_of_date)
@@ -212,96 +212,305 @@ def _build_market_overlay(
     }
 
 
-def _build_fundamental_overlay(symbol: str, symbol_meta: Dict[str, Any]) -> Dict[str, Any]:
+def _build_fundamental_overlay(
+    symbol: str,
+    symbol_meta: Dict[str, Any],
+    as_of_date: dt.date,
+) -> Dict[str, Any]:
     provider_payloads: Dict[str, Any] = {}
     provider_status: Dict[str, Any] = {}
     notes: List[str] = []
+    finnhub_profile, finnhub_profile_status = _safe_call(lambda: fetch_company_profile(symbol))
+    provider_status["finnhub_profile"] = finnhub_profile_status
+    if finnhub_profile is not None:
+        provider_payloads["finnhub_profile"] = finnhub_profile
+    elif finnhub_profile_status.get("note"):
+        notes.append(f"finnhub_profile: {finnhub_profile_status['note']}")
 
-    for provider_name, fetcher in (
-        ("sec_edgar", lambda: fetch_company_filing_profile(symbol)),
-        ("finnhub_profile", lambda: fetch_company_profile(symbol)),
-        ("finnhub_basic_financials", lambda: fetch_basic_financials(symbol)),
-        ("alphavantage_overview", lambda: fetch_company_overview(symbol)),
-    ):
-        payload, status = _safe_call(fetcher)
-        provider_status[provider_name] = status
-        if payload is not None:
-            provider_payloads[provider_name] = payload
-        elif status.get("note"):
-            notes.append(f"{provider_name}: {status['note']}")
+    alpha_overview, alpha_status = _safe_call(lambda: fetch_company_overview(symbol))
+    provider_status["alphavantage_overview"] = alpha_status
+    if alpha_overview is not None:
+        provider_payloads["alphavantage_overview"] = alpha_overview
+    elif alpha_status.get("note"):
+        notes.append(f"alphavantage_overview: {alpha_status['note']}")
 
-    sec_profile = provider_payloads.get("sec_edgar") or {}
-    finnhub_metrics = provider_payloads.get("finnhub_basic_financials") or {}
-    alpha_overview = provider_payloads.get("alphavantage_overview") or {}
-    finnhub_profile = provider_payloads.get("finnhub_profile") or {}
-
-    growth_quality = _bounded_score(
-        _mean(
-            [
-                alpha_overview.get("quarterly_revenue_growth_yoy"),
-                finnhub_metrics.get("revenue_growth_ttm_yoy"),
-            ]
-        ),
-        low=-0.25,
-        high=0.35,
+    sec_profile, sec_status = _safe_call(
+        lambda: fetch_company_filing_profile(
+            symbol,
+            company_name=(
+                symbol_meta.get("name")
+                or (finnhub_profile or {}).get("name")
+                or (alpha_overview or {}).get("name")
+            ),
+            as_of_date=as_of_date,
+        )
     )
-    profitability_quality = _bounded_score(
-        _mean(
-            [
-                alpha_overview.get("profit_margin"),
-                alpha_overview.get("operating_margin_ttm"),
-                finnhub_metrics.get("net_margin"),
-                finnhub_metrics.get("operating_margin_ttm"),
-            ]
-        ),
-        low=-0.05,
-        high=0.3,
+    provider_status["sec_edgar"] = sec_status
+    if sec_profile is not None:
+        provider_payloads["sec_edgar"] = sec_profile
+    elif sec_status.get("note"):
+        notes.append(f"sec_edgar: {sec_status['note']}")
+
+    finnhub_metrics, finnhub_metrics_status = _safe_call(lambda: fetch_basic_financials(symbol))
+    provider_status["finnhub_basic_financials"] = finnhub_metrics_status
+    if finnhub_metrics is not None:
+        provider_payloads["finnhub_basic_financials"] = finnhub_metrics
+    elif finnhub_metrics_status.get("note"):
+        notes.append(f"finnhub_basic_financials: {finnhub_metrics_status['note']}")
+
+    sec_profile = sec_profile or {}
+    finnhub_metrics = finnhub_metrics or {}
+    alpha_overview = alpha_overview or {}
+    finnhub_profile = finnhub_profile or {}
+
+    normalized_metrics = dict((sec_profile.get("normalized_metrics") or {}))
+    normalized_metrics["revenue_growth_yoy"] = _first_non_null(
+        normalized_metrics.get("revenue_growth_yoy"),
+        alpha_overview.get("quarterly_revenue_growth_yoy"),
+        finnhub_metrics.get("revenue_growth_ttm_yoy"),
     )
-    balance_sheet_resilience = _bounded_score(
-        _mean(
-            [
-                finnhub_metrics.get("current_ratio_quarterly"),
-                finnhub_metrics.get("quick_ratio_quarterly"),
-                _inverse_metric(finnhub_metrics.get("total_debt_to_equity_quarterly"), cap=3.0),
-            ]
-        ),
-        low=0.0,
-        high=2.0,
+    normalized_metrics["operating_margin"] = _first_non_null(
+        normalized_metrics.get("operating_margin"),
+        alpha_overview.get("operating_margin_ttm"),
+        finnhub_metrics.get("operating_margin_ttm"),
+    )
+    normalized_metrics["net_margin"] = _first_non_null(
+        normalized_metrics.get("net_margin"),
+        alpha_overview.get("profit_margin"),
+        finnhub_metrics.get("net_margin"),
+    )
+    normalized_metrics["current_ratio"] = _first_non_null(
+        normalized_metrics.get("current_ratio"),
+        finnhub_metrics.get("current_ratio_quarterly"),
+    )
+    normalized_metrics["cash_ratio"] = _first_non_null(
+        normalized_metrics.get("cash_ratio"),
+        finnhub_metrics.get("quick_ratio_quarterly"),
+    )
+    normalized_metrics["debt_to_equity"] = _first_non_null(
+        normalized_metrics.get("debt_to_equity"),
+        finnhub_metrics.get("total_debt_to_equity_quarterly"),
+    )
+    normalized_metrics["return_on_assets"] = _first_non_null(
+        normalized_metrics.get("return_on_assets"),
+        alpha_overview.get("return_on_assets_ttm"),
+        finnhub_metrics.get("roa_ttm"),
+    )
+    normalized_metrics["return_on_equity"] = _first_non_null(
+        normalized_metrics.get("return_on_equity"),
+        alpha_overview.get("return_on_equity_ttm"),
+        finnhub_metrics.get("roe_ttm"),
     )
 
-    sources = sorted(provider_payloads)
+    coverage_flags = dict((sec_profile.get("coverage_flags") or {}))
+    coverage = {
+        "revenue_growth_coverage": normalized_metrics.get("revenue_growth_yoy") is not None,
+        "profitability_coverage": any(
+            normalized_metrics.get(field) is not None
+            for field in ("operating_margin", "net_margin", "return_on_assets", "return_on_equity")
+        ),
+        "margin_coverage": any(
+            normalized_metrics.get(field) is not None
+            for field in ("gross_margin", "operating_margin", "net_margin")
+        ),
+        "balance_sheet_resilience_coverage": any(
+            normalized_metrics.get(field) is not None
+            for field in ("current_ratio", "cash_ratio", "liabilities_to_assets")
+        ),
+        "cash_flow_coverage": any(
+            normalized_metrics.get(field) is not None
+            for field in ("free_cash_flow", "free_cash_flow_margin", "positive_fcf_ratio")
+        ),
+        "leverage_liquidity_coverage": any(
+            normalized_metrics.get(field) is not None
+            for field in ("current_ratio", "cash_ratio", "debt_to_equity")
+        ),
+        "filing_recency_coverage": sec_profile.get("filing_recency_days") is not None,
+        "reporting_quality_coverage": any(
+            (sec_profile.get("quality_proxies") or {}).get(field) is not None
+            for field in ("reporting_completeness_score", "reporting_quality_proxy")
+        ),
+    }
+    coverage_flags.update(coverage)
+    coverage_score = _bounded_ratio(
+        sum(1 for ok in coverage.values() if ok),
+        len(coverage),
+    ) or sec_profile.get("coverage_score") or 0.0
+    missingness_flags = list(sec_profile.get("missingness_flags") or [])
+    missingness_flags.extend(
+        f"{field}_missing"
+        for field, ok in coverage.items()
+        if not ok and f"{field}_missing" not in missingness_flags
+    )
+
+    sec_quality = sec_profile.get("quality_proxies") or {}
+    quality_proxies = {
+        "filing_recency_score": _first_non_null(
+            sec_quality.get("filing_recency_score"),
+            _bounded_score(
+                1.0 - min((sec_profile.get("filing_recency_days") or 365), 365) / 365.0,
+                low=0.0,
+                high=1.0,
+            ),
+        ),
+        "reporting_completeness_score": _first_non_null(
+            sec_quality.get("reporting_completeness_score"),
+            coverage_score * 100.0,
+        ),
+        "reporting_quality_proxy": _first_non_null(
+            sec_quality.get("reporting_quality_proxy"),
+            _mean(
+                [
+                    sec_quality.get("reporting_quality_proxy"),
+                    _first_non_null(sec_profile.get("margin_stability"), normalized_metrics.get("operating_margin_stability")),
+                ]
+            ),
+        ),
+        "business_quality_durability": _first_non_null(
+            sec_quality.get("business_quality_durability"),
+            _mean(
+                [
+                    _bounded_score(normalized_metrics.get("revenue_growth_yoy"), low=-0.2, high=0.3),
+                    _bounded_score(_mean([normalized_metrics.get("operating_margin"), normalized_metrics.get("net_margin")]), low=0.0, high=0.3),
+                    _bounded_score(normalized_metrics.get("positive_fcf_ratio"), low=0.0, high=1.0),
+                    _bounded_score(
+                        _mean([normalized_metrics.get("current_ratio"), _inverse_metric(normalized_metrics.get("debt_to_equity"), cap=3.0)]),
+                        low=0.0,
+                        high=2.0,
+                    ),
+                ]
+            ),
+        ),
+        "balance_sheet_resilience": _first_non_null(
+            sec_quality.get("balance_sheet_resilience"),
+            _bounded_score(
+                _mean([normalized_metrics.get("current_ratio"), _inverse_metric(normalized_metrics.get("debt_to_equity"), cap=3.0)]),
+                low=0.0,
+                high=2.0,
+            ),
+        ),
+        "cash_flow_durability": _first_non_null(
+            sec_quality.get("cash_flow_durability"),
+            _bounded_score(
+                _mean([normalized_metrics.get("positive_fcf_ratio"), normalized_metrics.get("free_cash_flow_margin")]),
+                low=0.0,
+                high=0.3,
+            ),
+        ),
+    }
+
+    strengths = list(sec_profile.get("strength_summary") or [])
+    weaknesses = list(sec_profile.get("weakness_summary") or [])
+    coverage_caveats = list(sec_profile.get("coverage_caveats") or [])
+    strengths.extend(_secondary_strengths(normalized_metrics))
+    weaknesses.extend(_secondary_weaknesses(normalized_metrics))
+    if provider_status["sec_edgar"].get("status") != "ok":
+        coverage_caveats.append("SEC filing backbone is unavailable, so the fundamental layer is relying more heavily on secondary enrichment.")
+    if provider_status["alphavantage_overview"].get("status") != "ok" and provider_status["finnhub_basic_financials"].get("status") != "ok":
+        coverage_caveats.append("Secondary enrichment from Finnhub and Alpha Vantage is unavailable or thin.")
     filing_recency_days = sec_profile.get("filing_recency_days")
     status = (
         "fresh"
         if filing_recency_days is not None and filing_recency_days <= 120
         else "stale_but_usable"
-        if filing_recency_days is not None and filing_recency_days <= 180
+        if filing_recency_days is not None and filing_recency_days <= 210
         else "limited"
     )
+
+    latest_quarter = (
+        ((sec_profile.get("statement_snapshot") or {}).get("latest_quarter"))
+        or sec_profile.get("latest_quarter")
+        or {}
+    )
+    if latest_quarter and latest_quarter.get("op_margin") is None:
+        latest_quarter = {
+            **latest_quarter,
+            "op_margin": latest_quarter.get("operating_margin"),
+        }
+    latest_annual = ((sec_profile.get("statement_snapshot") or {}).get("latest_annual")) or {}
+    latest_balance_sheet = (
+        ((sec_profile.get("statement_snapshot") or {}).get("latest_balance_sheet")) or {}
+    )
+    sources = sorted(provider_payloads)
+    fetched_at = dt.datetime.now(dt.timezone.utc).isoformat()
     return {
-        "filing_recency_days": filing_recency_days,
-        "coverage_flags": sec_profile.get("coverage_flags") or {},
+        "mapping": sec_profile.get("mapping") or {},
+        "filing_backbone": sec_profile.get("filing_backbone") or {},
+        "statement_snapshot": {
+            "latest_quarter": latest_quarter,
+            "prior_year_quarter": ((sec_profile.get("statement_snapshot") or {}).get("prior_year_quarter")) or {},
+            "latest_annual": latest_annual,
+            "latest_balance_sheet": latest_balance_sheet,
+            "quarterly_series": ((sec_profile.get("statement_snapshot") or {}).get("quarterly_series")) or [],
+            "annual_series": ((sec_profile.get("statement_snapshot") or {}).get("annual_series")) or [],
+        },
+        "coverage_flags": coverage_flags,
+        "coverage_score": coverage_score,
+        "missingness_flags": missingness_flags,
         "company_profile": {
-            "name": symbol_meta.get("name") or finnhub_profile.get("name"),
+            "name": symbol_meta.get("name") or finnhub_profile.get("name") or sec_profile.get("name"),
             "sector": symbol_meta.get("sector") or alpha_overview.get("sector"),
             "industry": alpha_overview.get("industry") or finnhub_profile.get("finnhub_industry"),
             "exchange": symbol_meta.get("exchange") or finnhub_profile.get("exchange"),
             "country": symbol_meta.get("country") or finnhub_profile.get("country"),
             "currency": symbol_meta.get("currency") or finnhub_profile.get("currency"),
+            "market_cap": _first_non_null(
+                finnhub_metrics.get("market_cap"),
+                alpha_overview.get("market_cap"),
+                finnhub_profile.get("market_capitalization"),
+            ),
         },
-        "durability_proxies": {
-            "growth_quality": growth_quality,
-            "profitability_quality": profitability_quality,
-            "balance_sheet_resilience": balance_sheet_resilience,
-            "reporting_stability": 1.0 if filing_recency_days is not None and filing_recency_days <= 120 else 0.5 if filing_recency_days is not None else 0.25,
-        },
+        "normalized_metrics": normalized_metrics,
+        "quality_proxies": quality_proxies,
+        "strength_summary": _dedupe_text(strengths)[:5],
+        "weakness_summary": _dedupe_text(weaknesses)[:5],
+        "coverage_caveats": _dedupe_text(coverage_caveats + notes)[:8],
         "provider_snapshot": provider_payloads,
+        "filing_recency_days": filing_recency_days,
+        "latest_quarter": latest_quarter,
+        "revenue_growth_yoy": normalized_metrics.get("revenue_growth_yoy"),
+        "margin_stability": _first_non_null(
+            sec_profile.get("margin_stability"),
+            normalized_metrics.get("operating_margin_stability"),
+            normalized_metrics.get("gross_margin_stability"),
+        ),
+        "positive_fcf_ratio": _first_non_null(
+            sec_profile.get("positive_fcf_ratio"),
+            normalized_metrics.get("positive_fcf_ratio"),
+        ),
+        "durability_proxies": {
+            "growth_quality": _bounded_score(
+                normalized_metrics.get("revenue_growth_yoy"),
+                low=-0.25,
+                high=0.35,
+            ),
+            "profitability_quality": _bounded_score(
+                _mean([normalized_metrics.get("operating_margin"), normalized_metrics.get("net_margin")]),
+                low=-0.05,
+                high=0.3,
+            ),
+            "balance_sheet_resilience": quality_proxies.get("balance_sheet_resilience"),
+            "reporting_stability": _first_non_null(
+                quality_proxies.get("reporting_quality_proxy"),
+                100.0 * coverage_score,
+            ),
+        },
         "meta": {
             "sources": sources,
+            "primary_source": "sec_edgar" if sec_profile else "secondary_enrichment",
             "status": status,
-            "coverage_score": _bounded_ratio(len(sources), 4),
+            "coverage_score": coverage_score,
+            "missingness": max(0.0, 1.0 - coverage_score),
             "provider_status": provider_status,
             "notes": notes,
+            "fetched_at": fetched_at,
+            "updated_at": fetched_at,
+            "latest_report_date": _first_non_null(
+                latest_quarter.get("report_date"),
+                latest_annual.get("report_date"),
+                ((sec_profile.get("filing_backbone") or {}).get("latest_filing_date")),
+            ),
+            "fallback_notes": _dedupe_text(coverage_caveats + notes)[:8],
         },
     }
 
@@ -684,6 +893,65 @@ def _world_bank_country(country: Any) -> str:
     if value == "CA":
         return "CA"
     return "US"
+
+
+def _first_non_null(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _secondary_strengths(metrics: Dict[str, Any]) -> List[str]:
+    strengths: List[str] = []
+    revenue_growth = metrics.get("revenue_growth_yoy")
+    if revenue_growth is not None and revenue_growth >= 0.12:
+        strengths.append(
+            f"Secondary enrichment confirms revenue growth around {revenue_growth * 100:.1f}%."
+        )
+    roe = metrics.get("return_on_equity")
+    if roe is not None and roe >= 0.12:
+        strengths.append(
+            f"Return on equity is supportive at {roe * 100:.1f}%."
+        )
+    cash_flow_margin = metrics.get("free_cash_flow_margin")
+    if cash_flow_margin is not None and cash_flow_margin >= 0.1:
+        strengths.append(
+            f"Free-cash-flow margin is positive at {cash_flow_margin * 100:.1f}%."
+        )
+    return strengths
+
+
+def _secondary_weaknesses(metrics: Dict[str, Any]) -> List[str]:
+    weaknesses: List[str] = []
+    debt_to_equity = metrics.get("debt_to_equity")
+    if debt_to_equity is not None and debt_to_equity >= 1.5:
+        weaknesses.append(
+            f"Secondary enrichment indicates leverage is elevated at {debt_to_equity:.2f} debt-to-equity."
+        )
+    current_ratio = metrics.get("current_ratio")
+    if current_ratio is not None and current_ratio < 1.0:
+        weaknesses.append(
+            f"Current ratio is below 1.0 at {current_ratio:.2f}."
+        )
+    revenue_growth = metrics.get("revenue_growth_yoy")
+    if revenue_growth is not None and revenue_growth < 0:
+        weaknesses.append(
+            f"Revenue growth is negative at {revenue_growth * 100:.1f}% year over year."
+        )
+    return weaknesses
+
+
+def _dedupe_text(items: Iterable[str]) -> List[str]:
+    output: List[str] = []
+    seen: set[str] = set()
+    for item in items:
+        text = str(item or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        output.append(text)
+    return output
 
 
 def _safe_float(value: Any) -> Optional[float]:

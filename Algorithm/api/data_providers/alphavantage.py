@@ -86,6 +86,7 @@ def fetch_company_overview(symbol: str) -> Dict[str, Any]:
         raise SymbolNoData("NO_DATA", "Alpha Vantage overview missing symbol")
     return {
         "symbol": canonical_symbol(symbol),
+        "name": payload.get("Name"),
         "sector": payload.get("Sector"),
         "industry": payload.get("Industry"),
         "market_cap": _float_or_none(payload.get("MarketCapitalization")),

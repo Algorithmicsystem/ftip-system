@@ -132,6 +132,73 @@ def _fmt_driver_list(drivers: Iterable[Dict[str, Any]]) -> str:
     return "; ".join(parts) if parts else "none"
 
 
+def _fundamental_analysis_text(
+    fundamentals: Dict[str, Any],
+    composites: Dict[str, Any],
+    conviction_tier: str,
+    quality: Dict[str, Any],
+) -> str:
+    metrics = fundamentals.get("normalized_metrics") or {}
+    filing_backbone = fundamentals.get("filing_backbone") or {}
+    meta = fundamentals.get("meta") or {}
+    coverage_score = fundamentals.get("coverage_score")
+    quality_proxies = fundamentals.get("quality_proxies") or {}
+    strengths = list(fundamentals.get("strength_summary") or [])
+    weaknesses = list(fundamentals.get("weakness_summary") or [])
+    caveats = list(fundamentals.get("coverage_caveats") or [])
+    latest_quarter = (
+        ((fundamentals.get("statement_snapshot") or {}).get("latest_quarter"))
+        or fundamentals.get("latest_quarter")
+        or {}
+    )
+    latest_annual = ((fundamentals.get("statement_snapshot") or {}).get("latest_annual")) or {}
+    latest_balance_sheet = (
+        ((fundamentals.get("statement_snapshot") or {}).get("latest_balance_sheet")) or {}
+    )
+    sources = meta.get("sources") or []
+    filing_date = _first_available(
+        latest_quarter.get("report_date"),
+        latest_annual.get("report_date"),
+        filing_backbone.get("latest_filing_date"),
+    )
+    latest_10k = filing_backbone.get("latest_10k") or {}
+    latest_10q = filing_backbone.get("latest_10q") or {}
+
+    has_real_fundamental_coverage = any(
+        value is not None
+        for value in [
+            metrics.get("revenue_growth_yoy"),
+            metrics.get("operating_margin"),
+            metrics.get("net_margin"),
+            metrics.get("current_ratio"),
+            metrics.get("free_cash_flow"),
+            coverage_score,
+        ]
+    )
+    if not has_real_fundamental_coverage:
+        if quality.get("fundamentals_ok") is False:
+            return (
+                "Fundamental coverage is explicitly missing in the quality layer, so the current report is weighted toward market structure, sentiment, and cross-domain signal composition rather than a filing-rich fundamental thesis."
+            )
+        missing_flags = _fmt_list(fundamentals.get("missingness_flags") or [])
+        return (
+            "Fundamental data is still thin. The filing-aware layer could not populate enough SEC-backed coverage to make a stronger statement, "
+            f"and the missing areas are {missing_flags}. Secondary enrichment is preserved in provenance, but conviction is degraded rather than fabricated."
+        )
+
+    summary_parts = [
+        f"Fundamental coverage is now anchored to {_fmt_list(sources)} with coverage score {_fmt_num(coverage_score, digits=2)} and filing freshness {meta.get('status') or 'n/a'}.",
+        f"Latest periodic filing is {filing_backbone.get('latest_form') or 'n/a'} dated {filing_backbone.get('latest_filing_date') or 'n/a'}, with latest 10-K {latest_10k.get('filing_date') or 'n/a'} and latest 10-Q {latest_10q.get('filing_date') or 'n/a'}.",
+        f"Quarterly revenue is {_fmt_num(latest_quarter.get('revenue'), digits=0)}, revenue growth versus the year-ago quarter is {_fmt_pct(metrics.get('revenue_growth_yoy'))}, operating margin is {_fmt_pct(metrics.get('operating_margin'))}, net margin is {_fmt_pct(metrics.get('net_margin'))}, and free-cash-flow margin is {_fmt_pct(metrics.get('free_cash_flow_margin'))}.",
+        f"Balance-sheet and liquidity reads show current ratio {_fmt_num(metrics.get('current_ratio'), digits=2)}, cash ratio {_fmt_num(metrics.get('cash_ratio'), digits=2)}, debt-to-equity {_fmt_num(metrics.get('debt_to_equity'), digits=2)}, and liabilities-to-assets {_fmt_num(metrics.get('liabilities_to_assets'), digits=2)}.",
+        f"Reporting-quality proxy is {_fmt_num(quality_proxies.get('reporting_quality_proxy'), digits=1)} / 100, business-quality durability is {_fmt_num(quality_proxies.get('business_quality_durability'), digits=1)} / 100, and the composite Fundamental Durability Score is {_fmt_num(composites.get('Fundamental Durability Score'), digits=1)} / 100, which points to {conviction_tier} business-quality support."
+        if composites.get("Fundamental Durability Score") is not None
+        else f"Reporting-quality proxy is {_fmt_num(quality_proxies.get('reporting_quality_proxy'), digits=1)} / 100 and business-quality durability is {_fmt_num(quality_proxies.get('business_quality_durability'), digits=1)} / 100.",
+        f"Fundamental strengths are {_fmt_list(strengths)}. Weaknesses are {_fmt_list(weaknesses)}. Coverage caveats are {_fmt_list(caveats)}.",
+    ]
+    return " ".join(part for part in summary_parts if part)
+
+
 def _why_this_signal(
     strategy: Dict[str, Any],
     data_bundle: Optional[Dict[str, Any]],
@@ -270,24 +337,12 @@ def build_analysis_report(
         ]
     )
 
-    if fundamentals.get("latest_quarter"):
-        fundamental_analysis = " ".join(
-            [
-                f"Fundamental coverage is live, with latest quarter revenue at {_fmt_num((fundamentals.get('latest_quarter') or {}).get('revenue'), digits=0)} and operating margin {_fmt_pct((fundamentals.get('latest_quarter') or {}).get('op_margin'))}.",
-                f"Revenue growth versus the year-ago quarter is {_fmt_pct(fundamentals.get('revenue_growth_yoy'))}, gross-margin trend is {_fmt_pct(fundamentals.get('gross_margin_trend'))}, and filing recency is {fundamentals.get('filing_recency_days') or 'n/a'} days.",
-                f"The proprietary durability read is {_fmt_num(composites.get('Fundamental Durability Score'), digits=1)} / 100, which suggests {conviction_tier} business-quality support rather than purely price-led conviction."
-                if composites.get("Fundamental Durability Score") is not None
-                else "Fundamental durability is not fully scored because the quarterly history is partial.",
-            ]
-        )
-    elif quality.get("fundamentals_ok") is False:
-        fundamental_analysis = (
-            "Fundamental coverage is explicitly missing in the quality layer, so the current report is weighted toward market structure, sentiment, and cross-domain signal composition rather than a filing-rich fundamental thesis."
-        )
-    else:
-        fundamental_analysis = (
-            "Fundamental data is limited or incomplete. The assistant pipeline preserves the gap as a real coverage constraint and degrades conviction accordingly instead of pretending the filing layer is stronger than it is."
-        )
+    fundamental_analysis = _fundamental_analysis_text(
+        fundamentals,
+        composites,
+        conviction_tier,
+        quality,
+    )
 
     statistical_analysis = " ".join(
         [

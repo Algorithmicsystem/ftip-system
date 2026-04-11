@@ -105,10 +105,43 @@ def test_data_fabric_enriches_domains_with_provenance(monkeypatch):
     monkeypatch.setattr(
         data_fabric,
         "fetch_company_filing_profile",
-        lambda _symbol: {
+        lambda _symbol, **_kwargs: {
+            "mapping": {"match_type": "exact_ticker", "cik": "0001045810"},
             "latest_form": "10-Q",
             "filing_recency_days": 40,
             "coverage_flags": {"revenue": True, "net_income": True},
+            "statement_snapshot": {
+                "latest_quarter": {
+                    "revenue": 1000.0,
+                    "report_date": "2024-01-01",
+                    "operating_income": 250.0,
+                },
+                "latest_balance_sheet": {
+                    "assets": 5000.0,
+                    "current_assets": 2200.0,
+                    "current_liabilities": 1000.0,
+                    "equity": 2500.0,
+                },
+            },
+            "normalized_metrics": {
+                "revenue_growth_yoy": 0.2,
+                "operating_margin": 0.25,
+                "current_ratio": 2.2,
+                "debt_to_equity": 0.4,
+                "free_cash_flow": 180.0,
+                "free_cash_flow_margin": 0.18,
+                "positive_fcf_ratio": 0.75,
+            },
+            "quality_proxies": {
+                "filing_recency_score": 88.0,
+                "reporting_completeness_score": 85.0,
+                "reporting_quality_proxy": 82.0,
+                "business_quality_durability": 79.0,
+            },
+            "coverage_score": 0.86,
+            "strength_summary": ["Revenue growth remains strong."],
+            "weakness_summary": [],
+            "coverage_caveats": [],
         },
     )
     monkeypatch.setattr(
@@ -214,6 +247,8 @@ def test_data_fabric_enriches_domains_with_provenance(monkeypatch):
 
     assert overlay["enabled"] is True
     assert merged["fundamental_filing"]["filing_recency_days"] == 40
+    assert merged["fundamental_filing"]["normalized_metrics"]["operating_margin"] == 0.25
+    assert merged["fundamental_filing"]["quality_proxies"]["reporting_quality_proxy"] == 82.0
     assert merged["sentiment_narrative_flow"]["source_breakdown"]["gnews"] == 1
     assert merged["macro_cross_asset"]["macro_regime_context"]["regime"]
     assert merged["geopolitical_policy"]["event_buckets"]["policy_regulation"] >= 1

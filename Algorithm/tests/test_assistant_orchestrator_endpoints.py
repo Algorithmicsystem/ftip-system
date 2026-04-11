@@ -169,8 +169,36 @@ def test_assistant_analyze_surfaces_enriched_data_fabric(monkeypatch):
             "status": "ok",
             "domains": {
                 "fundamental_filing": {
+                    "filing_backbone": {
+                        "latest_form": "10-Q",
+                        "latest_filing_date": "2024-01-01",
+                        "latest_10k": {"filing_date": "2023-03-01"},
+                        "latest_10q": {"filing_date": "2024-01-01"},
+                    },
+                    "statement_snapshot": {
+                        "latest_quarter": {"revenue": 1200, "report_date": "2024-01-01"},
+                    },
+                    "normalized_metrics": {
+                        "revenue_growth_yoy": 0.18,
+                        "operating_margin": 0.24,
+                        "net_margin": 0.2,
+                        "current_ratio": 2.1,
+                        "debt_to_equity": 0.4,
+                        "free_cash_flow_margin": 0.16,
+                    },
+                    "quality_proxies": {
+                        "reporting_quality_proxy": 82.0,
+                        "business_quality_durability": 79.0,
+                    },
+                    "coverage_score": 0.88,
+                    "strength_summary": ["Quarterly revenue growth remains strong."],
+                    "weakness_summary": ["Cash-flow detail is based on quarterly facts only."],
+                    "coverage_caveats": ["Leverage detail is partly supported by Finnhub metrics."],
                     "filing_recency_days": 45,
-                    "meta": {"sources": ["sec_edgar", "finnhub_basic_financials"]},
+                    "meta": {
+                        "sources": ["sec_edgar", "finnhub_basic_financials"],
+                        "status": "fresh",
+                    },
                 },
                 "sentiment_narrative_flow": {
                     "source_breakdown": {"gnews": 3, "gdelt": 2},
@@ -214,6 +242,7 @@ def test_assistant_analyze_surfaces_enriched_data_fabric(monkeypatch):
         "sec_edgar",
         "finnhub_basic_financials",
     ]
+    assert "Latest periodic filing is 10-Q dated 2024-01-01" in data["fundamental_analysis"]
     assert "external data fabric status" in data["evidence_provenance"]
 
 

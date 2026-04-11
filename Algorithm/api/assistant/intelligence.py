@@ -150,6 +150,13 @@ def _iso_datetime(value: Any) -> Optional[str]:
     return str(value)
 
 
+def _first_available(*values: Any) -> Any:
+    for value in values:
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
 def _days_stale(as_of_date: Optional[str], latest_ts: Optional[str]) -> Optional[int]:
     if not as_of_date or not latest_ts:
         return None
@@ -1068,6 +1075,9 @@ def build_feature_factor_bundle(
     geopolitical = data_bundle.get("geopolitical_policy") or {}
     relative = data_bundle.get("relative_context") or {}
     quality_domain = data_bundle.get("quality_provenance") or {}
+    fundamental_metrics = fundamentals.get("normalized_metrics") or {}
+    fundamental_quality = fundamentals.get("quality_proxies") or {}
+    latest_quarter = fundamentals.get("latest_quarter") or {}
 
     price_momentum = {
         "ret_1d": _safe_float(key_features.get("ret_1d")),
@@ -1177,16 +1187,85 @@ def build_feature_factor_bundle(
     }
 
     fundamental_intelligence = {
-        "growth_quality": _score_100(fundamentals.get("revenue_growth_yoy"), low=-0.3, high=0.4),
-        "profitability_quality": _score_100(fundamentals.get("latest_quarter", {}).get("op_margin"), low=-0.1, high=0.4),
-        "balance_sheet_resilience": quality.get("fundamentals_ok") is True and 70.0 or 35.0,
-        "cash_flow_durability": _score_100(fundamentals.get("positive_fcf_ratio"), low=0.0, high=1.0),
-        "accounting_quality": _score_100(fundamentals.get("margin_stability"), low=0.0, high=1.0),
-        "capital_efficiency_proxy": _score_100(fundamentals.get("latest_quarter", {}).get("gross_margin"), low=0.0, high=0.8),
-        "filing_recency_drift": _score_100(
-            1.0 - min((fundamentals.get("filing_recency_days") or 365), 365) / 365.0,
+        "growth_quality": _first_available(
+            _score_100(
+                _first_available(
+                    fundamental_metrics.get("revenue_growth_yoy"),
+                    fundamentals.get("revenue_growth_yoy"),
+                ),
+                low=-0.3,
+                high=0.4,
+            ),
+            fundamental_quality.get("business_quality_durability"),
+        ),
+        "profitability_quality": _first_available(
+            fundamental_quality.get("profitability_strength"),
+            _score_100(
+                _mean(
+                    [
+                        fundamental_metrics.get("operating_margin"),
+                        fundamental_metrics.get("net_margin"),
+                        latest_quarter.get("op_margin"),
+                    ]
+                ),
+                low=-0.1,
+                high=0.4,
+            ),
+        ),
+        "balance_sheet_resilience": _first_available(
+            fundamental_quality.get("balance_sheet_resilience"),
+            _score_100(
+                _mean(
+                    [
+                        fundamental_metrics.get("current_ratio"),
+                        1.0 - min((fundamental_metrics.get("debt_to_equity") or 3.0), 3.0) / 3.0,
+                    ]
+                ),
+                low=0.0,
+                high=2.0,
+            ),
+            quality.get("fundamentals_ok") is True and 70.0 or 35.0,
+        ),
+        "cash_flow_durability": _first_available(
+            fundamental_quality.get("cash_flow_durability"),
+            _score_100(
+                _first_available(
+                    fundamental_metrics.get("positive_fcf_ratio"),
+                    fundamentals.get("positive_fcf_ratio"),
+                ),
+                low=0.0,
+                high=1.0,
+            ),
+        ),
+        "accounting_quality": _first_available(
+            fundamental_quality.get("reporting_quality_proxy"),
+            _score_100(
+                _first_available(
+                    fundamentals.get("margin_stability"),
+                    fundamental_metrics.get("operating_margin_stability"),
+                    fundamental_metrics.get("gross_margin_stability"),
+                ),
+                low=0.0,
+                high=100.0,
+            ),
+        ),
+        "capital_efficiency_proxy": _score_100(
+            _mean(
+                [
+                    fundamental_metrics.get("gross_margin"),
+                    fundamental_metrics.get("return_on_equity"),
+                ]
+            ),
             low=0.0,
-            high=1.0,
+            high=0.8,
+        ),
+        "filing_recency_drift": _first_available(
+            fundamental_quality.get("filing_recency_score"),
+            _score_100(
+                1.0 - min((fundamentals.get("filing_recency_days") or 365), 365) / 365.0,
+                low=0.0,
+                high=1.0,
+            ),
         ),
     }
 
