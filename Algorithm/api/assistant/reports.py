@@ -307,6 +307,9 @@ def _fundamental_analysis_text(
                 else None,
             ]
         ),
+        f"Quarterly revenue is {_fmt_num(latest_quarter.get('revenue'), digits=0, signed=False)}."
+        if latest_quarter.get("revenue") is not None
+        else None,
         f"Statement-level evidence shows {_fmt_list(item for item in performance_clauses if item)}."
         if any(performance_clauses)
         else "Statement-level profitability and growth coverage is still partial, so the system is avoiding a stronger business-performance claim.",
@@ -397,12 +400,15 @@ def _statistical_analysis_text(
     market: Dict[str, Any],
     key_features: Dict[str, Any],
     composites: Dict[str, Any],
+    fragility: Dict[str, Any],
+    domain_agreement: Dict[str, Any],
     quality: Dict[str, Any],
     data_bundle: Dict[str, Any],
 ) -> str:
     market_entry = _domain_availability(data_bundle, "market")
     vol_clauses = [
         _metric_phrase("5-day realized vol", market.get("realized_vol_5d"), formatter="pct"),
+        _metric_phrase("10-day realized vol", market.get("realized_vol_10d"), formatter="pct"),
         _metric_phrase("21-day realized vol", market.get("realized_vol_21d"), formatter="pct"),
         _metric_phrase("63-day realized vol", market.get("realized_vol_63d"), formatter="pct"),
         _metric_phrase("ATR percent", market.get("atr_pct"), formatter="pct"),
@@ -413,6 +419,8 @@ def _statistical_analysis_text(
         _metric_phrase("regime stability", composites.get("Regime Stability Score"), formatter="num", digits=1, signed=False),
         _metric_phrase("cross-domain conviction", composites.get("Cross-Domain Conviction Score"), formatter="num", digits=1, signed=False),
         _metric_phrase("signal fragility", composites.get("Signal Fragility Index"), formatter="num", digits=1, signed=False),
+        _metric_phrase("domain agreement", domain_agreement.get("domain_agreement_score"), formatter="num", digits=1, signed=False),
+        _metric_phrase("domain conflict", domain_agreement.get("domain_conflict_score"), formatter="num", digits=1, signed=False),
     ]
     structure_state = (
         "cleaner than average"
@@ -428,6 +436,9 @@ def _statistical_analysis_text(
             f"Composite statistical overlays show {_fmt_list(item for item in score_clauses if item)}."
             if any(score_clauses)
             else None,
+            f"Fragility diagnostics show clean setup {_fmt_num(fragility.get('clean_setup_score'), digits=1, signed=False)} / 100, instability {_fmt_num(fragility.get('instability_score'), digits=1, signed=False)} / 100, and anomaly pressure {_fmt_num(fragility.get('anomaly_pressure_score'), digits=1, signed=False)} / 100."
+            if fragility
+            else None,
             f"The current distributional posture reads as {structure_state}, while reported missingness is {_fmt_num(quality.get('missingness'))}."
             if quality.get("missingness") is not None
             else f"The current distributional posture reads as {structure_state}.",
@@ -437,6 +448,8 @@ def _statistical_analysis_text(
 
 def _sentiment_analysis_text(
     sentiment: Dict[str, Any],
+    sentiment_factor: Dict[str, Any],
+    composites: Dict[str, Any],
     data_bundle: Dict[str, Any],
 ) -> str:
     sentiment_entry = _domain_availability(data_bundle, "sentiment")
@@ -482,6 +495,9 @@ def _sentiment_analysis_text(
             f"Dominant narrative clusters are {_fmt_list(item.get('topic') for item in topic_clusters)}, with thematic bucket counts {sentiment.get('topic_buckets') or {}}."
             if topic_clusters or sentiment.get("topic_buckets")
             else None,
+            f"Narrative crowding is {_fmt_num(composites.get('Narrative Crowding Index'), digits=1, signed=False)} / 100, with crowding proxy {_fmt_num(sentiment_factor.get('crowding_proxy_score'), digits=1, signed=False)} / 100, positive-news/weak-price divergence {_fmt_num(sentiment_factor.get('positive_news_weak_price_divergence'), digits=1, signed=False)}, and negative-news/resilient-price divergence {_fmt_num(sentiment_factor.get('negative_news_resilient_price_divergence'), digits=1, signed=False)}."
+            if composites.get("Narrative Crowding Index") is not None or sentiment_factor
+            else None,
             f"GDELT event overlay is contributing {((sentiment.get('event_overlay') or {}).get('gdelt_article_count') or 0)} broader event articles with average tone {_fmt_num(((sentiment.get('event_overlay') or {}).get('gdelt_tone_average')), digits=2, signed=True)}."
             if sentiment.get("event_overlay")
             else None,
@@ -497,6 +513,7 @@ def _sentiment_analysis_text(
 
 def _macro_geopolitical_analysis_text(
     macro: Dict[str, Any],
+    macro_factor: Dict[str, Any],
     geopolitical: Dict[str, Any],
     relative: Dict[str, Any],
     data_bundle: Dict[str, Any],
@@ -556,6 +573,9 @@ def _macro_geopolitical_analysis_text(
             f"Broad market tone is {broad_market.get('risk_tone')} across the major benchmark basket, and sector context says {sector_context.get('coverage_note')}."
             if broad_market or sector_context.get("coverage_note")
             else None,
+            f"Macro fragility is {_fmt_num(macro_factor.get('macro_fragility_score'), digits=1, signed=False)} / 100, macro conflict is {_fmt_num(macro_factor.get('macro_conflict_score'), digits=1, signed=False)} / 100, and risk-on/risk-off alignment is {_fmt_num(macro_factor.get('risk_on_risk_off_alignment'), digits=1, signed=False)} / 100."
+            if macro_factor
+            else None,
             macro_entry.get("data_quality_note")
             if macro_entry.get("coverage_status") in {"partial", "stale", "unavailable"}
             else None,
@@ -578,6 +598,8 @@ def _risk_quality_analysis_text(
     warnings: Sequence[str],
     why_signal: Dict[str, Any],
     strategy: Dict[str, Any],
+    fragility: Dict[str, Any],
+    domain_agreement: Dict[str, Any],
     data_bundle: Dict[str, Any],
 ) -> str:
     domain_availability = (data_bundle.get("domain_availability") or {}) or (
@@ -598,6 +620,9 @@ def _risk_quality_analysis_text(
             _entry_text(signal),
             f"Risk framing uses stop loss {_fmt_num(signal.get('stop_loss'), digits=2)} and take-profit levels {_fmt_num(signal.get('take_profit_1'), digits=2)} / {_fmt_num(signal.get('take_profit_2'), digits=2)}."
             if signal.get("stop_loss") is not None or signal.get("take_profit_1") is not None or signal.get("take_profit_2") is not None
+            else None,
+            f"Fragility markers show instability {_fmt_num(fragility.get('instability_score'), digits=1, signed=False)} / 100, clean setup {_fmt_num(fragility.get('clean_setup_score'), digits=1, signed=False)} / 100, and conflict-driven confidence penalty {_fmt_num(domain_agreement.get('confidence_penalty_from_conflict'), digits=1, signed=False)} / 100."
+            if fragility or domain_agreement
             else None,
             f"Warnings currently include {_fmt_list(warning_text)}, anomaly flags {_fmt_list(quality.get('anomaly_flags') or [])}, and confidence degraders {_fmt_list(confidence_degraders)}."
             if warning_text or quality.get("anomaly_flags") or confidence_degraders
@@ -793,6 +818,15 @@ def build_analysis_report(
     geopolitical = data_bundle.get("geopolitical_policy") or {}
     relative = data_bundle.get("relative_context") or {}
     composites = feature_factor_bundle.get("composite_intelligence") or {}
+    proprietary_scores = feature_factor_bundle.get("proprietary_scores") or {}
+    factor_groups = feature_factor_bundle.get("factor_groups") or {}
+    regime_intelligence = feature_factor_bundle.get("regime_intelligence") or feature_factor_bundle.get("regime_engine") or {}
+    fragility_intelligence = feature_factor_bundle.get("fragility_intelligence") or feature_factor_bundle.get("volatility_risk_microstructure") or {}
+    sentiment_intelligence = feature_factor_bundle.get("sentiment_narrative_intelligence") or feature_factor_bundle.get("sentiment_intelligence") or {}
+    macro_intelligence = feature_factor_bundle.get("macro_alignment") or feature_factor_bundle.get("macro_sensitivity") or {}
+    domain_agreement = feature_factor_bundle.get("domain_agreement") or {}
+    conviction_components = feature_factor_bundle.get("conviction_components") or {}
+    opportunity_quality_components = feature_factor_bundle.get("opportunity_quality_components") or {}
     strategy_component_scores = strategy.get("component_scores") or {}
     domain_availability = (data_bundle.get("domain_availability") or {}) or (
         (data_bundle.get("quality_provenance") or {}).get("domain_availability") or {}
@@ -816,6 +850,8 @@ def build_analysis_report(
         [
             f"As of {as_of_text}, the assistant pipeline lands on a {strategy_signal} posture for {symbol}, framed on the {horizon} horizon under {risk_mode} risk mode.",
             f"The underlying signal engine prints {action} with score {_fmt_num(score)} and confidence {_fmt_num(confidence)}, while the strategy layer converts that into {strategy_signal} with {_fmt_num(strategy_confidence)} confidence, {conviction_tier} conviction, and {fragility_tier} fragility.",
+            f"Structural quality is {_fmt_num(composites.get('Market Structure Integrity Score'), digits=1, signed=False)} / 100, regime stability is {_fmt_num(composites.get('Regime Stability Score'), digits=1, signed=False)} / 100, signal fragility is {_fmt_num(composites.get('Signal Fragility Index'), digits=1, signed=False)} / 100, and opportunity quality is {_fmt_num(composites.get('Opportunity Quality Score'), digits=1, signed=False)} / 100.",
+            f"Cross-domain agreement is {_fmt_num(domain_agreement.get('domain_agreement_score'), digits=1, signed=False)} / 100 versus conflict {_fmt_num(domain_agreement.get('domain_conflict_score'), digits=1, signed=False)} / 100; the strongest confirming domains are {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_confirming_domains') or []))}, while conflicts are concentrated in {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_conflicting_domains') or []))}.",
             f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
             f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'}.",
             f"Coverage headwinds are concentrated in {_fmt_list(coverage_headwinds)}, which is dampening conviction."
@@ -837,14 +873,22 @@ def build_analysis_report(
         market,
         key_features,
         composites,
+        fragility_intelligence,
+        domain_agreement,
         quality,
         data_bundle,
     )
 
-    sentiment_analysis = _sentiment_analysis_text(sentiment, data_bundle)
+    sentiment_analysis = _sentiment_analysis_text(
+        sentiment,
+        sentiment_intelligence,
+        composites,
+        data_bundle,
+    )
 
     macro_geopolitical_analysis = _macro_geopolitical_analysis_text(
         macro,
+        macro_intelligence,
         geopolitical,
         relative,
         data_bundle,
@@ -856,6 +900,8 @@ def build_analysis_report(
         warnings,
         why_signal,
         strategy,
+        fragility_intelligence,
+        domain_agreement,
         data_bundle,
     )
 
@@ -863,6 +909,7 @@ def build_analysis_report(
         [
             f"The unified system view on {symbol} is {strategy_signal}. That posture is not coming from one score alone; it is the result of trend, mean-reversion, sentiment, macro-alignment, quality/fundamental, and fragility-veto components being fused inside the strategy layer.",
             f"The strongest evidence for the thesis is {_fmt_driver_list(why_signal['top_positive_drivers'])}. The strongest evidence against it is {_fmt_driver_list(why_signal['top_negative_drivers'])}.",
+            f"Structural integrity {_fmt_num(composites.get('Market Structure Integrity Score'), digits=1)} / 100, fundamental durability {_fmt_num(composites.get('Fundamental Durability Score'), digits=1)} / 100, macro alignment {_fmt_num(composites.get('Macro Alignment Score'), digits=1)} / 100, and cross-domain conviction {_fmt_num(composites.get('Cross-Domain Conviction Score'), digits=1)} / 100 are being weighed against fragility {_fmt_num(composites.get('Signal Fragility Index'), digits=1)} / 100 and crowding {_fmt_num(composites.get('Narrative Crowding Index'), digits=1)} / 100.",
             f"The final posture stays at {strategy_signal} because raw signal action {action}, regime {regime}, and opportunity-quality score {_fmt_num(composites.get('Opportunity Quality Score'), digits=1)} / 100 outweigh the current detractors, but the system is explicitly least certain where {strategy.get('where_least_certain') or 'cross-domain disagreement is highest'}.",
             "This remains a description of the platform's computed state, not personalized investment advice.",
         ]
@@ -882,29 +929,34 @@ def build_analysis_report(
             "strategy.final_signal",
             "strategy.component_scores",
             "feature_factor_bundle.composite_intelligence",
+            "feature_factor_bundle.proprietary_scores",
+            "feature_factor_bundle.domain_agreement",
         ],
         "technical_analysis": [
             "data_bundle.market_price_volume",
             "data_bundle.technical_market_structure",
             "key_features.ret_1d/ret_5d/ret_21d",
+            "feature_factor_bundle.factor_groups.market_structure",
         ],
         "fundamental_analysis": [
             "data_bundle.fundamental_filing",
             "feature_factor_bundle.fundamental_intelligence",
         ],
         "statistical_analysis": [
-            "feature_factor_bundle.multi_horizon_price_momentum",
-            "feature_factor_bundle.volatility_risk_microstructure",
-            "feature_factor_bundle.regime_engine",
+            "feature_factor_bundle.factor_groups.market_structure",
+            "feature_factor_bundle.fragility_intelligence",
+            "feature_factor_bundle.regime_intelligence",
+            "feature_factor_bundle.domain_agreement",
         ],
         "sentiment_analysis": [
             "data_bundle.sentiment_narrative_flow",
-            "feature_factor_bundle.sentiment_intelligence",
+            "feature_factor_bundle.sentiment_narrative_intelligence",
         ],
         "macro_geopolitical_analysis": [
             "data_bundle.macro_cross_asset",
             "data_bundle.geopolitical_policy",
             "data_bundle.relative_context",
+            "feature_factor_bundle.macro_alignment",
         ],
         "strategy_view": [
             "strategy.base_case",
@@ -941,6 +993,13 @@ def build_analysis_report(
         "data_bundle": data_bundle,
         "domain_availability": domain_availability,
         "feature_factor_bundle": feature_factor_bundle,
+        "proprietary_scores": proprietary_scores,
+        "factor_groups": factor_groups,
+        "regime_intelligence": regime_intelligence,
+        "fragility_intelligence": fragility_intelligence,
+        "domain_agreement": domain_agreement,
+        "conviction_components": conviction_components,
+        "opportunity_quality_components": opportunity_quality_components,
         "strategy": strategy,
         "why_this_signal": why_signal,
         "top_positive_drivers": why_signal["top_positive_drivers"],

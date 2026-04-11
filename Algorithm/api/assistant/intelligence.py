@@ -16,6 +16,7 @@ from api.assistant.coverage import (
     classify_horizon_coverage,
 )
 from api.assistant import data_fabric
+from api.assistant.phase3 import build_feature_factor_bundle as build_phase3_feature_factor_bundle
 
 
 ANALYSIS_JOB_KIND = "analysis_job_context"
@@ -598,12 +599,41 @@ def _market_domain(
     gap_pct = _pct_change(latest_open, prev_close)
     volume_anomaly = _ratio(latest_volume, avg_volume_20)
     realized_vol_5d = _realized_vol(close_values, 5)
+    realized_vol_10d = _realized_vol(close_values, 10)
     realized_vol_21d = _realized_vol(close_values, 21) or _safe_float(key_features.get("vol_21d"))
     realized_vol_63d = _realized_vol(close_values, 63) or _safe_float(key_features.get("vol_63d"))
+    realized_vol_126d = _realized_vol(close_values, 126)
+    realized_vol_252d = _realized_vol(close_values, 252)
     atr_pct = _first_available(_safe_float(key_features.get("atr_pct")), _atr_pct_from_bars(daily_bars))
+    ret_3d = _pct_change(latest_close, close_values[-4]) if len(close_values) >= 4 else None
     ret_63d = _pct_change(latest_close, close_values[-64]) if len(close_values) >= 64 else None
     ret_126d = _pct_change(latest_close, close_values[-127]) if len(close_values) >= 127 else None
     ret_252d = _pct_change(latest_close, close_values[-253]) if len(close_values) >= 253 else None
+    returns = _to_returns(close_values)
+    positive_day_ratio_10d = (
+        sum(1 for value in returns[-10:] if value > 0) / 10.0 if len(returns) >= 10 else None
+    )
+    positive_day_ratio_21d = (
+        sum(1 for value in returns[-21:] if value > 0) / 21.0 if len(returns) >= 21 else None
+    )
+    positive_day_ratio_63d = (
+        sum(1 for value in returns[-63:] if value > 0) / 63.0 if len(returns) >= 63 else None
+    )
+    return_dispersion_10d = _std(returns[-10:]) if len(returns) >= 10 else None
+    return_dispersion_21d = _std(returns[-21:]) if len(returns) >= 21 else None
+    return_dispersion_63d = _std(returns[-63:]) if len(returns) >= 63 else None
+    downside_21d = [value for value in returns[-21:] if value < 0] if len(returns) >= 21 else []
+    upside_21d = [value for value in returns[-21:] if value > 0] if len(returns) >= 21 else []
+    downside_63d = [value for value in returns[-63:] if value < 0] if len(returns) >= 63 else []
+    upside_63d = [value for value in returns[-63:] if value > 0] if len(returns) >= 63 else []
+    downside_vol_21d = _std(downside_21d) if len(downside_21d) >= 2 else None
+    upside_vol_21d = _std(upside_21d) if len(upside_21d) >= 2 else None
+    downside_vol_63d = _std(downside_63d) if len(downside_63d) >= 2 else None
+    upside_vol_63d = _std(upside_63d) if len(upside_63d) >= 2 else None
+    downside_asymmetry_21d = _ratio(downside_vol_21d, upside_vol_21d)
+    downside_asymmetry_63d = _ratio(downside_vol_63d, upside_vol_63d)
+    maxdd_21d = _max_drawdown(close_values[-21:]) if len(close_values) >= 21 else None
+    maxdd_126d = _max_drawdown(close_values[-126:]) if len(close_values) >= 126 else None
     support_window_days = min(len(low_values), 21) if len(low_values) >= 5 else 0
     breakout_window_days = min(len(high_values), 63) if len(high_values) >= 21 else 0
     support_21d = (
@@ -620,6 +650,12 @@ def _market_domain(
     if support_21d is not None and resistance_21d is not None:
         range_21d = resistance_21d - support_21d
     compression_ratio = _ratio(range_21d, latest_close) if latest_close else None
+    range_position_21d = None
+    if range_21d not in (None, 0) and latest_close is not None and support_21d is not None:
+        range_position_21d = (latest_close - support_21d) / range_21d
+    range_expansion_ratio = None
+    if realized_vol_5d is not None and realized_vol_21d not in (None, 0):
+        range_expansion_ratio = realized_vol_5d / realized_vol_21d
     breakout_distance_63d = None
     if latest_close is not None and breakout_window_days:
         trailing_high = max(
@@ -628,6 +664,34 @@ def _market_domain(
         )
         if trailing_high is not None and trailing_high != 0:
             breakout_distance_63d = latest_close / trailing_high - 1.0
+    abs_gap_mean_10d = None
+    gap_instability_10d = None
+    if len(open_values) >= 11 and len(close_values) >= 11:
+        gaps = []
+        for idx in range(len(open_values) - 10, len(open_values)):
+            open_value = open_values[idx]
+            prior_close = close_values[idx - 1] if idx > 0 else None
+            gap_value = _pct_change(open_value, prior_close)
+            if gap_value is not None:
+                gaps.append(abs(gap_value))
+        abs_gap_mean_10d = _mean(gaps)
+        gap_instability_10d = _ratio(abs_gap_mean_10d, atr_pct)
+    up_down_volume_ratio_21d = None
+    if len(returns) >= 21 and len(volume_values) >= 22:
+        up_volume = 0.0
+        down_volume = 0.0
+        for offset, ret_value in enumerate(returns[-21:], start=len(volume_values) - 21):
+            volume_value = volume_values[offset]
+            if volume_value is None:
+                continue
+            if ret_value > 0:
+                up_volume += float(volume_value)
+            elif ret_value < 0:
+                down_volume += float(volume_value)
+        up_down_volume_ratio_21d = _ratio(up_volume, down_volume or 1.0)
+    vol_of_vol_proxy = None
+    if realized_vol_5d is not None and realized_vol_21d not in (None, 0):
+        vol_of_vol_proxy = abs(realized_vol_5d - realized_vol_21d) / realized_vol_21d
 
     latest_bar_ingested = daily_bars[-1].get("ingested_at") if daily_bars else freshness.get("bars_updated_at")
     intraday_ingested = intraday_bars[-1].get("ingested_at") if intraday_bars else None
@@ -661,6 +725,7 @@ def _market_domain(
         "previous_close": prev_close,
         "latest_open": latest_open,
         "day_return": day_return,
+        "ret_3d": ret_3d,
         "ret_5d": ret_5d,
         "ret_10d": _pct_change(latest_close, close_values[-11]) if len(close_values) >= 11 else None,
         "ret_21d": ret_21d,
@@ -668,15 +733,39 @@ def _market_domain(
         "ret_126d": ret_126d,
         "ret_252d": ret_252d,
         "realized_vol_5d": realized_vol_5d,
+        "realized_vol_10d": realized_vol_10d,
         "realized_vol_21d": realized_vol_21d,
         "realized_vol_63d": realized_vol_63d,
+        "realized_vol_126d": realized_vol_126d,
+        "realized_vol_252d": realized_vol_252d,
         "atr_pct": atr_pct,
         "gap_pct": gap_pct,
         "volume_anomaly": volume_anomaly,
+        "positive_day_ratio_10d": positive_day_ratio_10d,
+        "positive_day_ratio_21d": positive_day_ratio_21d,
+        "positive_day_ratio_63d": positive_day_ratio_63d,
+        "return_dispersion_10d": return_dispersion_10d,
+        "return_dispersion_21d": return_dispersion_21d,
+        "return_dispersion_63d": return_dispersion_63d,
+        "downside_vol_21d": downside_vol_21d,
+        "upside_vol_21d": upside_vol_21d,
+        "downside_vol_63d": downside_vol_63d,
+        "upside_vol_63d": upside_vol_63d,
+        "downside_asymmetry_21d": downside_asymmetry_21d,
+        "downside_asymmetry_63d": downside_asymmetry_63d,
+        "maxdd_21d": maxdd_21d,
+        "maxdd_63d": _max_drawdown(close_values[-63:]) if len(close_values) >= 63 else None,
+        "maxdd_126d": maxdd_126d,
+        "gap_instability_10d": gap_instability_10d,
+        "abs_gap_mean_10d": abs_gap_mean_10d,
+        "up_down_volume_ratio_21d": up_down_volume_ratio_21d,
+        "vol_of_vol_proxy": vol_of_vol_proxy,
         "support_21d": support_21d,
         "resistance_21d": resistance_21d,
         "support_window_days": support_window_days or None,
         "compression_ratio": compression_ratio,
+        "range_position_21d": range_position_21d,
+        "range_expansion_ratio": range_expansion_ratio,
         "breakout_distance_63d": breakout_distance_63d,
         "breakout_window_days": breakout_window_days or None,
         "recent_bars": daily_bars[-5:],
@@ -726,6 +815,14 @@ def _technical_domain(
     ma_21 = _moving_average(close_values, 21)
     ma_63 = _moving_average(close_values, 63)
     ma_126 = _moving_average(close_values, 126)
+    ma_stack_alignment = None
+    if latest_close is not None and ma_10 is not None and ma_21 is not None and ma_63 is not None:
+        if latest_close > ma_10 > ma_21 > ma_63:
+            ma_stack_alignment = 1.0
+        elif latest_close < ma_10 < ma_21 < ma_63:
+            ma_stack_alignment = -1.0
+        else:
+            ma_stack_alignment = 0.0
     slope_21_direct = _linear_slope(close_values[-21:])
     slope_63_direct = _linear_slope(close_values[-63:])
     slope_21 = slope_21_direct or _safe_float(key_features.get("trend_slope_21d"))
@@ -779,6 +876,7 @@ def _technical_domain(
         "trend_slope_21d": slope_21,
         "trend_slope_63d": slope_63,
         "trend_curvature": trend_curvature,
+        "ma_stack_alignment": ma_stack_alignment,
         "mean_reversion_gap": mean_reversion_gap,
         "breakout_state": breakout_state,
         "volume_price_alignment": volume_price_alignment,
@@ -1125,6 +1223,7 @@ def _relative_context_domain(
     as_of_date: dt.date,
     symbol_meta: Dict[str, Any],
     market_domain: Dict[str, Any],
+    macro_domain: Dict[str, Any],
     key_features: Dict[str, Any],
 ) -> Dict[str, Any]:
     sector = symbol_meta.get("sector")
@@ -1141,6 +1240,31 @@ def _relative_context_domain(
         wins = sum(1 for value in peer_returns if value <= ret_21d)
         percentile = wins / len(peer_returns)
     peer_dispersion = _std(peer_returns)
+    benchmark_ret_21d = _safe_float(macro_domain.get("benchmark_ret_21d"))
+    benchmark_proxy = macro_domain.get("benchmark_proxy")
+    benchmark_relative = (
+        ret_21d - benchmark_ret_21d
+        if ret_21d is not None and benchmark_ret_21d is not None
+        else None
+    )
+    relative_move_summary = {
+        "vs_benchmark_ret_21d": benchmark_relative,
+        "vs_sector_ret_21d": rel_ret,
+        "market_relative_note": (
+            f"The stock is outperforming {benchmark_proxy} on a 21-day basis."
+            if benchmark_relative is not None and benchmark_proxy and benchmark_relative > 0
+            else f"The stock is lagging {benchmark_proxy} on a 21-day basis."
+            if benchmark_relative is not None and benchmark_proxy and benchmark_relative < 0
+            else None
+        ),
+        "sector_relative_note": (
+            "The stock is outperforming the local sector comparison set."
+            if rel_ret is not None and rel_ret > 0
+            else "The stock is lagging the local sector comparison set."
+            if rel_ret is not None and rel_ret < 0
+            else None
+        ),
+    }
     relative_note = (
         "Peer-relative context is currently unavailable because no same-sector comparison set was found."
         if not peers
@@ -1156,7 +1280,10 @@ def _relative_context_domain(
         "relative_ret_21d": rel_ret,
         "relative_momentum": rel_mom,
         "relative_strength_percentile": percentile,
+        "benchmark_proxy": benchmark_proxy,
+        "benchmark_relative_strength": benchmark_relative,
         "peer_dispersion_score": peer_dispersion,
+        "relative_move_summary": relative_move_summary,
         "peer_snapshot": peers[:8],
         "meta": {
             "coverage_score": _clamp(_ratio(len(peers), 8), 0.0, 1.0),
@@ -1296,7 +1423,7 @@ def build_normalized_data_bundle(
     macro_domain = _macro_cross_asset_domain(symbol_meta, as_of_date, job_context, market_domain)
     geopolitical_domain = _geopolitical_domain(recent_news)
     relative_domain = _relative_context_domain(
-        symbol, as_of_date, symbol_meta, market_domain, key_features
+        symbol, as_of_date, symbol_meta, market_domain, macro_domain, key_features
     )
     quality_domain = _quality_provenance_domain(
         freshness,
@@ -1365,323 +1492,9 @@ def build_feature_factor_bundle(
     key_features: Dict[str, Any],
     quality: Dict[str, Any],
 ) -> Dict[str, Any]:
-    market = data_bundle.get("market_price_volume") or {}
-    technical = data_bundle.get("technical_market_structure") or {}
-    fundamentals = data_bundle.get("fundamental_filing") or {}
-    sentiment = data_bundle.get("sentiment_narrative_flow") or {}
-    macro = data_bundle.get("macro_cross_asset") or {}
-    geopolitical = data_bundle.get("geopolitical_policy") or {}
-    relative = data_bundle.get("relative_context") or {}
-    quality_domain = data_bundle.get("quality_provenance") or {}
-    fundamental_metrics = fundamentals.get("normalized_metrics") or {}
-    fundamental_quality = fundamentals.get("quality_proxies") or {}
-    latest_quarter = fundamentals.get("latest_quarter") or {}
-
-    price_momentum = {
-        "ret_1d": _safe_float(key_features.get("ret_1d")),
-        "ret_5d": _safe_float(key_features.get("ret_5d")),
-        "ret_10d": market.get("ret_10d"),
-        "ret_21d": _safe_float(key_features.get("ret_21d")),
-        "ret_63d": market.get("ret_63d"),
-        "ret_126d": market.get("ret_126d"),
-        "ret_252d": market.get("ret_252d"),
-        "trend_slope_21d": technical.get("trend_slope_21d"),
-        "trend_slope_63d": technical.get("trend_slope_63d"),
-        "trend_curvature": technical.get("trend_curvature"),
-        "momentum_consistency_score": _score_100(
-            _mean(
-                [
-                    1.0 if (value or 0.0) > 0 else 0.0
-                    for value in [
-                        _safe_float(key_features.get("ret_1d")),
-                        _safe_float(key_features.get("ret_5d")),
-                        market.get("ret_10d"),
-                        _safe_float(key_features.get("ret_21d")),
-                        market.get("ret_63d"),
-                    ]
-                    if value is not None
-                ]
-            ),
-            low=0.0,
-            high=1.0,
-        ),
-        "breakout_follow_through_score": _score_100(
-            _ratio(
-                (market.get("breakout_distance_63d") or 0.0) + max(technical.get("mean_reversion_gap") or 0.0, 0.0),
-                max(market.get("atr_pct") or 0.05, 0.01),
-            ),
-            low=-2.0,
-            high=2.0,
-        ),
-        "exhaustion_score": _score_100(
-            (market.get("ret_5d") or 0.0) - (market.get("ret_21d") or 0.0) - (market.get("atr_pct") or 0.0),
-            low=-0.2,
-            high=0.2,
-        ),
-    }
-
-    vol_risk = {
-        "realized_vol_5d": market.get("realized_vol_5d"),
-        "realized_vol_21d": market.get("realized_vol_21d"),
-        "realized_vol_63d": market.get("realized_vol_63d"),
-        "vol_of_vol": _ratio(
-            (market.get("realized_vol_5d") or 0.0) - (market.get("realized_vol_21d") or 0.0),
-            max(market.get("realized_vol_21d") or 0.01, 0.01),
-        ),
-        "atr_normalization": _ratio(market.get("atr_pct"), market.get("realized_vol_21d")),
-        "gap_instability": _score_100(abs(market.get("gap_pct") or 0.0), low=0.0, high=0.08),
-        "downside_asymmetry": _score_100(
-            abs(min(market.get("ret_21d") or 0.0, 0.0)) - max(market.get("ret_21d") or 0.0, 0.0),
-            low=-0.2,
-            high=0.2,
-        ),
-        "stress_reactivity": _score_100(
-            (macro.get("stress_overlay") or 0.0) + (geopolitical.get("exogenous_event_score") or 0.0),
-            low=-0.1,
-            high=0.25,
-        ),
-    }
-
-    regime_label = technical.get("regime_label") or "unknown"
-    if (market.get("realized_vol_21d") or 0.0) >= 0.45:
-        regime_label = "high_vol"
-    elif (market.get("compression_ratio") or 1.0) <= 0.05:
-        regime_label = "squeeze"
-    elif technical.get("breakout_state") in {"transition_higher", "transition_lower"}:
-        regime_label = "transition"
-    elif technical.get("breakout_state") in {"trend_extension", "downtrend_extension"}:
-        regime_label = "trend"
-    else:
-        regime_label = "chop"
-
-    regime_engine = {
-        "regime_label": regime_label,
-        "regime_confidence": _score_100(
-            abs(technical.get("trend_slope_63d") or 0.0) + abs(technical.get("trend_curvature") or 0.0),
-            low=0.0,
-            high=0.5,
-        ),
-        "regime_instability": _score_100(
-            (abs(technical.get("trend_curvature") or 0.0) * 10.0)
-            + ((vol_risk.get("gap_instability") or 50.0) / 100.0),
-            low=0.0,
-            high=2.0,
-        ),
-        "regime_transition_probability": _score_100(
-            abs(technical.get("trend_curvature") or 0.0) + abs((market.get("gap_pct") or 0.0) * 3.0),
-            low=0.0,
-            high=0.5,
-        ),
-    }
-
-    sentiment_intelligence = {
-        "sentiment_level": sentiment.get("sentiment_score"),
-        "sentiment_trend": sentiment.get("sentiment_trend"),
-        "sentiment_confidence": sentiment.get("sentiment_confidence"),
-        "novelty_ratio": sentiment.get("novelty_ratio"),
-        "novelty_score": sentiment.get("novelty_score"),
-        "persistence_score": sentiment.get("persistence_score"),
-        "narrative_concentration": sentiment.get("narrative_concentration"),
-        "attention_crowding": sentiment.get("attention_crowding"),
-        "attention_score": sentiment.get("attention_score"),
-        "disagreement_score": sentiment.get("disagreement_score"),
-        "hype_to_price_divergence": sentiment.get("hype_price_divergence"),
-        "event_intensity": _first_available(
-            ((sentiment.get("event_overlay") or {}).get("gdelt_article_count")),
-            geopolitical.get("event_intensity_score"),
-        ),
-    }
-
-    fundamental_intelligence = {
-        "growth_quality": _first_available(
-            _score_100(
-                _first_available(
-                    fundamental_metrics.get("revenue_growth_yoy"),
-                    fundamentals.get("revenue_growth_yoy"),
-                ),
-                low=-0.3,
-                high=0.4,
-            ),
-            fundamental_quality.get("business_quality_durability"),
-        ),
-        "profitability_quality": _first_available(
-            fundamental_quality.get("profitability_strength"),
-            _score_100(
-                _mean(
-                    [
-                        fundamental_metrics.get("operating_margin"),
-                        fundamental_metrics.get("net_margin"),
-                        latest_quarter.get("op_margin"),
-                    ]
-                ),
-                low=-0.1,
-                high=0.4,
-            ),
-        ),
-        "balance_sheet_resilience": _first_available(
-            fundamental_quality.get("balance_sheet_resilience"),
-            _score_100(
-                _mean(
-                    [
-                        fundamental_metrics.get("current_ratio"),
-                        1.0 - min((fundamental_metrics.get("debt_to_equity") or 3.0), 3.0) / 3.0,
-                    ]
-                ),
-                low=0.0,
-                high=2.0,
-            ),
-            quality.get("fundamentals_ok") is True and 70.0 or 35.0,
-        ),
-        "cash_flow_durability": _first_available(
-            fundamental_quality.get("cash_flow_durability"),
-            _score_100(
-                _first_available(
-                    fundamental_metrics.get("positive_fcf_ratio"),
-                    fundamentals.get("positive_fcf_ratio"),
-                ),
-                low=0.0,
-                high=1.0,
-            ),
-        ),
-        "accounting_quality": _first_available(
-            fundamental_quality.get("reporting_quality_proxy"),
-            _score_100(
-                _first_available(
-                    fundamentals.get("margin_stability"),
-                    fundamental_metrics.get("operating_margin_stability"),
-                    fundamental_metrics.get("gross_margin_stability"),
-                ),
-                low=0.0,
-                high=100.0,
-            ),
-        ),
-        "capital_efficiency_proxy": _score_100(
-            _mean(
-                [
-                    fundamental_metrics.get("gross_margin"),
-                    fundamental_metrics.get("return_on_equity"),
-                ]
-            ),
-            low=0.0,
-            high=0.8,
-        ),
-        "filing_recency_drift": _first_available(
-            fundamental_quality.get("filing_recency_score"),
-            _score_100(
-                1.0 - min((fundamentals.get("filing_recency_days") or 365), 365) / 365.0,
-                low=0.0,
-                high=1.0,
-            ),
-        ),
-    }
-
-    macro_sensitivity = {
-        "macro_alignment_score": macro.get("macro_alignment_score"),
-        "macro_stress_fragility": _score_100(
-            (macro.get("stress_overlay") or 0.0) + (geopolitical.get("exogenous_event_score") or 0.0),
-            low=-0.05,
-            high=0.25,
-        ),
-        "risk_on_score": _score_100(macro.get("risk_on_score"), low=-0.08, high=0.08),
-        "geopolitical_stress_score": _score_100(geopolitical.get("exogenous_event_score"), low=0.0, high=1.0),
-        "liquidity_conditions_score": _first_available(
-            ((macro.get("liquidity_context") or {}).get("conditions_score")),
-            _score_100(macro.get("stress_overlay"), low=-0.05, high=0.1),
-        ),
-        "credit_context_score": _score_100(
-            _first_available(
-                ((macro.get("credit_context") or {}).get("latest")),
-                ((macro.get("fred_series") or {}).get("credit") or {}).get("latest"),
-            ),
-            low=0.0,
-            high=6.0,
-        ),
-    }
-
-    relative_peer = {
-        "sector_relative_momentum": _score_100(relative.get("relative_momentum"), low=-0.4, high=0.4),
-        "market_relative_behavior": _score_100(relative.get("relative_ret_21d"), low=-0.3, high=0.3),
-        "relative_strength_percentile": _score_100(relative.get("relative_strength_percentile"), low=0.0, high=1.0),
-        "dispersion_score": _score_100(relative.get("peer_dispersion_score"), low=0.0, high=0.25),
-        "peer_divergence_score": _score_100(abs(relative.get("relative_ret_21d") or 0.0), low=0.0, high=0.25),
-        "vs_benchmark_ret_21d": ((relative.get("relative_move_summary") or {}).get("vs_benchmark_ret_21d")),
-        "vs_sector_ret_21d": ((relative.get("relative_move_summary") or {}).get("vs_sector_ret_21d")),
-    }
-
-    market_structure_integrity = _mean(
-        [
-            price_momentum.get("momentum_consistency_score"),
-            _score_100(technical.get("volume_price_alignment"), low=-0.2, high=0.2),
-            100.0 - (vol_risk.get("gap_instability") or 50.0),
-        ]
+    return build_phase3_feature_factor_bundle(
+        data_bundle=data_bundle,
+        signal=signal,
+        key_features=key_features,
+        quality=quality,
     )
-    narrative_crowding_index = _mean(
-        [
-            _score_100(sentiment.get("attention_crowding"), low=0.5, high=3.0),
-            _score_100(sentiment.get("narrative_concentration"), low=0.1, high=0.8),
-            _score_100(abs(sentiment.get("hype_price_divergence") or 0.0), low=0.0, high=0.4),
-        ]
-    )
-    regime_stability_score = _mean(
-        [
-            regime_engine.get("regime_confidence"),
-            100.0 - (regime_engine.get("regime_instability") or 50.0),
-        ]
-    )
-    fundamental_durability_score = _mean(
-        [
-            fundamental_intelligence.get("growth_quality"),
-            fundamental_intelligence.get("profitability_quality"),
-            fundamental_intelligence.get("cash_flow_durability"),
-            fundamental_intelligence.get("accounting_quality"),
-            fundamental_intelligence.get("filing_recency_drift"),
-        ]
-    )
-    cross_domain_conviction = _mean(
-        [
-            _score_100(_safe_float(signal.get("confidence")), low=0.0, high=1.0),
-            market_structure_integrity,
-            regime_stability_score,
-            macro_sensitivity.get("macro_alignment_score"),
-            relative_peer.get("relative_strength_percentile"),
-        ]
-    )
-    signal_fragility_index = _mean(
-        [
-            vol_risk.get("gap_instability"),
-            macro_sensitivity.get("macro_stress_fragility"),
-            narrative_crowding_index,
-            _score_100(_safe_float(quality_domain.get("missingness")), low=0.0, high=0.25),
-        ]
-    )
-    opportunity_quality = _mean(
-        [
-            price_momentum.get("momentum_consistency_score"),
-            fundamental_durability_score,
-            cross_domain_conviction,
-            100.0 - (signal_fragility_index or 50.0),
-        ]
-    )
-
-    composite_intelligence = {
-        "Market Structure Integrity Score": market_structure_integrity,
-        "Narrative Crowding Index": narrative_crowding_index,
-        "Regime Stability Score": regime_stability_score,
-        "Macro Alignment Score": macro_sensitivity.get("macro_alignment_score"),
-        "Fundamental Durability Score": fundamental_durability_score,
-        "Cross-Domain Conviction Score": cross_domain_conviction,
-        "Signal Fragility Index": signal_fragility_index,
-        "Opportunity Quality Score": opportunity_quality,
-    }
-
-    return {
-        "multi_horizon_price_momentum": price_momentum,
-        "volatility_risk_microstructure": vol_risk,
-        "regime_engine": regime_engine,
-        "sentiment_intelligence": sentiment_intelligence,
-        "fundamental_intelligence": fundamental_intelligence,
-        "macro_sensitivity": macro_sensitivity,
-        "relative_peer": relative_peer,
-        "composite_intelligence": composite_intelligence,
-        "coverage_intelligence": data_bundle.get("domain_availability") or {},
-    }

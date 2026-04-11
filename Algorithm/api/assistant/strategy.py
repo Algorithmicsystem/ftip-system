@@ -75,6 +75,7 @@ def build_strategy_artifact(
     fundamentals_factor = feature_factor_bundle.get("fundamental_intelligence") or {}
     macro = feature_factor_bundle.get("macro_sensitivity") or {}
     relative = feature_factor_bundle.get("relative_peer") or {}
+    domain_agreement = feature_factor_bundle.get("domain_agreement") or {}
     composite = feature_factor_bundle.get("composite_intelligence") or {}
 
     base_action = str(signal.get("action") or "HOLD").upper()
@@ -86,58 +87,79 @@ def build_strategy_artifact(
     trend_score = _clamp(
         0.45 * _scaled_score(price.get("momentum_consistency_score"))
         + 0.35 * _scaled_score(composite.get("Market Structure Integrity Score"))
-        + 0.20 * _scaled_score(relative.get("relative_strength_percentile")),
+        + 0.10 * _scaled_score(relative.get("relative_strength_percentile"))
+        + 0.10 * _scaled_score(price.get("directional_persistence_score")),
         -1.0,
         1.0,
     )
-    mean_reversion_gap = _safe_float(technical.get("mean_reversion_gap")) or 0.0
     mean_reversion_score = _clamp(
-        0.50 * (-_scaled_score(price.get("exhaustion_score")))
-        + 0.50 * (-mean_reversion_gap),
+        0.60 * (-_scaled_score(price.get("reversal_pressure_score") or price.get("reversal_pressure_proxy")))
+        + 0.40 * (-_scaled_score(price.get("exhaustion_score"))),
         -1.0,
         1.0,
     )
     sentiment_score = _clamp(
-        0.60 * (_safe_float(sentiment_factor.get("sentiment_level")) or 0.0)
-        + 0.20 * (_safe_float(sentiment_factor.get("sentiment_trend")) or 0.0)
-        - 0.20 * _scaled_score(composite.get("Narrative Crowding Index")),
+        0.55 * _scaled_score(sentiment_factor.get("sentiment_direction_score"))
+        + 0.20 * (_safe_float(sentiment_factor.get("sentiment_level")) or 0.0)
+        + 0.10 * (_safe_float(sentiment_factor.get("sentiment_trend")) or 0.0)
+        - 0.15 * _scaled_score(composite.get("Narrative Crowding Index")),
         -1.0,
         1.0,
     )
     macro_score = _clamp(
-        0.60 * _scaled_score(macro.get("Macro Alignment Score") or macro.get("macro_alignment_score"))
-        - 0.40 * _scaled_score(macro.get("macro_stress_fragility")),
+        0.55 * _scaled_score(macro.get("Macro Alignment Score") or macro.get("macro_alignment_score"))
+        + 0.20 * _scaled_score(macro.get("growth_alignment_score"))
+        - 0.25 * _scaled_score(macro.get("macro_conflict_score"))
+        - 0.20 * _scaled_score(macro.get("macro_stress_fragility")),
         -1.0,
         1.0,
     )
     quality_score = _clamp(
-        0.50 * _scaled_score(composite.get("Fundamental Durability Score"))
-        + 0.50 * _scaled_score(composite.get("Opportunity Quality Score")),
+        0.55 * _scaled_score(composite.get("Fundamental Durability Score"))
+        + 0.45 * _scaled_score(composite.get("Opportunity Quality Score")),
         -1.0,
         1.0,
     )
-    fragility_veto = _clamp(-_scaled_score(composite.get("Signal Fragility Index")), -1.0, 1.0)
+    agreement_score = _clamp(
+        0.60 * _scaled_score(domain_agreement.get("domain_agreement_score"))
+        - 0.40 * _scaled_score(domain_agreement.get("domain_conflict_score")),
+        -1.0,
+        1.0,
+    )
+    fragility_veto = _clamp(
+        -0.75 * _scaled_score(composite.get("Signal Fragility Index"))
+        - 0.25 * _scaled_score(domain_agreement.get("domain_conflict_score")),
+        -1.0,
+        1.0,
+    )
 
     weights = {
-        "trend_following": 0.28,
-        "mean_reversion": 0.12,
-        "sentiment_aware": 0.14,
-        "macro_alignment": 0.14,
-        "quality_fundamental": 0.18,
+        "trend_following": 0.24,
+        "mean_reversion": 0.10,
+        "sentiment_aware": 0.12,
+        "macro_alignment": 0.12,
+        "quality_fundamental": 0.16,
+        "domain_agreement": 0.12,
         "fragility_risk_veto": 0.14,
     }
-    if regime_label == "trend":
+    if regime_label in {"trend", "trending"}:
         weights["trend_following"] = 0.36
         weights["mean_reversion"] = 0.08
-    elif regime_label in {"chop", "squeeze"}:
+        weights["domain_agreement"] = 0.10
+    elif regime_label in {"chop", "choppy", "squeeze"}:
         weights["trend_following"] = 0.22
         weights["mean_reversion"] = 0.18
+        weights["domain_agreement"] = 0.10
     elif regime_label == "high_vol":
         weights["fragility_risk_veto"] = 0.22
         weights["trend_following"] = 0.24
+        weights["domain_agreement"] = 0.10
     elif regime_label == "transition":
         weights["macro_alignment"] = 0.18
         weights["fragility_risk_veto"] = 0.18
+        weights["domain_agreement"] = 0.14
+    total_weight = sum(weights.values()) or 1.0
+    weights = {label: weight / total_weight for label, weight in weights.items()}
 
     component_scores = {
         "trend_following": {"score": trend_score, "weight": weights["trend_following"]},
@@ -145,6 +167,7 @@ def build_strategy_artifact(
         "sentiment_aware": {"score": sentiment_score, "weight": weights["sentiment_aware"]},
         "macro_alignment": {"score": macro_score, "weight": weights["macro_alignment"]},
         "quality_fundamental": {"score": quality_score, "weight": weights["quality_fundamental"]},
+        "domain_agreement": {"score": agreement_score, "weight": weights["domain_agreement"]},
         "fragility_risk_veto": {"score": fragility_veto, "weight": weights["fragility_risk_veto"]},
     }
 
@@ -157,6 +180,7 @@ def build_strategy_artifact(
     negative_components = sum(1 for component in component_scores.values() if component["score"] < -0.15)
     if positive_components and negative_components:
         disagreement_penalty += 0.12
+    disagreement_penalty += ((_safe_float(domain_agreement.get("confidence_penalty_from_conflict")) or 0.0) / 100.0) * 0.22
     missingness = _safe_float(quality.get("missingness")) or 0.0
     disagreement_penalty += min(max(missingness, 0.0), 0.25)
 
@@ -200,6 +224,7 @@ def build_strategy_artifact(
         ("Sentiment-aware component", sentiment_score, "Blends sentiment level, trend, and crowding."),
         ("Macro-alignment component", macro_score, "Tests whether the setup aligns with cross-asset context instead of fighting it."),
         ("Quality/fundamental component", quality_score, "Rewards durability, filing recency, and business-quality proxies."),
+        ("Domain-agreement component", agreement_score, "Rewards multi-domain confirmation and penalizes cross-domain conflict."),
         ("Fragility/risk veto", fragility_veto, "Penalizes unstable, stale, or crowded setups."),
     ]
     top_contributors = [
@@ -216,6 +241,14 @@ def build_strategy_artifact(
     confidence_degraders: List[str] = []
     if disagreement_penalty > 0.1:
         confidence_degraders.append("Cross-domain components disagree enough to degrade conviction.")
+    if (_safe_float(domain_agreement.get("domain_conflict_score")) or 0.0) >= 60:
+        conflict_domains = [item.get("domain") for item in (domain_agreement.get("strongest_conflicting_domains") or [])]
+        if conflict_domains:
+            confidence_degraders.append(
+                "Strong conflicting domains are "
+                + ", ".join(str(domain) for domain in conflict_domains[:3])
+                + "."
+            )
     if freshness_penalty > 0.05:
         confidence_degraders.append("At least one evidence domain is stale or only marginally usable.")
     if missingness > 0.1:
@@ -274,7 +307,7 @@ def build_strategy_artifact(
         "downside_case": downside_case,
         "invalidation_conditions": invalidation_conditions,
         "where_least_certain": (
-            "The model is least certain where macro alignment, sentiment crowding, and quality/freshness penalties point in different directions."
+            "The model is least certain where macro alignment, sentiment crowding, fragility, and domain agreement point in different directions."
             if confidence_degraders
             else "The least-certain area is whether current momentum persists without becoming too crowded or fragile."
         ),

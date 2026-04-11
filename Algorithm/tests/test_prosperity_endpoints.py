@@ -253,10 +253,10 @@ def test_snapshot_run_with_insufficient_bars(
     failure = body["result"]["symbols_failed"][0]
     assert failure["status"] == "data_unavailable"
     assert failure["reason_code"] in {"INSUFFICIENT_BARS", "NO_DATA"}
-    assert failure["required_bars"] == 252
+    assert failure["required_bars"] == routes._bars_required(payload["lookback"])
     assert failure["available_bars"] == len(bars)
     assert failure["lookback_days"] == 5
-    assert failure["bars_required"] == 252
+    assert failure["bars_required"] == routes._bars_required(payload["lookback"])
     assert failure["bars_returned"] == len(bars)
     assert body["result"]["failure_summary"][failure["reason_code"]] == 1
 
