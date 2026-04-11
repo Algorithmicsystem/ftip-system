@@ -1344,6 +1344,16 @@ def build_normalized_data_bundle(
         **(merged_bundle.get("quality_provenance") or {}),
         "domain_availability": domain_availability,
     }
+    merged_bundle["normalized_domains"] = {
+        "market": merged_bundle.get("market_price_volume") or {},
+        "technical": merged_bundle.get("technical_market_structure") or {},
+        "fundamentals": merged_bundle.get("fundamental_filing") or {},
+        "news_sentiment_narrative": merged_bundle.get("sentiment_narrative_flow") or {},
+        "macro": merged_bundle.get("macro_cross_asset") or {},
+        "geopolitical": merged_bundle.get("geopolitical_policy") or {},
+        "cross_asset": merged_bundle.get("relative_context") or {},
+        "quality_provenance": merged_bundle.get("quality_provenance") or {},
+    }
     merged_bundle["raw_supporting_fields"]["external_data_fabric"] = overlay
     return merged_bundle
 
@@ -1467,11 +1477,19 @@ def build_feature_factor_bundle(
     sentiment_intelligence = {
         "sentiment_level": sentiment.get("sentiment_score"),
         "sentiment_trend": sentiment.get("sentiment_trend"),
+        "sentiment_confidence": sentiment.get("sentiment_confidence"),
         "novelty_ratio": sentiment.get("novelty_ratio"),
+        "novelty_score": sentiment.get("novelty_score"),
+        "persistence_score": sentiment.get("persistence_score"),
         "narrative_concentration": sentiment.get("narrative_concentration"),
         "attention_crowding": sentiment.get("attention_crowding"),
+        "attention_score": sentiment.get("attention_score"),
         "disagreement_score": sentiment.get("disagreement_score"),
         "hype_to_price_divergence": sentiment.get("hype_price_divergence"),
+        "event_intensity": _first_available(
+            ((sentiment.get("event_overlay") or {}).get("gdelt_article_count")),
+            geopolitical.get("event_intensity_score"),
+        ),
     }
 
     fundamental_intelligence = {
@@ -1566,6 +1584,18 @@ def build_feature_factor_bundle(
         ),
         "risk_on_score": _score_100(macro.get("risk_on_score"), low=-0.08, high=0.08),
         "geopolitical_stress_score": _score_100(geopolitical.get("exogenous_event_score"), low=0.0, high=1.0),
+        "liquidity_conditions_score": _first_available(
+            ((macro.get("liquidity_context") or {}).get("conditions_score")),
+            _score_100(macro.get("stress_overlay"), low=-0.05, high=0.1),
+        ),
+        "credit_context_score": _score_100(
+            _first_available(
+                ((macro.get("credit_context") or {}).get("latest")),
+                ((macro.get("fred_series") or {}).get("credit") or {}).get("latest"),
+            ),
+            low=0.0,
+            high=6.0,
+        ),
     }
 
     relative_peer = {
@@ -1574,6 +1604,8 @@ def build_feature_factor_bundle(
         "relative_strength_percentile": _score_100(relative.get("relative_strength_percentile"), low=0.0, high=1.0),
         "dispersion_score": _score_100(relative.get("peer_dispersion_score"), low=0.0, high=0.25),
         "peer_divergence_score": _score_100(abs(relative.get("relative_ret_21d") or 0.0), low=0.0, high=0.25),
+        "vs_benchmark_ret_21d": ((relative.get("relative_move_summary") or {}).get("vs_benchmark_ret_21d")),
+        "vs_sector_ret_21d": ((relative.get("relative_move_summary") or {}).get("vs_sector_ret_21d")),
     }
 
     market_structure_integrity = _mean(

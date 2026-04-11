@@ -185,6 +185,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["data_bundle"]["quality_provenance"]
     assert result["domain_availability"]
     assert result["data_bundle"]["quality_provenance"]["domain_availability"]
+    assert result["data_bundle"]["normalized_domains"]["news_sentiment_narrative"] == result["data_bundle"]["sentiment_narrative_flow"]
     assert result["feature_factor_bundle"]["composite_intelligence"]
     assert result["strategy"]["final_signal"]
     assert result["why_this_signal"]["top_positive_drivers"] is not None

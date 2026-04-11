@@ -243,6 +243,7 @@ def test_assistant_analyze_surfaces_enriched_data_fabric(monkeypatch):
         "sec_edgar",
         "finnhub_basic_financials",
     ]
+    assert data["data_bundle"]["normalized_domains"]["fundamentals"]["filing_recency_days"] == 45
     assert "Latest periodic filing is 10-Q dated 2024-01-01" in data["fundamental_analysis"]
     assert "external data fabric status" in data["evidence_provenance"]
 

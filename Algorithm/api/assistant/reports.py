@@ -440,19 +440,32 @@ def _sentiment_analysis_text(
     data_bundle: Dict[str, Any],
 ) -> str:
     sentiment_entry = _domain_availability(data_bundle, "sentiment")
-    tone_source = _first_available(sentiment.get("sentiment_score"), sentiment.get("aggregated_sentiment_bias"))
+    sentiment_summary = sentiment.get("sentiment_summary") or {}
+    tone_source = _first_available(
+        sentiment.get("sentiment_score"),
+        sentiment_summary.get("bias"),
+        sentiment.get("aggregated_sentiment_bias"),
+    )
+    tone_label = _first_available(sentiment_summary.get("tone_label"), _tone_label(tone_source))
     level_text = (
-        f"Headline tone reads {_tone_label(tone_source)} at {_fmt_num(tone_source, digits=2, signed=True)}."
+        f"Headline tone reads {tone_label} at {_fmt_num(tone_source, digits=2, signed=True)}, with sentiment confidence {_fmt_num(sentiment.get('sentiment_confidence'), digits=1, signed=False)} / 100."
         if tone_source is not None
         else None
     )
     flow_clauses = [
+        _metric_phrase("attention score", sentiment.get("attention_score"), formatter="num", digits=1, signed=False),
         _metric_phrase("attention crowding", sentiment.get("attention_crowding"), formatter="num", digits=2, signed=False),
-        _metric_phrase("novelty ratio", sentiment.get("novelty_ratio"), formatter="num", digits=2, signed=False),
-        _metric_phrase("disagreement score", sentiment.get("disagreement_score"), formatter="num", digits=2, signed=False),
+        _metric_phrase("novelty score", sentiment.get("novelty_score"), formatter="num", digits=1, signed=False),
+        _metric_phrase("persistence score", sentiment.get("persistence_score"), formatter="num", digits=1, signed=False),
+        _metric_phrase("contradiction score", sentiment.get("contradiction_score"), formatter="num", digits=2, signed=False),
         _metric_phrase("sentiment surprise", sentiment.get("sentiment_surprise"), formatter="num", digits=2),
         _metric_phrase("sentiment trend", sentiment.get("sentiment_trend"), formatter="num", digits=2),
     ]
+    source_mix = sentiment.get("source_mix") or []
+    source_mix_text = ", ".join(
+        f"{item.get('source')} ({item.get('count')})" for item in source_mix if item.get("source")
+    )
+    topic_clusters = sentiment.get("topic_clusters") or sentiment.get("top_narratives") or []
     return _join_sentences(
         [
             level_text or _coverage_note(sentiment_entry, "Sentiment"),
@@ -461,11 +474,16 @@ def _sentiment_analysis_text(
             else f"Headline flow currently spans {sentiment.get('headline_count') or 0} recent items."
             if sentiment.get("headline_count")
             else None,
-            f"News aggregation is drawing on {_fmt_list((sentiment.get('meta') or {}).get('sources') or sentiment.get('source_breakdown', {}).keys())}."
+            f"News aggregation is drawing on {source_mix_text}."
+            if source_mix_text
+            else f"News aggregation is drawing on {_fmt_list((sentiment.get('meta') or {}).get('sources') or sentiment.get('source_breakdown', {}).keys())}."
             if (sentiment.get("meta") or {}).get("sources") or sentiment.get("source_breakdown")
             else None,
-            f"Top narratives currently cluster around {_fmt_list(item.get('topic') for item in sentiment.get('top_narratives') or [])}."
-            if sentiment.get("top_narratives")
+            f"Dominant narrative clusters are {_fmt_list(item.get('topic') for item in topic_clusters)}, with thematic bucket counts {sentiment.get('topic_buckets') or {}}."
+            if topic_clusters or sentiment.get("topic_buckets")
+            else None,
+            f"GDELT event overlay is contributing {((sentiment.get('event_overlay') or {}).get('gdelt_article_count') or 0)} broader event articles with average tone {_fmt_num(((sentiment.get('event_overlay') or {}).get('gdelt_tone_average')), digits=2, signed=True)}."
+            if sentiment.get("event_overlay")
             else None,
             "Headline tone is available, but the system does not yet have enough density for a stable sentiment-level inference."
             if tone_source is None and sentiment.get("headline_count")
@@ -502,6 +520,7 @@ def _macro_geopolitical_analysis_text(
         (relative.get("benchmark_context") or {}).get("benchmark_vol_21d"),
     )
     macro_regime = _first_available(
+        ((macro.get("macro_regime_summary") or {}).get("regime")),
         (macro.get("macro_regime_context") or {}).get("regime"),
         macro.get("inferred_market_regime"),
     )
@@ -509,27 +528,46 @@ def _macro_geopolitical_analysis_text(
         geopolitical.get("exogenous_event_score"),
         geopolitical.get("event_intensity_score"),
     )
+    rates_context = macro.get("rates_context") or {}
+    inflation_context = macro.get("inflation_context") or {}
+    growth_context = macro.get("growth_context") or {}
+    liquidity_context = macro.get("liquidity_context") or {}
+    broad_market = relative.get("broad_market_context") or {}
+    sector_context = relative.get("sector_context") or {}
+    relative_summary = relative.get("relative_move_summary") or {}
+    macro_notes = macro.get("macro_alignment_notes") or []
     return _join_sentences(
         [
             f"Cross-asset context is anchored to {benchmark_symbol}, with benchmark 21-day return {_fmt_pct(benchmark_ret)} and benchmark volatility {_fmt_pct(benchmark_vol)}."
             if benchmark_symbol and (benchmark_ret is not None or benchmark_vol is not None)
             else _coverage_note(macro_entry, "Macro/cross-asset"),
-            f"The broader macro backdrop currently reads as {macro_regime}, with macro alignment score {_fmt_num(macro.get('macro_alignment_score'), digits=1)} / 100."
+            ((macro.get("macro_regime_summary") or {}).get("summary"))
+            if (macro.get("macro_regime_summary") or {}).get("summary")
+            else f"The broader macro backdrop currently reads as {macro_regime}, with macro alignment score {_fmt_num(macro.get('macro_alignment_score'), digits=1)} / 100."
             if macro_regime and macro.get("macro_alignment_score") is not None
             else f"Macro alignment score is {_fmt_num(macro.get('macro_alignment_score'), digits=1)} / 100."
             if macro.get("macro_alignment_score") is not None
             else f"The broader macro backdrop currently reads as {macro_regime}."
             if macro_regime
             else None,
+            f"Rates are {rates_context.get('direction') or 'unclear'}, inflation is {inflation_context.get('direction') or 'unclear'}, growth is {growth_context.get('interpretation') or growth_context.get('direction') or 'unclear'}, and liquidity conditions are {liquidity_context.get('regime') or 'unclear'}."
+            if rates_context or inflation_context or growth_context or liquidity_context
+            else None,
+            f"Broad market tone is {broad_market.get('risk_tone')} across the major benchmark basket, and sector context says {sector_context.get('coverage_note')}."
+            if broad_market or sector_context.get("coverage_note")
+            else None,
             macro_entry.get("data_quality_note")
             if macro_entry.get("coverage_status") in {"partial", "stale", "unavailable"}
             else None,
-            f"Geopolitical and policy sensitivity is registering at {_fmt_num(geo_score, digits=2, signed=False)} with category counts {geopolitical.get('category_counts') or geopolitical.get('event_buckets') or {}}."
+            f"Geopolitical and policy sensitivity is registering at {_fmt_num(geo_score, digits=2, signed=False)} with category counts {geopolitical.get('category_counts') or geopolitical.get('event_buckets') or {}} and relevance {geopolitical.get('relevance_label') or 'unclear'}."
             if geo_score is not None
             else _coverage_note(geopolitical_entry, "Geopolitical"),
             f"Peer-relative context versus {relative.get('sector') or 'the local comparison set'} is running at {_fmt_num(relative.get('relative_strength_percentile') * 100 if relative.get('relative_strength_percentile') is not None else None, digits=0, signed=False)} percentile strength."
             if relative.get("peer_count") and relative.get("relative_strength_percentile") is not None
             else _coverage_note(relative_entry, "Peer-relative"),
+            _fmt_list(macro_notes) if macro_notes else None,
+            relative_summary.get("market_relative_note"),
+            relative_summary.get("sector_relative_note"),
         ]
     )
 
@@ -625,6 +663,12 @@ def _evidence_provenance_text(
         for label, entry in domain_availability.items()
         if entry.get("fallback_used")
     ]
+    domain_confidence = quality.get("domain_confidence") or {}
+    confidence_text = ", ".join(
+        f"{label}={_fmt_num(value, digits=1, signed=False)}"
+        for label, value in domain_confidence.items()
+        if value is not None
+    )
     return _join_sentences(
         [
             f"Evidence provenance spans {_fmt_list(evidence.get('sources') or [])} plus normalized domains for market, technical, fundamentals, sentiment, macro/cross-asset, geopolitical, relative context, and quality.",
@@ -632,7 +676,10 @@ def _evidence_provenance_text(
             f"Domain source map is {quality.get('source_map') or {}}, and fallback logic was used in {_fmt_list(fallback_domains)}."
             if fallback_domains
             else f"Domain source map is {quality.get('source_map') or {}}.",
-            f"external data fabric status is {(data_bundle.get('external_data_fabric') or {}).get('status') or 'disabled'}, reason codes are {_fmt_list(reason_codes)}, and strategy components are {strategy_component_scores}.",
+            f"Domain confidence currently reads {confidence_text}."
+            if confidence_text
+            else None,
+            f"Provider notes are {_fmt_list(quality.get('provider_notes') or [])}, external data fabric status is {(data_bundle.get('external_data_fabric') or {}).get('status') or 'disabled'}, reason codes are {_fmt_list(reason_codes)}, and strategy components are {strategy_component_scores}.",
         ]
     )
 
