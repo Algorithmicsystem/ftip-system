@@ -81,6 +81,7 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "quality",
         "evidence",
         "data_bundle",
+        "domain_availability",
         "feature_factor_bundle",
         "strategy",
         "why_this_signal",

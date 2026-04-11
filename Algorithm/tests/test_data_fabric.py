@@ -250,7 +250,9 @@ def test_data_fabric_enriches_domains_with_provenance(monkeypatch):
     assert merged["fundamental_filing"]["normalized_metrics"]["operating_margin"] == 0.25
     assert merged["fundamental_filing"]["quality_proxies"]["reporting_quality_proxy"] == 82.0
     assert merged["sentiment_narrative_flow"]["source_breakdown"]["gnews"] == 1
+    assert merged["sentiment_narrative_flow"]["sentiment_level_proxy"] is not None
     assert merged["macro_cross_asset"]["macro_regime_context"]["regime"]
     assert merged["geopolitical_policy"]["event_buckets"]["policy_regulation"] >= 1
     assert merged["quality_provenance"]["source_map"]["fundamental_filing"]
     assert merged["market_price_volume"]["external_verification"]["source"] == "stooq"
+    assert merged["relative_context"]["benchmark_proxy"] == "XLK"

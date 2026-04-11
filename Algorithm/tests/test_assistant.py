@@ -183,6 +183,8 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["analysis_job"]["trace_id"]
     assert result["freshness_summary"]["overall_status"]
     assert result["data_bundle"]["quality_provenance"]
+    assert result["domain_availability"]
+    assert result["data_bundle"]["quality_provenance"]["domain_availability"]
     assert result["feature_factor_bundle"]["composite_intelligence"]
     assert result["strategy"]["final_signal"]
     assert result["why_this_signal"]["top_positive_drivers"] is not None

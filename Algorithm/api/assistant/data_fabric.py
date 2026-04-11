@@ -552,6 +552,7 @@ def _build_news_overlay(
 
     return {
         "headline_count": len(articles),
+        "sentiment_level_proxy": sentiment_bias,
         "attention_crowding": _attention_multiple(source_breakdown, len(articles)),
         "novelty_ratio": novelty_ratio,
         "disagreement_score": contradiction_score,
@@ -627,10 +628,16 @@ def _build_cross_asset_overlay(
         )
         provider_status[proxy] = status
         if payload:
-            proxy_snapshot[proxy] = _bars_snapshot(payload)
+            proxy_snapshot[proxy] = {
+                **_bars_snapshot(payload),
+                "symbol": proxy,
+            }
     benchmark_symbol = sector_proxy or "SPY"
     benchmark = proxy_snapshot.get(benchmark_symbol) or proxy_snapshot.get("SPY")
     return {
+        "benchmark_proxy": benchmark.get("symbol") if benchmark else None,
+        "benchmark_ret_21d": benchmark.get("ret_21d") if benchmark else None,
+        "benchmark_vol_21d": benchmark.get("vol_21d") if benchmark else None,
         "benchmark_context": {
             "benchmark_symbol": benchmark_symbol if benchmark else None,
             "benchmark_ret_21d": benchmark.get("ret_21d") if benchmark else None,

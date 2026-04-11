@@ -9,6 +9,12 @@ from collections import Counter
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from api import db
+from api.assistant.coverage import (
+    RETURN_HORIZON_REQUIREMENTS,
+    TECHNICAL_HORIZON_REQUIREMENTS,
+    availability_payload,
+    classify_horizon_coverage,
+)
 from api.assistant import data_fabric
 
 
@@ -220,6 +226,28 @@ def _moving_average(values: Sequence[Optional[float]], window: int) -> Optional[
     if len(values) < window:
         return None
     return _mean(values[-window:])
+
+
+def _atr_pct_from_bars(rows: Sequence[Dict[str, Any]], window: int = 14) -> Optional[float]:
+    if len(rows) < max(window, 2):
+        return None
+    true_ranges: List[float] = []
+    for index in range(max(len(rows) - window, 1), len(rows)):
+        row = rows[index]
+        prev_close = rows[index - 1].get("close") if index > 0 else None
+        high = row.get("high")
+        low = row.get("low")
+        if high is None or low is None:
+            continue
+        candidates = [high - low]
+        if prev_close is not None:
+            candidates.extend([abs(high - prev_close), abs(low - prev_close)])
+        true_ranges.append(max(candidates))
+    atr = _mean(true_ranges)
+    latest_close = rows[-1].get("close")
+    if atr is None or latest_close in (None, 0):
+        return None
+    return atr / latest_close
 
 
 def _normalize_title(title: str) -> str:
@@ -558,24 +586,46 @@ def _market_domain(
     latest_volume = volume_values[-1] if volume_values else None
     avg_volume_20 = _mean(volume_values[-20:])
 
+    day_return = _first_available(_pct_change(latest_close, prev_close), _safe_float(key_features.get("ret_1d")))
+    ret_5d = _first_available(
+        _pct_change(latest_close, close_values[-6]) if len(close_values) >= 6 else None,
+        _safe_float(key_features.get("ret_5d")),
+    )
+    ret_21d = _first_available(
+        _pct_change(latest_close, close_values[-22]) if len(close_values) >= 22 else None,
+        _safe_float(key_features.get("ret_21d")),
+    )
     gap_pct = _pct_change(latest_open, prev_close)
     volume_anomaly = _ratio(latest_volume, avg_volume_20)
     realized_vol_5d = _realized_vol(close_values, 5)
     realized_vol_21d = _realized_vol(close_values, 21) or _safe_float(key_features.get("vol_21d"))
     realized_vol_63d = _realized_vol(close_values, 63) or _safe_float(key_features.get("vol_63d"))
-    atr_pct = _safe_float(key_features.get("atr_pct"))
+    atr_pct = _first_available(_safe_float(key_features.get("atr_pct")), _atr_pct_from_bars(daily_bars))
     ret_63d = _pct_change(latest_close, close_values[-64]) if len(close_values) >= 64 else None
     ret_126d = _pct_change(latest_close, close_values[-127]) if len(close_values) >= 127 else None
     ret_252d = _pct_change(latest_close, close_values[-253]) if len(close_values) >= 253 else None
-    support_21d = min((value for value in low_values[-21:] if value is not None), default=None)
-    resistance_21d = max((value for value in high_values[-21:] if value is not None), default=None)
+    support_window_days = min(len(low_values), 21) if len(low_values) >= 5 else 0
+    breakout_window_days = min(len(high_values), 63) if len(high_values) >= 21 else 0
+    support_21d = (
+        min((value for value in low_values[-support_window_days:] if value is not None), default=None)
+        if support_window_days
+        else None
+    )
+    resistance_21d = (
+        max((value for value in high_values[-support_window_days:] if value is not None), default=None)
+        if support_window_days
+        else None
+    )
     range_21d = None
     if support_21d is not None and resistance_21d is not None:
         range_21d = resistance_21d - support_21d
     compression_ratio = _ratio(range_21d, latest_close) if latest_close else None
     breakout_distance_63d = None
-    if latest_close is not None and len(high_values) >= 63:
-        trailing_high = max((value for value in high_values[-63:] if value is not None), default=None)
+    if latest_close is not None and breakout_window_days:
+        trailing_high = max(
+            (value for value in high_values[-breakout_window_days:] if value is not None),
+            default=None,
+        )
         if trailing_high is not None and trailing_high != 0:
             breakout_distance_63d = latest_close / trailing_high - 1.0
 
@@ -583,15 +633,37 @@ def _market_domain(
     intraday_ingested = intraday_bars[-1].get("ingested_at") if intraday_bars else None
     bars_staleness = _days_stale(_iso_date(as_of_date), latest_bar_ingested)
     intraday_staleness = _days_stale(_iso_date(as_of_date), intraday_ingested)
+    horizon_info = classify_horizon_coverage(len(close_values), requirements=RETURN_HORIZON_REQUIREMENTS)
+    fallback_sources = []
+    if day_return is not None and _pct_change(latest_close, prev_close) is None and key_features.get("ret_1d") is not None:
+        fallback_sources.append("features_daily")
+    if ret_5d is not None and not (len(close_values) >= 6):
+        fallback_sources.append("features_daily")
+    if ret_21d is not None and not (len(close_values) >= 22):
+        fallback_sources.append("features_daily")
+    if realized_vol_21d is not None and _realized_vol(close_values, 21) is None and key_features.get("vol_21d") is not None:
+        fallback_sources.append("features_daily")
+    if realized_vol_63d is not None and _realized_vol(close_values, 63) is None and key_features.get("vol_63d") is not None:
+        fallback_sources.append("features_daily")
+    if atr_pct is not None and _safe_float(key_features.get("atr_pct")) is not None:
+        fallback_sources.append("features_daily")
+    fallback_sources = sorted(set(fallback_sources))
+    market_note = (
+        f"Return context is populated through {horizon_info['available_through']}; longer-horizon metrics remain constrained by usable history."
+        if horizon_info["available_horizons"] and horizon_info["missing_horizons"]
+        else "Daily bar coverage is currently too thin for stable return-horizon analysis."
+        if not daily_bars
+        else "Daily bar coverage supports the standard return stack."
+    )
 
     domain = {
         "latest_close": latest_close,
         "previous_close": prev_close,
         "latest_open": latest_open,
-        "day_return": _safe_float(key_features.get("ret_1d")),
-        "ret_5d": _safe_float(key_features.get("ret_5d")),
+        "day_return": day_return,
+        "ret_5d": ret_5d,
         "ret_10d": _pct_change(latest_close, close_values[-11]) if len(close_values) >= 11 else None,
-        "ret_21d": _safe_float(key_features.get("ret_21d")),
+        "ret_21d": ret_21d,
         "ret_63d": ret_63d,
         "ret_126d": ret_126d,
         "ret_252d": ret_252d,
@@ -603,8 +675,10 @@ def _market_domain(
         "volume_anomaly": volume_anomaly,
         "support_21d": support_21d,
         "resistance_21d": resistance_21d,
+        "support_window_days": support_window_days or None,
         "compression_ratio": compression_ratio,
         "breakout_distance_63d": breakout_distance_63d,
+        "breakout_window_days": breakout_window_days or None,
         "recent_bars": daily_bars[-5:],
         "recent_intraday_bars": intraday_bars[-12:],
         "meta": {
@@ -625,6 +699,17 @@ def _market_domain(
             "bars_status": _domain_status(bars_staleness, fresh_days=1, usable_days=5),
             "intraday_status": _domain_status(intraday_staleness, fresh_days=0, usable_days=2),
             "coverage_score": _clamp(_ratio(len(daily_bars), 252), 0.0, 1.0),
+            **availability_payload(
+                has_data=bool(daily_bars),
+                coverage_score=_clamp(_ratio(len(daily_bars), 252), 0.0, 1.0),
+                freshness_status=_domain_status(bars_staleness, fresh_days=1, usable_days=5),
+                available_horizons=horizon_info["available_horizons"],
+                missing_horizons=horizon_info["missing_horizons"],
+                missing_reason="unavailable" if not daily_bars else horizon_info["missing_reason"],
+                fallback_used=bool(fallback_sources),
+                fallback_source=fallback_sources,
+                data_quality_note=market_note,
+            ),
         },
     }
     return domain, daily_bars, intraday_bars
@@ -641,15 +726,17 @@ def _technical_domain(
     ma_21 = _moving_average(close_values, 21)
     ma_63 = _moving_average(close_values, 63)
     ma_126 = _moving_average(close_values, 126)
-    slope_21 = _linear_slope(close_values[-21:]) or _safe_float(key_features.get("trend_slope_21d"))
-    slope_63 = _linear_slope(close_values[-63:]) or _safe_float(key_features.get("trend_slope_63d"))
+    slope_21_direct = _linear_slope(close_values[-21:])
+    slope_63_direct = _linear_slope(close_values[-63:])
+    slope_21 = slope_21_direct or _safe_float(key_features.get("trend_slope_21d"))
+    slope_63 = slope_63_direct or _safe_float(key_features.get("trend_slope_63d"))
     trend_curvature = None
     if slope_21 is not None and slope_63 is not None:
         trend_curvature = slope_21 - slope_63
     mean_reversion_gap = None
     if latest_close is not None and ma_21 not in (None, 0):
         mean_reversion_gap = latest_close / ma_21 - 1.0
-    breakout_state = "neutral"
+    breakout_state = None
     if latest_close is not None and ma_21 is not None and ma_63 is not None:
         if latest_close > ma_21 > ma_63:
             breakout_state = "trend_extension"
@@ -665,6 +752,23 @@ def _technical_domain(
         volume_change = _ratio(volume_values[-1], _mean(volume_values[-6:-1]))
         if short_return is not None and volume_change is not None:
             volume_price_alignment = short_return * volume_change
+    horizon_info = classify_horizon_coverage(
+        len(close_values),
+        requirements=TECHNICAL_HORIZON_REQUIREMENTS,
+    )
+    technical_fallback_sources = []
+    if slope_21 is not None and slope_21_direct is None and key_features.get("trend_slope_21d") is not None:
+        technical_fallback_sources.append("features_daily")
+    if slope_63 is not None and slope_63_direct is None and key_features.get("trend_slope_63d") is not None:
+        technical_fallback_sources.append("features_daily")
+    technical_fallback_sources = sorted(set(technical_fallback_sources))
+    technical_note = (
+        f"Technical structure is populated through {horizon_info['available_through']}; longer moving-average and trend layers remain history-constrained."
+        if horizon_info["available_horizons"] and horizon_info["missing_horizons"]
+        else "Technical structure is currently too thin for a stable multi-horizon read."
+        if not close_values
+        else "Technical structure supports the standard moving-average stack."
+    )
     return {
         "moving_averages": {
             "ma_10": ma_10,
@@ -682,6 +786,16 @@ def _technical_domain(
         "regime_strength": _safe_float(key_features.get("regime_strength")),
         "meta": {
             "coverage_score": _clamp(_ratio(len(close_values), 126), 0.0, 1.0),
+            **availability_payload(
+                has_data=bool(close_values),
+                coverage_score=_clamp(_ratio(len(close_values), 126), 0.0, 1.0),
+                available_horizons=horizon_info["available_horizons"],
+                missing_horizons=horizon_info["missing_horizons"],
+                missing_reason="unavailable" if not close_values else horizon_info["missing_reason"],
+                fallback_used=bool(technical_fallback_sources),
+                fallback_source=technical_fallback_sources,
+                data_quality_note=technical_note,
+            ),
         },
     }
 
@@ -718,10 +832,24 @@ def _fundamental_domain(
         except Exception:
             filing_recency_days = None
 
+    statement_coverage = {
+        "revenue": any(row.get("revenue") is not None for row in fundamentals),
+        "gross_margin": any(row.get("gross_margin") is not None for row in fundamentals),
+        "op_margin": any(row.get("op_margin") is not None for row in fundamentals),
+        "fcf": any(row.get("fcf") is not None for row in fundamentals),
+    }
     coverage_score = len(fundamentals) / 4.0 if fundamentals else 0.0
+    fundamental_note = (
+        "Quarterly filing coverage is partial, so durability and cash-flow reads should be treated with reduced confidence."
+        if fundamentals and coverage_score < 1.0
+        else "Quarterly filing coverage is currently unavailable in the local store."
+        if not fundamentals
+        else "Quarterly filing coverage is present across the recent filing window."
+    )
     return {
         "latest_quarter": latest,
         "quarterly_series": fundamentals[:4],
+        "statement_coverage": statement_coverage,
         "revenue_growth_yoy": revenue_growth_yoy,
         "gross_margin_trend": gross_margin_trend,
         "op_margin_trend": op_margin_trend,
@@ -735,12 +863,26 @@ def _fundamental_domain(
             "source": latest.get("source"),
             "latest_ingested_at": latest.get("ingested_at"),
             "status": "fresh" if filing_recency_days is not None and filing_recency_days <= 120 else "stale_but_usable" if filing_recency_days is not None and filing_recency_days <= 180 else "limited",
+            **availability_payload(
+                has_data=bool(fundamentals),
+                coverage_score=_clamp(coverage_score, 0.0, 1.0),
+                freshness_status=(
+                    "fresh"
+                    if filing_recency_days is not None and filing_recency_days <= 120
+                    else "stale_but_usable"
+                    if filing_recency_days is not None and filing_recency_days <= 180
+                    else "limited"
+                ),
+                missing_reason="unavailable" if not fundamentals else None,
+                data_quality_note=fundamental_note,
+            ),
         },
     }
 
 
 def _sentiment_domain(
     symbol: str,
+    as_of_date: dt.date,
     sentiment_history: List[Dict[str, Any]],
     recent_news: List[Dict[str, Any]],
     key_features: Dict[str, Any],
@@ -773,16 +915,37 @@ def _sentiment_domain(
         sentiment_trend = _linear_slope(sentiment_series[-5:])
 
     hype_price_divergence = None
-    sentiment_score = _safe_float(key_features.get("sentiment_score"))
+    sentiment_score = _first_available(
+        _safe_float(key_features.get("sentiment_score")),
+        latest_sentiment.get("sentiment_score"),
+        latest_sentiment.get("sentiment_mean"),
+    )
+    sentiment_surprise = _safe_float(key_features.get("sentiment_surprise"))
+    if sentiment_surprise is None and sentiment_series:
+        baseline = _mean(sentiment_series[:-1])
+        if baseline is not None and sentiment_score is not None:
+            sentiment_surprise = sentiment_score - baseline
     ret_5d = _safe_float(key_features.get("ret_5d"))
     if sentiment_score is not None and ret_5d is not None:
         hype_price_divergence = sentiment_score - ret_5d
 
     latest_news_ingested = recent_news[0].get("ingested_at") if recent_news else None
     latest_sentiment_at = latest_sentiment.get("computed_at")
+    sentiment_fallback_sources = []
+    if key_features.get("sentiment_score") in (None, "") and sentiment_score is not None:
+        sentiment_fallback_sources.append("sentiment_daily")
+    sentiment_note = (
+        "Headline flow is available, but the density is still too thin for a stable sentiment-level inference."
+        if recent_news and sentiment_score is None
+        else "Sentiment history is available but still partial across the recent lookback window."
+        if sentiment_history and len(sentiment_history) < 5
+        else "Sentiment coverage is currently too thin to support a directional read."
+        if not recent_news and not sentiment_history
+        else "Sentiment coverage is available across recent headlines and stored sentiment history."
+    )
     return {
         "sentiment_score": sentiment_score,
-        "sentiment_surprise": _safe_float(key_features.get("sentiment_surprise")),
+        "sentiment_surprise": sentiment_surprise,
         "sentiment_trend": sentiment_trend,
         "headline_count": headline_count,
         "attention_crowding": attention_crowding,
@@ -793,11 +956,33 @@ def _sentiment_domain(
         "top_narratives": topics,
         "recent_headlines": recent_news[:8],
         "meta": {
-            "news_status": _domain_status(_days_stale(sentiment_history[-1]["as_of_date"] if sentiment_history else None, latest_news_ingested), fresh_days=1, usable_days=5),
-            "sentiment_status": _domain_status(_days_stale(sentiment_history[-1]["as_of_date"] if sentiment_history else None, latest_sentiment_at), fresh_days=1, usable_days=5),
+            "news_status": _domain_status(_days_stale(_iso_date(as_of_date), latest_news_ingested), fresh_days=1, usable_days=5),
+            "sentiment_status": _domain_status(_days_stale(_iso_date(as_of_date), latest_sentiment_at), fresh_days=1, usable_days=5),
             "latest_news_ingested_at": latest_news_ingested,
             "latest_sentiment_at": latest_sentiment_at,
             "coverage_score": _clamp(_ratio(len(recent_news), 12), 0.0, 1.0),
+            **availability_payload(
+                has_data=bool(recent_news or sentiment_history),
+                coverage_score=_clamp(
+                    _mean(
+                        [
+                            _ratio(len(recent_news), 12),
+                            _ratio(len(sentiment_history), 5),
+                        ]
+                    ),
+                    0.0,
+                    1.0,
+                ),
+                freshness_status=_domain_status(
+                    _days_stale(_iso_date(as_of_date), latest_news_ingested or latest_sentiment_at),
+                    fresh_days=1,
+                    usable_days=5,
+                ),
+                missing_reason="unavailable" if not recent_news and not sentiment_history else None,
+                fallback_used=bool(sentiment_fallback_sources),
+                fallback_source=sentiment_fallback_sources,
+                data_quality_note=sentiment_note,
+            ),
         },
     }
 
@@ -841,6 +1026,16 @@ def _macro_cross_asset_domain(
         else:
             inferred_regime = "neutral"
 
+    macro_fallback_sources = []
+    if preferred_proxy and benchmark and benchmark.get("symbol") != preferred_proxy:
+        macro_fallback_sources.append(benchmark.get("symbol"))
+    macro_note = (
+        f"Sector-specific benchmark coverage is thin, so the broader-market fallback {benchmark.get('symbol')} is being used."
+        if preferred_proxy and benchmark and benchmark.get("symbol") != preferred_proxy
+        else "Cross-asset proxy coverage is currently thin."
+        if not proxies
+        else f"Cross-asset context is anchored to {benchmark.get('symbol')}."
+    )
     return {
         "requested_market_regime": market_regime,
         "inferred_market_regime": inferred_regime,
@@ -856,6 +1051,15 @@ def _macro_cross_asset_domain(
             "status": "fresh" if proxies else "limited",
             "relevance_note": (
                 f"Cross-asset context is anchored to {benchmark.get('symbol')}." if benchmark else "Cross-asset benchmark coverage is limited."
+            ),
+            **availability_payload(
+                has_data=bool(proxies),
+                coverage_score=_clamp(_ratio(len(proxies), len(proxy_universe)), 0.0, 1.0),
+                freshness_status="fresh" if proxies else "limited",
+                missing_reason="unavailable" if not proxies else None,
+                fallback_used=bool(macro_fallback_sources),
+                fallback_source=macro_fallback_sources,
+                data_quality_note=macro_note,
             ),
         },
     }
@@ -888,6 +1092,14 @@ def _geopolitical_domain(recent_news: List[Dict[str, Any]]) -> Dict[str, Any]:
         + 0.8 * category_counts["commodity_supply"]
     )
     exogenous_event_score = min(weighted_hits / headline_total, 1.0)
+    relevant = bool(matched_titles)
+    note = (
+        "Recent headline flow does not currently point to a material policy, conflict, or macro shock cluster."
+        if recent_news and not matched_titles
+        else "Geopolitical and policy coverage is currently unavailable because recent headline coverage is thin."
+        if not recent_news
+        else "Event tagging is heuristic and should be read as directional context rather than a precision event model."
+    )
     return {
         "category_counts": category_counts,
         "exogenous_event_score": exogenous_event_score,
@@ -896,6 +1108,14 @@ def _geopolitical_domain(recent_news: List[Dict[str, Any]]) -> Dict[str, Any]:
         "meta": {
             "coverage_score": _clamp(_ratio(len(recent_news), 10), 0.0, 1.0),
             "status": "fresh" if recent_news else "limited",
+            **availability_payload(
+                has_data=bool(recent_news),
+                coverage_score=_clamp(_ratio(len(recent_news), 10), 0.0, 1.0),
+                freshness_status="fresh" if recent_news else "limited",
+                missing_reason="unavailable" if not recent_news else "not_relevant" if not relevant else None,
+                relevant=relevant or not recent_news,
+                data_quality_note=note,
+            ),
         },
     }
 
@@ -921,6 +1141,13 @@ def _relative_context_domain(
         wins = sum(1 for value in peer_returns if value <= ret_21d)
         percentile = wins / len(peer_returns)
     peer_dispersion = _std(peer_returns)
+    relative_note = (
+        "Peer-relative context is currently unavailable because no same-sector comparison set was found."
+        if not peers
+        else "Peer-relative context is partial because the comparison set is still shallow."
+        if len(peers) < 5
+        else "Peer-relative context is populated against the local sector comparison set."
+    )
     return {
         "sector": sector,
         "peer_count": len(peers),
@@ -934,6 +1161,13 @@ def _relative_context_domain(
         "meta": {
             "coverage_score": _clamp(_ratio(len(peers), 8), 0.0, 1.0),
             "status": "fresh" if peers else "limited",
+            **availability_payload(
+                has_data=bool(peers),
+                coverage_score=_clamp(_ratio(len(peers), 8), 0.0, 1.0),
+                freshness_status="fresh" if peers else "limited",
+                missing_reason="unavailable" if not peers else None,
+                data_quality_note=relative_note,
+            ),
         },
     }
 
@@ -987,8 +1221,50 @@ def _quality_provenance_domain(
         "warnings": warnings,
         "meta": {
             "status": "fresh" if not warnings else "mixed",
+            **availability_payload(
+                has_data=bool(freshness_summary),
+                coverage_score=_mean(
+                    [
+                        1.0 if item.get("status") == "fresh" else 0.6 if item.get("status") == "stale_but_usable" else 0.35
+                        for item in freshness_summary.values()
+                    ]
+                ),
+                freshness_status="fresh" if not warnings else "stale_but_usable",
+                missing_reason="unavailable" if not freshness_summary else None,
+                data_quality_note=(
+                    "Coverage and freshness checks are current across the tracked operational domains."
+                    if not warnings
+                    else "Coverage and freshness checks are mixed, and the report is carrying explicit quality headwinds."
+                ),
+            ),
         },
     }
+
+
+def _build_domain_availability_map(data_bundle: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    domain_map = {
+        "market": data_bundle.get("market_price_volume") or {},
+        "technical": data_bundle.get("technical_market_structure") or {},
+        "fundamentals": data_bundle.get("fundamental_filing") or {},
+        "sentiment": data_bundle.get("sentiment_narrative_flow") or {},
+        "macro": data_bundle.get("macro_cross_asset") or {},
+        "geopolitical": data_bundle.get("geopolitical_policy") or {},
+        "cross_asset": data_bundle.get("relative_context") or {},
+        "quality": data_bundle.get("quality_provenance") or {},
+    }
+    availability: Dict[str, Dict[str, Any]] = {}
+    for label, payload in domain_map.items():
+        meta = dict(payload.get("meta") or {})
+        availability[label] = {
+            "coverage_status": meta.get("coverage_status") or meta.get("status") or "unknown",
+            "available_horizons": list(meta.get("available_horizons") or []),
+            "missing_horizons": list(meta.get("missing_horizons") or []),
+            "missing_reason": meta.get("missing_reason"),
+            "fallback_used": bool(meta.get("fallback_used")),
+            "fallback_source": list(meta.get("fallback_source") or []),
+            "data_quality_note": meta.get("data_quality_note") or meta.get("relevance_note"),
+        }
+    return availability
 
 
 def build_normalized_data_bundle(
@@ -1010,7 +1286,13 @@ def build_normalized_data_bundle(
     fundamental_domain = _fundamental_domain(fundamentals, as_of_date, quality)
     sentiment_history = _load_sentiment_history(symbol, as_of_date)
     recent_news = _load_recent_news(symbol, as_of_date)
-    sentiment_domain = _sentiment_domain(symbol, sentiment_history, recent_news, key_features)
+    sentiment_domain = _sentiment_domain(
+        symbol,
+        as_of_date,
+        sentiment_history,
+        recent_news,
+        key_features,
+    )
     macro_domain = _macro_cross_asset_domain(symbol_meta, as_of_date, job_context, market_domain)
     geopolitical_domain = _geopolitical_domain(recent_news)
     relative_domain = _relative_context_domain(
@@ -1056,6 +1338,12 @@ def build_normalized_data_bundle(
         data_bundle=data_bundle,
         overlay=overlay,
     )
+    domain_availability = _build_domain_availability_map(merged_bundle)
+    merged_bundle["domain_availability"] = domain_availability
+    merged_bundle["quality_provenance"] = {
+        **(merged_bundle.get("quality_provenance") or {}),
+        "domain_availability": domain_availability,
+    }
     merged_bundle["raw_supporting_fields"]["external_data_fabric"] = overlay
     return merged_bundle
 
@@ -1363,4 +1651,5 @@ def build_feature_factor_bundle(
         "macro_sensitivity": macro_sensitivity,
         "relative_peer": relative_peer,
         "composite_intelligence": composite_intelligence,
+        "coverage_intelligence": data_bundle.get("domain_availability") or {},
     }
