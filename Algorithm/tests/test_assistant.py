@@ -228,6 +228,47 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     )
 
 
+def test_market_domain_computes_drawdown_windows_without_name_error(monkeypatch):
+    as_of_date = "2024-01-02"
+    daily_bars = []
+    for index in range(140):
+        close = 100.0 + index * 0.6
+        if 40 <= index <= 55:
+            close -= (index - 39) * 1.8
+        if 56 <= index <= 70:
+            close -= max(0, 27.0 - (index - 55) * 1.5)
+        daily_bars.append(
+            {
+                "as_of_date": f"2023-08-{(index % 28) + 1:02d}",
+                "open": close - 0.5,
+                "high": close + 1.0,
+                "low": close - 1.2,
+                "close": close,
+                "volume": 1_000_000 + index * 5_000,
+                "source": "test",
+                "ingested_at": f"{as_of_date}T00:00:00Z",
+            }
+        )
+
+    monkeypatch.setattr(intelligence, "_load_daily_bars", lambda *_args, **_kwargs: daily_bars)
+    monkeypatch.setattr(intelligence, "_load_intraday_bars", lambda *_args, **_kwargs: [])
+
+    market_domain, _, _ = intelligence._market_domain(
+        "NVDA",
+        intelligence.dt.date(2024, 1, 2),
+        {"bars_updated_at": f"{as_of_date}T00:00:00Z"},
+        {"vol_21d": 0.25, "vol_63d": 0.22, "atr_pct": 0.03},
+        {"bars_ok": True},
+    )
+
+    assert market_domain["maxdd_21d"] is not None
+    assert market_domain["maxdd_63d"] is not None
+    assert market_domain["maxdd_126d"] is not None
+    assert market_domain["maxdd_21d"] <= 0
+    assert market_domain["maxdd_63d"] <= 0
+    assert market_domain["maxdd_126d"] <= 0
+
+
 def test_chat_uses_persisted_analysis_report(monkeypatch):
     monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")

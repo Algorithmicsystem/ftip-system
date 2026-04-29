@@ -209,6 +209,24 @@ def _realized_vol(close_values: Sequence[Optional[float]], window: int) -> Optio
     return float(sigma * math.sqrt(252.0))
 
 
+def _max_drawdown(values: Sequence[Optional[float]]) -> Optional[float]:
+    clean: List[float] = []
+    for value in values:
+        number = _safe_float(value)
+        if number is not None:
+            clean.append(number)
+    if len(clean) < 2:
+        return None
+    peak = clean[0]
+    worst_drawdown = 0.0
+    for value in clean:
+        peak = max(peak, value)
+        if peak == 0:
+            continue
+        worst_drawdown = min(worst_drawdown, (value - peak) / peak)
+    return float(worst_drawdown)
+
+
 def _linear_slope(values: Sequence[Optional[float]]) -> Optional[float]:
     clean = [float(value) for value in values if value is not None and math.isfinite(float(value))]
     if len(clean) < 3:
