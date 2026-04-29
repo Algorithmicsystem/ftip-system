@@ -188,6 +188,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["data_bundle"]["normalized_domains"]["news_sentiment_narrative"] == result["data_bundle"]["sentiment_narrative_flow"]
     assert result["feature_factor_bundle"]["composite_intelligence"]
     assert result["strategy"]["final_signal"]
+    assert result["strategy"]["strategy_posture"]
+    assert set(result["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
+    assert result["strategy"]["execution_posture"]["preferred_posture"]
+    assert result["actionability_score"] is not None
     assert result["why_this_signal"]["top_positive_drivers"] is not None
     assert result["evidence_provenance"]
 

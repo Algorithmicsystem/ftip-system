@@ -90,6 +90,17 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "domain_agreement",
         "conviction_components",
         "opportunity_quality_components",
+        "strategy_summary",
+        "strategy_posture",
+        "confidence_score",
+        "actionability_score",
+        "participant_fit",
+        "scenario_matrix",
+        "invalidators",
+        "confirmation_triggers",
+        "fragility_vetoes",
+        "execution_posture",
+        "uncertainty_notes",
         "strategy",
         "why_this_signal",
         "signal_summary",
@@ -110,6 +121,8 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["signal"]["action"] == "BUY"
     assert data["active_analysis"]["symbol"] == "NVDA"
     assert data["strategy"]["final_signal"] in {"BUY", "HOLD", "SELL"}
+    assert set(data["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
+    assert data["strategy"]["execution_posture"]["preferred_posture"]
     assert data["overall_analysis"]
 
 

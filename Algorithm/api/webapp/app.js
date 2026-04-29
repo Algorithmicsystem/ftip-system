@@ -362,14 +362,27 @@ const renderDashboardSummary = (report) => {
       note: `conviction ${strategy.conviction_tier || "unknown"}`,
     },
     {
+      label: "Actionability",
+      value:
+        strategy.actionability_score == null
+          ? "n/a"
+          : Number(strategy.actionability_score).toFixed(1),
+      note: strategy.strategy_posture || "posture unknown",
+    },
+    {
       label: "Fragility",
       value: strategy.fragility_tier || "unknown",
       note: `freshness ${report.freshness_summary?.overall_status || "unknown"}`,
     },
     {
+      label: "Participant Fit",
+      value: strategy.primary_participant_fit || "n/a",
+      note: strategy.time_horizon_fit || "time-horizon fit unknown",
+    },
+    {
       label: "Scenario",
       value: report.scenario || "base",
-      note: `regime ${report.market_regime || "auto"}`,
+      note: `execution ${strategy.execution_posture?.preferred_posture || "staged_watch"}`,
     },
   ];
   container.innerHTML = `
@@ -428,6 +441,122 @@ const renderWhySignal = (report) => {
   ].join("");
 };
 
+const renderStrategyMetrics = (report) => {
+  const strategy = report?.strategy;
+  if (!strategy) {
+    renderMetricCards("#assistant-strategy-metrics", null);
+    return;
+  }
+  renderMetricCards("#assistant-strategy-metrics", [
+    {
+      label: "Posture",
+      value: strategy.strategy_posture || strategy.final_signal || "n/a",
+      note: `public ${strategy.final_signal || report.signal?.final_action || "n/a"}`,
+    },
+    {
+      label: "Actionability",
+      value:
+        strategy.actionability_score == null
+          ? "n/a"
+          : Number(strategy.actionability_score).toFixed(1),
+      note: strategy.quality_of_setup || "quality unknown",
+    },
+    {
+      label: "Confidence",
+      value:
+        strategy.confidence_score == null
+          ? "n/a"
+          : Number(strategy.confidence_score).toFixed(1),
+      note: strategy.conviction_tier || "unknown conviction",
+    },
+    {
+      label: "Participant",
+      value: strategy.primary_participant_fit || "n/a",
+      note: strategy.time_horizon_fit || "time-horizon fit unknown",
+    },
+    {
+      label: "Execution",
+      value: strategy.execution_posture?.preferred_posture || "n/a",
+      note: `urgency ${strategy.execution_posture?.urgency_level || "unknown"}`,
+    },
+    {
+      label: "Fragility Veto",
+      value: strategy.hard_veto ? "active" : "none",
+      note: `${(strategy.fragility_vetoes || []).length} dampener(s)`,
+    },
+  ]);
+};
+
+const renderStrategyScenarios = (report) => {
+  const container = qs("#assistant-strategy-scenarios");
+  const scenarios = report?.strategy?.scenario_matrix;
+  if (!scenarios) {
+    container.innerHTML = emptyStateCard(
+      "Base / bull / bear / stress scenarios will render here."
+    );
+    return;
+  }
+  const order = [
+    ["base", "Base Case"],
+    ["bull", "Bull Case"],
+    ["bear", "Bear Case"],
+    ["stress", "Stress / Adverse"],
+  ];
+  container.innerHTML = order
+    .map(([key, label]) => {
+      const scenario = scenarios[key] || {};
+      const bullets = [
+        `Expected shift: ${scenario.expected_posture_shift || "n/a"}`,
+        `Confidence: ${
+          scenario.confidence_level == null ? "n/a" : Number(scenario.confidence_level).toFixed(1)
+        } / 100 (${scenario.confidence_tier || "unknown"})`,
+        `Support: ${(scenario.supporting_conditions || []).slice(0, 2).join(" | ") || "n/a"}`,
+        `Risk: ${(scenario.risk_conditions || []).slice(0, 2).join(" | ") || "n/a"}`,
+      ];
+      return `
+        <section class="drilldown-card">
+          <h5>${escapeHtml(label)}</h5>
+          <div class="drilldown-note">${escapeHtml(scenario.summary || "No scenario summary available.")}</div>
+          ${renderBullets(bullets, "No scenario detail available.")}
+        </section>
+      `;
+    })
+    .join("");
+};
+
+const renderRiskTriggers = (report) => {
+  const container = qs("#assistant-risk-triggers");
+  const strategy = report?.strategy;
+  if (!strategy) {
+    container.innerHTML = emptyStateCard(
+      "Invalidators, confirmation triggers, deterioration triggers, and vetoes will render here."
+    );
+    return;
+  }
+  const invalidators = strategy.invalidators || {};
+  const vetoLines = (strategy.fragility_vetoes || []).map(
+    (item) => `${item.name || "veto"}: ${item.reason || ""}`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Top Invalidators</h5>
+      ${renderBullets(invalidators.top_invalidators, "No top invalidators surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Confirmation Triggers</h5>
+      ${renderBullets(strategy.confirmation_triggers, "No confirmation triggers surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Deterioration Triggers</h5>
+      ${renderBullets(strategy.deterioration_triggers, "No deterioration triggers surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Fragility / Vetoes</h5>
+      ${renderBullets(vetoLines, "No active dampeners or hard vetoes.")}
+    </section>`,
+  ].join("");
+};
+
 const renderAssistantReport = (report) => {
   const container = qs("#assistant-analyze-report");
   state.assistantLatestReport = report || null;
@@ -448,6 +577,9 @@ const renderAssistantReport = (report) => {
     renderTextSection("#assistant-statistical-section", "Statistical / Quant Analysis", "");
     renderTextSection("#assistant-strategy-section", "Strategy View", "");
     renderTextSection("#assistant-risk-section", "Risks / Weaknesses / Invalidators", "");
+    renderStrategyMetrics(null);
+    renderStrategyScenarios(null);
+    renderRiskTriggers(null);
     renderTextSection("#assistant-fundamental-section", "Fundamental Analysis", "");
     renderTextSection("#assistant-sentiment-section", "Sentiment / Narrative / Flow Analysis", "");
     renderTextSection(
@@ -466,6 +598,7 @@ const renderAssistantReport = (report) => {
   const heroMetrics = [
     { label: "Final Signal", value: report.strategy?.final_signal || report.signal?.final_action || report.signal?.action || "N/A" },
     { label: "Raw Signal", value: report.signal?.action || "N/A" },
+    { label: "Posture", value: report.strategy?.strategy_posture || "N/A" },
     {
       label: "Confidence",
       value:
@@ -474,7 +607,15 @@ const renderAssistantReport = (report) => {
           : Number(report.strategy.confidence).toFixed(2),
     },
     { label: "Conviction", value: report.strategy?.conviction_tier || "N/A" },
+    {
+      label: "Actionability",
+      value:
+        report.strategy?.actionability_score == null
+          ? "N/A"
+          : Number(report.strategy.actionability_score).toFixed(1),
+    },
     { label: "Fragility", value: report.strategy?.fragility_tier || "N/A" },
+    { label: "Participant", value: report.strategy?.primary_participant_fit || "N/A" },
     { label: "Freshness", value: report.freshness_summary?.overall_status || "N/A" },
     { label: "As Of", value: report.as_of_date || "N/A" },
     { label: "Scenario", value: report.scenario || "N/A" },
@@ -542,6 +683,14 @@ const renderAssistantReport = (report) => {
       note: report.strategy?.conviction_tier || "unknown conviction",
     },
     {
+      label: "Actionability",
+      value:
+        report.strategy?.actionability_score == null
+          ? "n/a"
+          : Number(report.strategy.actionability_score).toFixed(1),
+      note: report.strategy?.strategy_posture || "posture unknown",
+    },
+    {
       label: "Regime",
       value:
         report.feature_factor_bundle?.regime_engine?.regime_label ||
@@ -571,12 +720,15 @@ const renderAssistantReport = (report) => {
     "Statistical / Quant Analysis",
     report.statistical_analysis
   );
+  renderStrategyMetrics(report);
   renderTextSection("#assistant-strategy-section", "Strategy View", report.strategy_view);
+  renderStrategyScenarios(report);
   renderTextSection(
     "#assistant-risk-section",
     "Risks / Weaknesses / Invalidators",
     report.risks_weaknesses_invalidators
   );
+  renderRiskTriggers(report);
   renderTextSection(
     "#assistant-fundamental-section",
     "Fundamental Analysis",

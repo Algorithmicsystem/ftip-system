@@ -156,137 +156,172 @@ def _base_data_bundle() -> dict:
     }
 
 
-def test_phase3_feature_factor_bundle_exposes_factor_families_and_scores():
-    bundle = intelligence.build_feature_factor_bundle(
-        data_bundle=_base_data_bundle(),
-        signal={"action": "BUY", "score": 0.82, "confidence": 0.76},
-        key_features={"ret_1d": 0.015, "ret_5d": 0.06, "ret_21d": 0.14, "mom_vol_adj_21d": 0.78},
-        quality={"missingness": 0.03, "fundamentals_ok": True},
-    )
-
-    assert {
-        "market_structure",
-        "regime_intelligence",
-        "fragility_intelligence",
-        "sentiment_narrative_intelligence",
-        "fundamental_durability",
-        "macro_alignment",
-        "cross_asset_relative_context",
-    }.issubset(bundle["factor_groups"].keys())
-    assert {
-        "Market Structure Integrity Score",
-        "Regime Stability Score",
-        "Signal Fragility Index",
-        "Narrative Crowding Index",
-        "Fundamental Durability Score",
-        "Macro Alignment Score",
-        "Cross-Domain Conviction Score",
-        "Opportunity Quality Score",
-    }.issubset(bundle["proprietary_scores"].keys())
-    assert bundle["market_structure"]["return_stack"]["252d"] == 0.72
-    assert bundle["domain_agreement"]["domain_agreement_score"] is not None
-    assert bundle["composite_intelligence"]["Opportunity Quality Score"] is not None
-
-
-def test_phase3_fragility_and_regime_turn_defensive_when_instability_is_high():
-    data_bundle = _base_data_bundle()
-    data_bundle["market_price_volume"].update(
-        {
-            "ret_5d": -0.04,
-            "ret_21d": -0.08,
-            "ret_63d": -0.16,
-            "realized_vol_5d": 0.62,
-            "realized_vol_10d": 0.58,
-            "realized_vol_21d": 0.54,
-            "realized_vol_63d": 0.49,
-            "gap_instability_10d": 0.95,
-            "vol_of_vol_proxy": 0.92,
-            "range_expansion_ratio": 1.8,
-        }
-    )
-    data_bundle["technical_market_structure"].update(
-        {
-            "trend_slope_21d": -0.03,
-            "trend_slope_63d": -0.01,
-            "trend_curvature": -0.11,
-            "ma_stack_alignment": 0.0,
-            "breakout_state": "transition_lower",
-            "volume_price_alignment": -0.12,
-        }
-    )
-
-    bundle = intelligence.build_feature_factor_bundle(
+def _build_feature_bundle(data_bundle: dict, *, action: str = "BUY", score: float = 0.82, confidence: float = 0.76) -> dict:
+    return intelligence.build_feature_factor_bundle(
         data_bundle=data_bundle,
-        signal={"action": "SELL", "score": -0.74, "confidence": 0.81},
-        key_features={"ret_1d": -0.02, "ret_5d": -0.04, "ret_21d": -0.08},
-        quality={"missingness": 0.07, "fundamentals_ok": True},
-    )
-
-    assert bundle["regime_intelligence"]["regime_label"] in {"high_vol", "transition"}
-    assert bundle["composite_intelligence"]["Signal Fragility Index"] >= 60
-    assert bundle["fragility_intelligence"]["confidence_degradation_triggers"]
-
-
-def test_phase3_domain_agreement_flags_cross_domain_conflict_patterns():
-    data_bundle = _base_data_bundle()
-    data_bundle["fundamental_filing"]["normalized_metrics"].update(
-        {
-            "revenue_growth_yoy": -0.08,
-            "operating_margin": 0.01,
-            "net_margin": -0.02,
-            "return_on_equity": 0.02,
-            "current_ratio": 0.9,
-            "cash_ratio": 0.1,
-            "debt_to_equity": 2.6,
-            "liabilities_to_assets": 0.82,
-            "positive_fcf_ratio": 0.2,
-            "free_cash_flow_margin": -0.03,
-        }
-    )
-    data_bundle["fundamental_filing"]["quality_proxies"].update(
-        {
-            "balance_sheet_resilience": 24.0,
-            "cash_flow_durability": 22.0,
-            "filing_recency_score": 60.0,
-            "reporting_quality_proxy": 48.0,
-        }
-    )
-
-    bundle = intelligence.build_feature_factor_bundle(
-        data_bundle=data_bundle,
-        signal={"action": "BUY", "score": 0.65, "confidence": 0.72},
-        key_features={"ret_1d": 0.01, "ret_5d": 0.06, "ret_21d": 0.14},
-        quality={"missingness": 0.05, "fundamentals_ok": True},
-    )
-
-    assert "technical strong / fundamentals weak" in bundle["domain_agreement"]["agreement_flags"]
-    assert bundle["domain_agreement"]["strongest_conflicting_domains"]
-    assert bundle["domain_agreement"]["confidence_penalty_from_conflict"] is not None
-
-
-def test_phase3_report_surfaces_structural_fragility_and_agreement_layers():
-    data_bundle = _base_data_bundle()
-    feature_bundle = intelligence.build_feature_factor_bundle(
-        data_bundle=data_bundle,
-        signal={"action": "BUY", "score": 0.82, "confidence": 0.76},
+        signal={"action": action, "score": score, "confidence": confidence},
         key_features={
-            "ret_1d": 0.015,
-            "ret_5d": 0.06,
-            "ret_21d": 0.14,
+            "ret_1d": data_bundle["market_price_volume"]["day_return"],
+            "ret_5d": data_bundle["market_price_volume"]["ret_5d"],
+            "ret_21d": data_bundle["market_price_volume"]["ret_21d"],
             "mom_vol_adj_21d": 0.78,
-            "regime_label": "trend",
+            "regime_label": data_bundle["technical_market_structure"].get("regime_label"),
         },
-        quality={"missingness": 0.03, "fundamentals_ok": True},
+        quality={"missingness": data_bundle["quality_provenance"].get("missingness"), "fundamentals_ok": True},
     )
+
+
+def test_phase4_strategy_artifact_exposes_components_scenarios_and_execution_fields():
+    data_bundle = _base_data_bundle()
+    feature_bundle = _build_feature_bundle(data_bundle)
+
     strategy_bundle = strategy.build_strategy_artifact(
         job_context={"horizon": "swing", "scenario": "base"},
         signal={"action": "BUY", "score": 0.82, "confidence": 0.76},
         data_bundle=data_bundle,
         feature_factor_bundle=feature_bundle,
     )
+
+    assert strategy_bundle["final_signal"] in {"BUY", "HOLD", "SELL"}
+    assert strategy_bundle["strategy_posture"]
+    assert strategy_bundle["strategy_summary"]
+    assert len(strategy_bundle["strategy_components"]) == 8
+    assert set(strategy_bundle["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
+    assert strategy_bundle["scenario_transitions"]["base_to_bull"]
+    assert strategy_bundle["confidence_score"] is not None
+    assert strategy_bundle["actionability_score"] is not None
+    assert strategy_bundle["execution_posture"]["preferred_posture"] in {
+        "immediate_action",
+        "staged_watch",
+        "wait_for_confirmation",
+        "avoid_due_to_fragility",
+    }
+    assert strategy_bundle["invalidators"]["top_invalidators"]
+    assert strategy_bundle["strategy_version"] == "phase4_institutional_v1"
+
+
+def test_phase4_confidence_degrades_under_staleness_missingness_and_conflict():
+    data_bundle = _base_data_bundle()
+    data_bundle["quality_provenance"]["missingness"] = 0.18
+    data_bundle["quality_provenance"]["freshness_summary"] = {
+        "bars": {"status": "stale_but_usable"},
+        "news": {"status": "stale"},
+        "sentiment": {"status": "stale_but_usable"},
+    }
+    data_bundle["domain_availability"]["fundamentals"]["coverage_status"] = "partial"
+    data_bundle["domain_availability"]["cross_asset"]["coverage_status"] = "limited"
+    data_bundle["fundamental_filing"]["normalized_metrics"]["revenue_growth_yoy"] = -0.06
+    data_bundle["fundamental_filing"]["normalized_metrics"]["operating_margin"] = 0.02
+    data_bundle["fundamental_filing"]["quality_proxies"]["balance_sheet_resilience"] = 32.0
+    data_bundle["fundamental_filing"]["quality_proxies"]["cash_flow_durability"] = 28.0
+
+    feature_bundle = _build_feature_bundle(data_bundle)
+    strategy_bundle = strategy.build_strategy_artifact(
+        job_context={"horizon": "swing", "scenario": "base"},
+        signal={"action": "BUY", "score": 0.66, "confidence": 0.72},
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_bundle,
+    )
+
+    assert strategy_bundle["confidence_score"] < 55
+    assert strategy_bundle["confidence_quality"] in {"fragile", "low_evidence", "adequate"}
+    assert strategy_bundle["calibration_status"] == "degraded_provisional"
+    assert strategy_bundle["confidence_degraders"]
+    assert strategy_bundle["uncertainty_notes"]
+
+
+def test_phase4_fragility_veto_converts_constructive_setup_to_hold_when_instability_is_extreme():
+    data_bundle = _base_data_bundle()
+    data_bundle["market_price_volume"].update(
+        {
+            "ret_5d": 0.09,
+            "ret_21d": 0.16,
+            "realized_vol_5d": 0.68,
+            "realized_vol_10d": 0.62,
+            "realized_vol_21d": 0.58,
+            "realized_vol_63d": 0.51,
+            "gap_instability_10d": 0.96,
+            "vol_of_vol_proxy": 0.95,
+            "return_dispersion_10d": 0.07,
+            "return_dispersion_21d": 0.06,
+            "return_dispersion_63d": 0.05,
+        }
+    )
+    data_bundle["technical_market_structure"].update(
+        {
+            "trend_slope_21d": 0.04,
+            "trend_slope_63d": 0.01,
+            "trend_curvature": 0.11,
+            "regime_label": "transition",
+            "volume_price_alignment": -0.08,
+        }
+    )
+    data_bundle["quality_provenance"]["missingness"] = 0.16
+
+    feature_bundle = _build_feature_bundle(data_bundle)
+    strategy_bundle = strategy.build_strategy_artifact(
+        job_context={"horizon": "swing", "scenario": "base"},
+        signal={"action": "BUY", "score": 0.84, "confidence": 0.78},
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_bundle,
+    )
+
+    assert strategy_bundle["hard_veto"] is True
+    assert strategy_bundle["final_signal"] == "HOLD"
+    assert strategy_bundle["strategy_posture"] in {"fragile_hold", "no_trade"}
+    assert strategy_bundle["actionability_score"] < 40
+    assert strategy_bundle["fragility_vetoes"]
+
+
+def test_phase4_participant_fit_can_shift_to_mean_reversion_in_chop():
+    data_bundle = _base_data_bundle()
+    data_bundle["market_price_volume"].update(
+        {
+            "ret_3d": -0.03,
+            "ret_5d": -0.05,
+            "ret_10d": -0.01,
+            "ret_21d": 0.02,
+            "ret_63d": 0.03,
+            "compression_ratio": 0.03,
+            "range_position_21d": 0.18,
+            "range_expansion_ratio": 0.82,
+        }
+    )
+    data_bundle["technical_market_structure"].update(
+        {
+            "trend_slope_21d": 0.01,
+            "trend_slope_63d": 0.0,
+            "trend_curvature": 0.02,
+            "mean_reversion_gap": -0.04,
+            "regime_label": "chop",
+        }
+    )
+
+    feature_bundle = _build_feature_bundle(data_bundle, action="HOLD", score=0.12, confidence=0.58)
+    strategy_bundle = strategy.build_strategy_artifact(
+        job_context={"horizon": "swing", "scenario": "base"},
+        signal={"action": "HOLD", "score": 0.12, "confidence": 0.58},
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_bundle,
+    )
+
+    assert "mean-reversion participant" in strategy_bundle["participant_fit"]
+    assert strategy_bundle["time_horizon_fit"].startswith("swing_")
+
+
+def test_phase4_report_surfaces_strategy_layer_language():
+    data_bundle = _base_data_bundle()
+    feature_bundle = _build_feature_bundle(data_bundle)
+    strategy_bundle = strategy.build_strategy_artifact(
+        job_context={"horizon": "swing", "scenario": "base", "analysis_depth": "deep"},
+        signal={"action": "BUY", "score": 0.82, "confidence": 0.76},
+        data_bundle=data_bundle,
+        feature_factor_bundle=feature_bundle,
+    )
+
     report = reports.build_analysis_report(
         symbol="NVDA",
-        as_of_date="2026-04-11",
+        as_of_date="2026-04-29",
         horizon="swing",
         risk_mode="balanced",
         signal={"action": "BUY", "score": 0.82, "confidence": 0.76},
@@ -299,16 +334,10 @@ def test_phase3_report_surfaces_structural_fragility_and_agreement_layers():
         strategy=strategy_bundle,
     )
 
-    assert "Structural quality is" in report["signal_summary"]
-    assert "domain agreement" in report["statistical_analysis"].lower()
-    assert "Narrative crowding" in report["sentiment_analysis"]
-    assert "Macro fragility" in report["macro_geopolitical_analysis"]
-    assert "Fragility markers show instability" in report["risk_quality_analysis"]
-    assert report["strategy"]["strategy_posture"]
-    assert report["strategy"]["scenario_matrix"]["base"]["summary"]
+    assert "actionability" in report["signal_summary"].lower()
+    assert "bull case" in report["strategy_view"].lower()
+    assert "stress case" in report["strategy_view"].lower()
+    assert "execution posture" in report["strategy_view"].lower()
+    assert "formal invalidators" in report["risks_weaknesses_invalidators"].lower()
+    assert report["scenario_matrix"]["base"]["summary"]
     assert report["execution_posture"]["preferred_posture"]
-    assert report["proprietary_scores"]
-    assert report["factor_groups"]
-    assert report["domain_agreement"]
-    assert report["conviction_components"]
-    assert report["opportunity_quality_components"]

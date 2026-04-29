@@ -11,6 +11,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-analyze-active-label"' in html
     assert 'id="assistant-chat-active-label"' in html
     assert 'id="assistant-analyze-report"' in html
+    assert 'id="assistant-strategy-metrics"' in html
+    assert 'id="assistant-strategy-scenarios"' in html
+    assert 'id="assistant-risk-triggers"' in html
     assert 'data-research-tab="dashboard"' in html
     assert 'data-research-tab="chat"' in html
     assert 'id="assistant-signal-drilldown"' in html
@@ -20,4 +23,7 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "session_id: pendingSessionId" in js
     assert "active_analysis: state.assistantActiveAnalysis" in js
     assert "setResearchTab" in js
+    assert "renderStrategyMetrics" in js
+    assert "renderStrategyScenarios" in js
+    assert "renderRiskTriggers" in js
     assert "refreshAssistantSystemHealth" in js

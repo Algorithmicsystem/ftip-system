@@ -637,19 +637,38 @@ def _strategy_view_text(
     horizon: str,
 ) -> str:
     participant_fit = strategy.get("participant_fit") or []
-    invalidators = strategy.get("invalidation_conditions") or []
+    scenario_matrix = strategy.get("scenario_matrix") or {}
+    execution = strategy.get("execution_posture") or {}
+    confirmation_triggers = strategy.get("confirmation_triggers") or []
     return _join_sentences(
         [
-            strategy.get("base_case")
+            strategy.get("strategy_summary")
+            or strategy.get("base_case")
             or f"The base case is to carry a {strategy_signal} stance on the {horizon} horizon.",
-            strategy.get("upside_case"),
-            strategy.get("downside_case"),
+            f"Internal posture is {strategy.get('strategy_posture') or strategy_signal.lower()}, with actionability {_fmt_num(strategy.get('actionability_score'), digits=1, signed=False)} / 100, confidence {_fmt_num(strategy.get('confidence_score'), digits=1, signed=False)} / 100, and time-horizon fit {strategy.get('time_horizon_fit') or horizon}."
+            if strategy
+            else None,
+            f"Base case: {(scenario_matrix.get('base') or {}).get('summary') or strategy.get('base_case')}."
+            if scenario_matrix.get("base") or strategy.get("base_case")
+            else None,
+            f"Bull case: {(scenario_matrix.get('bull') or {}).get('summary') or strategy.get('upside_case')}."
+            if scenario_matrix.get("bull") or strategy.get("upside_case")
+            else None,
+            f"Bear case: {(scenario_matrix.get('bear') or {}).get('summary') or strategy.get('downside_case')}."
+            if scenario_matrix.get("bear") or strategy.get("downside_case")
+            else None,
+            f"Stress case: {(scenario_matrix.get('stress') or {}).get('summary') or strategy.get('stress_case')}."
+            if scenario_matrix.get("stress") or strategy.get("stress_case")
+            else None,
             f"Participant fit is {_fmt_list(participant_fit)}."
             if participant_fit
             else "Participant fit remains broad because the setup is not resolving into one narrow style bucket.",
-            f"Invalidation conditions are {_fmt_list(invalidators)}."
-            if invalidators
-            else "No single hard invalidator dominates yet; the posture is more sensitive to incremental evidence decay.",
+            f"Execution posture prefers {(execution.get('preferred_posture') or 'staged_watch').replace('_', ' ')}, with urgency {(execution.get('urgency_level') or 'low').replace('_', ' ')} and patience {(execution.get('patience_level') or 'high').replace('_', ' ')}."
+            if execution
+            else None,
+            f"Upgrade / confirmation triggers are {_fmt_list(confirmation_triggers)}."
+            if confirmation_triggers
+            else "No single confirmation trigger dominates; the engine is looking for a cleaner evidence stack rather than one isolated event.",
         ]
     )
 
@@ -661,15 +680,30 @@ def _risks_invalidators_text(
     missing = why_signal.get("missing_data_warnings") or []
     freshness = why_signal.get("freshness_warnings") or []
     invalidators = strategy.get("invalidation_conditions") or []
+    invalidation_map = strategy.get("invalidators") or {}
+    vetoes = strategy.get("fragility_vetoes") or []
+    uncertainty_notes = strategy.get("uncertainty_notes") or []
     return _join_sentences(
         [
             f"Key weaknesses are {_fmt_driver_list(why_signal.get('top_negative_drivers') or [])}.",
+            f"Active fragility / veto dampeners are {_fmt_list(item.get('name', '').replace('_', ' ') for item in vetoes)}."
+            if vetoes
+            else "No hard fragility veto is active, but the setup is still being checked for instability and evidence weakness.",
             f"Missing-data warnings are {_fmt_list(missing)} and freshness warnings are {_fmt_list(freshness)}."
             if missing or freshness
             else "No major missing-data or freshness escalation is currently dominating the risk framing.",
             f"Formal invalidators are {_fmt_list(invalidators)}."
             if invalidators
             else "Formal invalidators remain scenario-dependent rather than singular.",
+            f"Regime invalidators are {_fmt_list((invalidation_map.get('regime_invalidators') or []))}, narrative invalidators are {_fmt_list((invalidation_map.get('narrative_invalidators') or []))}, macro invalidators are {_fmt_list((invalidation_map.get('macro_invalidators') or []))}, and quality invalidators are {_fmt_list((invalidation_map.get('quality_invalidators') or []))}."
+            if invalidation_map
+            else None,
+            f"Deterioration triggers are {_fmt_list((strategy.get('deterioration_triggers') or []))}."
+            if strategy.get("deterioration_triggers")
+            else None,
+            f"Uncertainty notes are {_fmt_list(uncertainty_notes)}."
+            if uncertainty_notes
+            else None,
         ]
     )
 
@@ -792,8 +826,15 @@ def build_analysis_report(
 
     strategy_signal = (strategy.get("final_signal") or action).upper()
     strategy_confidence = _first_available(strategy.get("confidence"), confidence)
+    confidence_score = strategy.get("confidence_score")
     conviction_tier = strategy.get("conviction_tier") or "unknown"
     fragility_tier = strategy.get("fragility_tier") or "unknown"
+    strategy_posture = strategy.get("strategy_posture") or strategy_signal.lower()
+    actionability_score = strategy.get("actionability_score")
+    participant_fit = strategy.get("participant_fit") or []
+    execution_posture = strategy.get("execution_posture") or {}
+    scenario_matrix = strategy.get("scenario_matrix") or {}
+    invalidation_map = strategy.get("invalidators") or {}
     regime = _first_available(
         (feature_factor_bundle.get("regime_engine") or {}).get("regime_label"),
         key_features.get("regime_label"),
@@ -842,18 +883,21 @@ def build_analysis_report(
         "risk_mode": risk_mode,
         "final_action": strategy_signal,
         "strategy_confidence": strategy_confidence,
+        "confidence_score": confidence_score,
         "conviction_tier": conviction_tier,
         "fragility_tier": fragility_tier,
+        "strategy_posture": strategy_posture,
+        "actionability_score": actionability_score,
     }
 
     signal_summary = " ".join(
         [
             f"As of {as_of_text}, the assistant pipeline lands on a {strategy_signal} posture for {symbol}, framed on the {horizon} horizon under {risk_mode} risk mode.",
-            f"The underlying signal engine prints {action} with score {_fmt_num(score)} and confidence {_fmt_num(confidence)}, while the strategy layer converts that into {strategy_signal} with {_fmt_num(strategy_confidence)} confidence, {conviction_tier} conviction, and {fragility_tier} fragility.",
+            f"The underlying signal engine prints {action} with score {_fmt_num(score)} and confidence {_fmt_num(confidence)}, while the strategy layer converts that into {strategy_signal} / {strategy_posture} with probability-like confidence {_fmt_num(strategy_confidence)} ({_fmt_num(confidence_score, digits=1, signed=False)} / 100), {conviction_tier} conviction, {fragility_tier} fragility, and actionability {_fmt_num(actionability_score, digits=1, signed=False)} / 100.",
             f"Structural quality is {_fmt_num(composites.get('Market Structure Integrity Score'), digits=1, signed=False)} / 100, regime stability is {_fmt_num(composites.get('Regime Stability Score'), digits=1, signed=False)} / 100, signal fragility is {_fmt_num(composites.get('Signal Fragility Index'), digits=1, signed=False)} / 100, and opportunity quality is {_fmt_num(composites.get('Opportunity Quality Score'), digits=1, signed=False)} / 100.",
             f"Cross-domain agreement is {_fmt_num(domain_agreement.get('domain_agreement_score'), digits=1, signed=False)} / 100 versus conflict {_fmt_num(domain_agreement.get('domain_conflict_score'), digits=1, signed=False)} / 100; the strongest confirming domains are {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_confirming_domains') or []))}, while conflicts are concentrated in {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_conflicting_domains') or []))}.",
-            f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
-            f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'}.",
+            f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, participant fit is {_fmt_list(participant_fit)}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
+            f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'} and execution posture {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')}.",
             f"Coverage headwinds are concentrated in {_fmt_list(coverage_headwinds)}, which is dampening conviction."
             if coverage_headwinds
             else "Cross-domain coverage is broadly in place, so the signal is not being driven by one thin data pocket alone.",
@@ -907,10 +951,11 @@ def build_analysis_report(
 
     overall_analysis = " ".join(
         [
-            f"The unified system view on {symbol} is {strategy_signal}. That posture is not coming from one score alone; it is the result of trend, mean-reversion, sentiment, macro-alignment, quality/fundamental, and fragility-veto components being fused inside the strategy layer.",
+            f"The unified system view on {symbol} is {strategy_signal} / {strategy_posture}. That posture is not coming from one score alone; it is the result of trend, mean-reversion, sentiment, macro-alignment, quality/fundamental, relative-strength, evidence-quality, and fragility-veto components being fused inside the strategy layer.",
             f"The strongest evidence for the thesis is {_fmt_driver_list(why_signal['top_positive_drivers'])}. The strongest evidence against it is {_fmt_driver_list(why_signal['top_negative_drivers'])}.",
             f"Structural integrity {_fmt_num(composites.get('Market Structure Integrity Score'), digits=1)} / 100, fundamental durability {_fmt_num(composites.get('Fundamental Durability Score'), digits=1)} / 100, macro alignment {_fmt_num(composites.get('Macro Alignment Score'), digits=1)} / 100, and cross-domain conviction {_fmt_num(composites.get('Cross-Domain Conviction Score'), digits=1)} / 100 are being weighed against fragility {_fmt_num(composites.get('Signal Fragility Index'), digits=1)} / 100 and crowding {_fmt_num(composites.get('Narrative Crowding Index'), digits=1)} / 100.",
-            f"The final posture stays at {strategy_signal} because raw signal action {action}, regime {regime}, and opportunity-quality score {_fmt_num(composites.get('Opportunity Quality Score'), digits=1)} / 100 outweigh the current detractors, but the system is explicitly least certain where {strategy.get('where_least_certain') or 'cross-domain disagreement is highest'}.",
+            f"The final posture stays at {strategy_signal} because raw signal action {action}, regime {regime}, opportunity-quality score {_fmt_num(composites.get('Opportunity Quality Score'), digits=1)} / 100, and execution framing {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')} outweigh the current detractors, but the system is explicitly least certain where {strategy.get('where_least_certain') or 'cross-domain disagreement is highest'}.",
+            f"Scenario discipline matters: base case is {(scenario_matrix.get('base') or {}).get('summary') or strategy.get('base_case')}, bull transition requires {_fmt_list((strategy.get('confirmation_triggers') or []))}, bear deterioration comes through {_fmt_list((strategy.get('deterioration_triggers') or []))}, and top invalidators are {_fmt_list((invalidation_map.get('top_invalidators') or []))}.",
             "This remains a description of the platform's computed state, not personalized investment advice.",
         ]
     )
@@ -959,6 +1004,11 @@ def build_analysis_report(
             "feature_factor_bundle.macro_alignment",
         ],
         "strategy_view": [
+            "strategy.strategy_summary",
+            "strategy.strategy_posture",
+            "strategy.actionability_score",
+            "strategy.scenario_matrix",
+            "strategy.execution_posture",
             "strategy.base_case",
             "strategy.upside_case",
             "strategy.downside_case",
@@ -968,6 +1018,8 @@ def build_analysis_report(
             "quality.warnings",
             "quality.anomaly_flags",
             "strategy.confidence_degraders",
+            "strategy.fragility_vetoes",
+            "strategy.invalidators",
         ],
     }
 
@@ -1001,6 +1053,19 @@ def build_analysis_report(
         "conviction_components": conviction_components,
         "opportunity_quality_components": opportunity_quality_components,
         "strategy": strategy,
+        "strategy_summary": strategy.get("strategy_summary"),
+        "strategy_posture": strategy_posture,
+        "confidence_score": confidence_score,
+        "actionability_score": actionability_score,
+        "participant_fit": participant_fit,
+        "scenario_matrix": scenario_matrix,
+        "invalidators": invalidation_map,
+        "confirmation_triggers": strategy.get("confirmation_triggers") or [],
+        "deterioration_triggers": strategy.get("deterioration_triggers") or [],
+        "fragility_vetoes": strategy.get("fragility_vetoes") or [],
+        "execution_posture": execution_posture,
+        "uncertainty_notes": strategy.get("uncertainty_notes") or [],
+        "strategy_version": strategy.get("strategy_version"),
         "why_this_signal": why_signal,
         "top_positive_drivers": why_signal["top_positive_drivers"],
         "top_negative_drivers": why_signal["top_negative_drivers"],
