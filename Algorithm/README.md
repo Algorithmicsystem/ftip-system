@@ -1,5 +1,45 @@
 # FTIP System Notes
 
+## Institutional Demo Flow
+
+The buyer-facing `/app` workspace now follows a disciplined institutional flow:
+
+1. `Dashboard`
+   - read the executive signal, posture, conviction, fragility, top drivers, top risks, freshness, and evaluation snapshot
+2. `Analyze`
+   - run a full assistant analysis and review the premium report sections
+3. `Strategy`
+   - inspect actionability, participant fit, scenarios, invalidators, and execution posture
+4. `Evaluation`
+   - review signal/strategy scorecards, calibration, regime behavior, and factor usefulness
+5. `Evidence`
+   - inspect provenance, freshness, coverage quality, supporting/conflicting evidence, and artifact metadata
+6. `Compare`
+   - compare the active name against another stored analysis
+7. `Watchlist`
+   - monitor saved symbols with signal, posture, conviction, fragility, and freshness context
+8. `Narrator`
+   - ask grounded follow-up questions from the active report, strategy, and evaluation artifacts
+
+### Product workflow map
+
+- `Dashboard`: first-screen buyer view
+- `Analyze`: premium report workspace and deep drilldown
+- `Strategy`: institutional decision layer
+- `Evaluation`: proof-of-edge and calibration layer
+- `Evidence`: provenance, freshness, and trust layer
+- `Compare`: relative decision workflow
+- `Watchlist`: monitoring and re-entry workflow
+- `Narrator`: grounded system voice
+- `Trust / Health`: provider health plus audit/freshness ledger
+
+### Demo notes
+
+- Keep the official Prosperity v1 controls intact for compatibility checks and operational demos.
+- Use `Demo Mode` in `/app` when presenting the institutional workspace first.
+- For the cleanest walkthrough, analyze one symbol, open `Strategy`, then `Evaluation`, then `Evidence`, and finish with a narrator follow-up question.
+- Recent analyses and the watchlist are browser-local convenience layers; they do not change the official v1 flow.
+
 ## Local Development Runbook (zero-issues)
 
 Follow these steps from a clean checkout (use **Terminal 1** unless noted).

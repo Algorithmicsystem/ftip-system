@@ -3,17 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FTIP Prosperity v1 Console</title>
+    <title>FTIP Institutional Intelligence Terminal</title>
     <link rel="stylesheet" href="/app/static/styles.css" />
   </head>
   <body>
-    <header>
-      <h1>FTIP Prosperity v1 Console</h1>
-      <p class="subtitle">Official v1 flow: bootstrap → snapshot run → latest signal/features.</p>
+    <header class="terminal-header">
+      <div>
+        <p class="console-kicker">Fund-grade intelligence platform</p>
+        <h1>FTIP Institutional Intelligence Terminal</h1>
+        <p class="subtitle">
+          Multi-domain analysis, strategy, evidence, evaluation, and grounded narration in one
+          institutional workflow.
+        </p>
+      </div>
+      <div class="header-actions">
+        <div class="header-pill">Official Prosperity v1 preserved</div>
+        <div class="header-pill" id="demo-mode-status">Demo mode off</div>
+        <button id="demo-mode-toggle" class="secondary">Enable Demo Mode</button>
+      </div>
     </header>
 
     <main>
-      <div class="panel">
+      <div class="panel official-controls-panel">
         <h2>Official v1 Controls</h2>
         <div class="input-row">
           <input id="api-key-input" placeholder="X-API-Key (optional for local dev)" />
@@ -37,7 +48,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="signal">Latest Signal (official v1)</button>
         <button class="tab" data-tab="features">Latest Features (official v1)</button>
-        <button class="tab" data-tab="legacy">Non-v1 / legacy tools</button>
+        <button class="tab" data-tab="legacy">Institutional workspace</button>
       </div>
 
       <div id="signal" class="panel tab-panel">
@@ -64,22 +75,23 @@
       </div>
 
       <div id="legacy" class="panel tab-panel hidden">
-        <div class="advanced-console">
-          <div class="advanced-console-head">
-            <div>
-              <p class="console-kicker">Non-v1 / legacy / advanced</p>
-              <h3>Institutional Research Console</h3>
-              <p class="muted legacy-note">
-                This assistant workspace is intentionally separate from the official Prosperity v1
-                flow above. It uses the assistant analysis artifact, strategy engine, and grounded
-                narrator for deeper research and explanation.
-              </p>
+          <div class="advanced-console">
+            <div class="advanced-console-head">
+              <div>
+                <p class="console-kicker">Institutional workflow</p>
+                <h3>Research, Strategy, Evidence, and Evaluation Workspace</h3>
+                <p class="muted legacy-note">
+                  This buyer-facing workspace layers the assistant analysis artifact, strategy
+                  engine, grounded narrator, and evaluation stack into a premium institutional
+                  research terminal. The official Prosperity v1 controls remain preserved above.
+                </p>
+              </div>
+              <div class="advanced-console-badges">
+                <span class="legacy-badge">Institutional</span>
+                <span class="legacy-badge">Artifact Grounded</span>
+                <span class="legacy-badge">Demo Ready</span>
+              </div>
             </div>
-            <div class="advanced-console-badges">
-              <span class="legacy-badge">Non-v1</span>
-              <span class="legacy-badge">Advanced</span>
-            </div>
-          </div>
 
           <div class="active-analysis-banner" id="assistant-active-analysis-banner">
             <div>
@@ -136,27 +148,31 @@
             <option value="neutral"></option>
           </datalist>
 
+          <datalist id="assistant-compare-options"></datalist>
+
           <div class="research-shell">
             <aside class="research-nav">
+              <div class="nav-kicker">Workspaces</div>
               <button class="research-tab active" data-research-tab="dashboard">
                 Dashboard
               </button>
               <button class="research-tab" data-research-tab="analyze">Analyze</button>
-              <button class="research-tab" data-research-tab="signal">Signal</button>
               <button class="research-tab" data-research-tab="strategy">Strategy</button>
-              <button class="research-tab" data-research-tab="evidence">Evidence</button>
               <button class="research-tab" data-research-tab="evaluation">Evaluation</button>
-              <button class="research-tab" data-research-tab="chat">Chat / Narrator</button>
+              <button class="research-tab" data-research-tab="evidence">Evidence</button>
+              <button class="research-tab" data-research-tab="compare">Compare</button>
+              <button class="research-tab" data-research-tab="watchlist">Watchlist</button>
+              <button class="research-tab" data-research-tab="chat">Narrator</button>
               <button class="research-tab" data-research-tab="research">
-                Advanced / Research
+                Factor Lab
               </button>
-              <button class="research-tab" data-research-tab="health">System Health</button>
+              <button class="research-tab" data-research-tab="health">Trust / Health</button>
             </aside>
 
             <div class="research-main">
               <section class="research-panel" data-research-panel="dashboard">
-                <div class="workspace-grid">
-                  <section class="legacy-card dashboard-hero">
+                <div class="workspace-grid dashboard-grid">
+                  <section class="legacy-card dashboard-hero dashboard-wide">
                     <div class="legacy-card-head">
                       <h4>Executive Summary</h4>
                       <span class="legacy-badge">Narrated artifact</span>
@@ -176,6 +192,38 @@
                       The driver panel will list top positives, top negatives, confidence
                       modifiers, missing-data warnings, and freshness warnings for the active
                       report.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Workflow / Demo Flow</h4>
+                      <span class="legacy-badge">Guided path</span>
+                    </div>
+                    <div id="assistant-dashboard-workflow" class="drilldown-grid empty-state-card">
+                      The dashboard will surface the buyer-facing workflow once an analysis is
+                      active.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Trust Snapshot</h4>
+                      <span class="legacy-badge">Freshness + auditability</span>
+                    </div>
+                    <div id="assistant-dashboard-trust-strip" class="summary-grid empty-state-card">
+                      Freshness, versions, coverage quality, and evaluation readiness render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card dashboard-wide">
+                    <div class="legacy-card-head">
+                      <h4>Recent Analyses</h4>
+                      <span class="legacy-badge">Quick re-entry</span>
+                    </div>
+                    <div id="assistant-dashboard-recent" class="empty-state-card">
+                      Recent analyzed names will appear here for fast reload, compare, and
+                      watchlist actions.
                     </div>
                   </section>
                 </div>
@@ -234,14 +282,12 @@
                     </div>
                   </div>
                 </section>
-              </section>
 
-              <section class="research-panel hidden" data-research-panel="signal">
-                <div class="workspace-grid">
+                <div class="workspace-grid analysis-workspace-grid">
                   <section class="legacy-card">
                     <div class="legacy-card-head">
                       <h4>Signal Summary</h4>
-                      <span class="legacy-badge">Final posture</span>
+                      <span class="legacy-badge">Executive thesis</span>
                     </div>
                     <div id="assistant-signal-summary-cards" class="summary-grid empty-state-card">
                       Signal summary cards appear here after analysis runs.
@@ -249,6 +295,9 @@
                     <div id="assistant-signal-section" class="section-copy empty-state-card">
                       The signal summary section will explain final action, confidence,
                       conviction, risks, and scenario framing.
+                    </div>
+                    <div id="assistant-overall-analysis-section" class="section-copy empty-state-card">
+                      Overall thesis and cross-domain synthesis will render here.
                     </div>
                   </section>
 
@@ -263,6 +312,46 @@
                     <div id="assistant-statistical-section" class="section-copy empty-state-card">
                       Statistical / quant analysis will render here.
                     </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Fundamental + Narrative</h4>
+                      <span class="legacy-badge">Business + crowd context</span>
+                    </div>
+                    <div id="assistant-fundamental-section" class="section-copy empty-state-card">
+                      Fundamental analysis will render here.
+                    </div>
+                    <div id="assistant-sentiment-section" class="section-copy empty-state-card">
+                      Sentiment / narrative / flow analysis will render here.
+                    </div>
+                    <div id="assistant-macro-section" class="section-copy empty-state-card">
+                      Macro / geopolitical / cross-asset analysis will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Evidence Snapshot</h4>
+                      <span class="legacy-badge">Traceability</span>
+                    </div>
+                    <div id="assistant-evidence-section" class="section-copy empty-state-card">
+                      Evidence provenance and data freshness will render here.
+                    </div>
+                    <div id="assistant-domain-status-grid" class="summary-grid empty-state-card">
+                      Domain freshness and coverage will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Deep Drilldown</h4>
+                      <span class="legacy-badge">Raw artifact</span>
+                    </div>
+                    <details class="report-raw">
+                      <summary>Open raw analysis JSON</summary>
+                      <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
+                    </details>
                   </section>
                 </div>
               </section>
@@ -287,14 +376,61 @@
 
                   <section class="legacy-card">
                     <div class="legacy-card-head">
-                      <h4>Risks / Weaknesses / Invalidators</h4>
-                      <span class="legacy-badge">Risk discipline</span>
+                      <h4>Execution / Risks / Invalidators</h4>
+                      <span class="legacy-badge">Decision discipline</span>
                     </div>
                     <div id="assistant-risk-section" class="section-copy empty-state-card">
                       Risks, weaknesses, and invalidation conditions will render here.
                     </div>
+                    <div id="assistant-strategy-playbook" class="drilldown-grid empty-state-card">
+                      Execution posture, participant fit, and what would improve or worsen the
+                      setup will render here.
+                    </div>
                     <div id="assistant-risk-triggers" class="drilldown-grid empty-state-card">
                       Invalidators, confirmation triggers, deterioration triggers, and vetoes will render here.
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="evaluation">
+                <div class="workspace-grid">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Evaluation Scorecard</h4>
+                      <span class="legacy-badge">Phase 6</span>
+                    </div>
+                    <div id="assistant-evaluation-metrics" class="summary-grid empty-state-card">
+                      Evaluation scorecards will render here after analysis runs.
+                    </div>
+                    <div id="assistant-evaluation-section" class="section-copy empty-state-card">
+                      Historical usefulness and research credibility context will render here.
+                    </div>
+                    <div id="assistant-calibration-section" class="section-copy empty-state-card">
+                      Confidence and calibration evaluation will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Regime / Failure Modes</h4>
+                      <span class="legacy-badge">Cohorts</span>
+                    </div>
+                    <div id="assistant-regime-grid" class="drilldown-grid empty-state-card">
+                      Regime and cohort breakdowns will render here.
+                    </div>
+                    <div id="assistant-failure-modes" class="drilldown-grid empty-state-card">
+                      Failure modes, strongest conditions, and bucket results will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Factor / Component Usefulness</h4>
+                      <span class="legacy-badge">Attribution</span>
+                    </div>
+                    <div id="assistant-evaluation-factors" class="drilldown-grid empty-state-card">
+                      Factor and strategy component usefulness will render here.
                     </div>
                   </section>
                 </div>
@@ -305,25 +441,122 @@
                   <section class="legacy-card">
                     <div class="legacy-card-head">
                       <h4>Evidence / Provenance</h4>
-                      <span class="legacy-badge">Traceability</span>
+                      <span class="legacy-badge">Key support</span>
                     </div>
                     <div id="assistant-evidence-section" class="section-copy empty-state-card">
                       Evidence provenance and data freshness will render here.
                     </div>
-                    <div id="assistant-domain-status-grid" class="summary-grid empty-state-card">
+                    <div id="assistant-evidence-supporting" class="drilldown-grid empty-state-card">
+                      Key supporting evidence will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Conflicts / Missingness</h4>
+                      <span class="legacy-badge">Weak points</span>
+                    </div>
+                    <div id="assistant-evidence-conflicts" class="drilldown-grid empty-state-card">
+                      Conflicting evidence, missingness, and freshness caveats will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Freshness / Coverage</h4>
+                      <span class="legacy-badge">Domain completeness</span>
+                    </div>
+                    <div id="assistant-domain-status-grid-evidence" class="summary-grid empty-state-card">
                       Domain freshness and coverage will render here.
                     </div>
                   </section>
 
                   <section class="legacy-card">
                     <div class="legacy-card-head">
-                      <h4>Raw JSON</h4>
-                      <span class="legacy-badge">Collapsible</span>
+                      <h4>Artifact Ledger</h4>
+                      <span class="legacy-badge">Audit trail</span>
                     </div>
-                    <details class="report-raw" open>
-                      <summary>Raw analysis JSON</summary>
-                      <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
-                    </details>
+                    <div id="assistant-artifact-ledger" class="drilldown-grid empty-state-card">
+                      Report, strategy, evaluation, and provenance metadata will render here.
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="compare">
+                <div class="workspace-grid">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Relative Comparison</h4>
+                      <span class="legacy-badge">Active vs peer</span>
+                    </div>
+                    <div class="input-row advanced-input-row">
+                      <input
+                        id="assistant-compare-active-symbol"
+                        placeholder="Active symbol"
+                        readonly
+                        aria-label="Active compare symbol"
+                      />
+                      <input
+                        id="assistant-compare-symbol"
+                        list="assistant-compare-options"
+                        placeholder="Compare symbol (recent or watchlist)"
+                      />
+                      <button id="assistant-compare-load-btn" class="secondary">
+                        Load Comparator
+                      </button>
+                      <button id="assistant-compare-clear-btn" class="secondary">Clear</button>
+                    </div>
+                    <p class="muted legacy-status" id="assistant-compare-status">
+                      Choose a second symbol to compare against the active analysis.
+                    </p>
+                    <div id="assistant-compare-summary" class="summary-grid empty-state-card">
+                      Comparison highlights render here after an active report and comparator are
+                      available.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Decision Matrix</h4>
+                      <span class="legacy-badge">Relative strength</span>
+                    </div>
+                    <div id="assistant-compare-details" class="empty-state-card">
+                      Compare signal, strategy, fragility, conviction, and evaluation snapshots
+                      here.
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="watchlist">
+                <div class="workspace-grid">
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Watchlist / Monitoring</h4>
+                      <span class="legacy-badge">Portfolio-style workflow</span>
+                    </div>
+                    <div class="input-row advanced-input-row">
+                      <input
+                        id="assistant-watchlist-symbol"
+                        placeholder="Add symbol to watchlist"
+                        aria-label="Watchlist symbol"
+                      />
+                      <button id="assistant-watchlist-add-btn" class="secondary">Add Symbol</button>
+                      <button id="assistant-watchlist-add-active-btn" class="secondary">
+                        Add Active Symbol
+                      </button>
+                      <button id="assistant-watchlist-clear-btn" class="secondary">
+                        Clear Watchlist
+                      </button>
+                    </div>
+                    <p class="muted legacy-status" id="assistant-watchlist-status">
+                      Watchlist symbols remain local to this browser and use stored analysis
+                      artifacts when available.
+                    </p>
+                    <div id="assistant-watchlist-grid" class="empty-state-card">
+                      Watchlist monitoring rows will render here.
+                    </div>
                   </section>
                 </div>
               </section>
@@ -331,7 +564,7 @@
               <section class="research-panel hidden" data-research-panel="chat">
                 <section class="legacy-card">
                   <div class="legacy-card-head">
-                    <h4>Chat / Narrator</h4>
+                    <h4>Narrator / System Voice</h4>
                     <span class="legacy-badge">POST /assistant/chat</span>
                   </div>
                   <p class="muted active-analysis-label" id="assistant-chat-active-label">
@@ -365,7 +598,7 @@
                   <textarea
                     id="assistant-chat-message"
                     rows="4"
-                    placeholder="Ask the narrator to explain the active analysis..."
+                    placeholder="Ask the narrator to explain the active analysis, strategy, or evaluation..."
                   ></textarea>
                   <div class="actions-row">
                     <button id="assistant-chat-btn" class="secondary">Send</button>
@@ -375,64 +608,26 @@
                 </section>
               </section>
 
-              <section class="research-panel hidden" data-research-panel="evaluation">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Evaluation Scorecard</h4>
-                      <span class="legacy-badge">Phase 6</span>
-                    </div>
-                    <div id="assistant-evaluation-metrics" class="summary-grid empty-state-card">
-                      Evaluation scorecards will render here after analysis runs.
-                    </div>
-                    <div id="assistant-evaluation-section" class="section-copy empty-state-card">
-                      Historical usefulness and research credibility context will render here.
-                    </div>
-                    <div id="assistant-calibration-section" class="section-copy empty-state-card">
-                      Confidence and calibration evaluation will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Regime / Failure Modes</h4>
-                      <span class="legacy-badge">Cohorts</span>
-                    </div>
-                    <div id="assistant-regime-grid" class="drilldown-grid empty-state-card">
-                      Regime and cohort breakdowns will render here.
-                    </div>
-                    <div id="assistant-failure-modes" class="drilldown-grid empty-state-card">
-                      Failure modes, strongest conditions, and bucket results will render here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
               <section class="research-panel hidden" data-research-panel="research">
                 <div class="workspace-grid">
                   <section class="legacy-card">
                     <div class="legacy-card-head">
-                      <h4>Fundamental + Narrative</h4>
-                      <span class="legacy-badge">Research layer</span>
+                      <h4>Factor Lab</h4>
+                      <span class="legacy-badge">Proprietary layer</span>
                     </div>
-                    <div id="assistant-fundamental-section" class="section-copy empty-state-card">
-                      Fundamental analysis will render here.
-                    </div>
-                    <div id="assistant-sentiment-section" class="section-copy empty-state-card">
-                      Sentiment / narrative / flow analysis will render here.
-                    </div>
-                    <div id="assistant-macro-section" class="section-copy empty-state-card">
-                      Macro / geopolitical / cross-asset analysis will render here.
+                    <div id="assistant-factor-grid" class="factor-grid empty-state-card">
+                      Composite scores and factor bundles render here.
                     </div>
                   </section>
 
                   <section class="legacy-card">
                     <div class="legacy-card-head">
-                      <h4>Factor Stack</h4>
-                      <span class="legacy-badge">Proprietary layer</span>
+                      <h4>Research Drilldown</h4>
+                      <span class="legacy-badge">Drivers + cohorts</span>
                     </div>
-                    <div id="assistant-factor-grid" class="factor-grid empty-state-card">
-                      Composite scores and factor bundles render here.
+                    <div id="assistant-research-drilldown" class="drilldown-grid empty-state-card">
+                      Strategy components, factor attribution, and diagnostic drilldowns will render
+                      here.
                     </div>
                   </section>
                 </div>
@@ -453,6 +648,17 @@
                     <p class="muted legacy-status" id="assistant-health-status">Ready.</p>
                     <div id="assistant-system-health" class="summary-grid empty-state-card">
                       Assistant and provider health will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Audit / Freshness Ledger</h4>
+                      <span class="legacy-badge">Trust layer</span>
+                    </div>
+                    <div id="assistant-system-audit" class="drilldown-grid empty-state-card">
+                      Report, strategy, evaluation, freshness, and coverage audit details render
+                      here.
                     </div>
                   </section>
                 </div>

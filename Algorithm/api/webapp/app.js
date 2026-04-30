@@ -7,15 +7,30 @@ const state = {
   assistantChatTranscript: [],
   assistantActiveAnalysis: null,
   assistantLatestReport: null,
+  assistantRecentReports: [],
+  assistantWatchlist: [],
+  assistantCompareSymbol: "",
   assistantHealth: null,
+  demoMode: false,
   researchTab: "dashboard",
 };
 
 const ASSISTANT_CHAT_SESSION_STORAGE_KEY = "ftip.assistant.chat.session_id";
 const ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY = "ftip.assistant.active_analysis";
+const ASSISTANT_RECENT_REPORTS_STORAGE_KEY = "ftip.assistant.recent_reports";
+const ASSISTANT_WATCHLIST_STORAGE_KEY = "ftip.assistant.watchlist";
+const ASSISTANT_COMPARE_SYMBOL_STORAGE_KEY = "ftip.assistant.compare_symbol";
+const FTIP_DEMO_MODE_STORAGE_KEY = "ftip.demo_mode";
 
 const isoDate = (date) => date.toISOString().slice(0, 10);
 const formatJson = (value) => JSON.stringify(value ?? {}, null, 2);
+const normalizeSymbol = (value) => String(value ?? "").trim().toUpperCase();
+const formatScore = (value, digits = 1) =>
+  value == null || Number.isNaN(Number(value)) ? "n/a" : Number(value).toFixed(digits);
+const formatPercent = (value, digits = 1) =>
+  value == null || Number.isNaN(Number(value))
+    ? "n/a"
+    : `${Number(value * 100).toFixed(digits)}%`;
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -25,6 +40,16 @@ const escapeHtml = (value) =>
     .replaceAll("'", "&#39;");
 
 const emptyStateCard = (text) => `<div class="empty-state-card">${escapeHtml(text)}</div>`;
+const readStorageJson = (key, fallback) => {
+  try {
+    const raw = window.localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+};
+const writeStorageJson = (key, value) =>
+  window.localStorage.setItem(key, JSON.stringify(value));
 
 const setDefaults = () => {
   const now = new Date();
@@ -91,6 +116,133 @@ const callJson = async (url, options = {}) => {
   return data;
 };
 
+const compositeScore = (report, label) =>
+  report?.feature_factor_bundle?.composite_intelligence?.[label];
+
+const topDriverLabel = (report, polarity) => {
+  const drivers =
+    polarity === "positive"
+      ? report?.why_this_signal?.top_positive_drivers
+      : report?.why_this_signal?.top_negative_drivers;
+  return drivers?.[0]?.label || drivers?.[0]?.detail || "n/a";
+};
+
+const conditionLabel = (item) => {
+  if (!item) {
+    return "n/a";
+  }
+  if (item.dimension && item.label) {
+    return `${item.dimension}=${item.label}`;
+  }
+  return item.label || item.dimension || "n/a";
+};
+
+const buildActiveAnalysisFromReport = (report) => ({
+  symbol: report?.symbol || "n/a",
+  as_of_date: report?.as_of_date || "n/a",
+  horizon: report?.horizon || "n/a",
+  risk_mode: report?.risk_mode || "n/a",
+  signal:
+    report?.strategy?.final_signal ||
+    report?.signal?.final_action ||
+    report?.signal?.action ||
+    "n/a",
+  conviction_tier: report?.strategy?.conviction_tier || "unknown",
+  strategy_posture: report?.strategy?.strategy_posture || "n/a",
+  freshness_status: report?.freshness_summary?.overall_status || "unknown",
+  report_version: report?.report_version || "n/a",
+  strategy_version: report?.strategy?.strategy_version || "n/a",
+});
+
+const buildStoredReportEntry = (report, activeAnalysis) => {
+  const analysis = activeAnalysis || buildActiveAnalysisFromReport(report);
+  return {
+    symbol: normalizeSymbol(report?.symbol || analysis?.symbol),
+    stored_at: new Date().toISOString(),
+    active_analysis: analysis,
+    snapshot: {
+      symbol: normalizeSymbol(report?.symbol || analysis?.symbol),
+      as_of_date: report?.as_of_date || analysis?.as_of_date || "n/a",
+      horizon: report?.horizon || analysis?.horizon || "n/a",
+      risk_mode: report?.risk_mode || analysis?.risk_mode || "n/a",
+      final_signal:
+        report?.strategy?.final_signal ||
+        report?.signal?.final_action ||
+        report?.signal?.action ||
+        "n/a",
+      strategy_posture: report?.strategy?.strategy_posture || analysis?.strategy_posture || "n/a",
+      conviction_tier: report?.strategy?.conviction_tier || analysis?.conviction_tier || "unknown",
+      actionability_score: report?.strategy?.actionability_score,
+      confidence: report?.strategy?.confidence,
+      confidence_score: report?.strategy?.confidence_score,
+      fragility_tier: report?.strategy?.fragility_tier || "unknown",
+      participant_fit: report?.strategy?.primary_participant_fit || "n/a",
+      freshness_status:
+        report?.freshness_summary?.overall_status || analysis?.freshness_status || "unknown",
+      report_version: report?.report_version || analysis?.report_version || "n/a",
+      strategy_version: report?.strategy?.strategy_version || analysis?.strategy_version || "n/a",
+      evaluation_version: report?.evaluation?.evaluation_version || "phase6",
+      opportunity_quality: compositeScore(report, "Opportunity Quality Score"),
+      cross_domain_conviction: compositeScore(report, "Cross-Domain Conviction Score"),
+      signal_fragility: compositeScore(report, "Signal Fragility Index"),
+      fundamental_durability: compositeScore(report, "Fundamental Durability Score"),
+      narrative_crowding: compositeScore(report, "Narrative Crowding Index"),
+      macro_alignment: compositeScore(report, "Macro Alignment Score"),
+      market_structure_integrity: compositeScore(report, "Market Structure Integrity Score"),
+      regime_stability: compositeScore(report, "Regime Stability Score"),
+      evaluation_hit_rate:
+        report?.evaluation?.signal_scorecard?.final_signal_overall?.hit_rate ?? null,
+      evaluation_reliability:
+        report?.evaluation?.calibration_summary?.confidence_reliability_score ?? null,
+      strongest_condition: conditionLabel(report?.evaluation?.strongest_conditions?.[0]),
+      weakest_condition: conditionLabel(report?.evaluation?.weakest_conditions?.[0]),
+      executive_summary: report?.overall_analysis || report?.signal_summary || "",
+      strategy_summary: report?.strategy_view || "",
+      top_driver: topDriverLabel(report, "positive"),
+      top_risk:
+        report?.strategy?.invalidators?.top_invalidators?.[0] ||
+        topDriverLabel(report, "negative"),
+    },
+    report,
+  };
+};
+
+const findStoredReport = (symbol) =>
+  state.assistantRecentReports.find((item) => item.symbol === normalizeSymbol(symbol)) || null;
+
+const persistRecentReports = (entries) => {
+  const normalized = Array.isArray(entries) ? entries : [];
+  state.assistantRecentReports = normalized.slice(0, 8);
+  writeStorageJson(ASSISTANT_RECENT_REPORTS_STORAGE_KEY, state.assistantRecentReports);
+};
+
+const upsertRecentReport = (report, activeAnalysis) => {
+  const entry = buildStoredReportEntry(report, activeAnalysis);
+  const existing = state.assistantRecentReports.filter((item) => item.symbol !== entry.symbol);
+  persistRecentReports([entry, ...existing]);
+  renderRecentAnalyses();
+  renderCompareWorkspace();
+  renderWatchlistWorkspace();
+  refreshCompareOptions();
+};
+
+const persistWatchlist = (symbols) => {
+  const normalized = Array.isArray(symbols) ? symbols : [];
+  state.assistantWatchlist = [...new Set(normalized.map(normalizeSymbol).filter(Boolean))].slice(0, 24);
+  writeStorageJson(ASSISTANT_WATCHLIST_STORAGE_KEY, state.assistantWatchlist);
+};
+
+const persistCompareSymbol = (symbol) => {
+  state.assistantCompareSymbol = normalizeSymbol(symbol);
+  window.localStorage.setItem(
+    ASSISTANT_COMPARE_SYMBOL_STORAGE_KEY,
+    state.assistantCompareSymbol
+  );
+  if (qs("#assistant-compare-symbol")) {
+    qs("#assistant-compare-symbol").value = state.assistantCompareSymbol;
+  }
+};
+
 const renderSignal = (signal) => {
   qs("#signal-symbol").textContent = signal?.symbol || "N/A";
   qs("#signal-asof").textContent = signal?.as_of || "N/A";
@@ -155,6 +307,14 @@ const persistAssistantSessionId = (sessionId) => {
   window.localStorage.setItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY, sessionId);
 };
 
+const applyDemoMode = (enabled) => {
+  state.demoMode = !!enabled;
+  document.body.classList.toggle("demo-mode", state.demoMode);
+  qs("#demo-mode-status").textContent = state.demoMode ? "Demo mode on" : "Demo mode off";
+  qs("#demo-mode-toggle").textContent = state.demoMode ? "Disable Demo Mode" : "Enable Demo Mode";
+  window.localStorage.setItem(FTIP_DEMO_MODE_STORAGE_KEY, state.demoMode ? "1" : "0");
+};
+
 const activeSignalLabel = () =>
   state.assistantLatestReport?.strategy?.final_signal ||
   state.assistantLatestReport?.signal?.final_action ||
@@ -191,6 +351,7 @@ const buildNarratorPromptSet = () => {
     `What are the invalidators here?`,
     `What is weakest in the setup for ${symbol}?`,
     `What would improve conviction on ${symbol}?`,
+    `What does evaluation history say about setups like ${symbol}?`,
   ];
 };
 
@@ -246,6 +407,9 @@ const renderActiveAnalysisLabels = () => {
   qs("#assistant-chat-grounding-note").textContent = analysis?.symbol
     ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report and strategy.`
     : "Run Assistant Analyze to establish the active artifact the narrator should use.";
+  if (qs("#assistant-compare-active-symbol")) {
+    qs("#assistant-compare-active-symbol").value = analysis?.symbol || "";
+  }
   renderNarratorPromptChips();
 };
 
@@ -322,7 +486,10 @@ const renderTextSection = (selector, title, body) => {
 };
 
 const renderDomainStatusGrid = (report) => {
-  const container = qs("#assistant-domain-status-grid");
+  const containers = [
+    qs("#assistant-domain-status-grid"),
+    qs("#assistant-domain-status-grid-evidence"),
+  ].filter(Boolean);
   const freshnessDomains = report?.freshness_summary?.domains || {};
   const bundle = report?.data_bundle || {};
   const cards = [
@@ -339,10 +506,12 @@ const renderDomainStatusGrid = (report) => {
   ].filter((item) => item[1] != null || item[2] != null);
 
   if (!cards.length) {
-    container.innerHTML = emptyStateCard("Domain freshness and coverage will render here.");
+    containers.forEach((container) => {
+      container.innerHTML = emptyStateCard("Domain freshness and coverage will render here.");
+    });
     return;
   }
-  container.innerHTML = cards
+  const html = cards
     .map(
       ([label, status, note]) => `
         <div class="summary-card">
@@ -353,6 +522,9 @@ const renderDomainStatusGrid = (report) => {
       `
     )
     .join("");
+  containers.forEach((container) => {
+    container.innerHTML = html;
+  });
 };
 
 const renderFactorGrid = (report) => {
@@ -488,6 +660,151 @@ const renderWhySignal = (report) => {
   ].join("");
 };
 
+const renderDashboardWorkflow = (report) => {
+  const container = qs("#assistant-dashboard-workflow");
+  if (!report) {
+    const placeholders = [
+      ["Executive Read", "Start with the dashboard for signal, posture, conviction, and top risks.", "dashboard"],
+      ["Decision Layer", "Open strategy to inspect actionability, scenarios, invalidators, and execution posture.", "strategy"],
+      ["Trust Layer", "Use evaluation and evidence to show scorecards, calibration, provenance, and freshness.", "evaluation"],
+    ];
+    container.innerHTML = placeholders
+      .map(
+        ([title, note, tab]) => `
+          <section class="workflow-step demo-callout">
+            <div class="workflow-step-title">${escapeHtml(title)}</div>
+            <div class="workflow-step-note">${escapeHtml(note)}</div>
+            <div class="workflow-step-actions">
+              <button type="button" class="secondary" data-open-research-tab="${escapeHtml(
+                tab
+              )}">Open ${escapeHtml(tab)}</button>
+            </div>
+          </section>
+        `
+      )
+      .join("");
+    return;
+  }
+
+  const steps = [
+    ["Signal and Thesis", report.signal_summary, "analyze"],
+    ["Strategy Console", report.strategy_view, "strategy"],
+    ["Proof and Trust", report.evaluation_research_analysis || report.evidence_provenance, "evaluation"],
+  ];
+  container.innerHTML = steps
+    .map(
+      ([title, note, tab]) => `
+        <section class="workflow-step">
+          <div class="workflow-step-head">
+            <div class="workflow-step-title">${escapeHtml(title)}</div>
+            <span class="legacy-badge">${escapeHtml(report.symbol || "active")}</span>
+          </div>
+          <div class="workflow-step-note">${escapeHtml(note || "No workflow note available.")}</div>
+          <div class="workflow-step-actions">
+            <button type="button" class="secondary" data-open-research-tab="${escapeHtml(
+              tab
+            )}">Open ${escapeHtml(tab)}</button>
+          </div>
+        </section>
+      `
+    )
+    .join("");
+};
+
+const renderDashboardTrustStrip = (report) => {
+  if (!report) {
+    qs("#assistant-dashboard-trust-strip").innerHTML = emptyStateCard(
+      "Freshness, versions, coverage quality, and evaluation readiness render here."
+    );
+    return;
+  }
+  renderMetricCards("#assistant-dashboard-trust-strip", [
+    {
+      label: "Freshness",
+      value: report.freshness_summary?.overall_status || "unknown",
+      note: report.freshness_summary?.summary || "active recency",
+    },
+    {
+      label: "Coverage",
+      value: report.data_bundle?.meta?.overall_quality || "mixed",
+      note: report.data_bundle?.meta?.coverage_status || "domain completeness",
+    },
+    {
+      label: "Version Stack",
+      value: `${report.report_version || "n/a"} / ${report.strategy?.strategy_version || "n/a"}`,
+      note: `evaluation ${report.evaluation?.evaluation_version || "phase6"}`,
+    },
+    {
+      label: "Evaluation",
+      value: report.evaluation?.status || "limited",
+      note:
+        report.evaluation?.prediction_linkage_summary?.total_predictions == null
+          ? "sample pending"
+          : `${report.evaluation.prediction_linkage_summary.total_predictions} tracked predictions`,
+    },
+  ]);
+};
+
+const renderRecentAnalyses = () => {
+  const container = qs("#assistant-dashboard-recent");
+  if (!state.assistantRecentReports.length) {
+    container.innerHTML = emptyStateCard(
+      "Recent analyzed names will appear here for fast reload, compare, and watchlist actions."
+    );
+    return;
+  }
+  container.innerHTML = `
+    <div class="recent-analysis-list">
+      ${state.assistantRecentReports
+        .map((entry) => {
+          const snapshot = entry.snapshot || {};
+          return `
+            <section class="recent-analysis-card">
+              <div class="recent-analysis-head">
+                <div>
+                  <div class="recent-analysis-title">${escapeHtml(entry.symbol)}</div>
+                  <div class="table-subtitle">${escapeHtml(
+                    `${snapshot.as_of_date || "n/a"} · ${snapshot.horizon || "n/a"} · ${
+                      snapshot.risk_mode || "n/a"
+                    }`
+                  )}</div>
+                </div>
+                <span class="legacy-badge">${escapeHtml(snapshot.final_signal || "n/a")}</span>
+              </div>
+              <div class="recent-analysis-meta">
+                <span class="micro-chip">posture ${escapeHtml(snapshot.strategy_posture || "n/a")}</span>
+                <span class="micro-chip">conviction ${escapeHtml(
+                  snapshot.conviction_tier || "unknown"
+                )}</span>
+                <span class="micro-chip">fragility ${escapeHtml(
+                  snapshot.fragility_tier || "unknown"
+                )}</span>
+                <span class="micro-chip">freshness ${escapeHtml(
+                  snapshot.freshness_status || "unknown"
+                )}</span>
+              </div>
+              <div class="table-note">${escapeHtml(
+                snapshot.executive_summary || snapshot.top_driver || "No summary available."
+              )}</div>
+              <div class="recent-analysis-actions">
+                <button type="button" class="secondary" data-load-report="${escapeHtml(
+                  entry.symbol
+                )}">Load</button>
+                <button type="button" class="secondary" data-compare-symbol="${escapeHtml(
+                  entry.symbol
+                )}">Compare</button>
+                <button type="button" class="secondary" data-watchlist-symbol="${escapeHtml(
+                  entry.symbol
+                )}">Watchlist</button>
+              </div>
+            </section>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+};
+
 const renderStrategyMetrics = (report) => {
   const strategy = report?.strategy;
   if (!strategy) {
@@ -600,6 +917,57 @@ const renderRiskTriggers = (report) => {
     `<section class="drilldown-card">
       <h5>Fragility / Vetoes</h5>
       ${renderBullets(vetoLines, "No active dampeners or hard vetoes.")}
+    </section>`,
+  ].join("");
+};
+
+const renderStrategyPlaybook = (report) => {
+  const container = qs("#assistant-strategy-playbook");
+  const strategy = report?.strategy;
+  if (!strategy) {
+    container.innerHTML = emptyStateCard(
+      "Execution posture, participant fit, and what would improve or worsen the setup will render here."
+    );
+    return;
+  }
+  const execution = strategy.execution_posture || {};
+  const fit = [
+    `Participant fit: ${strategy.primary_participant_fit || "n/a"}`,
+    `Time-horizon fit: ${strategy.time_horizon_fit || "n/a"}`,
+    `Execution posture: ${execution.preferred_posture || "n/a"} / urgency ${
+      execution.urgency_level || "unknown"
+    }`,
+    `Patience: ${execution.patience_level || "n/a"} / cleanliness ${
+      execution.signal_cleanliness || "n/a"
+    }`,
+  ];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Execution Posture</h5>
+      ${renderBullets(fit, "No execution posture available.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>What Would Improve It</h5>
+      ${renderBullets(
+        (strategy.confirmation_triggers || []).slice(0, 4),
+        "No explicit confirmation trigger surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>What Would Worsen It</h5>
+      ${renderBullets(
+        (strategy.deterioration_triggers || []).slice(0, 4),
+        "No deterioration trigger surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Risk Context</h5>
+      ${renderBullets(
+        [execution.risk_context_summary, strategy.quality_of_setup, strategy.confidence_quality].filter(
+          Boolean
+        ),
+        "No additional risk context surfaced."
+      )}
     </section>`,
   ].join("");
 };
@@ -791,6 +1159,479 @@ const renderEvaluationFailureModes = (report) => {
   ].join("");
 };
 
+const renderEvaluationFactors = (report) => {
+  const container = qs("#assistant-evaluation-factors");
+  const attribution = report?.evaluation?.factor_attribution_summary || {};
+  const scoreLeaders = attribution.proprietary_score_attribution || [];
+  const componentLeaders = attribution.strategy_component_attribution || [];
+  if (!scoreLeaders.length && !componentLeaders.length) {
+    container.innerHTML = emptyStateCard(
+      "Factor and strategy component usefulness will render here."
+    );
+    return;
+  }
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Proprietary Score Leaders</h5>
+      ${renderBullets(
+        scoreLeaders.slice(0, 5).map(
+          (item) =>
+            `${item.score_name}: spread ${formatPercent(
+              item.favorable_vs_unfavorable_return_spread,
+              2
+            )} · ${item.monotonicity || "mixed"}`
+        ),
+        "No proprietary score attribution yet."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Strategy Component Leaders</h5>
+      ${renderBullets(
+        componentLeaders.slice(0, 5).map(
+          (item) =>
+            `${item.score_name}: spread ${formatPercent(
+              item.favorable_vs_unfavorable_return_spread,
+              2
+            )} · ${item.monotonicity || "mixed"}`
+        ),
+        "No component attribution yet."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderEvidenceSupport = (report) => {
+  const support = qs("#assistant-evidence-supporting");
+  const conflict = qs("#assistant-evidence-conflicts");
+  if (!report) {
+    support.innerHTML = emptyStateCard("Key supporting evidence will render here.");
+    conflict.innerHTML = emptyStateCard(
+      "Conflicting evidence, missingness, and freshness caveats will render here."
+    );
+    return;
+  }
+
+  const positiveDrivers = (report.why_this_signal?.top_positive_drivers || [])
+    .slice(0, 4)
+    .map((item) => `${item.label || "driver"}${item.detail ? `: ${item.detail}` : ""}`);
+  const negatives = (report.why_this_signal?.top_negative_drivers || [])
+    .slice(0, 4)
+    .map((item) => `${item.label || "risk"}${item.detail ? `: ${item.detail}` : ""}`);
+  const caveats = [
+    ...(report.why_this_signal?.missing_data_warnings || []),
+    ...(report.why_this_signal?.freshness_warnings || []),
+  ];
+
+  support.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Supporting Evidence</h5>
+      ${renderBullets(positiveDrivers, "No explicit supporting evidence surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Provenance Notes</h5>
+      ${renderBullets(
+        [report.evidence_provenance, report.evaluation_summary, report.regime_usefulness_summary].filter(
+          Boolean
+        ),
+        "No provenance note available."
+      )}
+    </section>`,
+  ].join("");
+
+  conflict.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Conflicting Evidence</h5>
+      ${renderBullets(negatives, "No explicit conflicting evidence surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Missingness / Freshness Caveats</h5>
+      ${renderBullets(caveats, "No missing-data or freshness caveat surfaced.")}
+    </section>`,
+  ].join("");
+};
+
+const renderArtifactLedger = (report) => {
+  const container = qs("#assistant-artifact-ledger");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Report, strategy, evaluation, and provenance metadata will render here."
+    );
+    return;
+  }
+  const lines = [
+    `Report version: ${report.report_version || "n/a"}`,
+    `Strategy version: ${report.strategy?.strategy_version || "n/a"}`,
+    `Evaluation version: ${report.evaluation?.evaluation_version || "phase6"}`,
+    `Prediction artifact: ${
+      report.prediction_record_id || report.prediction_record_artifact_id || "n/a"
+    }`,
+    `Evaluation artifact: ${report.evaluation_artifact_id || "n/a"}`,
+    `Freshness status: ${report.freshness_summary?.overall_status || "unknown"}`,
+    `Scenario: ${report.scenario || "base"} / depth ${report.analysis_depth || "standard"}`,
+  ];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Artifact Metadata</h5>
+      ${renderBullets(lines, "No artifact metadata available.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Traceability</h5>
+      ${renderBullets(
+        [report.signal_summary, report.strategy_view, report.evaluation_research_analysis].filter(
+          Boolean
+        ),
+        "No traceability notes available."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderResearchDrilldown = (report) => {
+  const container = qs("#assistant-research-drilldown");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Strategy components, factor attribution, and diagnostic drilldowns will render here."
+    );
+    return;
+  }
+  const components = Object.entries(report.strategy?.component_scores || {})
+    .sort((left, right) => Number(right[1]?.weight || 0) - Number(left[1]?.weight || 0))
+    .slice(0, 4)
+    .map(
+      ([name, payload]) =>
+        `${name.replaceAll("_", " ")}: score ${formatScore(payload.score, 2)} · weight ${formatScore(
+          payload.weight,
+          2
+        )}`
+    );
+  const scores = [
+    `Opportunity Quality: ${formatScore(compositeScore(report, "Opportunity Quality Score"))}`,
+    `Cross-Domain Conviction: ${formatScore(
+      compositeScore(report, "Cross-Domain Conviction Score")
+    )}`,
+    `Signal Fragility: ${formatScore(compositeScore(report, "Signal Fragility Index"))}`,
+    `Narrative Crowding: ${formatScore(compositeScore(report, "Narrative Crowding Index"))}`,
+  ];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Strategy Components</h5>
+      ${renderBullets(components, "No strategy component stack available.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Composite Scores</h5>
+      ${renderBullets(scores, "No composite score detail available.")}
+    </section>`,
+  ].join("");
+};
+
+const renderSystemAudit = (report) => {
+  const container = qs("#assistant-system-audit");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Report, strategy, evaluation, freshness, and coverage audit details render here."
+    );
+    return;
+  }
+  const domains = report.freshness_summary?.domains || {};
+  const domainNotes = Object.entries(domains)
+    .slice(0, 6)
+    .map(([name, payload]) => `${name}: ${payload?.status || "n/a"} / ${payload?.updated_at || "n/a"}`);
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Versioning</h5>
+      ${renderBullets(
+        [
+          `Report ${report.report_version || "n/a"}`,
+          `Strategy ${report.strategy?.strategy_version || "n/a"}`,
+          `Evaluation ${report.evaluation?.evaluation_version || "phase6"}`,
+        ],
+        "No version data available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Freshness by Domain</h5>
+      ${renderBullets(domainNotes, "No domain freshness breakdown available.")}
+    </section>`,
+  ].join("");
+};
+
+const refreshCompareOptions = () => {
+  const options = [
+    ...state.assistantWatchlist,
+    ...state.assistantRecentReports.map((item) => item.symbol),
+  ];
+  qs("#assistant-compare-options").innerHTML = [...new Set(options.filter(Boolean))]
+    .map((symbol) => `<option value="${escapeHtml(symbol)}"></option>`)
+    .join("");
+};
+
+const loadStoredReportAsActive = (symbol, statusSelector = "#assistant-analyze-status") => {
+  const entry = findStoredReport(symbol);
+  if (!entry) {
+    if (statusSelector) {
+      setLegacyStatus(
+        statusSelector,
+        `No stored report is available for ${normalizeSymbol(symbol)} yet. Run Analyze first.`,
+        "error"
+      );
+    }
+    return false;
+  }
+  qs("#assistant-analyze-symbol").value = entry.symbol;
+  persistActiveAnalysis(entry.active_analysis || buildActiveAnalysisFromReport(entry.report));
+  renderAssistantReport(entry.report);
+  if (statusSelector) {
+    setLegacyStatus(statusSelector, `Loaded stored analysis for ${entry.symbol}.`, "success");
+  }
+  return true;
+};
+
+const addSymbolToWatchlist = (symbol, statusSelector = "#assistant-watchlist-status") => {
+  const normalized = normalizeSymbol(symbol);
+  if (!normalized) {
+    if (statusSelector) {
+      setLegacyStatus(statusSelector, "Symbol is required.", "error");
+    }
+    return;
+  }
+  persistWatchlist([...state.assistantWatchlist, normalized]);
+  renderWatchlistWorkspace();
+  refreshCompareOptions();
+  if (statusSelector) {
+    setLegacyStatus(statusSelector, `${normalized} added to the watchlist.`, "success");
+  }
+};
+
+const removeSymbolFromWatchlist = (symbol) => {
+  persistWatchlist(state.assistantWatchlist.filter((item) => item !== normalizeSymbol(symbol)));
+  renderWatchlistWorkspace();
+  refreshCompareOptions();
+};
+
+const renderWatchlistWorkspace = () => {
+  const container = qs("#assistant-watchlist-grid");
+  if (!state.assistantWatchlist.length) {
+    container.innerHTML = emptyStateCard("Watchlist monitoring rows will render here.");
+    return;
+  }
+  container.innerHTML = `
+    <div class="comparison-matrix">
+      <table class="workspace-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Signal</th>
+            <th>Posture</th>
+            <th>Conviction</th>
+            <th>Opportunity</th>
+            <th>Fragility</th>
+            <th>Freshness</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.assistantWatchlist
+            .map((symbol) => {
+              const entry = findStoredReport(symbol);
+              const snapshot = entry?.snapshot || {};
+              return `
+                <tr>
+                  <td>
+                    <div class="table-symbol">${escapeHtml(symbol)}</div>
+                    <div class="table-subtitle">${escapeHtml(
+                      entry ? `${snapshot.as_of_date || "n/a"} · ${snapshot.horizon || "n/a"}` : "No stored artifact yet"
+                    )}</div>
+                  </td>
+                  <td>${escapeHtml(snapshot.final_signal || "pending")}</td>
+                  <td>${escapeHtml(snapshot.strategy_posture || "pending")}</td>
+                  <td>${escapeHtml(snapshot.conviction_tier || "unknown")}</td>
+                  <td>${escapeHtml(formatScore(snapshot.opportunity_quality))}</td>
+                  <td>${escapeHtml(snapshot.fragility_tier || "unknown")}</td>
+                  <td>${escapeHtml(snapshot.freshness_status || "unknown")}</td>
+                  <td>
+                    <div class="table-actions">
+                      <button type="button" class="secondary" data-load-report="${escapeHtml(
+                        symbol
+                      )}">Load</button>
+                      <button type="button" class="secondary" data-compare-symbol="${escapeHtml(
+                        symbol
+                      )}">Compare</button>
+                      <button type="button" class="secondary" data-watchlist-remove="${escapeHtml(
+                        symbol
+                      )}">Remove</button>
+                    </div>
+                  </td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const compareMetricLeader = (left, right, higherBetter = true) => {
+  if (left == null && right == null) {
+    return "n/a";
+  }
+  if (left == null) {
+    return "peer";
+  }
+  if (right == null) {
+    return "active";
+  }
+  if (Math.abs(Number(left) - Number(right)) < 0.1) {
+    return "balanced";
+  }
+  const activeBetter = higherBetter ? Number(left) > Number(right) : Number(left) < Number(right);
+  return activeBetter ? "active" : "peer";
+};
+
+const renderCompareWorkspace = () => {
+  const summary = qs("#assistant-compare-summary");
+  const details = qs("#assistant-compare-details");
+  const active = state.assistantLatestReport
+    ? buildStoredReportEntry(state.assistantLatestReport, state.assistantActiveAnalysis)
+    : null;
+  const peer = findStoredReport(state.assistantCompareSymbol);
+
+  if (!active) {
+    summary.innerHTML = emptyStateCard(
+      "Run or load an active analysis before using the comparison workspace."
+    );
+    details.innerHTML = emptyStateCard(
+      "Compare signal, strategy, fragility, conviction, and evaluation snapshots here."
+    );
+    return;
+  }
+
+  if (!state.assistantCompareSymbol) {
+    summary.innerHTML = emptyStateCard(
+      "Choose a second symbol from recent analyses or the watchlist to compare against the active report."
+    );
+    details.innerHTML = emptyStateCard(
+      "The active report will be compared once a peer symbol is selected."
+    );
+    return;
+  }
+
+  if (!peer) {
+    summary.innerHTML = emptyStateCard(
+      `${state.assistantCompareSymbol} is not stored yet. Run Analyze on that symbol to compare it.`
+    );
+    details.innerHTML = emptyStateCard(
+      "Only stored assistant reports can be compared in the buyer-facing matrix."
+    );
+    return;
+  }
+
+  const left = active.snapshot || {};
+  const right = peer.snapshot || {};
+  renderMetricCards("#assistant-compare-summary", [
+    {
+      label: "Cleaner Opportunity",
+      value:
+        compareMetricLeader(left.opportunity_quality, right.opportunity_quality, true) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.opportunity_quality, right.opportunity_quality, true) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.opportunity_quality)} vs ${peer.symbol} ${formatScore(
+        right.opportunity_quality
+      )}`,
+    },
+    {
+      label: "Lower Fragility",
+      value:
+        compareMetricLeader(left.signal_fragility, right.signal_fragility, false) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.signal_fragility, right.signal_fragility, false) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.signal_fragility)} vs ${peer.symbol} ${formatScore(
+        right.signal_fragility
+      )}`,
+    },
+    {
+      label: "Higher Conviction",
+      value:
+        compareMetricLeader(left.cross_domain_conviction, right.cross_domain_conviction, true) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.cross_domain_conviction, right.cross_domain_conviction, true) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.cross_domain_conviction)} vs ${peer.symbol} ${formatScore(
+        right.cross_domain_conviction
+      )}`,
+    },
+    {
+      label: "Better Reliability",
+      value:
+        compareMetricLeader(left.evaluation_reliability, right.evaluation_reliability, true) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.evaluation_reliability, right.evaluation_reliability, true) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.evaluation_reliability)} vs ${peer.symbol} ${formatScore(
+        right.evaluation_reliability
+      )}`,
+    },
+  ]);
+
+  const metrics = [
+    ["Final Signal", left.final_signal, right.final_signal],
+    ["Strategy Posture", left.strategy_posture, right.strategy_posture],
+    ["Conviction Tier", left.conviction_tier, right.conviction_tier],
+    ["Actionability", formatScore(left.actionability_score), formatScore(right.actionability_score)],
+    ["Opportunity Quality", formatScore(left.opportunity_quality), formatScore(right.opportunity_quality)],
+    ["Cross-Domain Conviction", formatScore(left.cross_domain_conviction), formatScore(right.cross_domain_conviction)],
+    ["Signal Fragility", formatScore(left.signal_fragility), formatScore(right.signal_fragility)],
+    ["Fundamental Durability", formatScore(left.fundamental_durability), formatScore(right.fundamental_durability)],
+    ["Narrative Crowding", formatScore(left.narrative_crowding), formatScore(right.narrative_crowding)],
+    ["Macro Alignment", formatScore(left.macro_alignment), formatScore(right.macro_alignment)],
+    ["Eval Hit Rate", formatPercent(left.evaluation_hit_rate), formatPercent(right.evaluation_hit_rate)],
+    ["Reliability", formatScore(left.evaluation_reliability), formatScore(right.evaluation_reliability)],
+  ];
+
+  details.innerHTML = `
+    <div class="comparison-matrix">
+      <table class="workspace-table">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>${escapeHtml(active.symbol)}</th>
+            <th>${escapeHtml(peer.symbol)}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${metrics
+            .map(
+              ([label, leftValue, rightValue]) => `
+                <tr>
+                  <td>${escapeHtml(label)}</td>
+                  <td>${escapeHtml(leftValue || "n/a")}</td>
+                  <td>${escapeHtml(rightValue || "n/a")}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="drilldown-grid">
+      <section class="drilldown-card">
+        <h5>${escapeHtml(active.symbol)} Snapshot</h5>
+        ${renderBullets([left.top_driver, left.top_risk, left.executive_summary].filter(Boolean), "No snapshot note available.")}
+      </section>
+      <section class="drilldown-card">
+        <h5>${escapeHtml(peer.symbol)} Snapshot</h5>
+        ${renderBullets([right.top_driver, right.top_risk, right.executive_summary].filter(Boolean), "No snapshot note available.")}
+      </section>
+    </div>
+  `;
+};
+
 const renderAssistantReport = (report) => {
   const container = qs("#assistant-analyze-report");
   state.assistantLatestReport = report || null;
@@ -805,20 +1646,25 @@ const renderAssistantReport = (report) => {
     qs("#assistant-analyze-response").textContent = formatJson({});
     renderDashboardSummary(null);
     renderWhySignal(null);
+    renderDashboardWorkflow(null);
+    renderDashboardTrustStrip(null);
     renderMetricCards("#assistant-signal-summary-cards", null);
     renderTextSection("#assistant-signal-section", "Signal Summary", "");
+    renderTextSection("#assistant-overall-analysis-section", "Overall Thesis", "");
     renderTextSection("#assistant-technical-section", "Technical Analysis", "");
     renderTextSection("#assistant-statistical-section", "Statistical / Quant Analysis", "");
     renderTextSection("#assistant-strategy-section", "Strategy View", "");
     renderTextSection("#assistant-risk-section", "Risks / Weaknesses / Invalidators", "");
     renderStrategyMetrics(null);
     renderStrategyScenarios(null);
+    renderStrategyPlaybook(null);
     renderRiskTriggers(null);
     renderEvaluationMetrics(null);
     renderTextSection("#assistant-evaluation-section", "Evaluation Research", "");
     renderTextSection("#assistant-calibration-section", "Confidence / Calibration", "");
     renderEvaluationRegimeGrid(null);
     renderEvaluationFailureModes(null);
+    renderEvaluationFactors(null);
     renderTextSection("#assistant-fundamental-section", "Fundamental Analysis", "");
     renderTextSection("#assistant-sentiment-section", "Sentiment / Narrative / Flow Analysis", "");
     renderTextSection(
@@ -827,9 +1673,16 @@ const renderAssistantReport = (report) => {
       ""
     );
     renderTextSection("#assistant-evidence-section", "Evidence / Provenance", "");
+    renderEvidenceSupport(null);
+    renderArtifactLedger(null);
     renderDomainStatusGrid(null);
     renderFactorGrid(null);
+    renderResearchDrilldown(null);
+    renderSystemAudit(null);
+    renderCompareWorkspace();
+    renderWatchlistWorkspace();
     renderActiveAnalysisLabels();
+    renderRecentAnalyses();
     return;
   }
 
@@ -951,8 +1804,15 @@ const renderAssistantReport = (report) => {
   qs("#assistant-analyze-response").textContent = formatJson(report);
   renderDashboardSummary(report);
   renderWhySignal(report);
+  renderDashboardWorkflow(report);
+  renderDashboardTrustStrip(report);
   renderMetricCards("#assistant-signal-summary-cards", signalMetrics);
   renderTextSection("#assistant-signal-section", "Signal Summary", report.signal_summary);
+  renderTextSection(
+    "#assistant-overall-analysis-section",
+    "Overall Thesis",
+    report.overall_analysis
+  );
   renderTextSection("#assistant-technical-section", "Technical Analysis", report.technical_analysis);
   renderTextSection(
     "#assistant-statistical-section",
@@ -962,6 +1822,7 @@ const renderAssistantReport = (report) => {
   renderStrategyMetrics(report);
   renderTextSection("#assistant-strategy-section", "Strategy View", report.strategy_view);
   renderStrategyScenarios(report);
+  renderStrategyPlaybook(report);
   renderTextSection(
     "#assistant-risk-section",
     "Risks / Weaknesses / Invalidators",
@@ -981,6 +1842,7 @@ const renderAssistantReport = (report) => {
   );
   renderEvaluationRegimeGrid(report);
   renderEvaluationFailureModes(report);
+  renderEvaluationFactors(report);
   renderTextSection(
     "#assistant-fundamental-section",
     "Fundamental Analysis",
@@ -1001,8 +1863,15 @@ const renderAssistantReport = (report) => {
     "Evidence / Provenance",
     report.evidence_provenance
   );
+  renderEvidenceSupport(report);
+  renderArtifactLedger(report);
   renderDomainStatusGrid(report);
   renderFactorGrid(report);
+  renderResearchDrilldown(report);
+  renderSystemAudit(report);
+  renderCompareWorkspace();
+  renderWatchlistWorkspace();
+  renderRecentAnalyses();
   renderActiveAnalysisLabels();
 };
 
@@ -1084,13 +1953,12 @@ const refreshAssistantSystemHealth = async () => {
   }
 };
 
-const resetAssistantChatSession = (message = "New local session prepared.") => {
+const resetAssistantChatSession = (message = "Fresh narrator session prepared.") => {
   persistAssistantSessionId(generateUuid());
   state.assistantChatTranscript = [];
-  persistActiveAnalysis(null);
-  renderAssistantReport(null);
   renderAssistantChatTranscript();
   setLegacyStatus("#assistant-chat-status", message, "success");
+  renderActiveAnalysisLabels();
 };
 
 const getAnalyzeInputs = () => ({
@@ -1141,6 +2009,8 @@ const runAssistantAnalyze = async () => {
     }
     persistActiveAnalysis(data.active_analysis || null);
     renderAssistantReport(data);
+    upsertRecentReport(data, data.active_analysis || null);
+    persistCompareSymbol(state.assistantCompareSymbol);
     setLegacyStatus(
       "#assistant-analyze-status",
       `Assistant analyze complete for ${data.symbol || symbol}.`,
@@ -1303,6 +2173,41 @@ qs("#assistant-chat-reset-btn").addEventListener("click", () => {
   resetAssistantChatSession("Started a fresh assistant chat session.");
 });
 qs("#assistant-health-refresh-btn").addEventListener("click", refreshAssistantSystemHealth);
+qs("#demo-mode-toggle").addEventListener("click", () => {
+  applyDemoMode(!state.demoMode);
+  if (state.demoMode) {
+    setActiveTab("legacy");
+    setResearchTab("dashboard");
+  }
+});
+qs("#assistant-compare-load-btn").addEventListener("click", () => {
+  const symbol = normalizeSymbol(qs("#assistant-compare-symbol").value);
+  if (!symbol) {
+    setLegacyStatus("#assistant-compare-status", "Choose a comparison symbol.", "error");
+    return;
+  }
+  persistCompareSymbol(symbol);
+  renderCompareWorkspace();
+  setLegacyStatus("#assistant-compare-status", `Comparator set to ${symbol}.`, "success");
+});
+qs("#assistant-compare-clear-btn").addEventListener("click", () => {
+  persistCompareSymbol("");
+  renderCompareWorkspace();
+  setLegacyStatus("#assistant-compare-status", "Comparison cleared.", "success");
+});
+qs("#assistant-watchlist-add-btn").addEventListener("click", () => {
+  addSymbolToWatchlist(qs("#assistant-watchlist-symbol").value);
+  qs("#assistant-watchlist-symbol").value = "";
+});
+qs("#assistant-watchlist-add-active-btn").addEventListener("click", () => {
+  addSymbolToWatchlist(state.assistantActiveAnalysis?.symbol);
+});
+qs("#assistant-watchlist-clear-btn").addEventListener("click", () => {
+  persistWatchlist([]);
+  renderWatchlistWorkspace();
+  refreshCompareOptions();
+  setLegacyStatus("#assistant-watchlist-status", "Watchlist cleared.", "success");
+});
 qs("#assistant-chat-suggested-prompts").addEventListener("click", (event) => {
   const button = event.target.closest("[data-prompt]");
   if (!button) {
@@ -1326,6 +2231,46 @@ qs("#symbol-input").addEventListener("input", (event) => {
   }
 });
 
+document.body.addEventListener("click", (event) => {
+  const openTab = event.target.closest("[data-open-research-tab]");
+  if (openTab) {
+    setResearchTab(openTab.dataset.openResearchTab);
+    setActiveTab("legacy");
+    return;
+  }
+
+  const loadReportButton = event.target.closest("[data-load-report]");
+  if (loadReportButton) {
+    loadStoredReportAsActive(loadReportButton.dataset.loadReport, "#assistant-analyze-status");
+    setActiveTab("legacy");
+    setResearchTab("dashboard");
+    return;
+  }
+
+  const compareButton = event.target.closest("[data-compare-symbol]");
+  if (compareButton) {
+    const symbol = normalizeSymbol(compareButton.dataset.compareSymbol);
+    persistCompareSymbol(symbol);
+    renderCompareWorkspace();
+    setLegacyStatus("#assistant-compare-status", `Comparator set to ${symbol}.`, "success");
+    setActiveTab("legacy");
+    setResearchTab("compare");
+    return;
+  }
+
+  const watchlistButton = event.target.closest("[data-watchlist-symbol]");
+  if (watchlistButton) {
+    addSymbolToWatchlist(watchlistButton.dataset.watchlistSymbol);
+    return;
+  }
+
+  const watchlistRemoveButton = event.target.closest("[data-watchlist-remove]");
+  if (watchlistRemoveButton) {
+    removeSymbolFromWatchlist(watchlistRemoveButton.dataset.watchlistRemove);
+    setLegacyStatus("#assistant-watchlist-status", "Watchlist updated.", "success");
+  }
+});
+
 qsa(".tab").forEach((tab) => {
   tab.addEventListener("click", () => setActiveTab(tab.dataset.tab));
 });
@@ -1334,19 +2279,23 @@ qsa(".research-tab").forEach((tab) => {
 });
 
 setDefaults();
+applyDemoMode(window.localStorage.getItem(FTIP_DEMO_MODE_STORAGE_KEY) === "1");
 persistAssistantSessionId(
   window.localStorage.getItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY) || generateUuid()
 );
-try {
-  persistActiveAnalysis(
-    JSON.parse(window.localStorage.getItem(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY) || "null")
-  );
-} catch {
-  persistActiveAnalysis(null);
+persistRecentReports(readStorageJson(ASSISTANT_RECENT_REPORTS_STORAGE_KEY, []));
+persistWatchlist(readStorageJson(ASSISTANT_WATCHLIST_STORAGE_KEY, []));
+persistCompareSymbol(window.localStorage.getItem(ASSISTANT_COMPARE_SYMBOL_STORAGE_KEY) || "");
+persistActiveAnalysis(readStorageJson(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY, null));
+refreshCompareOptions();
+if (!state.assistantActiveAnalysis?.symbol || !loadStoredReportAsActive(state.assistantActiveAnalysis.symbol, null)) {
+  renderAssistantReport(null);
 }
-renderAssistantReport(null);
+renderRecentAnalyses();
+renderWatchlistWorkspace();
+renderCompareWorkspace();
 renderAssistantChatTranscript();
 renderSystemHealth(null);
 setResearchTab("dashboard");
-setActiveTab("signal");
+setActiveTab(state.demoMode ? "legacy" : "signal");
 refreshAssistantSystemHealth();
