@@ -23,8 +23,12 @@ class AnalysisReference(BaseModel):
     refresh_mode: Optional[str] = None
     market_regime: Optional[str] = None
     signal: Optional[str] = None
+    conviction_tier: Optional[str] = None
+    strategy_posture: Optional[str] = None
+    actionability_score: Optional[float] = None
     freshness_status: Optional[str] = None
     report_version: Optional[str] = None
+    strategy_version: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

@@ -341,6 +341,8 @@ def test_chat_uses_persisted_analysis_report(monkeypatch):
     def _fake_completion(messages):
         combined = "\n".join(message["content"] for message in messages)
         assert "NVDA" in combined
+        assert '"question_intent": "strategy"' in combined
+        assert '"answer_mode": "strategist"' in combined
         assert report["overall_analysis"] in combined
         assert report["strategy_view"] in combined
         assert report["evidence_provenance"] in combined
@@ -358,10 +360,13 @@ def test_chat_uses_persisted_analysis_report(monkeypatch):
     assert result["reply"] == "Grounded reply about the stored NVDA analysis."
     assert result["report_found"] is True
     assert result["active_analysis"]["symbol"] == "NVDA"
-    assert (
-        store.get_latest_artifact(kind=strategy.CHAT_GROUNDING_CONTEXT_KIND, session_id=session_id)
-        is not None
+    grounding = store.get_latest_artifact(
+        kind=strategy.CHAT_GROUNDING_CONTEXT_KIND, session_id=session_id
     )
+    assert grounding is not None
+    assert grounding["payload"]["report_found"] is True
+    assert grounding["payload"]["route"]["intent"] == "strategy"
+    assert grounding["payload"]["selected_sections"]["strategy_view"] == report["strategy_view"]
 
 
 def test_chat_returns_no_analysis_message_when_report_absent(monkeypatch):

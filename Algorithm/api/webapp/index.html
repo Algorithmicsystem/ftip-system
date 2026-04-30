@@ -338,8 +338,19 @@
                   </p>
                   <div class="active-analysis-meta compact" id="assistant-chat-analysis-meta">
                     <div class="active-chip">Signal: n/a</div>
+                    <div class="active-chip">Conviction: unknown</div>
+                    <div class="active-chip">Strategy: n/a</div>
                     <div class="active-chip">Freshness: unknown</div>
+                    <div class="active-chip">Report: n/a</div>
                     <div class="active-chip">Session: local</div>
+                  </div>
+                  <p class="muted narrator-grounding-note" id="assistant-chat-grounding-note">
+                    Run Assistant Analyze to establish the active artifact the narrator should use.
+                  </p>
+                  <div class="narrator-prompt-row" id="assistant-chat-suggested-prompts">
+                    <button type="button" class="prompt-chip">Why this signal?</button>
+                    <button type="button" class="prompt-chip">What is the bear case?</button>
+                    <button type="button" class="prompt-chip">What are the invalidators?</button>
                   </div>
                   <div class="session-row">
                     <input
@@ -359,7 +370,7 @@
                     <button id="assistant-chat-btn" class="secondary">Send</button>
                   </div>
                   <p class="muted legacy-status" id="assistant-chat-status">Ready.</p>
-                  <pre id="assistant-chat-response" class="json-block response-block">No messages yet.</pre>
+                  <pre id="assistant-chat-response" class="json-block response-block">No grounded narrator messages yet.</pre>
                 </section>
               </section>
 

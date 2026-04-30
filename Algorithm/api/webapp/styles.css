@@ -309,6 +309,32 @@ textarea {
   font-size: 12px;
 }
 
+.narrator-grounding-note {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
+.narrator-prompt-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.prompt-chip {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(132, 210, 255, 0.22);
+  background: rgba(12, 21, 31, 0.95);
+  color: #d8e8ff;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.prompt-chip:hover {
+  border-color: rgba(132, 210, 255, 0.42);
+}
+
 .research-shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);

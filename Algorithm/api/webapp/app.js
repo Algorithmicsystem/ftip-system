@@ -167,6 +167,44 @@ const activeFreshnessLabel = () =>
   state.assistantActiveAnalysis?.freshness_status ||
   "unknown";
 
+const activeConvictionLabel = () =>
+  state.assistantLatestReport?.strategy?.conviction_tier ||
+  state.assistantActiveAnalysis?.conviction_tier ||
+  "unknown";
+
+const activeStrategyPostureLabel = () =>
+  state.assistantLatestReport?.strategy?.strategy_posture ||
+  state.assistantActiveAnalysis?.strategy_posture ||
+  "n/a";
+
+const activeReportVersionLabel = () =>
+  state.assistantActiveAnalysis?.report_version ||
+  state.assistantLatestReport?.report_version ||
+  "n/a";
+
+const buildNarratorPromptSet = () => {
+  const symbol = state.assistantActiveAnalysis?.symbol || "this setup";
+  return [
+    `Why is ${symbol} ${activeSignalLabel()}?`,
+    `Explain the strategy view for ${symbol}.`,
+    `What is the bear case for ${symbol}?`,
+    `What are the invalidators here?`,
+    `What is weakest in the setup for ${symbol}?`,
+    `What would improve conviction on ${symbol}?`,
+  ];
+};
+
+const renderNarratorPromptChips = () => {
+  const container = qs("#assistant-chat-suggested-prompts");
+  const prompts = buildNarratorPromptSet();
+  container.innerHTML = prompts
+    .map(
+      (prompt) =>
+        `<button type="button" class="prompt-chip" data-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`
+    )
+    .join("");
+};
+
 const formatActiveAnalysisLabel = (analysis) => {
   if (!analysis?.symbol) {
     return "Active analysis: none yet.";
@@ -187,19 +225,28 @@ const renderActiveAnalysisLabels = () => {
   const metaChips = [
     `Signal: ${activeSignalLabel()}`,
     `Freshness: ${activeFreshnessLabel()}`,
-    `Report: ${analysis?.report_version || state.assistantLatestReport?.report_version || "n/a"}`,
+    `Conviction: ${activeConvictionLabel()}`,
+    `Strategy: ${activeStrategyPostureLabel()}`,
+    `Report: ${activeReportVersionLabel()}`,
   ];
   qs("#assistant-active-analysis-meta").innerHTML = metaChips
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");
   const chatMeta = [
     `Signal: ${activeSignalLabel()}`,
+    `Conviction: ${activeConvictionLabel()}`,
+    `Strategy: ${activeStrategyPostureLabel()}`,
     `Freshness: ${activeFreshnessLabel()}`,
+    `Report: ${activeReportVersionLabel()}`,
     `Session: ${state.assistantChatSessionId ? "active" : "local"}`,
   ];
   qs("#assistant-chat-analysis-meta").innerHTML = chatMeta
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");
+  qs("#assistant-chat-grounding-note").textContent = analysis?.symbol
+    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report and strategy.`
+    : "Run Assistant Analyze to establish the active artifact the narrator should use.";
+  renderNarratorPromptChips();
 };
 
 const persistActiveAnalysis = (analysis) => {
@@ -756,7 +803,7 @@ const renderAssistantReport = (report) => {
 
 const renderAssistantChatTranscript = () => {
   if (!state.assistantChatTranscript.length) {
-    qs("#assistant-chat-response").textContent = "No messages yet.";
+    qs("#assistant-chat-response").textContent = "No grounded narrator messages yet.";
     return;
   }
 
@@ -926,7 +973,7 @@ const sendAssistantChat = async () => {
   persistAssistantSessionId(pendingSessionId);
 
   setButtonLoading("#assistant-chat-btn", true, "Sending...");
-  setLegacyStatus("#assistant-chat-status", "Sending assistant chat request...");
+  setLegacyStatus("#assistant-chat-status", "Sending grounded narrator request...");
   try {
     const data = await callJson("/assistant/chat", {
       method: "POST",
@@ -1051,6 +1098,14 @@ qs("#assistant-chat-reset-btn").addEventListener("click", () => {
   resetAssistantChatSession("Started a fresh assistant chat session.");
 });
 qs("#assistant-health-refresh-btn").addEventListener("click", refreshAssistantSystemHealth);
+qs("#assistant-chat-suggested-prompts").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-prompt]");
+  if (!button) {
+    return;
+  }
+  qs("#assistant-chat-message").value = button.dataset.prompt || "";
+  qs("#assistant-chat-message").focus();
+});
 
 qs("#assistant-chat-message").addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {

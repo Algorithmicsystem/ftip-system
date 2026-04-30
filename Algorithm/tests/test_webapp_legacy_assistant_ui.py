@@ -10,6 +10,8 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
 
     assert 'id="assistant-analyze-active-label"' in html
     assert 'id="assistant-chat-active-label"' in html
+    assert 'id="assistant-chat-grounding-note"' in html
+    assert 'id="assistant-chat-suggested-prompts"' in html
     assert 'id="assistant-analyze-report"' in html
     assert 'id="assistant-strategy-metrics"' in html
     assert 'id="assistant-strategy-scenarios"' in html
@@ -23,6 +25,8 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "session_id: pendingSessionId" in js
     assert "active_analysis: state.assistantActiveAnalysis" in js
     assert "setResearchTab" in js
+    assert "buildNarratorPromptSet" in js
+    assert "renderNarratorPromptChips" in js
     assert "renderStrategyMetrics" in js
     assert "renderStrategyScenarios" in js
     assert "renderRiskTriggers" in js

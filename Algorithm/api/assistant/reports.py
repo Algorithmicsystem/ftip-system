@@ -774,6 +774,7 @@ def build_active_analysis_reference(
     session_id: Optional[str] = None,
     report_id: Optional[str] = None,
 ) -> Dict[str, Any]:
+    strategy = report.get("strategy") or {}
     return sanitize_payload(
         {
             "report_id": report_id,
@@ -787,15 +788,31 @@ def build_active_analysis_reference(
             "refresh_mode": report.get("refresh_mode"),
             "market_regime": report.get("market_regime"),
             "signal": _first_available(
-                (report.get("strategy") or {}).get("final_signal"),
+                strategy.get("final_signal"),
                 (report.get("signal") or {}).get("final_action"),
                 (report.get("signal") or {}).get("action"),
+            ),
+            "conviction_tier": _first_available(
+                strategy.get("conviction_tier"),
+                report.get("conviction_tier"),
+            ),
+            "strategy_posture": _first_available(
+                strategy.get("strategy_posture"),
+                report.get("strategy_posture"),
+            ),
+            "actionability_score": _first_available(
+                strategy.get("actionability_score"),
+                report.get("actionability_score"),
             ),
             "freshness_status": _first_available(
                 (report.get("freshness_summary") or {}).get("overall_status"),
                 _freshness_status(report.get("data_bundle")),
             ),
             "report_version": report.get("report_version"),
+            "strategy_version": _first_available(
+                strategy.get("strategy_version"),
+                report.get("strategy_version"),
+            ),
         }
     )
 

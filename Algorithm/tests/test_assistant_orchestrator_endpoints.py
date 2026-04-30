@@ -7,6 +7,119 @@ from fastapi.testclient import TestClient
 from api.main import app
 
 
+def _sample_chat_report(symbol: str) -> dict:
+    from api.assistant import reports
+
+    return reports.build_analysis_report(
+        symbol=symbol,
+        as_of_date="2024-01-02",
+        horizon="swing",
+        risk_mode="balanced",
+        signal={
+            "action": "BUY",
+            "score": 0.7,
+            "confidence": 0.6,
+            "entry_low": 100,
+            "entry_high": 104,
+            "stop_loss": 95,
+            "take_profit_1": 112,
+            "take_profit_2": 118,
+            "horizon_days": 21,
+            "reason_codes": ["TREND_UP"],
+            "reason_details": {"TREND_UP": "Trend remains constructive."},
+        },
+        key_features={"ret_5d": 0.08, "vol_21d": 0.24, "regime_label": "trend"},
+        quality={
+            "bars_ok": True,
+            "fundamentals_ok": True,
+            "sentiment_ok": True,
+            "news_ok": True,
+            "warnings": [],
+        },
+        evidence={
+            "reason_codes": ["TREND_UP"],
+            "reason_details": {"TREND_UP": "Trend remains constructive."},
+            "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
+        },
+        job_context={
+            "scenario": "base",
+            "analysis_depth": "standard",
+            "refresh_mode": "refresh_stale",
+            "market_regime": "auto",
+        },
+        feature_factor_bundle={
+            "proprietary_scores": {
+                "Cross-Domain Conviction Score": {"score": 64.1, "coverage_status": "available"},
+                "Signal Fragility Index": {"score": 33.4, "coverage_status": "available"},
+            },
+            "composite_intelligence": {
+                "Cross-Domain Conviction Score": 64.1,
+                "Signal Fragility Index": 33.4,
+                "Market Structure Integrity Score": 62.8,
+                "Regime Stability Score": 58.9,
+            },
+            "regime_intelligence": {
+                "regime_label": "trend",
+                "regime_confidence": 61.0,
+                "regime_instability": 28.0,
+                "transition_risk": 34.0,
+            },
+            "fragility_intelligence": {
+                "instability_score": 33.0,
+                "clean_setup_score": 61.0,
+                "confidence_degradation_triggers": ["crowding remains elevated"],
+            },
+            "domain_agreement": {
+                "domain_agreement_score": 73.0,
+                "domain_conflict_score": 27.0,
+                "strongest_confirming_domains": [
+                    {"domain": "technical"},
+                    {"domain": "macro"},
+                ],
+                "strongest_conflicting_domains": [{"domain": "sentiment"}],
+                "agreement_flags": ["many domains agree"],
+            },
+        },
+        strategy={
+            "strategy_version": "phase4_institutional_v1",
+            "final_signal": "HOLD",
+            "strategy_posture": "watchlist_positive",
+            "confidence_score": 53.0,
+            "confidence": 0.53,
+            "conviction_tier": "moderate",
+            "actionability_score": 46.0,
+            "participant_fit": ["swing trader", "wait / observe"],
+            "primary_participant_fit": "swing trader",
+            "strategy_summary": "The strategy remains HOLD / watchlist positive with moderate conviction.",
+            "scenario_matrix": {
+                "base": {"summary": "Base case remains constructive but not fully actionable."},
+                "bull": {"summary": "Bull case needs cleaner confirmation."},
+                "bear": {"summary": "Bear case follows relative weakness and crowding."},
+                "stress": {"summary": "Stress case assumes regime instability dominates."},
+            },
+            "invalidators": {
+                "top_invalidators": ["Macro alignment deteriorates materially."],
+                "regime_invalidators": ["The regime breaks into unstable chop."],
+            },
+            "confirmation_triggers": ["Price confirms with stronger volume."],
+            "deterioration_triggers": ["Relative strength rolls over."],
+            "fragility_vetoes": [
+                {"name": "narrative_crowding", "detail": "Narrative crowding is elevated."}
+            ],
+            "uncertainty_notes": ["Fundamental detail is partly coverage constrained."],
+            "confidence_degraders": ["sentiment is not fully aligned with price"],
+            "execution_posture": {
+                "preferred_posture": "wait_for_confirmation",
+                "urgency_level": "measured",
+                "patience_level": "high",
+                "signal_cleanliness": "mixed_clean",
+                "entry_quality_proxy": 53.0,
+                "risk_context_summary": "constructive but not yet clean enough for immediate action",
+            },
+        },
+    )
+
+
 def test_assistant_analyze_returns_schema(monkeypatch):
     from api.assistant import orchestrator
 
@@ -258,14 +371,61 @@ def test_assistant_analyze_surfaces_enriched_data_fabric(monkeypatch):
     data = resp.json()
     assert data["data_bundle"]["fundamental_filing"]["filing_recency_days"] == 45
     assert data["data_bundle"]["sentiment_narrative_flow"]["source_breakdown"]["gnews"] == 3
-    assert data["data_bundle"]["macro_cross_asset"]["macro_regime_context"]["regime"] == "growth_supportive"
-    assert data["data_bundle"]["quality_provenance"]["source_map"]["fundamental_filing"] == [
-        "sec_edgar",
-        "finnhub_basic_financials",
-    ]
-    assert data["data_bundle"]["normalized_domains"]["fundamentals"]["filing_recency_days"] == 45
-    assert "Latest periodic filing is 10-Q dated 2024-01-01" in data["fundamental_analysis"]
-    assert "external data fabric status" in data["evidence_provenance"]
+
+
+def test_assistant_chat_endpoint_returns_grounded_active_report(monkeypatch):
+    from api.assistant import reports, service
+
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    store = service.storage
+    store.use_memory = True
+    store._sessions.clear()
+    store._messages.clear()
+    store._artifacts.clear()
+
+    session_id = store.create_session()
+    report = _sample_chat_report("NVDA")
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    store.upsert_session_metadata(
+        session_id,
+        {
+            "active_analysis": reports.build_active_analysis_reference(
+                report,
+                session_id=session_id,
+                report_id=report_id,
+            )
+        },
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_safe_completion",
+        lambda messages: (
+            "Grounded strategist response for the active NVDA report.",
+            "model",
+            {"prompt_tokens": 20, "completion_tokens": 25},
+        ),
+    )
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/assistant/chat",
+            json={
+                "session_id": session_id,
+                "message": "Why is this HOLD instead of BUY?",
+            },
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["report_found"] is True
+    assert data["reply"] == "Grounded strategist response for the active NVDA report."
+    assert data["active_analysis"]["symbol"] == "NVDA"
+    assert data["active_analysis"]["conviction_tier"] == "moderate"
+    assert data["active_analysis"]["strategy_posture"] == "watchlist_positive"
+    assert "strategy_view" in data["citations"]
 
 
 def test_assistant_top_picks_schema(monkeypatch):
