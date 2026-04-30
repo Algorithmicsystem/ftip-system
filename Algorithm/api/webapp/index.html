@@ -145,6 +145,7 @@
               <button class="research-tab" data-research-tab="signal">Signal</button>
               <button class="research-tab" data-research-tab="strategy">Strategy</button>
               <button class="research-tab" data-research-tab="evidence">Evidence</button>
+              <button class="research-tab" data-research-tab="evaluation">Evaluation</button>
               <button class="research-tab" data-research-tab="chat">Chat / Narrator</button>
               <button class="research-tab" data-research-tab="research">
                 Advanced / Research
@@ -372,6 +373,39 @@
                   <p class="muted legacy-status" id="assistant-chat-status">Ready.</p>
                   <pre id="assistant-chat-response" class="json-block response-block">No grounded narrator messages yet.</pre>
                 </section>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="evaluation">
+                <div class="workspace-grid">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Evaluation Scorecard</h4>
+                      <span class="legacy-badge">Phase 6</span>
+                    </div>
+                    <div id="assistant-evaluation-metrics" class="summary-grid empty-state-card">
+                      Evaluation scorecards will render here after analysis runs.
+                    </div>
+                    <div id="assistant-evaluation-section" class="section-copy empty-state-card">
+                      Historical usefulness and research credibility context will render here.
+                    </div>
+                    <div id="assistant-calibration-section" class="section-copy empty-state-card">
+                      Confidence and calibration evaluation will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Regime / Failure Modes</h4>
+                      <span class="legacy-badge">Cohorts</span>
+                    </div>
+                    <div id="assistant-regime-grid" class="drilldown-grid empty-state-card">
+                      Regime and cohort breakdowns will render here.
+                    </div>
+                    <div id="assistant-failure-modes" class="drilldown-grid empty-state-card">
+                      Failure modes, strongest conditions, and bucket results will render here.
+                    </div>
+                  </section>
+                </div>
               </section>
 
               <section class="research-panel hidden" data-research-panel="research">

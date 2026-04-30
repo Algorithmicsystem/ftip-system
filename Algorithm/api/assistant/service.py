@@ -12,6 +12,12 @@ from api import config
 from api.assistant import intelligence, orchestrator, prompts, reports, strategy
 from api.assistant.phase5 import engine as narrator_engine
 from api.assistant.phase5 import grounding as narrator_grounding
+from api.assistant.phase6 import (
+    EVALUATION_ARTIFACT_KIND,
+    PREDICTION_RECORD_KIND,
+    build_evaluation_artifact,
+    build_prediction_record,
+)
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
@@ -219,6 +225,28 @@ async def generate_analysis_report(
     )
     strategy_id = store.save_artifact(sid, strategy.STRATEGY_ARTIFACT_KIND, strategy_bundle)
     report_id = store.save_artifact(sid, reports.ANALYSIS_REPORT_KIND, report)
+    prediction_record = build_prediction_record(report, report_id=report_id, session_id=sid)
+    prediction_record_id = store.save_artifact(
+        sid,
+        PREDICTION_RECORD_KIND,
+        prediction_record,
+    )
+    evaluation_artifact = build_evaluation_artifact(
+        current_report=report,
+        store=store,
+    )
+    evaluation_artifact_id = store.save_artifact(
+        sid,
+        EVALUATION_ARTIFACT_KIND,
+        evaluation_artifact,
+    )
+    report = reports.attach_evaluation_context(
+        report,
+        evaluation_artifact,
+        prediction_record_id=prediction_record_id,
+        evaluation_artifact_id=evaluation_artifact_id,
+    )
+    store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
     )
@@ -244,6 +272,8 @@ async def generate_analysis_report(
             "data_bundle_artifact_id": data_bundle_id,
             "feature_factor_artifact_id": factor_bundle_id,
             "strategy_artifact_id": strategy_id,
+            "prediction_record_artifact_id": prediction_record_id,
+            "evaluation_artifact_id": evaluation_artifact_id,
             "active_analysis": active_analysis,
         },
     )
@@ -255,6 +285,8 @@ async def generate_analysis_report(
         "data_bundle_artifact_id": data_bundle_id,
         "feature_factor_artifact_id": factor_bundle_id,
         "strategy_artifact_id": strategy_id,
+        "prediction_record_artifact_id": prediction_record_id,
+        "evaluation_artifact_id": evaluation_artifact_id,
         "active_analysis": active_analysis,
     }
 

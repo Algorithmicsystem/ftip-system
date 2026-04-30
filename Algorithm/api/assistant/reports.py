@@ -673,6 +673,20 @@ def _strategy_view_text(
     )
 
 
+def _evaluation_research_text(evaluation: Dict[str, Any]) -> str:
+    if not evaluation:
+        return (
+            "Phase 6 evaluation is not attached to this report yet, so the platform is not adding a historical performance or calibration overlay to the current read."
+        )
+    return _join_sentences(
+        [
+            evaluation.get("evaluation_summary"),
+            evaluation.get("confidence_reliability_summary"),
+            evaluation.get("regime_usefulness_summary"),
+        ]
+    )
+
+
 def _risks_invalidators_text(
     why_signal: Dict[str, Any],
     strategy: Dict[str, Any],
@@ -815,6 +829,70 @@ def build_active_analysis_reference(
             ),
         }
     )
+
+
+def attach_evaluation_context(
+    report: Dict[str, Any],
+    evaluation: Dict[str, Any],
+    *,
+    prediction_record_id: Optional[str] = None,
+    evaluation_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    research_text = _evaluation_research_text(evaluation)
+    updated["report_version"] = "2.1"
+    updated["prediction_record_id"] = prediction_record_id
+    updated["evaluation_artifact_id"] = evaluation_artifact_id
+    updated["evaluation"] = evaluation
+    updated["evaluation_summary"] = evaluation.get("evaluation_summary")
+    updated["confidence_reliability_summary"] = evaluation.get(
+        "confidence_reliability_summary"
+    )
+    updated["regime_usefulness_summary"] = evaluation.get("regime_usefulness_summary")
+    updated["evaluation_research_analysis"] = research_text
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Historical evaluation context: {evaluation.get('evaluation_summary')}"
+            if evaluation.get("evaluation_summary")
+            else None,
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Research scorecard context: {evaluation.get('confidence_reliability_summary')}"
+            if evaluation.get("confidence_reliability_summary")
+            else None,
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Regime and failure-mode context: {evaluation.get('regime_usefulness_summary')}"
+            if evaluation.get("regime_usefulness_summary")
+            else None,
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Evaluation provenance is point-in-time: prediction records are stored at analysis time and only linked to forward bars once the horizon matures."
+            if evaluation
+            else None,
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["evaluation_research_analysis"] = [
+        "evaluation.prediction_linkage_summary",
+        "evaluation.signal_scorecard",
+        "evaluation.strategy_scorecard",
+        "evaluation.calibration_summary",
+        "evaluation.regime_breakdown",
+        "evaluation.factor_attribution_summary",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
 
 
 def build_analysis_report(
@@ -985,6 +1063,9 @@ def build_analysis_report(
         reason_codes,
         strategy_component_scores,
     )
+    evaluation_research_analysis = (
+        "Phase 6 evaluation will attach a point-in-time research scorecard once prediction records and matured outcomes are available for this cohort."
+    )
     evidence_map = {
         "signal_summary": [
             "signal.action",
@@ -1042,7 +1123,7 @@ def build_analysis_report(
 
     report = {
         "report_kind": ANALYSIS_REPORT_KIND,
-        "report_version": "2.0",
+        "report_version": "2.1",
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "created_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "symbol": symbol,
@@ -1090,6 +1171,11 @@ def build_analysis_report(
         "missing_data_warnings": why_signal["missing_data_warnings"],
         "freshness_warnings": why_signal["freshness_warnings"],
         "evidence_map": evidence_map,
+        "evaluation": {},
+        "evaluation_summary": None,
+        "confidence_reliability_summary": None,
+        "regime_usefulness_summary": None,
+        "evaluation_research_analysis": evaluation_research_analysis,
         "signal_summary": signal_summary,
         "technical_analysis": technical_analysis,
         "fundamental_analysis": fundamental_analysis,

@@ -72,6 +72,7 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "strategy_view": report.get("strategy_view") or "",
         "risks_weaknesses_invalidators": report.get("risks_weaknesses_invalidators") or "",
         "evidence_provenance": report.get("evidence_provenance") or "",
+        "evaluation_research_analysis": report.get("evaluation_research_analysis") or "",
     }
 
 
@@ -204,7 +205,9 @@ def build_narrator_context(
             "strategy_view": sections["strategy_view"],
             "risks_weaknesses_invalidators": sections["risks_weaknesses_invalidators"],
             "evidence_provenance": sections["evidence_provenance"],
+            "evaluation_research_analysis": sections["evaluation_research_analysis"],
         },
+        "evaluation_snapshot": report.get("evaluation") or {},
         "selected_sections": selected_sections,
         "scenario_matrix": _scenario_snapshot(report),
         "invalidators": {

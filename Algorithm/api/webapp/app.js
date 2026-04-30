@@ -604,6 +604,193 @@ const renderRiskTriggers = (report) => {
   ].join("");
 };
 
+const renderEvaluationMetrics = (report) => {
+  const evaluation = report?.evaluation;
+  if (!evaluation || Object.keys(evaluation).length === 0) {
+    renderMetricCards("#assistant-evaluation-metrics", null);
+    return;
+  }
+  const signal = evaluation.signal_scorecard || {};
+  const strategy = evaluation.strategy_scorecard || {};
+  const calibration = evaluation.calibration_summary || {};
+  renderMetricCards("#assistant-evaluation-metrics", [
+    {
+      label: "Matured Signals",
+      value: signal.final_signal_overall?.matured_count ?? "n/a",
+      note: `${evaluation.prediction_linkage_summary?.total_predictions ?? "n/a"} total predictions`,
+    },
+    {
+      label: "Hit Rate",
+      value:
+        signal.final_signal_overall?.hit_rate == null
+          ? "n/a"
+          : Number(signal.final_signal_overall.hit_rate * 100).toFixed(1) + "%",
+      note: "final strategy posture",
+    },
+    {
+      label: "Avg Fwd Return",
+      value:
+        signal.final_signal_overall?.average_forward_return == null
+          ? "n/a"
+          : Number(signal.final_signal_overall.average_forward_return * 100).toFixed(2) + "%",
+      note: report.horizon || "n/a",
+    },
+    {
+      label: "Actionable Spread",
+      value:
+        strategy.actionable_vs_watchlist_return_spread == null
+          ? "n/a"
+          : Number(strategy.actionable_vs_watchlist_return_spread * 100).toFixed(2) + "%",
+      note: "actionable vs wait/watch",
+    },
+    {
+      label: "Reliability",
+      value:
+        calibration.confidence_reliability_score == null
+          ? "n/a"
+          : Number(calibration.confidence_reliability_score).toFixed(1),
+      note: calibration.confidence_monotonicity || "sample-limited",
+    },
+    {
+      label: "Status",
+      value: evaluation.status || "unknown",
+      note: evaluation.evaluation_version || "phase6",
+    },
+  ]);
+};
+
+const renderEvaluationRegimeGrid = (report) => {
+  const container = qs("#assistant-regime-grid");
+  const evaluation = report?.evaluation;
+  const breakdown = evaluation?.regime_breakdown || {};
+  const strongest = evaluation?.strongest_conditions || [];
+  const weakest = evaluation?.weakest_conditions || [];
+  if (!evaluation || Object.keys(evaluation).length === 0) {
+    container.innerHTML = emptyStateCard(
+      "Regime and cohort breakdowns will render here."
+    );
+    return;
+  }
+  const regimeRows = (breakdown.regime_label || []).slice(0, 3).map(
+    (item) =>
+      `${item.label}: avg ${
+        item.average_forward_return == null
+          ? "n/a"
+          : Number(item.average_forward_return * 100).toFixed(2) + "%"
+      } · hit ${
+        item.hit_rate == null ? "n/a" : Number(item.hit_rate * 100).toFixed(1) + "%"
+      }`
+  );
+  const fragilityRows = (breakdown.fragility_tier || []).slice(0, 3).map(
+    (item) =>
+      `${item.label}: avg ${
+        item.average_forward_return == null
+          ? "n/a"
+          : Number(item.average_forward_return * 100).toFixed(2) + "%"
+      } · hit ${
+        item.hit_rate == null ? "n/a" : Number(item.hit_rate * 100).toFixed(1) + "%"
+      }`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Regime Labels</h5>
+      ${renderBullets(regimeRows, "No mature regime cohort yet.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Fragility Tiers</h5>
+      ${renderBullets(fragilityRows, "No mature fragility cohort yet.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Strongest Conditions</h5>
+      ${renderBullets(
+        strongest.map(
+          (item) =>
+            `${item.dimension}=${item.label} · avg ${
+              item.average_forward_return == null
+                ? "n/a"
+                : Number(item.average_forward_return * 100).toFixed(2) + "%"
+            }`
+        ),
+        "No standout conditions yet."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Weakest Conditions</h5>
+      ${renderBullets(
+        weakest.map(
+          (item) =>
+            `${item.dimension}=${item.label} · avg ${
+              item.average_forward_return == null
+                ? "n/a"
+                : Number(item.average_forward_return * 100).toFixed(2) + "%"
+            }`
+        ),
+        "No weak-condition pattern yet."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderEvaluationFailureModes = (report) => {
+  const container = qs("#assistant-failure-modes");
+  const evaluation = report?.evaluation;
+  const calibration = evaluation?.calibration_summary || {};
+  const ranking = evaluation?.bucket_results || [];
+  if (!evaluation || Object.keys(evaluation).length === 0) {
+    container.innerHTML = emptyStateCard(
+      "Failure modes, strongest conditions, and bucket results will render here."
+    );
+    return;
+  }
+  const driftNotes = calibration.calibration_drift_notes || [];
+  const bucketSummaries = ranking
+    .filter((item) => item.status === "available")
+    .slice(0, 3)
+    .map(
+      (item) =>
+        `${item.score_name}: spread ${
+          item.favorable_vs_unfavorable_return_spread == null
+            ? "n/a"
+            : Number(item.favorable_vs_unfavorable_return_spread * 100).toFixed(2) + "%"
+        } · ${item.monotonicity || "mixed"}`
+    );
+  const failureModes = (evaluation.failure_modes || []).map(
+    (item) =>
+      `${item.dimension}=${item.label} · avg ${
+        item.average_forward_return == null
+          ? "n/a"
+          : Number(item.average_forward_return * 100).toFixed(2) + "%"
+      } · hit ${
+        item.hit_rate == null ? "n/a" : Number(item.hit_rate * 100).toFixed(1) + "%"
+      }`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Calibration Drift Notes</h5>
+      ${renderBullets(driftNotes, "No material drift note surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Bucket Scorecards</h5>
+      ${renderBullets(bucketSummaries, "No ranking bucket result available yet.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Failure Modes</h5>
+      ${renderBullets(failureModes, "No repeated failure mode is isolated yet.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Research Layer</h5>
+      ${renderBullets(
+        [
+          report.evaluation_summary,
+          report.confidence_reliability_summary,
+          report.regime_usefulness_summary,
+        ].filter(Boolean),
+        "No research summary available."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderAssistantReport = (report) => {
   const container = qs("#assistant-analyze-report");
   state.assistantLatestReport = report || null;
@@ -627,6 +814,11 @@ const renderAssistantReport = (report) => {
     renderStrategyMetrics(null);
     renderStrategyScenarios(null);
     renderRiskTriggers(null);
+    renderEvaluationMetrics(null);
+    renderTextSection("#assistant-evaluation-section", "Evaluation Research", "");
+    renderTextSection("#assistant-calibration-section", "Confidence / Calibration", "");
+    renderEvaluationRegimeGrid(null);
+    renderEvaluationFailureModes(null);
     renderTextSection("#assistant-fundamental-section", "Fundamental Analysis", "");
     renderTextSection("#assistant-sentiment-section", "Sentiment / Narrative / Flow Analysis", "");
     renderTextSection(
@@ -776,6 +968,19 @@ const renderAssistantReport = (report) => {
     report.risks_weaknesses_invalidators
   );
   renderRiskTriggers(report);
+  renderEvaluationMetrics(report);
+  renderTextSection(
+    "#assistant-evaluation-section",
+    "Evaluation Research",
+    report.evaluation_research_analysis
+  );
+  renderTextSection(
+    "#assistant-calibration-section",
+    "Confidence / Calibration",
+    report.confidence_reliability_summary
+  );
+  renderEvaluationRegimeGrid(report);
+  renderEvaluationFailureModes(report);
   renderTextSection(
     "#assistant-fundamental-section",
     "Fundamental Analysis",

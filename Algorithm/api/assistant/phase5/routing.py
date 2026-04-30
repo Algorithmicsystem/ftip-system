@@ -220,6 +220,32 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Which domains agree and which conflict?",
         ),
     },
+    "evaluation_performance": {
+        "keywords": (
+            "historical",
+            "history",
+            "evaluation",
+            "performed",
+            "performance",
+            "reliability",
+            "calibration",
+            "worked",
+            "fails",
+            "failure mode",
+            "edge",
+        ),
+        "mode": "evidence",
+        "sections": (
+            "evaluation_research_analysis",
+            "strategy_view",
+            "overall_analysis",
+        ),
+        "followups": (
+            "How reliable are the confidence buckets?",
+            "Which regimes have been strongest historically?",
+            "What failure modes stand out in the scorecards?",
+        ),
+    },
     "compare_clarify": {
         "keywords": (
             "difference",

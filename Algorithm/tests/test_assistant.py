@@ -191,6 +191,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["strategy"]["strategy_posture"]
     assert set(result["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
     assert result["strategy"]["execution_posture"]["preferred_posture"]
+    assert result["prediction_record_artifact_id"]
+    assert result["evaluation_artifact_id"]
+    assert result["evaluation"]["evaluation_version"]
+    assert result["evaluation_research_analysis"]
     assert result["actionability_score"] is not None
     assert result["why_this_signal"]["top_positive_drivers"] is not None
     assert result["evidence_provenance"]
@@ -205,6 +209,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["report_id"] == result["report_id"]
     assert report["signal_summary"] == result["signal_summary"]
     assert report["overall_analysis"] == result["overall_analysis"]
+    assert report["evaluation"]
     assert (
         store.get_latest_artifact(
             kind=intelligence.ANALYSIS_JOB_KIND, session_id=result["session_id"]
@@ -227,6 +232,18 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert (
         store.get_latest_artifact(
             kind=strategy.STRATEGY_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind="assistant_prediction_record", session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind="assistant_evaluation_artifact", session_id=result["session_id"]
         )
         is not None
     )

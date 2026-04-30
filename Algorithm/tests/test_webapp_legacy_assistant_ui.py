@@ -16,6 +16,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-strategy-metrics"' in html
     assert 'id="assistant-strategy-scenarios"' in html
     assert 'id="assistant-risk-triggers"' in html
+    assert 'data-research-tab="evaluation"' in html
+    assert 'id="assistant-evaluation-metrics"' in html
+    assert 'id="assistant-evaluation-section"' in html
+    assert 'id="assistant-calibration-section"' in html
+    assert 'id="assistant-regime-grid"' in html
+    assert 'id="assistant-failure-modes"' in html
     assert 'data-research-tab="dashboard"' in html
     assert 'data-research-tab="chat"' in html
     assert 'id="assistant-signal-drilldown"' in html
@@ -27,6 +33,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "setResearchTab" in js
     assert "buildNarratorPromptSet" in js
     assert "renderNarratorPromptChips" in js
+    assert "renderEvaluationMetrics" in js
+    assert "renderEvaluationRegimeGrid" in js
+    assert "renderEvaluationFailureModes" in js
     assert "renderStrategyMetrics" in js
     assert "renderStrategyScenarios" in js
     assert "renderRiskTriggers" in js

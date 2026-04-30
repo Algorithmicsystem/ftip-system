@@ -214,6 +214,11 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "fragility_vetoes",
         "execution_posture",
         "uncertainty_notes",
+        "evaluation",
+        "evaluation_summary",
+        "confidence_reliability_summary",
+        "regime_usefulness_summary",
+        "evaluation_research_analysis",
         "strategy",
         "why_this_signal",
         "signal_summary",
@@ -229,6 +234,8 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "evidence_provenance",
         "session_id",
         "report_id",
+        "prediction_record_artifact_id",
+        "evaluation_artifact_id",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"

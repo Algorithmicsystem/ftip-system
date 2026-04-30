@@ -218,6 +218,83 @@ class AssistantStorage:
             "created_at": row[4],
         }
 
+    def update_artifact(self, artifact_id: str, payload: Dict[str, Any]) -> bool:
+        sanitized = sanitize_payload(payload)
+        if self.use_memory:
+            for artifact in self._artifacts:
+                if artifact.get("id") == artifact_id:
+                    artifact["payload"] = sanitized
+                    return True
+            return False
+
+        row = db.exec1(
+            """
+            UPDATE assistant_artifacts
+            SET payload=%s::jsonb
+            WHERE id=%s
+            RETURNING id
+            """,
+            (Json(sanitized), artifact_id),
+        )
+        return bool(row)
+
+    def list_artifacts(
+        self,
+        *,
+        kind: Optional[str] = None,
+        session_id: Optional[str] = None,
+        limit: int = 500,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            candidates = [
+                artifact
+                for artifact in self._artifacts
+                if (kind is None or artifact.get("kind") == kind)
+                and (session_id is None or str(artifact.get("session_id")) == str(session_id))
+            ]
+            candidates.sort(key=lambda item: item.get("created_at", 0), reverse=True)
+            trimmed = candidates[:limit]
+            return [
+                {
+                    "id": artifact.get("id"),
+                    "session_id": str(artifact.get("session_id")),
+                    "kind": artifact.get("kind"),
+                    "payload": artifact.get("payload") or {},
+                    "created_at": artifact.get("created_at"),
+                }
+                for artifact in trimmed
+            ]
+
+        where_clauses = ["1=1"]
+        params: List[Any] = []
+        if kind is not None:
+            where_clauses.append("kind=%s")
+            params.append(kind)
+        if session_id is not None:
+            where_clauses.append("session_id=%s")
+            params.append(session_id)
+        params.append(limit)
+        rows = db.fetchall(
+            f"""
+            SELECT id, session_id, kind, payload, created_at
+            FROM assistant_artifacts
+            WHERE {' AND '.join(where_clauses)}
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            tuple(params),
+        )
+        return [
+            {
+                "id": str(row[0]),
+                "session_id": str(row[1]),
+                "kind": row[2],
+                "payload": sanitize_payload(row[3]) if row[3] is not None else {},
+                "created_at": row[4],
+            }
+            for row in rows
+        ]
+
     def get_latest_artifact(
         self,
         *,
