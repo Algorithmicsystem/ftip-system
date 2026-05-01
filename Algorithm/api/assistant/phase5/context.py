@@ -77,6 +77,10 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "deployment_permission_analysis": report.get("deployment_permission_analysis") or "",
         "risk_budget_exposure_analysis": report.get("risk_budget_exposure_analysis") or "",
         "rollout_stage_summary": report.get("rollout_stage_summary") or "",
+        "portfolio_context_summary": report.get("portfolio_context_summary") or "",
+        "portfolio_fit_analysis": report.get("portfolio_fit_analysis") or "",
+        "execution_quality_analysis": report.get("execution_quality_analysis") or "",
+        "portfolio_workflow_summary": report.get("portfolio_workflow_summary") or "",
     }
 
 
@@ -166,6 +170,13 @@ def build_narrator_context(
         "live_readiness_score": active_analysis.get("live_readiness_score")
         or report.get("live_readiness_score"),
         "rollout_stage": active_analysis.get("rollout_stage") or report.get("rollout_stage"),
+        "candidate_classification": active_analysis.get("candidate_classification")
+        or report.get("candidate_classification"),
+        "ranked_opportunity_score": active_analysis.get("ranked_opportunity_score")
+        or report.get("ranked_opportunity_score"),
+        "portfolio_fit_quality": active_analysis.get("portfolio_fit_quality")
+        or report.get("portfolio_fit_quality"),
+        "size_band": active_analysis.get("size_band") or report.get("size_band"),
     }
 
     return {
@@ -230,6 +241,10 @@ def build_narrator_context(
             "deployment_permission_analysis": sections["deployment_permission_analysis"],
             "risk_budget_exposure_analysis": sections["risk_budget_exposure_analysis"],
             "rollout_stage_summary": sections["rollout_stage_summary"],
+            "portfolio_context_summary": sections["portfolio_context_summary"],
+            "portfolio_fit_analysis": sections["portfolio_fit_analysis"],
+            "execution_quality_analysis": sections["execution_quality_analysis"],
+            "portfolio_workflow_summary": sections["portfolio_workflow_summary"],
         },
         "evaluation_snapshot": report.get("evaluation") or {},
         "deployment_readiness_snapshot": {
@@ -272,6 +287,44 @@ def build_narrator_context(
                 or report.get("drift_alerts")
                 or []
             ),
+        },
+        "portfolio_snapshot": {
+            "candidate_classification": report.get("candidate_classification"),
+            "ranked_opportunity_score": report.get("ranked_opportunity_score"),
+            "portfolio_candidate_score": report.get("portfolio_candidate_score"),
+            "watchlist_priority_score": report.get("watchlist_priority_score"),
+            "portfolio_fit_quality": report.get("portfolio_fit_quality"),
+            "size_band": report.get("size_band"),
+            "weight_band": report.get("weight_band"),
+            "risk_budget_band": report.get("risk_budget_band"),
+            "overlap_score": report.get("overlap_score"),
+            "redundancy_score": report.get("redundancy_score"),
+            "diversification_contribution_score": report.get("diversification_contribution_score"),
+            "execution_quality_score": report.get("execution_quality_score"),
+            "friction_penalty": report.get("friction_penalty"),
+            "turnover_penalty": report.get("turnover_penalty"),
+            "candidate_blockers": _compact_list(report.get("candidate_blockers") or []),
+            "active_warnings": _compact_list(
+                [
+                    report.get("concentration_warning"),
+                    report.get("cluster_concentration_warning"),
+                    report.get("sector_crowding_warning"),
+                    report.get("fragility_cluster_warning"),
+                    report.get("macro_exposure_warning"),
+                    report.get("theme_exposure_warning"),
+                ]
+            ),
+            "cohort_ranking": [
+                {
+                    "symbol": item.get("symbol"),
+                    "portfolio_rank": item.get("portfolio_rank"),
+                    "candidate_classification": item.get("candidate_classification"),
+                    "portfolio_candidate_score": item.get("portfolio_candidate_score"),
+                    "portfolio_fit_quality": item.get("portfolio_fit_quality"),
+                    "deployment_permission": item.get("deployment_permission"),
+                }
+                for item in (report.get("cohort_ranking") or [])[:6]
+            ],
         },
         "selected_sections": selected_sections,
         "scenario_matrix": _scenario_snapshot(report),

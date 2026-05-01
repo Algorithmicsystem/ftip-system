@@ -24,6 +24,14 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-deployment-summary-section"' in html
     assert 'id="assistant-deployment-readiness"' in html
     assert 'id="assistant-deployment-risk-budget"' in html
+    assert 'data-research-tab="portfolio"' in html
+    assert 'id="assistant-portfolio-metrics"' in html
+    assert 'id="assistant-portfolio-context-section"' in html
+    assert 'id="assistant-portfolio-fit-section"' in html
+    assert 'id="assistant-portfolio-execution-section"' in html
+    assert 'id="assistant-portfolio-controls"' in html
+    assert 'id="assistant-portfolio-ranking"' in html
+    assert 'id="assistant-portfolio-workflow"' in html
     assert 'data-research-tab="evaluation"' in html
     assert 'data-research-tab="compare"' in html
     assert 'data-research-tab="watchlist"' in html
@@ -75,4 +83,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderDeploymentReadiness" in js
     assert "renderDeploymentRiskBudget" in js
     assert "renderDeploymentAudit" in js
+    assert "renderPortfolioMetrics" in js
+    assert "renderPortfolioControls" in js
+    assert "renderPortfolioRanking" in js
+    assert "renderPortfolioWorkflow" in js
+    assert "portfolio_construction" in js
+    assert "Which idea fits the portfolio better" in js
     assert "refreshAssistantSystemHealth" in js

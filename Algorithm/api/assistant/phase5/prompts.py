@@ -33,6 +33,10 @@ _MODE_DIRECTIVES = {
         "Frame the answer around staged deployment discipline: live readiness, paper vs live eligibility, blockers, trust tier, review requirements, risk-budget caution, pause conditions, and what would need to improve. "
         "Do not turn the answer into personal trade advice."
     ),
+    "portfolio": (
+        "Frame the answer around portfolio construction: candidate rank, watchlist versus deployable status, overlap and diversification, size-band logic, execution-quality friction, and why one idea fits better than another. "
+        "Do not turn the answer into personalized trading instructions."
+    ),
 }
 
 

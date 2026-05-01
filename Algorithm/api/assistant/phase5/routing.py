@@ -281,6 +281,42 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "What would need to improve before trust rises?",
         ),
     },
+    "portfolio_construction": {
+        "keywords": (
+            "portfolio",
+            "watchlist",
+            "candidate",
+            "ranking",
+            "rank",
+            "priority",
+            "redundant",
+            "overlap",
+            "diversification",
+            "fit",
+            "size band",
+            "weight band",
+            "execution quality",
+            "friction",
+            "turnover",
+            "rebalance",
+            "rotation",
+            "better between",
+            "portfolio better",
+        ),
+        "mode": "portfolio",
+        "sections": (
+            "portfolio_context_summary",
+            "portfolio_fit_analysis",
+            "execution_quality_analysis",
+            "portfolio_workflow_summary",
+            "strategy_view",
+        ),
+        "followups": (
+            "Which idea fits the portfolio better right now?",
+            "Why is this a watchlist candidate instead of a deployable one?",
+            "What is creating redundancy or concentration here?",
+        ),
+    },
     "compare_clarify": {
         "keywords": (
             "difference",
@@ -357,6 +393,30 @@ def route_question(message: str) -> Dict[str, Any]:
             )
         ):
             if intent == "deployment_readiness":
+                score += 3
+        if any(
+            phrase in text
+            for phrase in (
+                "portfolio",
+                "watchlist",
+                "candidate",
+                "ranking",
+                "rank",
+                "redundant",
+                "overlap",
+                "diversification",
+                "size band",
+                "weight band",
+                "execution quality",
+                "friction",
+                "turnover",
+                "rebalance",
+                "rotation",
+                "better between",
+                "fits better",
+            )
+        ):
+            if intent == "portfolio_construction":
                 score += 3
         scores.append((score, intent, matches))
 

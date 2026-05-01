@@ -38,6 +38,7 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Confidence: {strategy.get('confidence', (report.get('signal') or {}).get('confidence', 'n/a'))}.",
             f"Deployment permission: {report.get('deployment_permission', 'n/a')} under {report.get('deployment_mode', 'research_only')}.",
             f"Trust tier: {report.get('trust_tier', 'unknown')} with live readiness {report.get('live_readiness_score', 'n/a')}.",
+            f"Portfolio classification: {report.get('candidate_classification', 'n/a')} with portfolio score {report.get('portfolio_candidate_score', 'n/a')}.",
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
     )
@@ -62,6 +63,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "evidence": report.get("evidence"),
         "evidence_map": report.get("evidence_map"),
         "deployment_readiness": report.get("deployment_readiness"),
+        "portfolio_construction": report.get("portfolio_construction"),
     }
     section_context = {
         "signal_summary": report.get("signal_summary"),
@@ -79,6 +81,10 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "deployment_permission_analysis": report.get("deployment_permission_analysis"),
         "risk_budget_exposure_analysis": report.get("risk_budget_exposure_analysis"),
         "rollout_stage_summary": report.get("rollout_stage_summary"),
+        "portfolio_context_summary": report.get("portfolio_context_summary"),
+        "portfolio_fit_analysis": report.get("portfolio_fit_analysis"),
+        "execution_quality_analysis": report.get("execution_quality_analysis"),
+        "portfolio_workflow_summary": report.get("portfolio_workflow_summary"),
     }
     blocks = [
         "Grounding report metadata and machine-readable fields:",

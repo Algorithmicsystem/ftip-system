@@ -195,7 +195,7 @@ def _sample_report(symbol: str) -> dict:
             },
         },
     )
-    return reports.attach_deployment_context(
+    report = reports.attach_deployment_context(
         report,
         {
             "deployment_readiness_version": "phase8_capital_readiness_v1",
@@ -249,6 +249,84 @@ def _sample_report(symbol: str) -> dict:
         readiness_artifact_id="readiness-1",
         deployment_audit_artifact_id="audit-1",
     )
+    return reports.attach_portfolio_context(
+        report,
+        {
+            "portfolio_construction_version": "phase9_portfolio_construction_v1",
+            "current_candidate": {
+                "symbol": symbol,
+                "candidate_classification": "watchlist_candidate",
+                "ranked_opportunity_score": 63.0,
+                "portfolio_candidate_score": 60.5,
+                "watchlist_priority_score": 66.0,
+                "deployability_rank": 53.0,
+                "portfolio_rank": 2,
+                "portfolio_fit_quality": 48.0,
+                "overlap_score": 76.0,
+                "redundancy_score": 79.0,
+                "diversification_contribution_score": 31.0,
+                "most_redundant_symbol": "AAPL",
+                "size_band": "paper / shadow band",
+                "weight_band": "0.00x live weight",
+                "risk_budget_band": "shadow_risk_band",
+                "execution_quality_score": 53.0,
+                "friction_penalty": 37.0,
+                "turnover_penalty": 44.0,
+                "wait_for_better_entry_flag": True,
+                "confirmation_preferred_flag": True,
+                "candidate_blockers": ["the idea is redundant with existing tracked exposures"],
+                "concentration_warning": "Sector concentration is rising.",
+            },
+            "cohort_ranking": [
+                {
+                    "portfolio_rank": 1,
+                    "symbol": "AAPL",
+                    "candidate_classification": "top_priority_candidate",
+                    "portfolio_candidate_score": 75.0,
+                    "portfolio_fit_quality": 71.0,
+                    "size_band": "exploratory allocation band",
+                    "deployment_permission": "low_risk_live_eligible",
+                    "strategy_posture": "actionable_long",
+                    "conviction_tier": "high",
+                },
+                {
+                    "portfolio_rank": 2,
+                    "symbol": symbol,
+                    "candidate_classification": "watchlist_candidate",
+                    "portfolio_candidate_score": 60.5,
+                    "portfolio_fit_quality": 48.0,
+                    "size_band": "paper / shadow band",
+                    "deployment_permission": "paper_shadow_only",
+                    "strategy_posture": "watchlist_positive",
+                    "conviction_tier": "moderate",
+                },
+            ],
+            "workflow": {
+                "candidate_watchlist": [symbol],
+                "prioritized_watchlist": ["AAPL", symbol],
+                "active_portfolio_candidates": ["AAPL"],
+                "blocked_candidates": [
+                    {
+                        "symbol": symbol,
+                        "classification": "watchlist_candidate",
+                        "reasons": ["the idea is redundant with existing tracked exposures"],
+                    }
+                ],
+                "stale_review_needed": [],
+                "priority_shift_flag": True,
+                "rebalance_attention_flag": True,
+                "candidate_upgrade_reason": None,
+                "candidate_downgrade_reason": "portfolio redundancy is capping priority",
+                "replacement_candidate_notes": "AAPL currently offers a cleaner portfolio-adjusted candidate score.",
+                "rotation_pressure_score": 71.0,
+            },
+            "portfolio_context_summary": "Portfolio rank is 2 of 2 tracked candidates and the setup remains watchlist-only because fit is modest.",
+            "portfolio_fit_analysis": "Overlap and redundancy are elevated versus AAPL, so diversification contribution is limited.",
+            "execution_quality_analysis": "Execution quality is acceptable, but confirmation is preferred and live size remains blocked.",
+            "portfolio_workflow_summary": "AAPL is the higher-priority candidate while the active name remains on the watchlist.",
+        },
+        portfolio_construction_artifact_id="portfolio-1",
+    )
 
 
 def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
@@ -271,6 +349,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     deployment_route = route_question("Is this ready for live capital or only paper mode?")
     assert deployment_route["intent"] == "deployment_readiness"
     assert deployment_route["answer_mode"] == "deployment"
+
+    portfolio_route = route_question("Why is this a watchlist candidate instead of a better portfolio fit?")
+    assert portfolio_route["intent"] == "portfolio_construction"
+    assert portfolio_route["answer_mode"] == "portfolio"
 
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
@@ -302,6 +384,32 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["followup_questions"]
     assert narrator_context["deployment_readiness_snapshot"]["deployment_permission"] == "paper_shadow_only"
     assert narrator_context["deployment_readiness_snapshot"]["blockers"]
+    assert narrator_context["portfolio_snapshot"]["candidate_classification"] == "watchlist_candidate"
+    assert narrator_context["portfolio_snapshot"]["size_band"] == "paper / shadow band"
+
+
+def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
+    report = _sample_report("NVDA")
+    active_analysis = reports.build_active_analysis_reference(
+        report,
+        session_id="session-1",
+        report_id="report-1",
+    )
+    route = route_question("Which idea fits the portfolio better right now?")
+
+    narrator_context = build_narrator_context(
+        report,
+        active_analysis=active_analysis,
+        route=route,
+        user_message="Which idea fits the portfolio better right now?",
+        caller_context={"active_analysis": active_analysis},
+    )
+
+    assert narrator_context["question_intent"] == "portfolio_construction"
+    assert "portfolio_context_summary" in narrator_context["selected_sections"]
+    assert "portfolio_fit_analysis" in narrator_context["selected_sections"]
+    assert "execution_quality_analysis" in narrator_context["selected_sections"]
+    assert narrator_context["portfolio_snapshot"]["cohort_ranking"]
 
 
 def test_phase5_preserves_session_symbol_continuity_for_chat_followups() -> None:

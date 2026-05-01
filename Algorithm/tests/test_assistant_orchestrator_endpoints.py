@@ -118,7 +118,7 @@ def _sample_chat_report(symbol: str) -> dict:
             },
         },
     )
-    return reports.attach_deployment_context(
+    report = reports.attach_deployment_context(
         report,
         {
             "deployment_readiness_version": "phase8_capital_readiness_v1",
@@ -171,6 +171,77 @@ def _sample_chat_report(symbol: str) -> dict:
         },
         readiness_artifact_id="readiness-1",
         deployment_audit_artifact_id="audit-1",
+    )
+    return reports.attach_portfolio_context(
+        report,
+        {
+            "portfolio_construction_version": "phase9_portfolio_construction_v1",
+            "current_candidate": {
+                "symbol": symbol,
+                "candidate_classification": "watchlist_candidate",
+                "ranked_opportunity_score": 62.0,
+                "portfolio_candidate_score": 59.0,
+                "watchlist_priority_score": 65.0,
+                "deployability_rank": 53.0,
+                "portfolio_rank": 2,
+                "portfolio_fit_quality": 47.0,
+                "overlap_score": 75.0,
+                "redundancy_score": 78.0,
+                "diversification_contribution_score": 32.0,
+                "most_redundant_symbol": "AAPL",
+                "size_band": "paper / shadow band",
+                "weight_band": "0.00x live weight",
+                "risk_budget_band": "shadow_risk_band",
+                "execution_quality_score": 54.0,
+                "friction_penalty": 35.0,
+                "turnover_penalty": 44.0,
+                "wait_for_better_entry_flag": True,
+                "confirmation_preferred_flag": True,
+                "candidate_blockers": ["the idea is redundant with existing tracked exposures"],
+            },
+            "cohort_ranking": [
+                {
+                    "portfolio_rank": 1,
+                    "symbol": "AAPL",
+                    "candidate_classification": "top_priority_candidate",
+                    "portfolio_candidate_score": 76.0,
+                    "portfolio_fit_quality": 72.0,
+                    "size_band": "exploratory allocation band",
+                    "deployment_permission": "low_risk_live_eligible",
+                    "strategy_posture": "actionable_long",
+                    "conviction_tier": "high",
+                },
+                {
+                    "portfolio_rank": 2,
+                    "symbol": symbol,
+                    "candidate_classification": "watchlist_candidate",
+                    "portfolio_candidate_score": 59.0,
+                    "portfolio_fit_quality": 47.0,
+                    "size_band": "paper / shadow band",
+                    "deployment_permission": "paper_shadow_only",
+                    "strategy_posture": "watchlist_positive",
+                    "conviction_tier": "moderate",
+                },
+            ],
+            "workflow": {
+                "candidate_watchlist": [symbol],
+                "prioritized_watchlist": ["AAPL", symbol],
+                "active_portfolio_candidates": ["AAPL"],
+                "blocked_candidates": [],
+                "stale_review_needed": [],
+                "priority_shift_flag": True,
+                "rebalance_attention_flag": True,
+                "candidate_upgrade_reason": None,
+                "candidate_downgrade_reason": "portfolio redundancy is capping priority",
+                "replacement_candidate_notes": "AAPL currently offers a cleaner portfolio-adjusted candidate score.",
+                "rotation_pressure_score": 70.0,
+            },
+            "portfolio_context_summary": "Portfolio rank is 2 of 2 tracked candidates and the setup remains watchlist-only because fit is modest.",
+            "portfolio_fit_analysis": "Overlap and redundancy are elevated versus AAPL, so diversification contribution is limited.",
+            "execution_quality_analysis": "Execution quality is acceptable, but confirmation is preferred and live size remains blocked.",
+            "portfolio_workflow_summary": "AAPL is the higher-priority candidate while the active name remains on the watchlist.",
+        },
+        portfolio_construction_artifact_id="portfolio-1",
     )
 
 
@@ -309,6 +380,19 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "evaluation_artifact_id",
         "deployment_readiness_artifact_id",
         "deployment_audit_artifact_id",
+        "portfolio_construction",
+        "portfolio_construction_artifact_id",
+        "portfolio_context_summary",
+        "portfolio_fit_analysis",
+        "execution_quality_analysis",
+        "portfolio_workflow_summary",
+        "candidate_classification",
+        "portfolio_candidate_score",
+        "portfolio_fit_quality",
+        "size_band",
+        "execution_quality_score",
+        "overlap_score",
+        "redundancy_score",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
@@ -318,6 +402,7 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["strategy"]["execution_posture"]["preferred_posture"]
     assert data["deployment_readiness"]["deployment_readiness_version"]
     assert data["active_analysis"]["deployment_permission"]
+    assert data["active_analysis"]["candidate_classification"]
     assert data["overall_analysis"]
 
 
@@ -507,6 +592,8 @@ def test_assistant_chat_endpoint_returns_grounded_active_report(monkeypatch):
     assert data["active_analysis"]["symbol"] == "NVDA"
     assert data["active_analysis"]["conviction_tier"] == "moderate"
     assert data["active_analysis"]["strategy_posture"] == "watchlist_positive"
+    assert data["active_analysis"]["candidate_classification"] == "watchlist_candidate"
+    assert data["active_analysis"]["size_band"] == "paper / shadow band"
     assert "strategy_view" in data["citations"]
 
 

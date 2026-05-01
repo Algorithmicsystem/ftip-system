@@ -158,6 +158,7 @@
               </button>
               <button class="research-tab" data-research-tab="analyze">Analyze</button>
               <button class="research-tab" data-research-tab="strategy">Strategy</button>
+              <button class="research-tab" data-research-tab="portfolio">Portfolio</button>
               <button class="research-tab" data-research-tab="evaluation">Evaluation</button>
               <button class="research-tab" data-research-tab="evidence">Evidence</button>
               <button class="research-tab" data-research-tab="compare">Compare</button>
@@ -447,6 +448,52 @@
                     </div>
                     <div id="assistant-evaluation-factors" class="drilldown-grid empty-state-card">
                       Factor and strategy component usefulness will render here.
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="portfolio">
+                <div class="workspace-grid">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Portfolio Construction</h4>
+                      <span class="legacy-badge">Ranking + fit</span>
+                    </div>
+                    <div id="assistant-portfolio-metrics" class="summary-grid empty-state-card">
+                      Portfolio ranking, classification, and size-band metrics will render here.
+                    </div>
+                    <div id="assistant-portfolio-context-section" class="section-copy empty-state-card">
+                      Portfolio context and candidate ranking logic will render here.
+                    </div>
+                    <div id="assistant-portfolio-fit-section" class="section-copy empty-state-card">
+                      Overlap, redundancy, diversification, and portfolio-fit analysis will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Execution / Exposure Controls</h4>
+                      <span class="legacy-badge">Friction-aware</span>
+                    </div>
+                    <div id="assistant-portfolio-execution-section" class="section-copy empty-state-card">
+                      Execution-quality, friction, and turnover context will render here.
+                    </div>
+                    <div id="assistant-portfolio-controls" class="drilldown-grid empty-state-card">
+                      Size-band, overlap, exposure warnings, and caution logic will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Candidate Ranking / Workflow</h4>
+                      <span class="legacy-badge">Priority and rotation</span>
+                    </div>
+                    <div id="assistant-portfolio-ranking" class="empty-state-card">
+                      Cohort ranking and portfolio-adjusted candidate ordering will render here.
+                    </div>
+                    <div id="assistant-portfolio-workflow" class="drilldown-grid empty-state-card">
+                      Watchlist, blocked reasons, stale review needs, and rotation pressure will render here.
                     </div>
                   </section>
                 </div>

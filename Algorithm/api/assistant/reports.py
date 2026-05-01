@@ -753,6 +753,48 @@ def _rollout_stage_text(readiness: Dict[str, Any]) -> str:
     )
 
 
+def _portfolio_context_text(portfolio: Dict[str, Any]) -> str:
+    if not portfolio:
+        return (
+            "Portfolio-construction overlays are not attached to this report yet, so the platform is not expressing rank, portfolio fit, or watchlist priority."
+        )
+    current = portfolio.get("current_candidate") or {}
+    return _join_sentences(
+        [
+            f"Portfolio rank is {_fmt_num(current.get('portfolio_rank'), digits=0, signed=False)} of {_fmt_num(len(portfolio.get('cohort_ranking') or []), digits=0, signed=False)}, with ranked opportunity score {_fmt_num(current.get('ranked_opportunity_score'), digits=1, signed=False)} / 100 and portfolio candidate score {_fmt_num(current.get('portfolio_candidate_score'), digits=1, signed=False)} / 100.",
+            f"Candidate classification is {current.get('candidate_classification') or 'watchlist_candidate'}, deployability rank is {_fmt_num(current.get('deployability_rank'), digits=1, signed=False)} / 100, and watchlist priority is {_fmt_num(current.get('watchlist_priority_score'), digits=1, signed=False)} / 100.",
+            f"Size band is {current.get('size_band') or 'watchlist only'}, weight band is {current.get('weight_band') or '0.00x live weight'}, and caution level is {current.get('caution_level') or 'high'}.",
+        ]
+    )
+
+
+def _portfolio_fit_text(portfolio: Dict[str, Any]) -> str:
+    if not portfolio:
+        return "Portfolio-fit analysis will attach once the portfolio-construction layer is available."
+    current = portfolio.get("current_candidate") or {}
+    return _join_sentences(
+        [
+            f"Overlap score is {_fmt_num(current.get('overlap_score'), digits=1, signed=False)} / 100, redundancy score is {_fmt_num(current.get('redundancy_score'), digits=1, signed=False)} / 100, and diversification contribution is {_fmt_num(current.get('diversification_contribution_score'), digits=1, signed=False)} / 100.",
+            f"The most redundant tracked peer is {current.get('most_redundant_symbol') or 'none'}, and portfolio fit quality is {_fmt_num(current.get('portfolio_fit_quality'), digits=1, signed=False)} / 100.",
+            f"Exposure warnings are {_fmt_list((current.get('active_warnings') or []))}."
+            if current.get("active_warnings")
+            else f"Diversification status is {current.get('diversification_status') or 'balanced'}.",
+        ]
+    )
+
+
+def _execution_quality_text(portfolio: Dict[str, Any]) -> str:
+    if not portfolio:
+        return "Execution-quality analysis will attach once the portfolio-construction layer is available."
+    current = portfolio.get("current_candidate") or {}
+    return _join_sentences(
+        [
+            f"Execution quality is {_fmt_num(current.get('execution_quality_score'), digits=1, signed=False)} / 100 with friction penalty {_fmt_num(current.get('friction_penalty'), digits=1, signed=False)} and turnover penalty {_fmt_num(current.get('turnover_penalty'), digits=1, signed=False)}.",
+            f"Urgency is {current.get('urgency_level') or 'measured'}, patience is {current.get('patience_level') or 'high'}, wait-for-better-entry is {current.get('wait_for_better_entry_flag')}, and confirmation preferred is {current.get('confirmation_preferred_flag')}.",
+        ]
+    )
+
+
 def _risks_invalidators_text(
     why_signal: Dict[str, Any],
     strategy: Dict[str, Any],
@@ -899,6 +941,10 @@ def build_active_analysis_reference(
             "live_readiness_status": report.get("model_readiness_status"),
             "live_readiness_score": report.get("live_readiness_score"),
             "rollout_stage": report.get("rollout_stage"),
+            "candidate_classification": report.get("candidate_classification"),
+            "ranked_opportunity_score": report.get("ranked_opportunity_score"),
+            "portfolio_fit_quality": report.get("portfolio_fit_quality"),
+            "size_band": report.get("size_band"),
         }
     )
 
@@ -1071,6 +1117,116 @@ def attach_deployment_context(
     evidence_map["rollout_stage_summary"] = [
         "deployment_readiness.rollout_workflow",
         "deployment_readiness.prior_audit_summary",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_portfolio_context(
+    report: Dict[str, Any],
+    portfolio: Dict[str, Any],
+    *,
+    portfolio_construction_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    current = portfolio.get("current_candidate") or {}
+    workflow = portfolio.get("workflow") or {}
+    portfolio_context_text = _portfolio_context_text(portfolio)
+    portfolio_fit_text = _portfolio_fit_text(portfolio)
+    execution_quality_text = _execution_quality_text(portfolio)
+
+    updated["report_version"] = "2.3"
+    updated["portfolio_construction_artifact_id"] = portfolio_construction_artifact_id
+    updated["portfolio_construction"] = portfolio
+    updated["ranked_opportunity_score"] = current.get("ranked_opportunity_score")
+    updated["portfolio_candidate_score"] = current.get("portfolio_candidate_score")
+    updated["watchlist_priority_score"] = current.get("watchlist_priority_score")
+    updated["deployability_rank"] = current.get("deployability_rank")
+    updated["quality_vs_fragility_ratio"] = current.get("quality_vs_fragility_ratio")
+    updated["confidence_adjusted_rank"] = current.get("confidence_adjusted_rank")
+    updated["conviction_adjusted_rank"] = current.get("conviction_adjusted_rank")
+    updated["candidate_classification"] = current.get("candidate_classification")
+    updated["candidate_blockers"] = current.get("candidate_blockers") or []
+    updated["portfolio_rank"] = current.get("portfolio_rank")
+    updated["overlap_score"] = current.get("overlap_score")
+    updated["redundancy_score"] = current.get("redundancy_score")
+    updated["diversification_contribution_score"] = current.get("diversification_contribution_score")
+    updated["most_redundant_symbol"] = current.get("most_redundant_symbol")
+    updated["cluster_membership"] = current.get("cluster_membership") or []
+    updated["exposure_family"] = current.get("exposure_family")
+    updated["portfolio_fit_quality"] = current.get("portfolio_fit_quality")
+    updated["concentration_warning"] = current.get("concentration_warning")
+    updated["cluster_concentration_warning"] = current.get("cluster_concentration_warning")
+    updated["sector_crowding_warning"] = current.get("sector_crowding_warning")
+    updated["fragility_cluster_warning"] = current.get("fragility_cluster_warning")
+    updated["macro_exposure_warning"] = current.get("macro_exposure_warning")
+    updated["theme_exposure_warning"] = current.get("theme_exposure_warning")
+    updated["diversification_status"] = current.get("diversification_status")
+    updated["size_band"] = current.get("size_band")
+    updated["weight_band"] = current.get("weight_band")
+    updated["risk_budget_band"] = current.get("risk_budget_band")
+    updated["fragility_adjustment"] = current.get("fragility_adjustment")
+    updated["confidence_adjustment"] = current.get("confidence_adjustment")
+    updated["concentration_adjustment"] = current.get("concentration_adjustment")
+    updated["overlap_adjustment"] = current.get("overlap_adjustment")
+    updated["deployment_mode_adjustment"] = current.get("deployment_mode_adjustment")
+    updated["max_priority_allowed"] = current.get("max_priority_allowed")
+    updated["caution_level"] = current.get("caution_level")
+    updated["execution_quality_score"] = current.get("execution_quality_score")
+    updated["friction_penalty"] = current.get("friction_penalty")
+    updated["turnover_penalty"] = current.get("turnover_penalty")
+    updated["wait_for_better_entry_flag"] = current.get("wait_for_better_entry_flag")
+    updated["confirmation_preferred_flag"] = current.get("confirmation_preferred_flag")
+    updated["portfolio_context_summary"] = portfolio_context_text
+    updated["portfolio_fit_analysis"] = portfolio_fit_text
+    updated["execution_quality_analysis"] = execution_quality_text
+    updated["portfolio_workflow_summary"] = portfolio.get("portfolio_workflow_summary")
+    updated["top_peer_overlaps"] = portfolio.get("top_peer_overlaps") or []
+    updated["cohort_ranking"] = portfolio.get("cohort_ranking") or []
+    updated["priority_shift_flag"] = workflow.get("priority_shift_flag")
+    updated["rebalance_attention_flag"] = workflow.get("rebalance_attention_flag")
+    updated["candidate_upgrade_reason"] = workflow.get("candidate_upgrade_reason")
+    updated["candidate_downgrade_reason"] = workflow.get("candidate_downgrade_reason")
+    updated["replacement_candidate_notes"] = workflow.get("replacement_candidate_notes")
+    updated["rotation_pressure_score"] = workflow.get("rotation_pressure_score")
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Portfolio context: {portfolio_context_text}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Portfolio fit: {portfolio_fit_text}",
+            f"Execution quality: {execution_quality_text}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Workflow and rotation: {portfolio.get('portfolio_workflow_summary')}",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Portfolio-construction provenance is cohort-based: rank, overlap, diversification, and size-band outputs are computed from the stored report cohort available at analysis time.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["portfolio_context_summary"] = [
+        "portfolio_construction.current_candidate",
+        "portfolio_construction.cohort_ranking",
+    ]
+    evidence_map["portfolio_fit_analysis"] = [
+        "portfolio_construction.current_candidate.peer_overlaps",
+        "portfolio_construction.current_candidate.active_warnings",
+    ]
+    evidence_map["execution_quality_analysis"] = [
+        "portfolio_construction.current_candidate.execution_quality_score",
+        "portfolio_construction.current_candidate.friction_penalty",
+        "portfolio_construction.current_candidate.turnover_penalty",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)
@@ -1401,6 +1557,67 @@ def build_analysis_report(
         "rollout_stage_summary": (
             "Rollout-stage guidance will attach once staged deployment controls are available."
         ),
+        "portfolio_construction": {},
+        "portfolio_construction_artifact_id": None,
+        "ranked_opportunity_score": None,
+        "portfolio_candidate_score": None,
+        "watchlist_priority_score": None,
+        "deployability_rank": None,
+        "quality_vs_fragility_ratio": None,
+        "confidence_adjusted_rank": None,
+        "conviction_adjusted_rank": None,
+        "candidate_classification": None,
+        "candidate_blockers": [],
+        "portfolio_rank": None,
+        "overlap_score": None,
+        "redundancy_score": None,
+        "diversification_contribution_score": None,
+        "most_redundant_symbol": None,
+        "cluster_membership": [],
+        "exposure_family": None,
+        "portfolio_fit_quality": None,
+        "concentration_warning": None,
+        "cluster_concentration_warning": None,
+        "sector_crowding_warning": None,
+        "fragility_cluster_warning": None,
+        "macro_exposure_warning": None,
+        "theme_exposure_warning": None,
+        "diversification_status": None,
+        "size_band": None,
+        "weight_band": None,
+        "risk_budget_band": None,
+        "fragility_adjustment": None,
+        "confidence_adjustment": None,
+        "concentration_adjustment": None,
+        "overlap_adjustment": None,
+        "deployment_mode_adjustment": None,
+        "max_priority_allowed": None,
+        "caution_level": None,
+        "execution_quality_score": None,
+        "friction_penalty": None,
+        "turnover_penalty": None,
+        "wait_for_better_entry_flag": None,
+        "confirmation_preferred_flag": None,
+        "portfolio_context_summary": (
+            "Phase 9 portfolio-construction overlays will attach rank, portfolio fit, overlap, and size-band context once the portfolio layer runs."
+        ),
+        "portfolio_fit_analysis": (
+            "Portfolio-fit and diversification analysis will attach once the portfolio-construction layer is available."
+        ),
+        "execution_quality_analysis": (
+            "Execution-quality and friction analysis will attach once the portfolio-construction layer is available."
+        ),
+        "portfolio_workflow_summary": (
+            "Watchlist, candidate-priority, and rotation workflow guidance will attach once the portfolio-construction layer is available."
+        ),
+        "top_peer_overlaps": [],
+        "cohort_ranking": [],
+        "priority_shift_flag": None,
+        "rebalance_attention_flag": None,
+        "candidate_upgrade_reason": None,
+        "candidate_downgrade_reason": None,
+        "replacement_candidate_notes": None,
+        "rotation_pressure_score": None,
         "signal_summary": signal_summary,
         "technical_analysis": technical_analysis,
         "fundamental_analysis": fundamental_analysis,

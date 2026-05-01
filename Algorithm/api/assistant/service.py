@@ -23,6 +23,10 @@ from api.assistant.phase8 import (
     DEPLOYMENT_READINESS_ARTIFACT_KIND,
     build_deployment_readiness_artifact,
 )
+from api.assistant.phase9 import (
+    PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND,
+    build_portfolio_construction_artifact,
+)
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
@@ -271,6 +275,22 @@ async def generate_analysis_report(
         readiness_artifact_id=deployment_readiness_artifact_id,
         deployment_audit_artifact_id=deployment_audit_artifact_id,
     )
+    portfolio_construction = build_portfolio_construction_artifact(
+        current_report=report,
+        current_report_id=report_id,
+        session_id=sid,
+        store=store,
+    )
+    portfolio_construction_artifact_id = store.save_artifact(
+        sid,
+        PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND,
+        portfolio_construction,
+    )
+    report = reports.attach_portfolio_context(
+        report,
+        portfolio_construction,
+        portfolio_construction_artifact_id=portfolio_construction_artifact_id,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -293,6 +313,14 @@ async def generate_analysis_report(
                 "live_readiness_score": report.get("live_readiness_score"),
                 "rollout_stage": report.get("rollout_stage"),
             },
+            "portfolio_construction": {
+                "artifact_id": portfolio_construction_artifact_id,
+                "candidate_classification": report.get("candidate_classification"),
+                "portfolio_candidate_score": report.get("portfolio_candidate_score"),
+                "ranked_opportunity_score": report.get("ranked_opportunity_score"),
+                "portfolio_fit_quality": report.get("portfolio_fit_quality"),
+                "size_band": report.get("size_band"),
+            },
         },
     )
     store.add_message(
@@ -310,6 +338,7 @@ async def generate_analysis_report(
             "evaluation_artifact_id": evaluation_artifact_id,
             "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
             "deployment_audit_artifact_id": deployment_audit_artifact_id,
+            "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
             "active_analysis": active_analysis,
         },
     )
@@ -325,6 +354,7 @@ async def generate_analysis_report(
         "evaluation_artifact_id": evaluation_artifact_id,
         "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
         "deployment_audit_artifact_id": deployment_audit_artifact_id,
+        "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
         "active_analysis": active_analysis,
     }
 

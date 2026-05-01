@@ -49,6 +49,16 @@ _ACTIVE_ANALYSIS_KEYS = (
     "freshness_status",
     "report_version",
     "strategy_version",
+    "deployment_mode",
+    "deployment_permission",
+    "trust_tier",
+    "live_readiness_status",
+    "live_readiness_score",
+    "rollout_stage",
+    "candidate_classification",
+    "ranked_opportunity_score",
+    "portfolio_fit_quality",
+    "size_band",
 )
 
 

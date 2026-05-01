@@ -158,6 +158,10 @@ const buildActiveAnalysisFromReport = (report) => ({
   live_readiness_status: report?.model_readiness_status || "unknown",
   live_readiness_score: report?.live_readiness_score,
   rollout_stage: report?.rollout_stage || "historical_validation",
+  candidate_classification: report?.candidate_classification || "watchlist_candidate",
+  ranked_opportunity_score: report?.ranked_opportunity_score,
+  portfolio_fit_quality: report?.portfolio_fit_quality,
+  size_band: report?.size_band || "watchlist only",
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -210,10 +214,29 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.live_readiness_score ?? analysis?.live_readiness_score ?? null,
       rollout_stage: report?.rollout_stage || analysis?.rollout_stage || "historical_validation",
       risk_budget_tier: report?.risk_budget_tier || "none",
+      candidate_classification:
+        report?.candidate_classification || analysis?.candidate_classification || "watchlist_candidate",
+      ranked_opportunity_score:
+        report?.ranked_opportunity_score ?? analysis?.ranked_opportunity_score ?? null,
+      portfolio_candidate_score: report?.portfolio_candidate_score,
+      portfolio_fit_quality:
+        report?.portfolio_fit_quality ?? analysis?.portfolio_fit_quality ?? null,
+      watchlist_priority_score: report?.watchlist_priority_score,
+      deployability_rank: report?.deployability_rank,
+      size_band: report?.size_band || analysis?.size_band || "watchlist only",
+      weight_band: report?.weight_band || "n/a",
+      risk_budget_band: report?.risk_budget_band || "n/a",
+      overlap_score: report?.overlap_score,
+      redundancy_score: report?.redundancy_score,
+      diversification_contribution_score: report?.diversification_contribution_score,
+      execution_quality_score: report?.execution_quality_score,
+      friction_penalty: report?.friction_penalty,
+      turnover_penalty: report?.turnover_penalty,
       strongest_condition: conditionLabel(report?.evaluation?.strongest_conditions?.[0]),
       weakest_condition: conditionLabel(report?.evaluation?.weakest_conditions?.[0]),
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
       strategy_summary: report?.strategy_view || "",
+      portfolio_summary: report?.portfolio_context_summary || "",
       top_driver: topDriverLabel(report, "positive"),
       top_risk:
         report?.strategy?.invalidators?.top_invalidators?.[0] ||
@@ -384,9 +407,11 @@ const buildNarratorPromptSet = () => {
   return [
     `Why is ${symbol} ${activeSignalLabel()}?`,
     `Explain the strategy view for ${symbol}.`,
+    `Which idea fits the portfolio better than ${symbol} right now?`,
     `What is the bear case for ${symbol}?`,
     `What are the invalidators here?`,
     `Is ${symbol} ready for live capital or only paper/shadow mode?`,
+    `Why is ${symbol} watchlist-only or blocked in portfolio terms?`,
     `What is weakest in the setup for ${symbol}?`,
     `What would improve conviction on ${symbol}?`,
     `What does evaluation history say about setups like ${symbol}?`,
@@ -426,7 +451,9 @@ const renderActiveAnalysisLabels = () => {
     `Freshness: ${activeFreshnessLabel()}`,
     `Conviction: ${activeConvictionLabel()}`,
     `Strategy: ${activeStrategyPostureLabel()}`,
+    `Candidate: ${analysis?.candidate_classification || "watchlist_candidate"}`,
     `Permission: ${activeDeploymentPermissionLabel()}`,
+    `Size: ${analysis?.size_band || "watchlist only"}`,
     `Trust: ${activeTrustTierLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
   ];
@@ -437,7 +464,9 @@ const renderActiveAnalysisLabels = () => {
     `Signal: ${activeSignalLabel()}`,
     `Conviction: ${activeConvictionLabel()}`,
     `Strategy: ${activeStrategyPostureLabel()}`,
+    `Candidate: ${analysis?.candidate_classification || "watchlist_candidate"}`,
     `Permission: ${activeDeploymentPermissionLabel()}`,
+    `Size: ${analysis?.size_band || "watchlist only"}`,
     `Readiness: ${activeReadinessLabel()}`,
     `Freshness: ${activeFreshnessLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
@@ -447,7 +476,7 @@ const renderActiveAnalysisLabels = () => {
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");
   qs("#assistant-chat-grounding-note").textContent = analysis?.symbol
-    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report, strategy, evaluation, and deployment-readiness layers.`
+    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report, strategy, portfolio-construction, evaluation, and deployment-readiness layers.`
     : "Run Assistant Analyze to establish the active artifact the narrator should use.";
   if (qs("#assistant-compare-active-symbol")) {
     qs("#assistant-compare-active-symbol").value = analysis?.symbol || "";
@@ -651,6 +680,13 @@ const renderDashboardSummary = (report) => {
       note: `${report.deployment_mode || "research_only"} · trust ${report.trust_tier || "blocked"}`,
     },
     {
+      label: "Portfolio Candidate",
+      value: report.candidate_classification || "watchlist_candidate",
+      note: `rank ${report.portfolio_rank || "n/a"} · fit ${formatScore(
+        report.portfolio_fit_quality
+      )}`,
+    },
+    {
       label: "Live Readiness",
       value:
         report.live_readiness_score == null
@@ -721,6 +757,7 @@ const renderDashboardWorkflow = (report) => {
     const placeholders = [
       ["Executive Read", "Start with the dashboard for signal, posture, conviction, and top risks.", "dashboard"],
       ["Decision Layer", "Open strategy to inspect actionability, scenarios, invalidators, and execution posture.", "strategy"],
+      ["Portfolio Fit", "Use the portfolio workspace to inspect ranking, overlap, size-band logic, and rotation pressure.", "portfolio"],
       ["Trust Layer", "Use evaluation and evidence to show scorecards, calibration, provenance, and freshness.", "evaluation"],
     ];
     container.innerHTML = placeholders
@@ -744,6 +781,7 @@ const renderDashboardWorkflow = (report) => {
   const steps = [
     ["Signal and Thesis", report.signal_summary, "analyze"],
     ["Strategy Console", report.strategy_view, "strategy"],
+    ["Portfolio Construction", report.portfolio_context_summary || report.portfolio_fit_analysis, "portfolio"],
     [
       "Deployment Readiness",
       report.deployment_readiness_summary || report.deployment_permission_analysis,
@@ -823,6 +861,14 @@ const renderDashboardTrustStrip = (report) => {
           ? "review policy pending"
           : `human review ${report.human_review_required ? "required" : "still advised"}`,
     },
+    {
+      label: "Portfolio Fit",
+      value:
+        report.portfolio_fit_quality == null
+          ? "n/a"
+          : Number(report.portfolio_fit_quality).toFixed(1),
+      note: `${report.candidate_classification || "watchlist_candidate"} · ${report.size_band || "watchlist only"}`,
+    },
   ]);
 };
 
@@ -860,15 +906,24 @@ const renderRecentAnalyses = () => {
                 <span class="micro-chip">fragility ${escapeHtml(
                   snapshot.fragility_tier || "unknown"
                 )}</span>
+                <span class="micro-chip">candidate ${escapeHtml(
+                  snapshot.candidate_classification || "watchlist_candidate"
+                )}</span>
                 <span class="micro-chip">permission ${escapeHtml(
                   snapshot.deployment_permission || "analysis_only"
+                )}</span>
+                <span class="micro-chip">size ${escapeHtml(
+                  snapshot.size_band || "watchlist only"
                 )}</span>
                 <span class="micro-chip">freshness ${escapeHtml(
                   snapshot.freshness_status || "unknown"
                 )}</span>
               </div>
               <div class="table-note">${escapeHtml(
-                snapshot.executive_summary || snapshot.top_driver || "No summary available."
+                snapshot.portfolio_summary ||
+                  snapshot.executive_summary ||
+                  snapshot.top_driver ||
+                  "No summary available."
               )}</div>
               <div class="recent-analysis-actions">
                 <button type="button" class="secondary" data-load-report="${escapeHtml(
@@ -1177,6 +1232,223 @@ const renderDeploymentRiskBudget = (report) => {
   ].join("");
 };
 
+const renderPortfolioMetrics = (report) => {
+  if (!report) {
+    renderMetricCards("#assistant-portfolio-metrics", null);
+    return;
+  }
+  renderMetricCards("#assistant-portfolio-metrics", [
+    {
+      label: "Candidate Class",
+      value: report.candidate_classification || "watchlist_candidate",
+      note: `portfolio rank ${report.portfolio_rank || "n/a"}`,
+    },
+    {
+      label: "Portfolio Score",
+      value:
+        report.portfolio_candidate_score == null
+          ? "n/a"
+          : Number(report.portfolio_candidate_score).toFixed(1),
+      note: `ranked opportunity ${formatScore(report.ranked_opportunity_score)}`,
+    },
+    {
+      label: "Portfolio Fit",
+      value:
+        report.portfolio_fit_quality == null
+          ? "n/a"
+          : Number(report.portfolio_fit_quality).toFixed(1),
+      note: `diversification ${formatScore(report.diversification_contribution_score)}`,
+    },
+    {
+      label: "Overlap / Redundancy",
+      value: `${formatScore(report.overlap_score)} / ${formatScore(report.redundancy_score)}`,
+      note: report.most_redundant_symbol
+        ? `closest overlap ${report.most_redundant_symbol}`
+        : "no major redundancy peer",
+    },
+    {
+      label: "Size Band",
+      value: report.size_band || "watchlist only",
+      note: report.weight_band || report.risk_budget_band || "band pending",
+    },
+    {
+      label: "Execution Quality",
+      value:
+        report.execution_quality_score == null
+          ? "n/a"
+          : Number(report.execution_quality_score).toFixed(1),
+      note: `friction ${formatScore(report.friction_penalty)} · turnover ${formatScore(
+        report.turnover_penalty
+      )}`,
+    },
+  ]);
+};
+
+const renderPortfolioControls = (report) => {
+  const container = qs("#assistant-portfolio-controls");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Size-band, overlap, exposure warnings, and caution logic will render here."
+    );
+    return;
+  }
+  const warnings = [
+    report.concentration_warning,
+    report.cluster_concentration_warning,
+    report.sector_crowding_warning,
+    report.fragility_cluster_warning,
+    report.macro_exposure_warning,
+    report.theme_exposure_warning,
+  ].filter(Boolean);
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Size / Risk Bands</h5>
+      ${renderBullets(
+        [
+          `Size band: ${report.size_band || "watchlist only"}`,
+          `Weight band: ${report.weight_band || "n/a"}`,
+          `Risk budget band: ${report.risk_budget_band || "n/a"}`,
+          `Caution level: ${report.caution_level || "measured"}`,
+          `Max priority allowed: ${report.max_priority_allowed || "watchlist_only"}`,
+        ],
+        "No size-band guidance available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Adjustments / Warnings</h5>
+      ${renderBullets(
+        [
+          `Fragility adjustment: ${report.fragility_adjustment || "neutral"}`,
+          `Confidence adjustment: ${report.confidence_adjustment || "neutral"}`,
+          `Concentration adjustment: ${report.concentration_adjustment || "neutral"}`,
+          `Overlap adjustment: ${report.overlap_adjustment || "neutral"}`,
+          `Deployment adjustment: ${report.deployment_mode_adjustment || "neutral"}`,
+          ...warnings,
+        ],
+        "No portfolio-control warning surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Execution Discipline</h5>
+      ${renderBullets(
+        [
+          `Execution quality: ${formatScore(report.execution_quality_score)}`,
+          `Friction penalty: ${formatScore(report.friction_penalty)}`,
+          `Turnover penalty: ${formatScore(report.turnover_penalty)}`,
+          `Wait for better entry: ${report.wait_for_better_entry_flag ? "yes" : "no"}`,
+          `Confirmation preferred: ${report.confirmation_preferred_flag ? "yes" : "no"}`,
+        ],
+        "No execution-quality note surfaced."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPortfolioRanking = (report) => {
+  const container = qs("#assistant-portfolio-ranking");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Cohort ranking and portfolio-adjusted candidate ordering will render here."
+    );
+    return;
+  }
+  const rows = report.cohort_ranking || [];
+  if (!rows.length) {
+    container.innerHTML = emptyStateCard(
+      "Portfolio ranking will populate once there is an active cohort of stored analyses."
+    );
+    return;
+  }
+  container.innerHTML = `
+    <div class="comparison-matrix">
+      <table class="workspace-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Symbol</th>
+            <th>Classification</th>
+            <th>Portfolio Score</th>
+            <th>Fit</th>
+            <th>Permission</th>
+            <th>Size Band</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows
+            .slice(0, 8)
+            .map(
+              (row) => `
+                <tr>
+                  <td>${escapeHtml(row.portfolio_rank || "n/a")}</td>
+                  <td>
+                    <div class="table-symbol">${escapeHtml(row.symbol || "n/a")}</div>
+                    <div class="table-subtitle">${escapeHtml(
+                      `${row.strategy_posture || "n/a"} · ${row.conviction_tier || "unknown"}`
+                    )}</div>
+                  </td>
+                  <td>${escapeHtml(row.candidate_classification || "watchlist_candidate")}</td>
+                  <td>${escapeHtml(formatScore(row.portfolio_candidate_score))}</td>
+                  <td>${escapeHtml(formatScore(row.portfolio_fit_quality))}</td>
+                  <td>${escapeHtml(row.deployment_permission || "analysis_only")}</td>
+                  <td>${escapeHtml(row.size_band || "watchlist only")}</td>
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const renderPortfolioWorkflow = (report) => {
+  const container = qs("#assistant-portfolio-workflow");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Watchlist, blocked reasons, stale review needs, and rotation pressure will render here."
+    );
+    return;
+  }
+  const blocked = (report.portfolio_construction?.workflow?.blocked_candidates || []).map(
+    (item) =>
+      `${item.symbol || "n/a"} · ${item.classification || "blocked_candidate"}${
+        item.reasons?.length ? ` · ${item.reasons.join(" | ")}` : ""
+      }`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Workflow Summary</h5>
+      ${renderBullets(
+        [
+          report.portfolio_workflow_summary,
+          report.candidate_upgrade_reason,
+          report.candidate_downgrade_reason,
+          report.replacement_candidate_notes,
+          `Priority shift flag: ${report.priority_shift_flag ? "yes" : "no"}`,
+          `Rebalance attention: ${report.rebalance_attention_flag ? "yes" : "no"}`,
+          `Rotation pressure: ${formatScore(report.rotation_pressure_score)}`,
+        ].filter(Boolean),
+        "No workflow summary available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Watchlists / Active Candidates</h5>
+      ${renderBullets(
+        [
+          `Prioritized watchlist: ${(report.portfolio_construction?.workflow?.prioritized_watchlist || []).join(", ") || "none"}`,
+          `Active candidates: ${(report.portfolio_construction?.workflow?.active_portfolio_candidates || []).join(", ") || "none"}`,
+          `Stale review needed: ${(report.portfolio_construction?.workflow?.stale_review_needed || []).join(", ") || "none"}`,
+        ],
+        "No watchlist workflow surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Blocked / Redundant</h5>
+      ${renderBullets(blocked, "No blocked or redundant cohort candidate surfaced.")}
+    </section>`,
+  ].join("");
+};
+
 const renderEvaluationMetrics = (report) => {
   const evaluation = report?.evaluation;
   if (!evaluation || Object.keys(evaluation).length === 0) {
@@ -1441,6 +1713,8 @@ const renderEvidenceSupport = (report) => {
           report.regime_usefulness_summary,
           report.deployment_readiness_summary,
           report.deployment_permission_analysis,
+          report.portfolio_context_summary,
+          report.portfolio_fit_analysis,
         ].filter(Boolean),
         "No provenance note available."
       )}
@@ -1487,10 +1761,14 @@ const renderArtifactLedger = (report) => {
     `Trust tier: ${report.trust_tier || "blocked"}`,
     `Deployment readiness artifact: ${report.deployment_readiness_artifact_id || "n/a"}`,
     `Deployment audit artifact: ${report.deployment_audit_artifact_id || "n/a"}`,
+    `Portfolio artifact: ${report.portfolio_construction_artifact_id || "n/a"}`,
     `Prediction artifact: ${
       report.prediction_record_id || report.prediction_record_artifact_id || "n/a"
     }`,
     `Evaluation artifact: ${report.evaluation_artifact_id || "n/a"}`,
+    `Portfolio rank: ${report.portfolio_rank || "n/a"} / class ${
+      report.candidate_classification || "watchlist_candidate"
+    } / size ${report.size_band || "watchlist only"}`,
     `Freshness status: ${report.freshness_summary?.overall_status || "unknown"}`,
     `Scenario: ${report.scenario || "base"} / depth ${report.analysis_depth || "standard"}`,
   ];
@@ -1591,6 +1869,9 @@ const renderSystemAudit = (report) => {
               ? report.model_readiness_status || "unknown"
               : `${Number(report.live_readiness_score).toFixed(1)} / 100`
           }`,
+          `Portfolio ${report.candidate_classification || "watchlist_candidate"} / fit ${formatScore(
+            report.portfolio_fit_quality
+          )} / size ${report.size_band || "watchlist only"}`,
           ...(report.deployment_risk_alerts || []),
         ].filter(Boolean),
         "No deployment trust layer data available."
@@ -1720,12 +2001,12 @@ const renderWatchlistWorkspace = () => {
           <tr>
             <th>Symbol</th>
             <th>Signal</th>
-            <th>Posture</th>
-            <th>Conviction</th>
-            <th>Opportunity</th>
+            <th>Candidate</th>
+            <th>Portfolio Score</th>
+            <th>Fit</th>
             <th>Fragility</th>
             <th>Permission</th>
-            <th>Trust</th>
+            <th>Size Band</th>
             <th>Freshness</th>
             <th>Actions</th>
           </tr>
@@ -1744,12 +2025,12 @@ const renderWatchlistWorkspace = () => {
                     )}</div>
                   </td>
                   <td>${escapeHtml(snapshot.final_signal || "pending")}</td>
-                  <td>${escapeHtml(snapshot.strategy_posture || "pending")}</td>
-                  <td>${escapeHtml(snapshot.conviction_tier || "unknown")}</td>
-                  <td>${escapeHtml(formatScore(snapshot.opportunity_quality))}</td>
+                  <td>${escapeHtml(snapshot.candidate_classification || "watchlist_candidate")}</td>
+                  <td>${escapeHtml(formatScore(snapshot.portfolio_candidate_score))}</td>
+                  <td>${escapeHtml(formatScore(snapshot.portfolio_fit_quality))}</td>
                   <td>${escapeHtml(snapshot.fragility_tier || "unknown")}</td>
                   <td>${escapeHtml(snapshot.deployment_permission || "analysis_only")}</td>
-                  <td>${escapeHtml(snapshot.trust_tier || "blocked")}</td>
+                  <td>${escapeHtml(snapshot.size_band || "watchlist only")}</td>
                   <td>${escapeHtml(snapshot.freshness_status || "unknown")}</td>
                   <td>
                     <div class="table-actions">
@@ -1833,15 +2114,27 @@ const renderCompareWorkspace = () => {
   const right = peer.snapshot || {};
   renderMetricCards("#assistant-compare-summary", [
     {
-      label: "Cleaner Opportunity",
+      label: "Stronger Portfolio Score",
       value:
-        compareMetricLeader(left.opportunity_quality, right.opportunity_quality, true) === "active"
+        compareMetricLeader(left.portfolio_candidate_score, right.portfolio_candidate_score, true) === "active"
           ? active.symbol
-          : compareMetricLeader(left.opportunity_quality, right.opportunity_quality, true) === "peer"
+          : compareMetricLeader(left.portfolio_candidate_score, right.portfolio_candidate_score, true) === "peer"
             ? peer.symbol
             : "balanced",
-      note: `${active.symbol} ${formatScore(left.opportunity_quality)} vs ${peer.symbol} ${formatScore(
-        right.opportunity_quality
+      note: `${active.symbol} ${formatScore(left.portfolio_candidate_score)} vs ${peer.symbol} ${formatScore(
+        right.portfolio_candidate_score
+      )}`,
+    },
+    {
+      label: "Better Portfolio Fit",
+      value:
+        compareMetricLeader(left.portfolio_fit_quality, right.portfolio_fit_quality, true) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.portfolio_fit_quality, right.portfolio_fit_quality, true) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.portfolio_fit_quality)} vs ${peer.symbol} ${formatScore(
+        right.portfolio_fit_quality
       )}`,
     },
     {
@@ -1857,15 +2150,27 @@ const renderCompareWorkspace = () => {
       )}`,
     },
     {
-      label: "Higher Conviction",
+      label: "Less Redundant",
       value:
-        compareMetricLeader(left.cross_domain_conviction, right.cross_domain_conviction, true) === "active"
+        compareMetricLeader(left.redundancy_score, right.redundancy_score, false) === "active"
           ? active.symbol
-          : compareMetricLeader(left.cross_domain_conviction, right.cross_domain_conviction, true) === "peer"
+          : compareMetricLeader(left.redundancy_score, right.redundancy_score, false) === "peer"
             ? peer.symbol
             : "balanced",
-      note: `${active.symbol} ${formatScore(left.cross_domain_conviction)} vs ${peer.symbol} ${formatScore(
-        right.cross_domain_conviction
+      note: `${active.symbol} ${formatScore(left.redundancy_score)} vs ${peer.symbol} ${formatScore(
+        right.redundancy_score
+      )}`,
+    },
+    {
+      label: "Cleaner Execution",
+      value:
+        compareMetricLeader(left.execution_quality_score, right.execution_quality_score, true) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.execution_quality_score, right.execution_quality_score, true) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.execution_quality_score)} vs ${peer.symbol} ${formatScore(
+        right.execution_quality_score
       )}`,
     },
     {
@@ -1897,13 +2202,21 @@ const renderCompareWorkspace = () => {
   const metrics = [
     ["Final Signal", left.final_signal, right.final_signal],
     ["Strategy Posture", left.strategy_posture, right.strategy_posture],
+    ["Candidate Class", left.candidate_classification, right.candidate_classification],
     ["Conviction Tier", left.conviction_tier, right.conviction_tier],
     ["Deployment Permission", left.deployment_permission, right.deployment_permission],
     ["Trust Tier", left.trust_tier, right.trust_tier],
+    ["Size Band", left.size_band, right.size_band],
     ["Live Readiness", formatScore(left.live_readiness_score), formatScore(right.live_readiness_score)],
     ["Rollout Stage", left.rollout_stage, right.rollout_stage],
     ["Actionability", formatScore(left.actionability_score), formatScore(right.actionability_score)],
     ["Opportunity Quality", formatScore(left.opportunity_quality), formatScore(right.opportunity_quality)],
+    ["Portfolio Score", formatScore(left.portfolio_candidate_score), formatScore(right.portfolio_candidate_score)],
+    ["Portfolio Fit", formatScore(left.portfolio_fit_quality), formatScore(right.portfolio_fit_quality)],
+    ["Overlap Score", formatScore(left.overlap_score), formatScore(right.overlap_score)],
+    ["Redundancy Score", formatScore(left.redundancy_score), formatScore(right.redundancy_score)],
+    ["Diversification", formatScore(left.diversification_contribution_score), formatScore(right.diversification_contribution_score)],
+    ["Execution Quality", formatScore(left.execution_quality_score), formatScore(right.execution_quality_score)],
     ["Cross-Domain Conviction", formatScore(left.cross_domain_conviction), formatScore(right.cross_domain_conviction)],
     ["Signal Fragility", formatScore(left.signal_fragility), formatScore(right.signal_fragility)],
     ["Fundamental Durability", formatScore(left.fundamental_durability), formatScore(right.fundamental_durability)],
@@ -1993,6 +2306,13 @@ const renderAssistantReport = (report) => {
     );
     renderTextSection("#assistant-evidence-section", "Evidence / Provenance", "");
     renderTextSection("#assistant-deployment-summary-section", "Deployment Readiness Summary", "");
+    renderMetricCards("#assistant-portfolio-metrics", null);
+    renderTextSection("#assistant-portfolio-context-section", "Portfolio Context", "");
+    renderTextSection("#assistant-portfolio-fit-section", "Portfolio Fit", "");
+    renderTextSection("#assistant-portfolio-execution-section", "Execution Quality", "");
+    renderPortfolioControls(null);
+    renderPortfolioRanking(null);
+    renderPortfolioWorkflow(null);
     renderEvidenceSupport(null);
     renderArtifactLedger(null);
     renderDomainStatusGrid(null);
@@ -2040,6 +2360,15 @@ const renderAssistantReport = (report) => {
           ? report.model_readiness_status || "N/A"
           : Number(report.live_readiness_score).toFixed(1),
     },
+    { label: "Candidate", value: report.candidate_classification || "N/A" },
+    {
+      label: "Portfolio Fit",
+      value:
+        report.portfolio_fit_quality == null
+          ? "N/A"
+          : Number(report.portfolio_fit_quality).toFixed(1),
+    },
+    { label: "Size Band", value: report.size_band || "N/A" },
     { label: "Freshness", value: report.freshness_summary?.overall_status || "N/A" },
     { label: "As Of", value: report.as_of_date || "N/A" },
     { label: "Scenario", value: report.scenario || "N/A" },
@@ -2138,6 +2467,11 @@ const renderAssistantReport = (report) => {
       note: report.trust_tier || "blocked",
     },
     {
+      label: "Portfolio Candidate",
+      value: report.candidate_classification || "watchlist_candidate",
+      note: `portfolio score ${formatScore(report.portfolio_candidate_score)}`,
+    },
+    {
       label: "Live Readiness",
       value:
         report.live_readiness_score == null
@@ -2213,6 +2547,25 @@ const renderAssistantReport = (report) => {
     "Deployment Readiness Summary",
     report.deployment_readiness_summary
   );
+  renderPortfolioMetrics(report);
+  renderTextSection(
+    "#assistant-portfolio-context-section",
+    "Portfolio Context",
+    report.portfolio_context_summary
+  );
+  renderTextSection(
+    "#assistant-portfolio-fit-section",
+    "Portfolio Fit",
+    report.portfolio_fit_analysis
+  );
+  renderTextSection(
+    "#assistant-portfolio-execution-section",
+    "Execution Quality",
+    report.execution_quality_analysis
+  );
+  renderPortfolioControls(report);
+  renderPortfolioRanking(report);
+  renderPortfolioWorkflow(report);
   renderEvidenceSupport(report);
   renderArtifactLedger(report);
   renderDomainStatusGrid(report);

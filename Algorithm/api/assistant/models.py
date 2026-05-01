@@ -35,6 +35,10 @@ class AnalysisReference(BaseModel):
     live_readiness_status: Optional[str] = None
     live_readiness_score: Optional[float] = None
     rollout_stage: Optional[str] = None
+    candidate_classification: Optional[str] = None
+    ranked_opportunity_score: Optional[float] = None
+    portfolio_fit_quality: Optional[float] = None
+    size_band: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

@@ -8,6 +8,7 @@ from api.assistant.phase8 import (
     DEPLOYMENT_AUDIT_RECORD_KIND,
     DEPLOYMENT_READINESS_ARTIFACT_KIND,
 )
+from api.assistant.phase9 import PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -199,11 +200,18 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["evaluation_artifact_id"]
     assert result["deployment_readiness_artifact_id"]
     assert result["deployment_audit_artifact_id"]
+    assert result["portfolio_construction_artifact_id"]
     assert result["evaluation"]["evaluation_version"]
     assert result["evaluation_research_analysis"]
     assert result["deployment_readiness"]["deployment_readiness_version"]
     assert result["deployment_permission"]
     assert result["deployment_readiness_summary"]
+    assert result["portfolio_construction"]["portfolio_construction_version"]
+    assert result["portfolio_context_summary"]
+    assert result["portfolio_fit_analysis"]
+    assert result["execution_quality_analysis"]
+    assert result["candidate_classification"]
+    assert result["size_band"]
     assert result["actionability_score"] is not None
     assert result["why_this_signal"]["top_positive_drivers"] is not None
     assert result["evidence_provenance"]
@@ -213,7 +221,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session["metadata"]["active_analysis"]["report_id"] == result["report_id"]
     assert session["metadata"]["active_analysis"]["signal"]
     assert session["metadata"]["active_analysis"]["deployment_permission"]
+    assert session["metadata"]["active_analysis"]["candidate_classification"]
     assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
+    assert (
+        session["metadata"]["portfolio_construction"]["artifact_id"]
+        == result["portfolio_construction_artifact_id"]
+    )
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
@@ -222,6 +235,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["overall_analysis"] == result["overall_analysis"]
     assert report["evaluation"]
     assert report["deployment_readiness"]
+    assert report["portfolio_construction"]
     assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(
@@ -269,6 +283,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert (
         store.get_latest_artifact(
             kind=DEPLOYMENT_AUDIT_RECORD_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND, session_id=result["session_id"]
         )
         is not None
     )
@@ -576,6 +596,209 @@ def test_chat_routes_deployment_readiness_questions_to_readiness_sections(monkey
     assert result["report_found"] is True
     assert result["active_analysis"]["deployment_permission"] == "paper_shadow_only"
     assert result["active_analysis"]["trust_tier"] == "paper_only"
+
+
+def test_chat_routes_portfolio_questions_to_portfolio_sections(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = reports.attach_portfolio_context(
+        reports.attach_deployment_context(
+            reports.build_analysis_report(
+                symbol="NVDA",
+                as_of_date="2024-01-02",
+                horizon="swing",
+                risk_mode="balanced",
+                signal={
+                    "action": "BUY",
+                    "score": 0.8,
+                    "confidence": 0.7,
+                    "reason_codes": ["TREND_UP"],
+                    "reason_details": {"TREND_UP": "Trend is rising"},
+                    "horizon_days": 21,
+                },
+                key_features={"ret_21d": 0.08, "vol_21d": 0.25, "regime_label": "trend"},
+                quality={"bars_ok": True, "news_ok": True, "sentiment_ok": True, "warnings": []},
+                evidence={"reason_codes": ["TREND_UP"], "reason_details": {}, "sources": ["market_bars_daily"]},
+                strategy={
+                    "final_signal": "HOLD",
+                    "strategy_posture": "watchlist_positive",
+                    "confidence": 0.57,
+                    "confidence_score": 57.0,
+                    "conviction_tier": "moderate",
+                    "actionability_score": 44.0,
+                    "primary_participant_fit": "swing trader",
+                    "participant_fit": ["swing trader", "wait / observe"],
+                    "scenario_matrix": {"base": {"summary": "Constructive but not fully actionable."}},
+                    "execution_posture": {
+                        "preferred_posture": "wait_for_confirmation",
+                        "urgency_level": "measured",
+                        "patience_level": "high",
+                        "signal_cleanliness": "mixed_clean",
+                        "entry_quality_proxy": 51.0,
+                        "risk_context_summary": "constructive but still crowded",
+                    },
+                },
+            ),
+            {
+                "deployment_readiness_version": "phase8_capital_readiness_v1",
+                "deployment_mode": {
+                    "active_mode": "paper_shadow",
+                    "rollout_stage": "forward_shadow_validation",
+                },
+                "model_readiness": {
+                    "model_readiness_status": "constrained",
+                    "live_readiness_score": 57.0,
+                    "live_readiness_blockers": ["confidence calibration quality is not strong enough for live escalation"],
+                    "recent_degradation_flags": ["confidence reliability is still building"],
+                },
+                "signal_admission_control": {
+                    "admitted_for_strategy": True,
+                    "admitted_for_paper": True,
+                    "admitted_for_live": False,
+                },
+                "deployment_permission": {
+                    "deployment_permission": "paper_shadow_only",
+                    "deployment_blockers": ["portfolio overlap is already elevated"],
+                    "deployment_rationale": "The setup is analytically useful but still paper-only.",
+                    "trust_tier": "paper_only",
+                    "minimum_required_review": "analyst_review",
+                    "human_review_required": True,
+                },
+                "risk_budgeting": {
+                    "risk_budget_tier": "shadow_only",
+                    "exposure_caution_level": "high",
+                    "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                    "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                    "maximum_risk_mode_allowed": "paper_shadow",
+                },
+                "rollout_workflow": {
+                    "rollout_stage": "forward_shadow_validation",
+                    "readiness_checkpoint": "watch",
+                    "promotion_criteria": ["confidence reliability remains above the stage threshold"],
+                    "demotion_criteria": ["fragility rises into the blocked zone"],
+                    "stage_transition_notes": ["Continue paper/shadow evidence collection before live escalation."],
+                },
+                "drift_monitor": {
+                    "pause_recommended": False,
+                    "degrade_to_paper_recommended": False,
+                    "drift_alerts": ["confidence reliability is below the live-support comfort zone"],
+                    "deployment_risk_alerts": [],
+                },
+                "audit_snapshot": {
+                    "rationale_summary": "Paper-shadow only until calibration and overlap improve.",
+                },
+            },
+            readiness_artifact_id="readiness-3",
+            deployment_audit_artifact_id="audit-3",
+        ),
+        {
+            "portfolio_construction_version": "phase9_portfolio_construction_v1",
+            "current_candidate": {
+                "symbol": "NVDA",
+                "candidate_classification": "watchlist_candidate",
+                "ranked_opportunity_score": 64.0,
+                "portfolio_candidate_score": 61.5,
+                "watchlist_priority_score": 68.0,
+                "deployability_rank": 54.0,
+                "portfolio_fit_quality": 49.0,
+                "overlap_score": 78.0,
+                "redundancy_score": 81.0,
+                "diversification_contribution_score": 29.0,
+                "most_redundant_symbol": "AAPL",
+                "size_band": "paper / shadow band",
+                "weight_band": "0.00x live weight",
+                "risk_budget_band": "shadow_risk_band",
+                "execution_quality_score": 52.0,
+                "friction_penalty": 38.0,
+                "turnover_penalty": 46.0,
+                "wait_for_better_entry_flag": True,
+                "confirmation_preferred_flag": True,
+                "candidate_blockers": [
+                    "the idea is redundant with existing tracked exposures",
+                    "deployment gating blocks portfolio use",
+                ],
+                "concentration_warning": "Sector concentration is rising.",
+            },
+            "cohort_ranking": [
+                {
+                    "portfolio_rank": 1,
+                    "symbol": "AAPL",
+                    "candidate_classification": "top_priority_candidate",
+                    "portfolio_candidate_score": 76.0,
+                    "portfolio_fit_quality": 72.0,
+                    "size_band": "exploratory allocation band",
+                    "deployment_permission": "low_risk_live_eligible",
+                    "strategy_posture": "actionable_long",
+                    "conviction_tier": "high",
+                },
+                {
+                    "portfolio_rank": 2,
+                    "symbol": "NVDA",
+                    "candidate_classification": "watchlist_candidate",
+                    "portfolio_candidate_score": 61.5,
+                    "portfolio_fit_quality": 49.0,
+                    "size_band": "paper / shadow band",
+                    "deployment_permission": "paper_shadow_only",
+                    "strategy_posture": "watchlist_positive",
+                    "conviction_tier": "moderate",
+                },
+            ],
+            "workflow": {
+                "candidate_watchlist": ["NVDA"],
+                "prioritized_watchlist": ["AAPL", "NVDA"],
+                "active_portfolio_candidates": ["AAPL"],
+                "blocked_candidates": [
+                    {
+                        "symbol": "NVDA",
+                        "classification": "watchlist_candidate",
+                        "reasons": ["the idea is redundant with existing tracked exposures"],
+                    }
+                ],
+                "stale_review_needed": [],
+                "priority_shift_flag": True,
+                "rebalance_attention_flag": True,
+                "candidate_upgrade_reason": None,
+                "candidate_downgrade_reason": "portfolio redundancy is capping priority",
+                "replacement_candidate_notes": "AAPL currently offers a cleaner portfolio-adjusted candidate score.",
+                "rotation_pressure_score": 72.0,
+            },
+            "portfolio_context_summary": "Portfolio rank is 2 of 2 tracked candidates and the setup remains watchlist-only because portfolio fit is modest.",
+            "portfolio_fit_analysis": "Overlap and redundancy are elevated versus AAPL, so diversification contribution is limited.",
+            "execution_quality_analysis": "Execution quality is acceptable, but confirmation is preferred and the live size band remains blocked.",
+            "portfolio_workflow_summary": "AAPL is the higher-priority candidate while NVDA stays on the watchlist for diversification reasons.",
+        },
+        portfolio_construction_artifact_id="portfolio-1",
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=session_id, report_id=report_id
+    )
+    store.upsert_session_metadata(session_id, {"active_analysis": active_analysis})
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert '"question_intent": "portfolio_construction"' in combined
+        assert '"answer_mode": "portfolio"' in combined
+        assert report["portfolio_context_summary"] in combined
+        assert report["portfolio_fit_analysis"] in combined
+        assert report["execution_quality_analysis"] in combined
+        return (
+            "NVDA is analytically constructive, but AAPL currently fits the tracked portfolio better because NVDA is more redundant and remains paper-only.",
+            "model",
+            {"prompt_tokens": 12, "completion_tokens": 16},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {"session_id": session_id, "message": "Why is NVDA a watchlist candidate instead of a deployable portfolio idea?"},
+        store=store,
+    )
+
+    assert result["report_found"] is True
+    assert result["active_analysis"]["candidate_classification"] == "watchlist_candidate"
+    assert result["active_analysis"]["size_band"] == "paper / shadow band"
 
 
 def test_chat_returns_no_analysis_message_when_report_absent(monkeypatch):
