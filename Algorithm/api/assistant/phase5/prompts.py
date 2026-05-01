@@ -37,6 +37,10 @@ _MODE_DIRECTIVES = {
         "Frame the answer around portfolio construction: candidate rank, watchlist versus deployable status, overlap and diversification, size-band logic, execution-quality friction, and why one idea fits better than another. "
         "Do not turn the answer into personalized trading instructions."
     ),
+    "learning": (
+        "Frame the answer around continuous learning: what the platform is learning from its own outputs, where drift or failure modes are appearing, which experiments or reweighting ideas are under consideration, and how archetypes or motifs are evolving. "
+        "Keep the answer grounded in the stored learning artifact rather than generic speculation."
+    ),
 }
 
 

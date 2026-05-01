@@ -317,6 +317,43 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "What is creating redundancy or concentration here?",
         ),
     },
+    "learning_research": {
+        "keywords": (
+            "learning",
+            "learn",
+            "drift",
+            "experiment",
+            "experiments",
+            "archetype",
+            "motif",
+            "improve",
+            "improvement",
+            "improving",
+            "adapt",
+            "adaptation",
+            "research queue",
+            "failure mode",
+            "what is the platform learning",
+            "strongest setup",
+            "strongest setups",
+            "useful factor",
+            "more useful",
+        ),
+        "mode": "learning",
+        "sections": (
+            "learning_summary",
+            "regime_learning_summary",
+            "adaptation_queue_summary",
+            "experiment_registry_summary",
+            "archetype_motif_summary",
+            "evaluation_research_analysis",
+        ),
+        "followups": (
+            "What is the platform learning lately?",
+            "Where is the model drifting right now?",
+            "Which experiments deserve review next?",
+        ),
+    },
     "compare_clarify": {
         "keywords": (
             "difference",
@@ -417,6 +454,24 @@ def route_question(message: str) -> Dict[str, Any]:
             )
         ):
             if intent == "portfolio_construction":
+                score += 3
+        if any(
+            phrase in text
+            for phrase in (
+                "learning",
+                "learn",
+                "drift",
+                "experiment",
+                "archetype",
+                "motif",
+                "improve",
+                "improvement",
+                "what is the platform learning",
+                "strongest setups",
+                "failure mode",
+            )
+        ):
+            if intent == "learning_research":
                 score += 3
         scores.append((score, intent, matches))
 

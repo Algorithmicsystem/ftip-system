@@ -9,6 +9,7 @@ from api.assistant.phase8 import (
     DEPLOYMENT_READINESS_ARTIFACT_KIND,
 )
 from api.assistant.phase9 import PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND
+from api.assistant.phase10 import CONTINUOUS_LEARNING_ARTIFACT_KIND
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -39,6 +40,111 @@ class DummyBacktest:
             "volatility": 0.2,
             "lookback": 252,
         }
+
+
+def _attach_learning_test_context(report: dict[str, Any]) -> dict[str, Any]:
+    return reports.attach_learning_context(
+        report,
+        {
+            "continuous_learning_version": "phase10_alpha_acceleration_v1",
+            "cohort_summary": {
+                "tracked_reports": 9,
+                "peer_reports": 8,
+                "unique_symbols": 8,
+                "horizon": report.get("horizon"),
+                "risk_mode": report.get("risk_mode"),
+                "prior_learning_cycles": 3,
+            },
+            "active_setup_archetype": {
+                "archetype_id": "watchlist_only_thesis",
+                "archetype_name": "Watchlist Only Thesis",
+                "summary": "The setup is analytically constructive but still constrained by crowding and confirmation needs.",
+                "defining_characteristics": ["moderate conviction", "paper-shadow only"],
+                "common_failure_modes": ["crowding rises without price confirmation"],
+                "best_regimes": ["trend"],
+                "worst_regimes": ["transition", "high_vol"],
+                "strategy_fit": "wait_for_confirmation",
+                "deployment_caution_level": "elevated",
+            },
+            "motif_discovery": {
+                "active_motifs": [
+                    {
+                        "motif_id": "crowding_divergence",
+                        "motif_summary": "Narrative crowding remains elevated relative to confirmation quality.",
+                    }
+                ],
+                "motif_library": [],
+            },
+            "signal_family_library": {
+                "archetype_cohorts": [
+                    {
+                        "archetype_name": "Watchlist Only Thesis",
+                        "sample_count": 7,
+                        "average_reliability": 59.0,
+                    }
+                ]
+            },
+            "regime_conditioned_learnings": [
+                {
+                    "regime_label": "trend",
+                    "sample_size": 9,
+                    "average_reliability": 61.0,
+                    "average_hit_rate": 0.58,
+                    "decision_quality_summary": "Trend setups remain constructive, but crowding still depresses cleaner deployment.",
+                    "adaptation_suggestion": "Keep confirmation and crowding penalties firm until reliability improves.",
+                }
+            ],
+            "feature_interaction_candidates": [
+                {
+                    "interaction_candidate": "trend_plus_low_fragility_plus_macro_alignment",
+                    "description": "This interaction remains the cleanest continuation pattern.",
+                }
+            ],
+            "reweighting_candidates": [
+                {
+                    "target_family": "Narrative Crowding Index",
+                    "suggested_weight_changes": [
+                        {"direction": "increase_penalty", "target": "crowding_penalty"}
+                    ],
+                    "confidence_in_recommendation": 0.75,
+                    "sample_size": 9,
+                }
+            ],
+            "research_hypotheses": [
+                {
+                    "hypothesis_title": "Crowding penalty deserves more weight",
+                    "observed_pattern": "Crowded trend setups underperform cleaner continuation setups.",
+                }
+            ],
+            "drift_alerts": [
+                {
+                    "affected_component": "confidence_calibration",
+                    "severity": "moderate",
+                    "evidence": "The active regime still shows weaker reliability than the cohort median.",
+                }
+            ],
+            "experiment_registry": {
+                "open_experiments": [
+                    {
+                        "title": "Tighten crowding penalty in trend regimes",
+                        "validation_status": "candidate",
+                        "approval_status": "review",
+                    }
+                ],
+                "approved_improvements": [],
+                "rejected_improvements": [],
+            },
+            "improvement_queue": [
+                {"title": "Increase crowding penalty in trend regimes", "priority": "high"}
+            ],
+            "learning_summary": "The active setup sits in a watchlist-only archetype and crowding discipline remains the top learning priority.",
+            "regime_learning_summary": "Trend regimes still work, but reliability weakens when crowding remains elevated.",
+            "adaptation_queue_summary": "Raise crowding penalties and keep confirmation gates tight until reliability improves.",
+            "experiment_registry_summary": "One governed crowding-penalty experiment is queued for review.",
+            "archetype_motif_summary": "This setup clusters into the watchlist-only thesis family with a crowding-divergence motif.",
+        },
+        learning_artifact_id="learning-test",
+    )
 
 
 def test_chat_returns_503_when_disabled(monkeypatch):
@@ -212,6 +318,15 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["execution_quality_analysis"]
     assert result["candidate_classification"]
     assert result["size_band"]
+    assert result["learning_artifact_id"]
+    assert result["continuous_learning"]["continuous_learning_version"]
+    assert result["learning_summary"]
+    assert result["regime_learning_summary"]
+    assert result["adaptation_queue_summary"]
+    assert result["experiment_registry_summary"]
+    assert result["archetype_motif_summary"]
+    assert result["setup_archetype"]["archetype_name"]
+    assert result["learning_priority"]
     assert result["actionability_score"] is not None
     assert result["why_this_signal"]["top_positive_drivers"] is not None
     assert result["evidence_provenance"]
@@ -222,10 +337,15 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session["metadata"]["active_analysis"]["signal"]
     assert session["metadata"]["active_analysis"]["deployment_permission"]
     assert session["metadata"]["active_analysis"]["candidate_classification"]
+    assert session["metadata"]["active_analysis"]["setup_archetype"]
     assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
     assert (
         session["metadata"]["portfolio_construction"]["artifact_id"]
         == result["portfolio_construction_artifact_id"]
+    )
+    assert (
+        session["metadata"]["continuous_learning"]["artifact_id"]
+        == result["learning_artifact_id"]
     )
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
@@ -236,6 +356,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["evaluation"]
     assert report["deployment_readiness"]
     assert report["portfolio_construction"]
+    assert report["continuous_learning"]
     assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(
@@ -289,6 +410,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert (
         store.get_latest_artifact(
             kind=PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=CONTINUOUS_LEARNING_ARTIFACT_KIND, session_id=result["session_id"]
         )
         is not None
     )
@@ -799,6 +926,154 @@ def test_chat_routes_portfolio_questions_to_portfolio_sections(monkeypatch):
     assert result["report_found"] is True
     assert result["active_analysis"]["candidate_classification"] == "watchlist_candidate"
     assert result["active_analysis"]["size_band"] == "paper / shadow band"
+
+
+def test_chat_routes_learning_questions_to_learning_sections(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = _attach_learning_test_context(
+        reports.attach_portfolio_context(
+            reports.attach_deployment_context(
+                reports.build_analysis_report(
+                    symbol="NVDA",
+                    as_of_date="2024-01-02",
+                    horizon="swing",
+                    risk_mode="balanced",
+                    signal={
+                        "action": "BUY",
+                        "score": 0.8,
+                        "confidence": 0.7,
+                        "reason_codes": ["TREND_UP"],
+                        "reason_details": {"TREND_UP": "Trend is rising"},
+                    },
+                    key_features={"ret_21d": 0.08, "vol_21d": 0.25, "regime_label": "trend"},
+                    quality={"bars_ok": True, "news_ok": True, "sentiment_ok": True, "warnings": []},
+                    evidence={
+                        "reason_codes": ["TREND_UP"],
+                        "reason_details": {},
+                        "sources": ["market_bars_daily"],
+                    },
+                    strategy={
+                        "final_signal": "HOLD",
+                        "strategy_posture": "watchlist_positive",
+                        "confidence": 0.57,
+                        "confidence_score": 57.0,
+                        "conviction_tier": "moderate",
+                        "actionability_score": 44.0,
+                        "primary_participant_fit": "swing trader",
+                        "participant_fit": ["swing trader", "wait / observe"],
+                        "scenario_matrix": {"base": {"summary": "Constructive but not fully actionable."}},
+                    },
+                ),
+                {
+                    "deployment_readiness_version": "phase8_capital_readiness_v1",
+                    "deployment_mode": {
+                        "active_mode": "paper_shadow",
+                        "rollout_stage": "forward_shadow_validation",
+                    },
+                    "model_readiness": {
+                        "model_readiness_status": "constrained",
+                        "live_readiness_score": 57.0,
+                        "live_readiness_blockers": [
+                            "confidence calibration quality is not strong enough for live escalation"
+                        ],
+                        "recent_degradation_flags": ["confidence reliability is still building"],
+                    },
+                    "signal_admission_control": {
+                        "admitted_for_strategy": True,
+                        "admitted_for_paper": True,
+                        "admitted_for_live": False,
+                    },
+                    "deployment_permission": {
+                        "deployment_permission": "paper_shadow_only",
+                        "deployment_blockers": ["fragility remains too high for live admission"],
+                        "deployment_rationale": "The setup remains paper-only while reliability improves.",
+                        "trust_tier": "paper_only",
+                        "minimum_required_review": "analyst_review",
+                        "human_review_required": True,
+                    },
+                    "risk_budgeting": {
+                        "risk_budget_tier": "shadow_only",
+                        "exposure_caution_level": "high",
+                        "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                        "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                        "maximum_risk_mode_allowed": "paper_shadow",
+                    },
+                    "rollout_workflow": {
+                        "rollout_stage": "forward_shadow_validation",
+                        "readiness_checkpoint": "watch",
+                        "promotion_criteria": [
+                            "confidence reliability remains above the stage threshold"
+                        ],
+                        "demotion_criteria": ["fragility rises into the blocked zone"],
+                        "stage_transition_notes": [
+                            "Continue paper/shadow evidence collection before live escalation."
+                        ],
+                    },
+                    "drift_monitor": {
+                        "pause_recommended": False,
+                        "degrade_to_paper_recommended": False,
+                        "drift_alerts": [
+                            "confidence reliability is below the live-support comfort zone"
+                        ],
+                        "deployment_risk_alerts": [],
+                    },
+                    "audit_snapshot": {
+                        "rationale_summary": "Paper-shadow only until calibration improves.",
+                    },
+                },
+                readiness_artifact_id="readiness-learning",
+                deployment_audit_artifact_id="audit-learning",
+            ),
+            {
+                "portfolio_construction_version": "phase9_portfolio_construction_v1",
+                "current_candidate": {
+                    "symbol": "NVDA",
+                    "candidate_classification": "watchlist_candidate",
+                    "ranked_opportunity_score": 64.0,
+                    "portfolio_candidate_score": 61.0,
+                    "portfolio_fit_quality": 48.0,
+                    "size_band": "paper / shadow band",
+                    "execution_quality_score": 54.0,
+                },
+                "workflow": {"prioritized_watchlist": ["NVDA"]},
+                "portfolio_context_summary": "NVDA stays on the watchlist while portfolio fit remains modest.",
+                "portfolio_fit_analysis": "Overlap and crowding still limit deployability.",
+                "execution_quality_analysis": "Confirmation is still preferred before escalation.",
+            },
+            portfolio_construction_artifact_id="portfolio-learning",
+        )
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=session_id, report_id=report_id
+    )
+    store.upsert_session_metadata(session_id, {"active_analysis": active_analysis})
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert '"question_intent": "learning_research"' in combined
+        assert '"answer_mode": "learning"' in combined
+        assert report["learning_summary"] in combined
+        assert report["regime_learning_summary"] in combined
+        assert report["experiment_registry_summary"] in combined
+        return (
+            "The platform is currently learning that crowding discipline needs more weight in this watchlist-only setup family.",
+            "model",
+            {"prompt_tokens": 12, "completion_tokens": 16},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {"session_id": session_id, "message": "What is the platform learning lately about NVDA?"},
+        store=store,
+    )
+
+    assert result["report_found"] is True
+    assert result["active_analysis"]["setup_archetype"] == "Watchlist Only Thesis"
+    assert result["active_analysis"]["learning_priority"] == "high"
 
 
 def test_chat_returns_no_analysis_message_when_report_absent(monkeypatch):

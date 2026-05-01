@@ -81,6 +81,11 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "portfolio_fit_analysis": report.get("portfolio_fit_analysis") or "",
         "execution_quality_analysis": report.get("execution_quality_analysis") or "",
         "portfolio_workflow_summary": report.get("portfolio_workflow_summary") or "",
+        "learning_summary": report.get("learning_summary") or "",
+        "regime_learning_summary": report.get("regime_learning_summary") or "",
+        "adaptation_queue_summary": report.get("adaptation_queue_summary") or "",
+        "experiment_registry_summary": report.get("experiment_registry_summary") or "",
+        "archetype_motif_summary": report.get("archetype_motif_summary") or "",
     }
 
 
@@ -177,6 +182,12 @@ def build_narrator_context(
         "portfolio_fit_quality": active_analysis.get("portfolio_fit_quality")
         or report.get("portfolio_fit_quality"),
         "size_band": active_analysis.get("size_band") or report.get("size_band"),
+        "setup_archetype": active_analysis.get("setup_archetype")
+        or ((report.get("setup_archetype") or {}).get("archetype_name")),
+        "research_version": active_analysis.get("research_version")
+        or report.get("research_version"),
+        "learning_priority": active_analysis.get("learning_priority")
+        or report.get("learning_priority"),
     }
 
     return {
@@ -245,6 +256,11 @@ def build_narrator_context(
             "portfolio_fit_analysis": sections["portfolio_fit_analysis"],
             "execution_quality_analysis": sections["execution_quality_analysis"],
             "portfolio_workflow_summary": sections["portfolio_workflow_summary"],
+            "learning_summary": sections["learning_summary"],
+            "regime_learning_summary": sections["regime_learning_summary"],
+            "adaptation_queue_summary": sections["adaptation_queue_summary"],
+            "experiment_registry_summary": sections["experiment_registry_summary"],
+            "archetype_motif_summary": sections["archetype_motif_summary"],
         },
         "evaluation_snapshot": report.get("evaluation") or {},
         "deployment_readiness_snapshot": {
@@ -325,6 +341,22 @@ def build_narrator_context(
                 }
                 for item in (report.get("cohort_ranking") or [])[:6]
             ],
+        },
+        "learning_snapshot": {
+            "research_version": report.get("research_version"),
+            "setup_archetype": (report.get("setup_archetype") or {}).get("archetype_name"),
+            "deployment_caution_level": (report.get("setup_archetype") or {}).get(
+                "deployment_caution_level"
+            ),
+            "learning_priority": report.get("learning_priority"),
+            "top_drift_alert": (report.get("learning_drift_alerts") or [{}])[0],
+            "top_reweighting_candidate": (report.get("reweighting_candidates") or [{}])[0],
+            "top_hypothesis": (report.get("research_hypotheses") or [{}])[0],
+            "top_experiment": (
+                ((report.get("experiment_registry") or {}).get("open_experiments") or [{}])[0]
+            ),
+            "active_motifs": report.get("active_motifs") or [],
+            "regime_learning": (report.get("regime_conditioned_learnings") or [])[:4],
         },
         "selected_sections": selected_sections,
         "scenario_matrix": _scenario_snapshot(report),

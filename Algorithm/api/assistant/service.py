@@ -27,6 +27,10 @@ from api.assistant.phase9 import (
     PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND,
     build_portfolio_construction_artifact,
 )
+from api.assistant.phase10 import (
+    CONTINUOUS_LEARNING_ARTIFACT_KIND,
+    build_continuous_learning_artifact,
+)
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
@@ -291,6 +295,22 @@ async def generate_analysis_report(
         portfolio_construction,
         portfolio_construction_artifact_id=portfolio_construction_artifact_id,
     )
+    continuous_learning = build_continuous_learning_artifact(
+        current_report=report,
+        current_report_id=report_id,
+        session_id=sid,
+        store=store,
+    )
+    continuous_learning_artifact_id = store.save_artifact(
+        sid,
+        CONTINUOUS_LEARNING_ARTIFACT_KIND,
+        continuous_learning,
+    )
+    report = reports.attach_learning_context(
+        report,
+        continuous_learning,
+        learning_artifact_id=continuous_learning_artifact_id,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -321,6 +341,12 @@ async def generate_analysis_report(
                 "portfolio_fit_quality": report.get("portfolio_fit_quality"),
                 "size_band": report.get("size_band"),
             },
+            "continuous_learning": {
+                "artifact_id": continuous_learning_artifact_id,
+                "research_version": report.get("research_version"),
+                "setup_archetype": report.get("setup_archetype", {}).get("archetype_name"),
+                "learning_priority": report.get("learning_priority"),
+            },
         },
     )
     store.add_message(
@@ -339,6 +365,7 @@ async def generate_analysis_report(
             "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
             "deployment_audit_artifact_id": deployment_audit_artifact_id,
             "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
+            "continuous_learning_artifact_id": continuous_learning_artifact_id,
             "active_analysis": active_analysis,
         },
     )
@@ -355,6 +382,7 @@ async def generate_analysis_report(
         "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
         "deployment_audit_artifact_id": deployment_audit_artifact_id,
         "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
+        "continuous_learning_artifact_id": continuous_learning_artifact_id,
         "active_analysis": active_analysis,
     }
 

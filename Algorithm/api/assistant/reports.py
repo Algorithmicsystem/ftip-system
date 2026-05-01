@@ -945,6 +945,9 @@ def build_active_analysis_reference(
             "ranked_opportunity_score": report.get("ranked_opportunity_score"),
             "portfolio_fit_quality": report.get("portfolio_fit_quality"),
             "size_band": report.get("size_band"),
+            "setup_archetype": ((report.get("setup_archetype") or {}).get("archetype_name")),
+            "research_version": report.get("research_version"),
+            "learning_priority": report.get("learning_priority"),
         }
     )
 
@@ -1227,6 +1230,144 @@ def attach_portfolio_context(
         "portfolio_construction.current_candidate.execution_quality_score",
         "portfolio_construction.current_candidate.friction_penalty",
         "portfolio_construction.current_candidate.turnover_penalty",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def _learning_summary_text(learning: Dict[str, Any]) -> str:
+    active = learning.get("active_setup_archetype") or {}
+    queue = learning.get("improvement_queue") or []
+    drift_alerts = learning.get("drift_alerts") or []
+    top_queue = queue[0] if queue else {}
+    top_drift = drift_alerts[0] if drift_alerts else {}
+    return (
+        f"Phase 10 continuous learning classifies the active setup as {active.get('archetype_name') or 'unknown'}, "
+        f"with deployment caution {active.get('deployment_caution_level') or 'unknown'}. "
+        f"Top improvement priority is {top_queue.get('title') or 'maintain observation mode'}, "
+        f"and the leading drift issue is {top_drift.get('affected_component') or 'none active'}."
+    )
+
+
+def _regime_learning_text(learning: Dict[str, Any]) -> str:
+    return str(
+        learning.get("regime_learning_summary")
+        or "Regime-conditioned learning is not yet populated."
+    )
+
+
+def _adaptation_queue_text(learning: Dict[str, Any]) -> str:
+    return str(
+        learning.get("adaptation_queue_summary")
+        or "Adaptation and reweighting candidates are not yet populated."
+    )
+
+
+def _experiment_registry_text(learning: Dict[str, Any]) -> str:
+    return str(
+        learning.get("experiment_registry_summary")
+        or "Experiment-registry context is not yet populated."
+    )
+
+
+def _archetype_motif_text(learning: Dict[str, Any]) -> str:
+    return str(
+        learning.get("archetype_motif_summary")
+        or "Archetype and motif context is not yet populated."
+    )
+
+
+def attach_learning_context(
+    report: Dict[str, Any],
+    learning: Dict[str, Any],
+    *,
+    learning_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    active = learning.get("active_setup_archetype") or {}
+    motifs = learning.get("motif_discovery") or {}
+    experiment_registry = learning.get("experiment_registry") or {}
+    top_queue = (learning.get("improvement_queue") or [{}])[0]
+    top_drift = (learning.get("drift_alerts") or [{}])[0]
+    learning_summary = _learning_summary_text(learning)
+    regime_summary = _regime_learning_text(learning)
+    adaptation_summary = _adaptation_queue_text(learning)
+    experiment_summary = _experiment_registry_text(learning)
+    archetype_summary = _archetype_motif_text(learning)
+
+    updated["report_version"] = "2.4"
+    updated["learning_artifact_id"] = learning_artifact_id
+    updated["continuous_learning"] = learning
+    updated["research_version"] = learning.get("continuous_learning_version")
+    updated["setup_archetype"] = active
+    updated["active_motifs"] = motifs.get("active_motifs") or []
+    updated["regime_conditioned_learnings"] = learning.get("regime_conditioned_learnings") or []
+    updated["reweighting_candidates"] = learning.get("reweighting_candidates") or []
+    updated["research_hypotheses"] = learning.get("research_hypotheses") or []
+    updated["interaction_candidates"] = learning.get("feature_interaction_candidates") or []
+    updated["learning_drift_alerts"] = learning.get("drift_alerts") or []
+    updated["experiment_registry"] = experiment_registry
+    updated["signal_family_library"] = learning.get("signal_family_library") or {}
+    updated["motif_library"] = motifs.get("motif_library") or []
+    updated["improvement_queue"] = learning.get("improvement_queue") or []
+    updated["learning_priority"] = top_queue.get("priority") or top_drift.get("severity") or "observe"
+    updated["learning_summary"] = learning_summary
+    updated["regime_learning_summary"] = regime_summary
+    updated["adaptation_queue_summary"] = adaptation_summary
+    updated["experiment_registry_summary"] = experiment_summary
+    updated["archetype_motif_summary"] = archetype_summary
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Continuous-learning overlay: {learning_summary}",
+        ]
+    )
+    updated["evaluation_research_analysis"] = _join_sentences(
+        [
+            updated.get("evaluation_research_analysis"),
+            f"Regime learning: {regime_summary}",
+            f"Adaptation queue: {adaptation_summary}",
+            f"Experiment registry: {experiment_summary}",
+            f"Archetypes and motifs: {archetype_summary}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Setup archetype: {active.get('archetype_name') or 'unknown'} with deployment caution {active.get('deployment_caution_level') or 'unknown'}.",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Learning drift monitor: {top_drift.get('affected_component') or 'no acute drift alert'}; {top_drift.get('severity') or 'stable'} severity.",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Continuous-learning provenance is derived from stored evaluation, deployment-readiness, and portfolio-construction artifacts. Adaptation ideas remain proposals until reviewed and approved.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["learning_summary"] = [
+        "continuous_learning.active_setup_archetype",
+        "continuous_learning.improvement_queue",
+        "continuous_learning.drift_alerts",
+    ]
+    evidence_map["regime_learning_summary"] = [
+        "continuous_learning.regime_conditioned_learnings",
+    ]
+    evidence_map["adaptation_queue_summary"] = [
+        "continuous_learning.reweighting_candidates",
+        "continuous_learning.research_hypotheses",
+    ]
+    evidence_map["experiment_registry_summary"] = [
+        "continuous_learning.experiment_registry",
+    ]
+    evidence_map["archetype_motif_summary"] = [
+        "continuous_learning.signal_family_library",
+        "continuous_learning.motif_discovery",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)
@@ -1618,6 +1759,36 @@ def build_analysis_report(
         "candidate_downgrade_reason": None,
         "replacement_candidate_notes": None,
         "rotation_pressure_score": None,
+        "continuous_learning": {},
+        "learning_artifact_id": None,
+        "research_version": None,
+        "setup_archetype": {},
+        "active_motifs": [],
+        "regime_conditioned_learnings": [],
+        "reweighting_candidates": [],
+        "research_hypotheses": [],
+        "interaction_candidates": [],
+        "learning_drift_alerts": [],
+        "experiment_registry": {},
+        "signal_family_library": {},
+        "motif_library": [],
+        "improvement_queue": [],
+        "learning_priority": None,
+        "learning_summary": (
+            "Phase 10 continuous-learning overlays will attach regime learnings, adaptation candidates, drift alerts, experiments, and archetype research once the learning layer runs."
+        ),
+        "regime_learning_summary": (
+            "Regime-conditioned learning context will attach once the continuous-learning layer is available."
+        ),
+        "adaptation_queue_summary": (
+            "Reweighting candidates and research hypotheses will attach once the continuous-learning layer is available."
+        ),
+        "experiment_registry_summary": (
+            "Experiment-registry and approval-workflow context will attach once the continuous-learning layer is available."
+        ),
+        "archetype_motif_summary": (
+            "Signal-family archetypes and motif discovery context will attach once the continuous-learning layer is available."
+        ),
         "signal_summary": signal_summary,
         "technical_analysis": technical_analysis,
         "fundamental_analysis": fundamental_analysis,

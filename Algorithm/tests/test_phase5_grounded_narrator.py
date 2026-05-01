@@ -249,7 +249,7 @@ def _sample_report(symbol: str) -> dict:
         readiness_artifact_id="readiness-1",
         deployment_audit_artifact_id="audit-1",
     )
-    return reports.attach_portfolio_context(
+    report = reports.attach_portfolio_context(
         report,
         {
             "portfolio_construction_version": "phase9_portfolio_construction_v1",
@@ -327,6 +327,116 @@ def _sample_report(symbol: str) -> dict:
         },
         portfolio_construction_artifact_id="portfolio-1",
     )
+    return reports.attach_learning_context(
+        report,
+        {
+            "continuous_learning_version": "phase10_alpha_acceleration_v1",
+            "cohort_summary": {
+                "tracked_reports": 7,
+                "peer_reports": 6,
+                "unique_symbols": 6,
+                "horizon": "swing",
+                "risk_mode": "balanced",
+                "prior_learning_cycles": 2,
+            },
+            "active_setup_archetype": {
+                "archetype_id": "watchlist_only_thesis",
+                "archetype_name": "Watchlist Only Thesis",
+                "summary": "The setup is analytically constructive but still capped by crowding and confirmation gaps.",
+                "defining_characteristics": ["moderate conviction", "paper-shadow only", "portfolio redundancy"],
+                "common_failure_modes": ["crowding rises without price confirmation"],
+                "best_regimes": ["trend"],
+                "worst_regimes": ["transition", "high_vol"],
+                "strategy_fit": "wait_for_confirmation",
+                "deployment_caution_level": "elevated",
+            },
+            "motif_discovery": {
+                "active_motifs": [
+                    {
+                        "motif_id": "crowding_divergence",
+                        "motif_summary": "Narrative crowding remains elevated relative to confirmation quality.",
+                        "motif_validation_status": "observed",
+                    }
+                ],
+                "motif_library": [
+                    {
+                        "motif_id": "crowding_divergence",
+                        "motif_summary": "Narrative crowding remains elevated relative to confirmation quality.",
+                        "motif_sample_count": 7,
+                    }
+                ],
+            },
+            "signal_family_library": {
+                "archetype_cohorts": [
+                    {
+                        "archetype_name": "Watchlist Only Thesis",
+                        "sample_count": 6,
+                        "average_reliability": 57.0,
+                    }
+                ]
+            },
+            "regime_conditioned_learnings": [
+                {
+                    "regime_label": "trend",
+                    "sample_size": 7,
+                    "average_reliability": 59.0,
+                    "average_hit_rate": 0.57,
+                    "decision_quality_summary": "Trend regimes are constructive, but crowding still suppresses actionability.",
+                    "adaptation_suggestion": "Keep fragility and crowding penalties elevated until confirmation quality improves.",
+                }
+            ],
+            "feature_interaction_candidates": [
+                {
+                    "interaction_candidate": "trend_plus_low_fragility_plus_macro_alignment",
+                    "description": "This combination remains the cleanest continuation motif in the tracked cohort.",
+                }
+            ],
+            "reweighting_candidates": [
+                {
+                    "target_family": "Narrative Crowding Index",
+                    "suggested_weight_changes": [
+                        {"direction": "increase_penalty", "target": "crowding_penalty"}
+                    ],
+                    "confidence_in_recommendation": 0.72,
+                    "sample_size": 7,
+                }
+            ],
+            "research_hypotheses": [
+                {
+                    "hypothesis_title": "Crowding penalty deserves more weight",
+                    "observed_pattern": "Crowded trend setups underperform cleaner continuation setups.",
+                }
+            ],
+            "drift_alerts": [
+                {
+                    "affected_component": "confidence_calibration",
+                    "severity": "moderate",
+                    "evidence": "The active regime still carries weaker reliability than the cohort median.",
+                }
+            ],
+            "experiment_registry": {
+                "open_experiments": [
+                    {
+                        "title": "Tighten crowding penalty in trend regimes",
+                        "validation_status": "candidate",
+                        "approval_status": "review",
+                    }
+                ],
+                "approved_improvements": [],
+                "rejected_improvements": [],
+                "experiment_registry_summary": "One crowding-penalty experiment is queued for review.",
+            },
+            "improvement_queue": [
+                {"title": "Increase crowding penalty in trend regimes", "priority": "high"}
+            ],
+            "learning_summary": "The current setup is a watchlist-only archetype and the top learning priority is crowding discipline.",
+            "regime_learning_summary": "Trend regimes still work, but reliability weakens when crowding stays elevated.",
+            "adaptation_queue_summary": "Increase crowding penalties and keep confirmation gates tight until reliability improves.",
+            "experiment_registry_summary": "One governed experiment is queued to tighten crowding penalties in trend regimes.",
+            "archetype_motif_summary": "This setup clusters into the watchlist-only thesis family with a crowding-divergence motif.",
+        },
+        learning_artifact_id="learning-1",
+    )
 
 
 def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
@@ -353,6 +463,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     portfolio_route = route_question("Why is this a watchlist candidate instead of a better portfolio fit?")
     assert portfolio_route["intent"] == "portfolio_construction"
     assert portfolio_route["answer_mode"] == "portfolio"
+
+    learning_route = route_question("What is the platform learning lately about this setup?")
+    assert learning_route["intent"] == "learning_research"
+    assert learning_route["answer_mode"] == "learning"
 
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
@@ -386,6 +500,9 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["deployment_readiness_snapshot"]["blockers"]
     assert narrator_context["portfolio_snapshot"]["candidate_classification"] == "watchlist_candidate"
     assert narrator_context["portfolio_snapshot"]["size_band"] == "paper / shadow band"
+    assert narrator_context["learning_snapshot"]["setup_archetype"] == "Watchlist Only Thesis"
+    assert narrator_context["learning_snapshot"]["top_drift_alert"]
+    assert narrator_context["learning_snapshot"]["top_reweighting_candidate"]
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
@@ -410,6 +527,30 @@ def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
     assert "portfolio_fit_analysis" in narrator_context["selected_sections"]
     assert "execution_quality_analysis" in narrator_context["selected_sections"]
     assert narrator_context["portfolio_snapshot"]["cohort_ranking"]
+
+
+def test_phase5_selects_learning_sections_for_learning_questions() -> None:
+    report = _sample_report("NVDA")
+    active_analysis = reports.build_active_analysis_reference(
+        report,
+        session_id="session-1",
+        report_id="report-1",
+    )
+    route = route_question("What is the platform learning lately?")
+
+    narrator_context = build_narrator_context(
+        report,
+        active_analysis=active_analysis,
+        route=route,
+        user_message="What is the platform learning lately?",
+        caller_context={"active_analysis": active_analysis},
+    )
+
+    assert narrator_context["question_intent"] == "learning_research"
+    assert "learning_summary" in narrator_context["selected_sections"]
+    assert "regime_learning_summary" in narrator_context["selected_sections"]
+    assert "experiment_registry_summary" in narrator_context["selected_sections"]
+    assert narrator_context["learning_snapshot"]["active_motifs"]
 
 
 def test_phase5_preserves_session_symbol_continuity_for_chat_followups() -> None:

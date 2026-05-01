@@ -172,7 +172,7 @@ def _sample_chat_report(symbol: str) -> dict:
         readiness_artifact_id="readiness-1",
         deployment_audit_artifact_id="audit-1",
     )
-    return reports.attach_portfolio_context(
+    report = reports.attach_portfolio_context(
         report,
         {
             "portfolio_construction_version": "phase9_portfolio_construction_v1",
@@ -242,6 +242,108 @@ def _sample_chat_report(symbol: str) -> dict:
             "portfolio_workflow_summary": "AAPL is the higher-priority candidate while the active name remains on the watchlist.",
         },
         portfolio_construction_artifact_id="portfolio-1",
+    )
+    return reports.attach_learning_context(
+        report,
+        {
+            "continuous_learning_version": "phase10_alpha_acceleration_v1",
+            "cohort_summary": {
+                "tracked_reports": 8,
+                "peer_reports": 7,
+                "unique_symbols": 7,
+                "horizon": "swing",
+                "risk_mode": "balanced",
+                "prior_learning_cycles": 2,
+            },
+            "active_setup_archetype": {
+                "archetype_id": "watchlist_only_thesis",
+                "archetype_name": "Watchlist Only Thesis",
+                "summary": "The setup is constructive but still gated by crowding and confirmation needs.",
+                "defining_characteristics": ["moderate conviction", "paper-shadow only"],
+                "common_failure_modes": ["crowding rises without confirmation"],
+                "best_regimes": ["trend"],
+                "worst_regimes": ["transition", "high_vol"],
+                "strategy_fit": "wait_for_confirmation",
+                "deployment_caution_level": "elevated",
+            },
+            "motif_discovery": {
+                "active_motifs": [
+                    {
+                        "motif_id": "crowding_divergence",
+                        "motif_summary": "Narrative crowding remains elevated relative to confirmation quality.",
+                    }
+                ],
+                "motif_library": [],
+            },
+            "signal_family_library": {
+                "archetype_cohorts": [
+                    {
+                        "archetype_name": "Watchlist Only Thesis",
+                        "sample_count": 6,
+                        "average_reliability": 58.0,
+                    }
+                ]
+            },
+            "regime_conditioned_learnings": [
+                {
+                    "regime_label": "trend",
+                    "sample_size": 8,
+                    "average_reliability": 60.0,
+                    "average_hit_rate": 0.58,
+                    "decision_quality_summary": "Trend setups still work, but crowding suppresses cleaner deployment.",
+                    "adaptation_suggestion": "Keep confirmation gates firm until crowding eases.",
+                }
+            ],
+            "feature_interaction_candidates": [
+                {
+                    "interaction_candidate": "trend_plus_low_fragility_plus_macro_alignment",
+                    "description": "This interaction remains the cleanest continuation pattern.",
+                }
+            ],
+            "reweighting_candidates": [
+                {
+                    "target_family": "Narrative Crowding Index",
+                    "suggested_weight_changes": [
+                        {"direction": "increase_penalty", "target": "crowding_penalty"}
+                    ],
+                    "confidence_in_recommendation": 0.74,
+                    "sample_size": 8,
+                }
+            ],
+            "research_hypotheses": [
+                {
+                    "hypothesis_title": "Crowding penalty deserves more weight",
+                    "observed_pattern": "Crowded trend setups underperform cleaner continuations.",
+                }
+            ],
+            "drift_alerts": [
+                {
+                    "affected_component": "confidence_calibration",
+                    "severity": "moderate",
+                    "evidence": "The active regime still shows weaker reliability than the cohort median.",
+                }
+            ],
+            "experiment_registry": {
+                "open_experiments": [
+                    {
+                        "title": "Tighten crowding penalty in trend regimes",
+                        "validation_status": "candidate",
+                        "approval_status": "review",
+                    }
+                ],
+                "approved_improvements": [],
+                "rejected_improvements": [],
+            },
+            "improvement_queue": [
+                {"title": "Increase crowding penalty in trend regimes", "priority": "high"}
+            ],
+            "learning_summary": "The active setup is a watchlist-only thesis and crowding discipline remains the top learning priority.",
+            "regime_learning_summary": "Trend regimes still work, but reliability softens when crowding stays elevated.",
+            "adaptation_queue_summary": "Raise crowding penalties and keep confirmation gates firm until reliability improves.",
+            "experiment_registry_summary": "One governed crowding-penalty experiment is queued for review.",
+            "archetype_motif_summary": "This setup clusters into the watchlist-only thesis family with a crowding-divergence motif.",
+        },
+        learning_artifact_id="learning-1",
     )
 
 
@@ -393,6 +495,26 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "execution_quality_score",
         "overlap_score",
         "redundancy_score",
+        "continuous_learning",
+        "learning_artifact_id",
+        "research_version",
+        "setup_archetype",
+        "active_motifs",
+        "regime_conditioned_learnings",
+        "reweighting_candidates",
+        "research_hypotheses",
+        "interaction_candidates",
+        "learning_drift_alerts",
+        "experiment_registry",
+        "signal_family_library",
+        "motif_library",
+        "improvement_queue",
+        "learning_priority",
+        "learning_summary",
+        "regime_learning_summary",
+        "adaptation_queue_summary",
+        "experiment_registry_summary",
+        "archetype_motif_summary",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
@@ -403,6 +525,7 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["deployment_readiness"]["deployment_readiness_version"]
     assert data["active_analysis"]["deployment_permission"]
     assert data["active_analysis"]["candidate_classification"]
+    assert data["active_analysis"]["setup_archetype"]
     assert data["overall_analysis"]
 
 
@@ -594,6 +717,7 @@ def test_assistant_chat_endpoint_returns_grounded_active_report(monkeypatch):
     assert data["active_analysis"]["strategy_posture"] == "watchlist_positive"
     assert data["active_analysis"]["candidate_classification"] == "watchlist_candidate"
     assert data["active_analysis"]["size_band"] == "paper / shadow band"
+    assert data["active_analysis"]["setup_archetype"] == "Watchlist Only Thesis"
     assert "strategy_view" in data["citations"]
 
 

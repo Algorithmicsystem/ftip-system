@@ -54,6 +54,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-system-health"' in html
     assert 'id="assistant-system-audit"' in html
     assert 'id="assistant-deployment-governance"' in html
+    assert 'id="assistant-learning-metrics"' in html
+    assert 'id="assistant-learning-regimes"' in html
+    assert 'id="assistant-learning-adaptations"' in html
+    assert 'id="assistant-learning-experiments"' in html
+    assert 'id="assistant-learning-archetypes"' in html
+    assert "Learning Lab" in html
     assert "assistantActiveAnalysis" in js
     assert "ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY" in js
     assert "ASSISTANT_RECENT_REPORTS_STORAGE_KEY" in js
@@ -87,6 +93,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderPortfolioControls" in js
     assert "renderPortfolioRanking" in js
     assert "renderPortfolioWorkflow" in js
+    assert "renderLearningMetrics" in js
+    assert "renderLearningRegimes" in js
+    assert "renderLearningAdaptations" in js
+    assert "renderLearningExperiments" in js
+    assert "renderLearningArchetypes" in js
     assert "portfolio_construction" in js
     assert "Which idea fits the portfolio better" in js
+    assert "What is the platform learning lately" in js
     assert "refreshAssistantSystemHealth" in js

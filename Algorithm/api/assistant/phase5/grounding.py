@@ -59,6 +59,9 @@ _ACTIVE_ANALYSIS_KEYS = (
     "ranked_opportunity_score",
     "portfolio_fit_quality",
     "size_band",
+    "setup_archetype",
+    "research_version",
+    "learning_priority",
 )
 
 

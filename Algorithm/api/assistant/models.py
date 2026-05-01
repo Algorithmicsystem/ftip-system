@@ -39,6 +39,9 @@ class AnalysisReference(BaseModel):
     ranked_opportunity_score: Optional[float] = None
     portfolio_fit_quality: Optional[float] = None
     size_band: Optional[str] = None
+    setup_archetype: Optional[str] = None
+    research_version: Optional[str] = None
+    learning_priority: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

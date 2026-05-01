@@ -162,6 +162,9 @@ const buildActiveAnalysisFromReport = (report) => ({
   ranked_opportunity_score: report?.ranked_opportunity_score,
   portfolio_fit_quality: report?.portfolio_fit_quality,
   size_band: report?.size_band || "watchlist only",
+  setup_archetype: report?.setup_archetype?.archetype_name || "n/a",
+  research_version: report?.research_version || "n/a",
+  learning_priority: report?.learning_priority || "observe",
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -232,6 +235,10 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
       execution_quality_score: report?.execution_quality_score,
       friction_penalty: report?.friction_penalty,
       turnover_penalty: report?.turnover_penalty,
+      setup_archetype:
+        report?.setup_archetype?.archetype_name || analysis?.setup_archetype || "n/a",
+      learning_priority: report?.learning_priority || analysis?.learning_priority || "observe",
+      research_version: report?.research_version || analysis?.research_version || "n/a",
       strongest_condition: conditionLabel(report?.evaluation?.strongest_conditions?.[0]),
       weakest_condition: conditionLabel(report?.evaluation?.weakest_conditions?.[0]),
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
@@ -415,6 +422,10 @@ const buildNarratorPromptSet = () => {
     `What is weakest in the setup for ${symbol}?`,
     `What would improve conviction on ${symbol}?`,
     `What does evaluation history say about setups like ${symbol}?`,
+    `What is the platform learning lately about ${symbol}?`,
+    `Where is the model drifting right now on ${symbol}?`,
+    `What experiments should be run next for ${symbol}?`,
+    `What setup archetype is ${symbol} right now?`,
   ];
 };
 
@@ -452,6 +463,8 @@ const renderActiveAnalysisLabels = () => {
     `Conviction: ${activeConvictionLabel()}`,
     `Strategy: ${activeStrategyPostureLabel()}`,
     `Candidate: ${analysis?.candidate_classification || "watchlist_candidate"}`,
+    `Archetype: ${analysis?.setup_archetype || "n/a"}`,
+    `Learning: ${analysis?.learning_priority || "observe"}`,
     `Permission: ${activeDeploymentPermissionLabel()}`,
     `Size: ${analysis?.size_band || "watchlist only"}`,
     `Trust: ${activeTrustTierLabel()}`,
@@ -465,6 +478,8 @@ const renderActiveAnalysisLabels = () => {
     `Conviction: ${activeConvictionLabel()}`,
     `Strategy: ${activeStrategyPostureLabel()}`,
     `Candidate: ${analysis?.candidate_classification || "watchlist_candidate"}`,
+    `Archetype: ${analysis?.setup_archetype || "n/a"}`,
+    `Learning: ${analysis?.learning_priority || "observe"}`,
     `Permission: ${activeDeploymentPermissionLabel()}`,
     `Size: ${analysis?.size_band || "watchlist only"}`,
     `Readiness: ${activeReadinessLabel()}`,
@@ -476,7 +491,7 @@ const renderActiveAnalysisLabels = () => {
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");
   qs("#assistant-chat-grounding-note").textContent = analysis?.symbol
-    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report, strategy, portfolio-construction, evaluation, and deployment-readiness layers.`
+    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report, strategy, portfolio-construction, evaluation, deployment-readiness, and continuous-learning layers.`
     : "Run Assistant Analyze to establish the active artifact the narrator should use.";
   if (qs("#assistant-compare-active-symbol")) {
     qs("#assistant-compare-active-symbol").value = analysis?.symbol || "";
@@ -759,6 +774,7 @@ const renderDashboardWorkflow = (report) => {
       ["Decision Layer", "Open strategy to inspect actionability, scenarios, invalidators, and execution posture.", "strategy"],
       ["Portfolio Fit", "Use the portfolio workspace to inspect ranking, overlap, size-band logic, and rotation pressure.", "portfolio"],
       ["Trust Layer", "Use evaluation and evidence to show scorecards, calibration, provenance, and freshness.", "evaluation"],
+      ["Learning Loop", "Open the learning lab for drift alerts, regime learnings, and governed improvement candidates.", "research"],
     ];
     container.innerHTML = placeholders
       .map(
@@ -788,6 +804,7 @@ const renderDashboardWorkflow = (report) => {
       "strategy",
     ],
     ["Proof and Trust", report.evaluation_research_analysis || report.evidence_provenance, "evaluation"],
+    ["Learning and Improvement", report.learning_summary || report.adaptation_queue_summary, "research"],
   ];
   container.innerHTML = steps
     .map(
@@ -869,6 +886,11 @@ const renderDashboardTrustStrip = (report) => {
           : Number(report.portfolio_fit_quality).toFixed(1),
       note: `${report.candidate_classification || "watchlist_candidate"} · ${report.size_band || "watchlist only"}`,
     },
+    {
+      label: "Learning",
+      value: report.setup_archetype?.archetype_name || "n/a",
+      note: `${report.learning_priority || "observe"} / ${report.research_version || "phase10"}`,
+    },
   ]);
 };
 
@@ -908,6 +930,12 @@ const renderRecentAnalyses = () => {
                 )}</span>
                 <span class="micro-chip">candidate ${escapeHtml(
                   snapshot.candidate_classification || "watchlist_candidate"
+                )}</span>
+                <span class="micro-chip">archetype ${escapeHtml(
+                  snapshot.setup_archetype || "n/a"
+                )}</span>
+                <span class="micro-chip">learning ${escapeHtml(
+                  snapshot.learning_priority || "observe"
                 )}</span>
                 <span class="micro-chip">permission ${escapeHtml(
                   snapshot.deployment_permission || "analysis_only"
@@ -1715,6 +1743,11 @@ const renderEvidenceSupport = (report) => {
           report.deployment_permission_analysis,
           report.portfolio_context_summary,
           report.portfolio_fit_analysis,
+          report.learning_summary,
+          report.regime_learning_summary,
+          report.adaptation_queue_summary,
+          report.experiment_registry_summary,
+          report.archetype_motif_summary,
         ].filter(Boolean),
         "No provenance note available."
       )}
@@ -1737,6 +1770,9 @@ const renderEvidenceSupport = (report) => {
           ...(report.deployment_blockers || []),
           ...(report.live_readiness_blockers || []),
           ...(report.drift_alerts || []),
+          ...((report.learning_drift_alerts || []).map(
+            (item) => `${item.affected_component || "drift"}: ${item.evidence || "drift alert"}`
+          ) || []),
         ],
         "No explicit deployment blocker surfaced."
       )}
@@ -1766,6 +1802,11 @@ const renderArtifactLedger = (report) => {
       report.prediction_record_id || report.prediction_record_artifact_id || "n/a"
     }`,
     `Evaluation artifact: ${report.evaluation_artifact_id || "n/a"}`,
+    `Learning artifact: ${report.learning_artifact_id || "n/a"}`,
+    `Research version: ${report.research_version || "n/a"}`,
+    `Setup archetype: ${report.setup_archetype?.archetype_name || "n/a"} / priority ${
+      report.learning_priority || "observe"
+    }`,
     `Portfolio rank: ${report.portfolio_rank || "n/a"} / class ${
       report.candidate_classification || "watchlist_candidate"
     } / size ${report.size_band || "watchlist only"}`,
@@ -1786,6 +1827,8 @@ const renderArtifactLedger = (report) => {
           report.evaluation_research_analysis,
           report.deployment_readiness_summary,
           report.rollout_stage_summary,
+          report.learning_summary,
+          report.experiment_registry_summary,
         ].filter(Boolean),
         "No traceability notes available."
       )}
@@ -1831,6 +1874,240 @@ const renderResearchDrilldown = (report) => {
   ].join("");
 };
 
+const renderLearningMetrics = (report) => {
+  if (!report) {
+    renderMetricCards("#assistant-learning-metrics", null);
+    return;
+  }
+  const learning = report.continuous_learning || {};
+  const cohort = learning.cohort_summary || {};
+  const registry = report.experiment_registry || {};
+  const activeMotif = (report.active_motifs || [])[0] || {};
+  renderMetricCards("#assistant-learning-metrics", [
+    {
+      label: "Setup Archetype",
+      value: report.setup_archetype?.archetype_name || "n/a",
+      note: report.setup_archetype?.deployment_caution_level || "caution unknown",
+    },
+    {
+      label: "Research Version",
+      value: report.research_version || "phase10",
+      note: `priority ${report.learning_priority || "observe"}`,
+    },
+    {
+      label: "Cohort",
+      value:
+        cohort.tracked_reports == null ? "n/a" : `${cohort.tracked_reports} reports`,
+      note:
+        cohort.peer_reports == null
+          ? "peer set unavailable"
+          : `${cohort.peer_reports} peers / ${cohort.unique_symbols || 0} symbols`,
+    },
+    {
+      label: "Drift Alerts",
+      value: `${(report.learning_drift_alerts || []).length}`,
+      note: (report.learning_drift_alerts || [])[0]?.severity || "none active",
+    },
+    {
+      label: "Experiments",
+      value: `${(registry.open_experiments || []).length}`,
+      note: `${(registry.approved_improvements || []).length} approved / ${
+        (registry.rejected_improvements || []).length
+      } rejected`,
+    },
+    {
+      label: "Active Motif",
+      value: activeMotif.motif_id || "n/a",
+      note: activeMotif.motif_summary || "no active motif highlighted",
+    },
+  ]);
+};
+
+const renderLearningRegimes = (report) => {
+  const container = qs("#assistant-learning-regimes");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Regime-conditioned learnings and strongest or weakest environments render here."
+    );
+    return;
+  }
+  const learnings = report.regime_conditioned_learnings || [];
+  const strongest = [...learnings]
+    .sort((left, right) => Number(right.average_reliability || 0) - Number(left.average_reliability || 0))
+    .slice(0, 2)
+    .map(
+      (item) =>
+        `${item.regime_label || "unknown"}: reliability ${formatScore(
+          item.average_reliability,
+          1
+        )} / hit rate ${formatScore(item.average_hit_rate, 2)}`
+    );
+  const weakest = [...learnings]
+    .sort((left, right) => Number(left.average_reliability || 0) - Number(right.average_reliability || 0))
+    .slice(0, 2)
+    .map(
+      (item) =>
+        `${item.regime_label || "unknown"}: reliability ${formatScore(
+          item.average_reliability,
+          1
+        )} / hit rate ${formatScore(item.average_hit_rate, 2)}`
+    );
+  const notes = learnings.slice(0, 5).map((item) => {
+    const summary = item.decision_quality_summary || "No summary available.";
+    const suggestion = item.adaptation_suggestion || "No adaptation suggestion.";
+    return `${item.regime_label || "unknown"}: ${summary} Adaptation: ${suggestion}`;
+  });
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Regime Learning Summary</h5>
+      <p>${escapeHtml(report.regime_learning_summary || "No regime learning summary available.")}</p>
+      ${renderBullets(notes, "No regime-conditioned learnings yet.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Strongest Regimes</h5>
+      ${renderBullets(strongest, "No strongest regime surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Weakest Regimes</h5>
+      ${renderBullets(weakest, "No weakest regime surfaced.")}
+    </section>`,
+  ].join("");
+};
+
+const renderLearningAdaptations = (report) => {
+  const container = qs("#assistant-learning-adaptations");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Reweighting candidates, interaction learnings, and research hypotheses render here."
+    );
+    return;
+  }
+  const reweights = (report.reweighting_candidates || []).slice(0, 4).map((item) => {
+    const change = (item.suggested_weight_changes || [])[0] || {};
+    return `${item.target_family || "candidate"}: ${change.direction || "observe"} ${
+      change.target || ""
+    } (${formatScore(item.confidence_in_recommendation, 2)} confidence / sample ${
+      item.sample_size || 0
+    })`;
+  });
+  const hypotheses = (report.research_hypotheses || []).slice(0, 4).map(
+    (item) =>
+      `${item.hypothesis_title || "hypothesis"}: ${item.observed_pattern || "No observed pattern."}`
+  );
+  const interactions = (report.interaction_candidates || []).slice(0, 4).map(
+    (item) =>
+      `${item.interaction_candidate || "interaction"}: ${
+        item.description || item.conditional_usefulness || "No interaction note."
+      }`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Adaptation Queue</h5>
+      <p>${escapeHtml(report.adaptation_queue_summary || "No adaptation queue summary available.")}</p>
+      ${renderBullets(reweights, "No reweighting candidates surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Research Hypotheses</h5>
+      ${renderBullets(hypotheses, "No research hypotheses surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Interaction Candidates</h5>
+      ${renderBullets(interactions, "No interaction candidates surfaced.")}
+    </section>`,
+  ].join("");
+};
+
+const renderLearningExperiments = (report) => {
+  const container = qs("#assistant-learning-experiments");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Proposed, approved, and under-review experiments render here."
+    );
+    return;
+  }
+  const registry = report.experiment_registry || {};
+  const openItems = (registry.open_experiments || []).slice(0, 4).map(
+    (item) =>
+      `${item.title || item.experiment_id || "experiment"}: ${item.validation_status || "pending"} / ${
+        item.approval_status || "review"
+      }`
+  );
+  const approved = (registry.approved_improvements || []).slice(0, 3).map(
+    (item) => `${item.title || item.experiment_id || "approved"}`
+  );
+  const queue = (report.improvement_queue || []).slice(0, 4).map(
+    (item) =>
+      `${item.title || item.target_family || item.hypothesis_title || "queue item"}: ${
+        item.priority || item.severity || "review"
+      }`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Experiment Registry</h5>
+      <p>${escapeHtml(report.experiment_registry_summary || "No experiment registry summary available.")}</p>
+      ${renderBullets(openItems, "No open experiments currently tracked.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Improvement Queue</h5>
+      ${renderBullets(queue, "No improvement queue item surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Approved Improvements</h5>
+      ${renderBullets(approved, "No approved improvements yet.")}
+    </section>`,
+  ].join("");
+};
+
+const renderLearningArchetypes = (report) => {
+  const container = qs("#assistant-learning-archetypes");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Setup archetypes, active motifs, and failure modes render here."
+    );
+    return;
+  }
+  const active = report.setup_archetype || {};
+  const motifs = (report.active_motifs || []).slice(0, 4).map(
+    (item) => `${item.motif_id || "motif"}: ${item.motif_summary || "No motif summary."}`
+  );
+  const families = ((report.signal_family_library || {}).archetype_cohorts || [])
+    .slice(0, 4)
+    .map(
+      (item) =>
+        `${item.archetype_name || "archetype"}: ${item.sample_count || 0} samples / reliability ${formatScore(
+          item.average_reliability,
+          1
+        )}`
+    );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Active Archetype</h5>
+      <p>${escapeHtml(report.archetype_motif_summary || "No archetype summary available.")}</p>
+      ${renderBullets(
+        [
+          active.summary,
+          active.defining_characteristics?.length
+            ? `Characteristics: ${active.defining_characteristics.join(", ")}`
+            : null,
+          active.common_failure_modes?.length
+            ? `Failure modes: ${active.common_failure_modes.join(", ")}`
+            : null,
+          active.best_regimes?.length ? `Best regimes: ${active.best_regimes.join(", ")}` : null,
+        ].filter(Boolean),
+        "No active archetype detail available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Active Motifs</h5>
+      ${renderBullets(motifs, "No active motifs surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Signal Family Library</h5>
+      ${renderBullets(families, "No signal family cohorts available.")}
+    </section>`,
+  ].join("");
+};
+
 const renderSystemAudit = (report) => {
   const container = qs("#assistant-system-audit");
   if (!report) {
@@ -1851,6 +2128,7 @@ const renderSystemAudit = (report) => {
           `Report ${report.report_version || "n/a"}`,
           `Strategy ${report.strategy?.strategy_version || "n/a"}`,
           `Evaluation ${report.evaluation?.evaluation_version || "phase6"}`,
+          `Research ${report.research_version || "phase10"}`,
         ],
         "No version data available."
       )}
@@ -1872,6 +2150,9 @@ const renderSystemAudit = (report) => {
           `Portfolio ${report.candidate_classification || "watchlist_candidate"} / fit ${formatScore(
             report.portfolio_fit_quality
           )} / size ${report.size_band || "watchlist only"}`,
+          `Learning ${report.learning_priority || "observe"} / archetype ${
+            report.setup_archetype?.archetype_name || "n/a"
+          }`,
           ...(report.deployment_risk_alerts || []),
         ].filter(Boolean),
         "No deployment trust layer data available."
@@ -2317,6 +2598,11 @@ const renderAssistantReport = (report) => {
     renderArtifactLedger(null);
     renderDomainStatusGrid(null);
     renderFactorGrid(null);
+    renderLearningMetrics(null);
+    renderLearningRegimes(null);
+    renderLearningAdaptations(null);
+    renderLearningExperiments(null);
+    renderLearningArchetypes(null);
     renderResearchDrilldown(null);
     renderSystemAudit(null);
     renderDeploymentReadiness(null);
@@ -2570,6 +2856,11 @@ const renderAssistantReport = (report) => {
   renderArtifactLedger(report);
   renderDomainStatusGrid(report);
   renderFactorGrid(report);
+  renderLearningMetrics(report);
+  renderLearningRegimes(report);
+  renderLearningAdaptations(report);
+  renderLearningExperiments(report);
+  renderLearningArchetypes(report);
   renderResearchDrilldown(report);
   renderSystemAudit(report);
   renderDeploymentReadiness(report);
