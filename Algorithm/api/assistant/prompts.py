@@ -36,6 +36,8 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Signal: {(report.get('signal') or {}).get('action', 'n/a')} -> {strategy.get('final_signal', 'n/a')}.",
             f"Score: {(report.get('signal') or {}).get('score', 'n/a')}.",
             f"Confidence: {strategy.get('confidence', (report.get('signal') or {}).get('confidence', 'n/a'))}.",
+            f"Deployment permission: {report.get('deployment_permission', 'n/a')} under {report.get('deployment_mode', 'research_only')}.",
+            f"Trust tier: {report.get('trust_tier', 'unknown')} with live readiness {report.get('live_readiness_score', 'n/a')}.",
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
     )
@@ -59,6 +61,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "quality": report.get("quality"),
         "evidence": report.get("evidence"),
         "evidence_map": report.get("evidence_map"),
+        "deployment_readiness": report.get("deployment_readiness"),
     }
     section_context = {
         "signal_summary": report.get("signal_summary"),
@@ -72,6 +75,10 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "strategy_view": report.get("strategy_view"),
         "risks_weaknesses_invalidators": report.get("risks_weaknesses_invalidators"),
         "evidence_provenance": report.get("evidence_provenance"),
+        "deployment_readiness_summary": report.get("deployment_readiness_summary"),
+        "deployment_permission_analysis": report.get("deployment_permission_analysis"),
+        "risk_budget_exposure_analysis": report.get("risk_budget_exposure_analysis"),
+        "rollout_stage_summary": report.get("rollout_stage_summary"),
     }
     blocks = [
         "Grounding report metadata and machine-readable fields:",

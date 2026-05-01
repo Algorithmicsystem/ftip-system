@@ -10,7 +10,7 @@ from api.main import app
 def _sample_chat_report(symbol: str) -> dict:
     from api.assistant import reports
 
-    return reports.build_analysis_report(
+    report = reports.build_analysis_report(
         symbol=symbol,
         as_of_date="2024-01-02",
         horizon="swing",
@@ -118,6 +118,60 @@ def _sample_chat_report(symbol: str) -> dict:
             },
         },
     )
+    return reports.attach_deployment_context(
+        report,
+        {
+            "deployment_readiness_version": "phase8_capital_readiness_v1",
+            "deployment_mode": {
+                "active_mode": "paper_shadow",
+                "rollout_stage": "forward_shadow_validation",
+            },
+            "model_readiness": {
+                "model_readiness_status": "constrained",
+                "live_readiness_score": 57.0,
+                "live_readiness_blockers": ["confidence calibration quality is not strong enough for live escalation"],
+                "recent_degradation_flags": ["confidence reliability is still building"],
+            },
+            "signal_admission_control": {
+                "admitted_for_strategy": True,
+                "admitted_for_paper": True,
+                "admitted_for_live": False,
+            },
+            "deployment_permission": {
+                "deployment_permission": "paper_shadow_only",
+                "deployment_blockers": ["fragility remains too high for live admission"],
+                "deployment_rationale": "The setup is analyzable, but it remains paper-only until calibration and fragility improve.",
+                "trust_tier": "paper_only",
+                "minimum_required_review": "analyst_review",
+                "human_review_required": True,
+            },
+            "risk_budgeting": {
+                "risk_budget_tier": "shadow_only",
+                "exposure_caution_level": "high",
+                "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "maximum_risk_mode_allowed": "paper_shadow",
+            },
+            "rollout_workflow": {
+                "rollout_stage": "forward_shadow_validation",
+                "readiness_checkpoint": "watch",
+                "promotion_criteria": ["confidence reliability remains above the stage threshold"],
+                "demotion_criteria": ["drift monitoring recommends paper or paused mode"],
+                "stage_transition_notes": ["Continue forward shadow validation before any live escalation."],
+            },
+            "drift_monitor": {
+                "pause_recommended": False,
+                "degrade_to_paper_recommended": False,
+                "drift_alerts": ["confidence reliability is below the live-support comfort zone"],
+                "deployment_risk_alerts": ["live readiness has slipped below the controlled-live comfort zone"],
+            },
+            "audit_snapshot": {
+                "rationale_summary": "Paper-shadow only while calibration and matured sample depth improve.",
+            },
+        },
+        readiness_artifact_id="readiness-1",
+        deployment_audit_artifact_id="audit-1",
+    )
 
 
 def test_assistant_analyze_returns_schema(monkeypatch):
@@ -219,6 +273,23 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "confidence_reliability_summary",
         "regime_usefulness_summary",
         "evaluation_research_analysis",
+        "deployment_readiness",
+        "deployment_mode",
+        "rollout_stage",
+        "deployment_permission",
+        "deployment_blockers",
+        "deployment_rationale",
+        "trust_tier",
+        "minimum_required_review",
+        "human_review_required",
+        "model_readiness_status",
+        "live_readiness_score",
+        "live_readiness_blockers",
+        "risk_budget_tier",
+        "deployment_readiness_summary",
+        "deployment_permission_analysis",
+        "risk_budget_exposure_analysis",
+        "rollout_stage_summary",
         "strategy",
         "why_this_signal",
         "signal_summary",
@@ -236,6 +307,8 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "report_id",
         "prediction_record_artifact_id",
         "evaluation_artifact_id",
+        "deployment_readiness_artifact_id",
+        "deployment_audit_artifact_id",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
@@ -243,6 +316,8 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["strategy"]["final_signal"] in {"BUY", "HOLD", "SELL"}
     assert set(data["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
     assert data["strategy"]["execution_posture"]["preferred_posture"]
+    assert data["deployment_readiness"]["deployment_readiness_version"]
+    assert data["active_analysis"]["deployment_permission"]
     assert data["overall_analysis"]
 
 

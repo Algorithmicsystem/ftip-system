@@ -29,6 +29,10 @@ _MODE_DIRECTIVES = {
     "risk": (
         "Focus on fragility, invalidators, degradation triggers, uncertainty, and why the system is or is not suppressing actionability."
     ),
+    "deployment": (
+        "Frame the answer around staged deployment discipline: live readiness, paper vs live eligibility, blockers, trust tier, review requirements, risk-budget caution, pause conditions, and what would need to improve. "
+        "Do not turn the answer into personal trade advice."
+    ),
 }
 
 

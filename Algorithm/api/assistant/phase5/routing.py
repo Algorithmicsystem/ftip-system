@@ -246,6 +246,41 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "What failure modes stand out in the scorecards?",
         ),
     },
+    "deployment_readiness": {
+        "keywords": (
+            "live capital",
+            "real money",
+            "deployment",
+            "deploy",
+            "deployable",
+            "readiness",
+            "ready for live",
+            "paper",
+            "shadow",
+            "paused",
+            "pause",
+            "blocked",
+            "eligible",
+            "trust tier",
+            "human review",
+            "review",
+            "capital",
+        ),
+        "mode": "deployment",
+        "sections": (
+            "deployment_readiness_summary",
+            "deployment_permission_analysis",
+            "risk_budget_exposure_analysis",
+            "rollout_stage_summary",
+            "strategy_view",
+            "evaluation_research_analysis",
+        ),
+        "followups": (
+            "Is this setup paper-only or live-eligible?",
+            "What is blocking this from live deployment right now?",
+            "What would need to improve before trust rises?",
+        ),
+    },
     "compare_clarify": {
         "keywords": (
             "difference",
@@ -305,6 +340,24 @@ def route_question(message: str) -> Dict[str, Any]:
         if "invalid" in text or "fragile" in text:
             if intent == "risk_invalidation":
                 score += 2
+        if any(
+            phrase in text
+            for phrase in (
+                "live capital",
+                "real money",
+                "paper only",
+                "paper",
+                "deploy",
+                "deployment",
+                "readiness",
+                "trust tier",
+                "human review",
+                "blocked",
+                "paused",
+            )
+        ):
+            if intent == "deployment_readiness":
+                score += 3
         scores.append((score, intent, matches))
 
     scores.sort(key=lambda item: item[0], reverse=True)

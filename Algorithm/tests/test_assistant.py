@@ -4,6 +4,10 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.assistant import intelligence, reports, service, strategy
+from api.assistant.phase8 import (
+    DEPLOYMENT_AUDIT_RECORD_KIND,
+    DEPLOYMENT_READINESS_ARTIFACT_KIND,
+)
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -193,8 +197,13 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["strategy"]["execution_posture"]["preferred_posture"]
     assert result["prediction_record_artifact_id"]
     assert result["evaluation_artifact_id"]
+    assert result["deployment_readiness_artifact_id"]
+    assert result["deployment_audit_artifact_id"]
     assert result["evaluation"]["evaluation_version"]
     assert result["evaluation_research_analysis"]
+    assert result["deployment_readiness"]["deployment_readiness_version"]
+    assert result["deployment_permission"]
+    assert result["deployment_readiness_summary"]
     assert result["actionability_score"] is not None
     assert result["why_this_signal"]["top_positive_drivers"] is not None
     assert result["evidence_provenance"]
@@ -203,6 +212,8 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session is not None
     assert session["metadata"]["active_analysis"]["report_id"] == result["report_id"]
     assert session["metadata"]["active_analysis"]["signal"]
+    assert session["metadata"]["active_analysis"]["deployment_permission"]
+    assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
@@ -210,6 +221,8 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["signal_summary"] == result["signal_summary"]
     assert report["overall_analysis"] == result["overall_analysis"]
     assert report["evaluation"]
+    assert report["deployment_readiness"]
+    assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(
             kind=intelligence.ANALYSIS_JOB_KIND, session_id=result["session_id"]
@@ -244,6 +257,18 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert (
         store.get_latest_artifact(
             kind="assistant_evaluation_artifact", session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=DEPLOYMENT_READINESS_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=DEPLOYMENT_AUDIT_RECORD_KIND, session_id=result["session_id"]
         )
         is not None
     )
@@ -345,6 +370,60 @@ def test_chat_uses_persisted_analysis_report(monkeypatch):
             "sources": ["market_bars_daily", "news_raw", "sentiment_daily"],
         },
     )
+    report = reports.attach_deployment_context(
+        report,
+        {
+            "deployment_readiness_version": "phase8_capital_readiness_v1",
+            "deployment_mode": {
+                "active_mode": "paper_shadow",
+                "rollout_stage": "forward_shadow_validation",
+            },
+            "model_readiness": {
+                "model_readiness_status": "constrained",
+                "live_readiness_score": 58.0,
+                "live_readiness_blockers": ["similar setups do not yet have enough matured observations for live escalation"],
+                "recent_degradation_flags": ["confidence reliability is still building"],
+            },
+            "signal_admission_control": {
+                "admitted_for_strategy": True,
+                "admitted_for_paper": True,
+                "admitted_for_live": False,
+            },
+            "deployment_permission": {
+                "deployment_permission": "paper_shadow_only",
+                "deployment_blockers": ["confidence calibration quality is not strong enough for live escalation"],
+                "deployment_rationale": "The setup is analyzable, but it remains paper-only until calibration and matured sample support improve.",
+                "trust_tier": "paper_only",
+                "minimum_required_review": "analyst_review",
+                "human_review_required": True,
+            },
+            "risk_budgeting": {
+                "risk_budget_tier": "shadow_only",
+                "exposure_caution_level": "high",
+                "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "maximum_risk_mode_allowed": "paper_shadow",
+            },
+            "rollout_workflow": {
+                "rollout_stage": "forward_shadow_validation",
+                "readiness_checkpoint": "watch",
+                "promotion_criteria": ["confidence reliability remains above the stage threshold"],
+                "demotion_criteria": ["drift monitoring recommends paper or paused mode"],
+                "stage_transition_notes": ["Continue forward shadow validation before any live escalation."],
+            },
+            "drift_monitor": {
+                "pause_recommended": False,
+                "degrade_to_paper_recommended": False,
+                "drift_alerts": ["confidence reliability is below the live-support comfort zone"],
+                "deployment_risk_alerts": ["live readiness has slipped below the controlled-live comfort zone"],
+            },
+            "audit_snapshot": {
+                "rationale_summary": "Paper-shadow only while calibration and matured sample depth improve.",
+            },
+        },
+        readiness_artifact_id="readiness-1",
+        deployment_audit_artifact_id="audit-1",
+    )
     report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
     store.upsert_session_metadata(
         session_id,
@@ -384,6 +463,119 @@ def test_chat_uses_persisted_analysis_report(monkeypatch):
     assert grounding["payload"]["report_found"] is True
     assert grounding["payload"]["route"]["intent"] == "strategy"
     assert grounding["payload"]["selected_sections"]["strategy_view"] == report["strategy_view"]
+
+
+def test_chat_routes_deployment_readiness_questions_to_readiness_sections(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = reports.attach_deployment_context(
+        reports.build_analysis_report(
+            symbol="NVDA",
+            as_of_date="2024-01-02",
+            horizon="swing",
+            risk_mode="balanced",
+            signal={
+                "action": "BUY",
+                "score": 0.8,
+                "confidence": 0.7,
+                "reason_codes": ["TREND_UP"],
+                "reason_details": {"TREND_UP": "Trend is rising"},
+            },
+            key_features={"ret_21d": 0.08, "vol_21d": 0.25, "regime_label": "trend"},
+            quality={"bars_ok": True, "news_ok": True, "sentiment_ok": True, "warnings": []},
+            evidence={"reason_codes": ["TREND_UP"], "reason_details": {}, "sources": ["market_bars_daily"]},
+            strategy={
+                "final_signal": "HOLD",
+                "strategy_posture": "watchlist_positive",
+                "confidence": 0.57,
+                "confidence_score": 57.0,
+                "conviction_tier": "moderate",
+                "actionability_score": 44.0,
+                "scenario_matrix": {"base": {"summary": "Constructive but not fully actionable."}},
+            },
+        ),
+        {
+            "deployment_readiness_version": "phase8_capital_readiness_v1",
+            "deployment_mode": {
+                "active_mode": "low_risk_live",
+                "rollout_stage": "low_risk_live_pilot",
+            },
+            "model_readiness": {
+                "model_readiness_status": "constrained",
+                "live_readiness_score": 54.0,
+                "live_readiness_blockers": ["confidence calibration quality is not strong enough for live escalation"],
+                "recent_degradation_flags": ["historical weakness is concentrated in the current regime (trend)"],
+            },
+            "signal_admission_control": {
+                "admitted_for_strategy": True,
+                "admitted_for_paper": True,
+                "admitted_for_live": False,
+            },
+            "deployment_permission": {
+                "deployment_permission": "paper_shadow_only",
+                "deployment_blockers": ["fragility remains too high for live admission"],
+                "deployment_rationale": "The setup is paper-worthy, but it does not clear the live gate.",
+                "trust_tier": "paper_only",
+                "minimum_required_review": "senior_analyst_and_risk_review",
+                "human_review_required": True,
+            },
+            "risk_budgeting": {
+                "risk_budget_tier": "shadow_only",
+                "exposure_caution_level": "high",
+                "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "maximum_risk_mode_allowed": "paper_shadow",
+            },
+            "rollout_workflow": {
+                "rollout_stage": "low_risk_live_pilot",
+                "readiness_checkpoint": "watch",
+                "promotion_criteria": ["confidence reliability remains above the stage threshold"],
+                "demotion_criteria": ["fragility rises into the blocked zone"],
+                "stage_transition_notes": ["Continue paper/shadow evidence collection before live escalation."],
+            },
+            "drift_monitor": {
+                "pause_recommended": False,
+                "degrade_to_paper_recommended": True,
+                "drift_alerts": ["confidence reliability is below the live-support comfort zone"],
+                "deployment_risk_alerts": ["live readiness has slipped below the controlled-live comfort zone"],
+            },
+            "audit_snapshot": {
+                "rationale_summary": "Paper-shadow only until calibration and fragility improve.",
+            },
+        },
+        readiness_artifact_id="readiness-2",
+        deployment_audit_artifact_id="audit-2",
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=session_id, report_id=report_id
+    )
+    store.upsert_session_metadata(session_id, {"active_analysis": active_analysis})
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert '"question_intent": "deployment_readiness"' in combined
+        assert '"answer_mode": "deployment"' in combined
+        assert report["deployment_readiness_summary"] in combined
+        assert report["deployment_permission_analysis"] in combined
+        assert report["risk_budget_exposure_analysis"] in combined
+        return (
+            "The setup remains paper-shadow only because live-readiness and calibration are still constrained.",
+            "model",
+            {"prompt_tokens": 12, "completion_tokens": 16},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {"session_id": session_id, "message": "Is this ready for live capital or only paper mode?"},
+        store=store,
+    )
+
+    assert result["report_found"] is True
+    assert result["active_analysis"]["deployment_permission"] == "paper_shadow_only"
+    assert result["active_analysis"]["trust_tier"] == "paper_only"
 
 
 def test_chat_returns_no_analysis_message_when_report_absent(monkeypatch):

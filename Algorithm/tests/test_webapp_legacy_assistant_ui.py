@@ -21,6 +21,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-strategy-scenarios"' in html
     assert 'id="assistant-strategy-playbook"' in html
     assert 'id="assistant-risk-triggers"' in html
+    assert 'id="assistant-deployment-summary-section"' in html
+    assert 'id="assistant-deployment-readiness"' in html
+    assert 'id="assistant-deployment-risk-budget"' in html
     assert 'data-research-tab="evaluation"' in html
     assert 'data-research-tab="compare"' in html
     assert 'data-research-tab="watchlist"' in html
@@ -36,11 +39,13 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-evidence-supporting"' in html
     assert 'id="assistant-evidence-conflicts"' in html
     assert 'id="assistant-artifact-ledger"' in html
+    assert 'id="assistant-deployment-audit"' in html
     assert 'id="assistant-compare-summary"' in html
     assert 'id="assistant-compare-details"' in html
     assert 'id="assistant-watchlist-grid"' in html
     assert 'id="assistant-system-health"' in html
     assert 'id="assistant-system-audit"' in html
+    assert 'id="assistant-deployment-governance"' in html
     assert "assistantActiveAnalysis" in js
     assert "ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY" in js
     assert "ASSISTANT_RECENT_REPORTS_STORAGE_KEY" in js
@@ -67,4 +72,7 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderStrategyScenarios" in js
     assert "renderStrategyPlaybook" in js
     assert "renderRiskTriggers" in js
+    assert "renderDeploymentReadiness" in js
+    assert "renderDeploymentRiskBudget" in js
+    assert "renderDeploymentAudit" in js
     assert "refreshAssistantSystemHealth" in js

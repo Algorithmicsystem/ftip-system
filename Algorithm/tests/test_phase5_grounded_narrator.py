@@ -15,7 +15,7 @@ def _sample_report(symbol: str) -> dict:
         "Cross-Domain Conviction Score": {"score": 64.8, "coverage_status": "available"},
         "Opportunity Quality Score": {"score": 57.3, "coverage_status": "available"},
     }
-    return reports.build_analysis_report(
+    report = reports.build_analysis_report(
         symbol=symbol,
         as_of_date="2024-01-02",
         horizon="swing",
@@ -195,6 +195,60 @@ def _sample_report(symbol: str) -> dict:
             },
         },
     )
+    return reports.attach_deployment_context(
+        report,
+        {
+            "deployment_readiness_version": "phase8_capital_readiness_v1",
+            "deployment_mode": {
+                "active_mode": "paper_shadow",
+                "rollout_stage": "forward_shadow_validation",
+            },
+            "model_readiness": {
+                "model_readiness_status": "constrained",
+                "live_readiness_score": 58.0,
+                "live_readiness_blockers": ["similar setups do not yet have enough matured observations for live escalation"],
+                "recent_degradation_flags": ["confidence reliability is still building"],
+            },
+            "signal_admission_control": {
+                "admitted_for_strategy": True,
+                "admitted_for_paper": True,
+                "admitted_for_live": False,
+            },
+            "deployment_permission": {
+                "deployment_permission": "paper_shadow_only",
+                "deployment_blockers": ["confidence calibration quality is not strong enough for live escalation"],
+                "deployment_rationale": "The setup is analyzable, but it remains paper-only until calibration and matured sample support improve.",
+                "trust_tier": "paper_only",
+                "minimum_required_review": "analyst_review",
+                "human_review_required": True,
+            },
+            "risk_budgeting": {
+                "risk_budget_tier": "shadow_only",
+                "exposure_caution_level": "high",
+                "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                "maximum_risk_mode_allowed": "paper_shadow",
+            },
+            "rollout_workflow": {
+                "rollout_stage": "forward_shadow_validation",
+                "readiness_checkpoint": "watch",
+                "promotion_criteria": ["confidence reliability remains above the stage threshold"],
+                "demotion_criteria": ["drift monitoring recommends paper or paused mode"],
+                "stage_transition_notes": ["Continue forward shadow validation before any live escalation."],
+            },
+            "drift_monitor": {
+                "pause_recommended": False,
+                "degrade_to_paper_recommended": False,
+                "drift_alerts": ["confidence reliability is below the live-support comfort zone"],
+                "deployment_risk_alerts": ["live readiness has slipped below the controlled-live comfort zone"],
+            },
+            "audit_snapshot": {
+                "rationale_summary": "Paper-shadow only while calibration and matured sample depth improve.",
+            },
+        },
+        readiness_artifact_id="readiness-1",
+        deployment_audit_artifact_id="audit-1",
+    )
 
 
 def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
@@ -213,6 +267,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     evidence_route = route_question("What evidence supports this view?")
     assert evidence_route["intent"] == "evidence_provenance"
     assert evidence_route["answer_mode"] == "evidence"
+
+    deployment_route = route_question("Is this ready for live capital or only paper mode?")
+    assert deployment_route["intent"] == "deployment_readiness"
+    assert deployment_route["answer_mode"] == "deployment"
 
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
@@ -235,12 +293,15 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["active_context"]["symbol"] == "NVDA"
     assert narrator_context["active_context"]["conviction_tier"] == "moderate"
     assert narrator_context["signal_snapshot"]["strategy_posture"] == "watchlist_positive"
+    assert narrator_context["active_context"]["deployment_permission"] == "paper_shadow_only"
     assert "strategy_view" in narrator_context["selected_sections"]
     assert "risks_weaknesses_invalidators" in narrator_context["selected_sections"]
     assert narrator_context["scenario_matrix"]["bear"]["summary"]
     assert narrator_context["invalidators"]["top_invalidators"]
     assert narrator_context["evidence_summary"]["strong_evidence"]
     assert narrator_context["followup_questions"]
+    assert narrator_context["deployment_readiness_snapshot"]["deployment_permission"] == "paper_shadow_only"
+    assert narrator_context["deployment_readiness_snapshot"]["blockers"]
 
 
 def test_phase5_preserves_session_symbol_continuity_for_chat_followups() -> None:

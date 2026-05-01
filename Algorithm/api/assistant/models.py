@@ -29,6 +29,12 @@ class AnalysisReference(BaseModel):
     freshness_status: Optional[str] = None
     report_version: Optional[str] = None
     strategy_version: Optional[str] = None
+    deployment_mode: Optional[str] = None
+    deployment_permission: Optional[str] = None
+    trust_tier: Optional[str] = None
+    live_readiness_status: Optional[str] = None
+    live_readiness_score: Optional[float] = None
+    rollout_stage: Optional[str] = None
 
 
 class ChatResponse(BaseModel):

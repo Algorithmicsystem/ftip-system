@@ -5,7 +5,7 @@ import math
 from collections.abc import Mapping
 from decimal import Decimal
 from numbers import Real
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Sequence
 
 
 ANALYSIS_REPORT_KIND = "analysis_report"
@@ -687,6 +687,72 @@ def _evaluation_research_text(evaluation: Dict[str, Any]) -> str:
     )
 
 
+def _deployment_readiness_text(readiness: Dict[str, Any]) -> str:
+    if not readiness:
+        return (
+            "Capital-readiness controls are not attached to this report yet, so the platform is not expressing a deployment-permission or staged live-use posture."
+        )
+    mode = (readiness.get("deployment_mode") or {}).get("active_mode") or "research_only"
+    model = readiness.get("model_readiness") or {}
+    permission = readiness.get("deployment_permission") or {}
+    return _join_sentences(
+        [
+            f"Deployment mode is {mode} and current permission is {permission.get('deployment_permission') or 'analysis_only'}.",
+            f"Model readiness is {model.get('model_readiness_status') or 'unknown'} at {_fmt_num(model.get('live_readiness_score'), digits=1, signed=False)} / 100.",
+            f"Trust tier is {permission.get('trust_tier') or 'blocked'}, human review required is {permission.get('human_review_required')}, and minimum required review is {permission.get('minimum_required_review') or 'analyst_review'}.",
+            f"Blockers are {_fmt_list(permission.get('deployment_blockers') or model.get('live_readiness_blockers') or [])}.",
+        ]
+    )
+
+
+def _deployment_permission_text(readiness: Dict[str, Any]) -> str:
+    if not readiness:
+        return "Deployment permission analysis will attach once the capital-readiness layer is available."
+    permission = readiness.get("deployment_permission") or {}
+    admission = readiness.get("signal_admission_control") or {}
+    drift = readiness.get("drift_monitor") or {}
+    return _join_sentences(
+        [
+            permission.get("deployment_rationale"),
+            f"Admission control says strategy={admission.get('admitted_for_strategy')}, paper={admission.get('admitted_for_paper')}, live={admission.get('admitted_for_live')}.",
+            f"Primary admission decision is {admission.get('primary_decision') or 'unknown'}.",
+            f"Pause recommended is {drift.get('pause_recommended')}, degrade-to-paper recommended is {drift.get('degrade_to_paper_recommended')}, and increased review required is {drift.get('increased_review_required')}.",
+        ]
+    )
+
+
+def _risk_budget_text(readiness: Dict[str, Any]) -> str:
+    if not readiness:
+        return "Risk-budget and exposure-caution framing will attach once deployment controls are available."
+    risk_budget = readiness.get("risk_budgeting") or {}
+    return _join_sentences(
+        [
+            f"Risk budget tier is {risk_budget.get('risk_budget_tier') or 'none'} with {risk_budget.get('exposure_caution_level') or 'extreme'} exposure caution.",
+            f"Fragility-adjusted size band is {risk_budget.get('fragility_adjusted_size_band') or 'none'}, confidence-adjusted size band is {risk_budget.get('confidence_adjusted_size_band') or 'none'}, and the maximum risk mode allowed is {risk_budget.get('maximum_risk_mode_allowed') or 'research_only'}.",
+            risk_budget.get("concentration_warning"),
+            risk_budget.get("diversification_warning"),
+            risk_budget.get("correlation_context_warning"),
+        ]
+    )
+
+
+def _rollout_stage_text(readiness: Dict[str, Any]) -> str:
+    if not readiness:
+        return "Rollout-stage guidance will attach once deployment controls are available."
+    rollout = readiness.get("rollout_workflow") or {}
+    return _join_sentences(
+        [
+            f"Current rollout stage is {rollout.get('rollout_stage') or 'historical_validation'}, readiness checkpoint is {rollout.get('readiness_checkpoint') or 'watch'}, and the next eligible stage is {rollout.get('next_eligible_stage') or 'none'}.",
+            f"Promotion criteria are {_fmt_list(rollout.get('promotion_criteria') or [])}.",
+            f"Demotion criteria are {_fmt_list(rollout.get('demotion_criteria') or [])}.",
+            f"Stage transition notes are {_fmt_list(rollout.get('stage_transition_notes') or [])}.",
+            f"Rollback reason is {rollout.get('rollback_reason')}."
+            if rollout.get("rollback_reason")
+            else None,
+        ]
+    )
+
+
 def _risks_invalidators_text(
     why_signal: Dict[str, Any],
     strategy: Dict[str, Any],
@@ -827,6 +893,12 @@ def build_active_analysis_reference(
                 strategy.get("strategy_version"),
                 report.get("strategy_version"),
             ),
+            "deployment_mode": report.get("deployment_mode"),
+            "deployment_permission": report.get("deployment_permission"),
+            "trust_tier": report.get("trust_tier"),
+            "live_readiness_status": report.get("model_readiness_status"),
+            "live_readiness_score": report.get("live_readiness_score"),
+            "rollout_stage": report.get("rollout_stage"),
         }
     )
 
@@ -890,6 +962,115 @@ def attach_evaluation_context(
         "evaluation.calibration_summary",
         "evaluation.regime_breakdown",
         "evaluation.factor_attribution_summary",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_deployment_context(
+    report: Dict[str, Any],
+    readiness: Dict[str, Any],
+    *,
+    readiness_artifact_id: Optional[str] = None,
+    deployment_audit_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    deployment_summary = _deployment_readiness_text(readiness)
+    permission_text = _deployment_permission_text(readiness)
+    risk_budget_text = _risk_budget_text(readiness)
+    rollout_text = _rollout_stage_text(readiness)
+
+    mode = readiness.get("deployment_mode") or {}
+    model = readiness.get("model_readiness") or {}
+    permission = readiness.get("deployment_permission") or {}
+    risk_budget = readiness.get("risk_budgeting") or {}
+    rollout = readiness.get("rollout_workflow") or {}
+    drift = readiness.get("drift_monitor") or {}
+    audit_snapshot = readiness.get("audit_snapshot") or {}
+
+    updated["report_version"] = "2.2"
+    updated["deployment_readiness_artifact_id"] = readiness_artifact_id
+    updated["deployment_audit_artifact_id"] = deployment_audit_artifact_id
+    updated["deployment_readiness"] = readiness
+    updated["deployment_mode"] = mode.get("active_mode")
+    updated["rollout_stage"] = rollout.get("rollout_stage")
+    updated["deployment_permission"] = permission.get("deployment_permission")
+    updated["deployment_blockers"] = permission.get("deployment_blockers") or []
+    updated["deployment_rationale"] = permission.get("deployment_rationale")
+    updated["trust_tier"] = permission.get("trust_tier")
+    updated["minimum_required_review"] = permission.get("minimum_required_review")
+    updated["human_review_required"] = permission.get("human_review_required")
+    updated["model_readiness_status"] = model.get("model_readiness_status")
+    updated["model_readiness_notes"] = model.get("model_readiness_notes") or []
+    updated["live_readiness_score"] = model.get("live_readiness_score")
+    updated["live_readiness_blockers"] = model.get("live_readiness_blockers") or []
+    updated["recent_degradation_flags"] = model.get("recent_degradation_flags") or []
+    updated["evidence_quality_summary"] = model.get("evidence_quality_summary")
+    updated["risk_budget_tier"] = risk_budget.get("risk_budget_tier")
+    updated["exposure_caution_level"] = risk_budget.get("exposure_caution_level")
+    updated["fragility_adjusted_size_band"] = risk_budget.get("fragility_adjusted_size_band")
+    updated["confidence_adjusted_size_band"] = risk_budget.get("confidence_adjusted_size_band")
+    updated["maximum_risk_mode_allowed"] = risk_budget.get("maximum_risk_mode_allowed")
+    updated["pause_recommended"] = drift.get("pause_recommended")
+    updated["degrade_to_paper_recommended"] = drift.get("degrade_to_paper_recommended")
+    updated["increased_review_required"] = drift.get("increased_review_required")
+    updated["degraded_reliability_regimes"] = drift.get("degraded_reliability_regimes") or []
+    updated["drift_alerts"] = drift.get("drift_alerts") or []
+    updated["deployment_risk_alerts"] = drift.get("deployment_risk_alerts") or []
+    updated["readiness_checkpoint"] = rollout.get("readiness_checkpoint")
+    updated["promotion_criteria"] = rollout.get("promotion_criteria") or []
+    updated["demotion_criteria"] = rollout.get("demotion_criteria") or []
+    updated["rollback_reason"] = rollout.get("rollback_reason")
+    updated["stage_transition_notes"] = rollout.get("stage_transition_notes") or []
+    updated["live_use_audit_snapshot"] = audit_snapshot
+    updated["deployment_readiness_summary"] = deployment_summary
+    updated["deployment_permission_analysis"] = permission_text
+    updated["risk_budget_exposure_analysis"] = risk_budget_text
+    updated["rollout_stage_summary"] = rollout_text
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Deployment-readiness overlay: {deployment_summary}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Deployment permission overlay: {permission_text}",
+            f"Risk-budget overlay: {risk_budget_text}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Rollout and drift discipline: {rollout_text}",
+            f"Deployment alerts: {_fmt_list(drift.get('deployment_risk_alerts') or drift.get('drift_alerts') or [])}.",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Deployment-readiness provenance is point-in-time and audit-backed: mode, blockers, trust tier, rollout stage, and review requirements are stored with each readiness decision.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["deployment_readiness_summary"] = [
+        "deployment_readiness.deployment_mode",
+        "deployment_readiness.model_readiness",
+        "deployment_readiness.signal_admission_control",
+    ]
+    evidence_map["deployment_permission_analysis"] = [
+        "deployment_readiness.deployment_permission",
+        "deployment_readiness.drift_monitor",
+        "deployment_readiness.audit_snapshot",
+    ]
+    evidence_map["risk_budget_exposure_analysis"] = [
+        "deployment_readiness.risk_budgeting",
+        "deployment_readiness.model_readiness.component_scores",
+    ]
+    evidence_map["rollout_stage_summary"] = [
+        "deployment_readiness.rollout_workflow",
+        "deployment_readiness.prior_audit_summary",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)
@@ -1176,6 +1357,50 @@ def build_analysis_report(
         "confidence_reliability_summary": None,
         "regime_usefulness_summary": None,
         "evaluation_research_analysis": evaluation_research_analysis,
+        "deployment_readiness": {},
+        "deployment_mode": None,
+        "rollout_stage": None,
+        "deployment_permission": None,
+        "deployment_blockers": [],
+        "deployment_rationale": None,
+        "trust_tier": None,
+        "minimum_required_review": None,
+        "human_review_required": None,
+        "model_readiness_status": None,
+        "model_readiness_notes": [],
+        "live_readiness_score": None,
+        "live_readiness_blockers": [],
+        "recent_degradation_flags": [],
+        "evidence_quality_summary": None,
+        "risk_budget_tier": None,
+        "exposure_caution_level": None,
+        "fragility_adjusted_size_band": None,
+        "confidence_adjusted_size_band": None,
+        "maximum_risk_mode_allowed": None,
+        "pause_recommended": None,
+        "degrade_to_paper_recommended": None,
+        "increased_review_required": None,
+        "degraded_reliability_regimes": [],
+        "drift_alerts": [],
+        "deployment_risk_alerts": [],
+        "readiness_checkpoint": None,
+        "promotion_criteria": [],
+        "demotion_criteria": [],
+        "rollback_reason": None,
+        "stage_transition_notes": [],
+        "live_use_audit_snapshot": {},
+        "deployment_readiness_summary": (
+            "Phase 8 deployment-readiness controls will attach a staged capital-readiness summary, trust tier, and live-use blockers once the readiness layer runs."
+        ),
+        "deployment_permission_analysis": (
+            "Deployment-permission analysis will attach once capital-readiness controls are available."
+        ),
+        "risk_budget_exposure_analysis": (
+            "Risk-budget and exposure-caution framing will attach once capital-readiness controls are available."
+        ),
+        "rollout_stage_summary": (
+            "Rollout-stage guidance will attach once staged deployment controls are available."
+        ),
         "signal_summary": signal_summary,
         "technical_analysis": technical_analysis,
         "fundamental_analysis": fundamental_analysis,

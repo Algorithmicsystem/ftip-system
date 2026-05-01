@@ -152,6 +152,12 @@ const buildActiveAnalysisFromReport = (report) => ({
   freshness_status: report?.freshness_summary?.overall_status || "unknown",
   report_version: report?.report_version || "n/a",
   strategy_version: report?.strategy?.strategy_version || "n/a",
+  deployment_mode: report?.deployment_mode || "research_only",
+  deployment_permission: report?.deployment_permission || "analysis_only",
+  trust_tier: report?.trust_tier || "blocked",
+  live_readiness_status: report?.model_readiness_status || "unknown",
+  live_readiness_score: report?.live_readiness_score,
+  rollout_stage: report?.rollout_stage || "historical_validation",
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -194,6 +200,16 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.evaluation?.signal_scorecard?.final_signal_overall?.hit_rate ?? null,
       evaluation_reliability:
         report?.evaluation?.calibration_summary?.confidence_reliability_score ?? null,
+      deployment_mode: report?.deployment_mode || analysis?.deployment_mode || "research_only",
+      deployment_permission:
+        report?.deployment_permission || analysis?.deployment_permission || "analysis_only",
+      trust_tier: report?.trust_tier || analysis?.trust_tier || "blocked",
+      live_readiness_status:
+        report?.model_readiness_status || analysis?.live_readiness_status || "unknown",
+      live_readiness_score:
+        report?.live_readiness_score ?? analysis?.live_readiness_score ?? null,
+      rollout_stage: report?.rollout_stage || analysis?.rollout_stage || "historical_validation",
+      risk_budget_tier: report?.risk_budget_tier || "none",
       strongest_condition: conditionLabel(report?.evaluation?.strongest_conditions?.[0]),
       weakest_condition: conditionLabel(report?.evaluation?.weakest_conditions?.[0]),
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
@@ -337,6 +353,27 @@ const activeStrategyPostureLabel = () =>
   state.assistantActiveAnalysis?.strategy_posture ||
   "n/a";
 
+const activeDeploymentPermissionLabel = () =>
+  state.assistantLatestReport?.deployment_permission ||
+  state.assistantActiveAnalysis?.deployment_permission ||
+  "analysis_only";
+
+const activeTrustTierLabel = () =>
+  state.assistantLatestReport?.trust_tier ||
+  state.assistantActiveAnalysis?.trust_tier ||
+  "blocked";
+
+const activeReadinessLabel = () => {
+  const score =
+    state.assistantLatestReport?.live_readiness_score ??
+    state.assistantActiveAnalysis?.live_readiness_score;
+  const status =
+    state.assistantLatestReport?.model_readiness_status ||
+    state.assistantActiveAnalysis?.live_readiness_status ||
+    "unknown";
+  return score == null ? status : `${status} (${Number(score).toFixed(1)})`;
+};
+
 const activeReportVersionLabel = () =>
   state.assistantActiveAnalysis?.report_version ||
   state.assistantLatestReport?.report_version ||
@@ -349,6 +386,7 @@ const buildNarratorPromptSet = () => {
     `Explain the strategy view for ${symbol}.`,
     `What is the bear case for ${symbol}?`,
     `What are the invalidators here?`,
+    `Is ${symbol} ready for live capital or only paper/shadow mode?`,
     `What is weakest in the setup for ${symbol}?`,
     `What would improve conviction on ${symbol}?`,
     `What does evaluation history say about setups like ${symbol}?`,
@@ -388,6 +426,8 @@ const renderActiveAnalysisLabels = () => {
     `Freshness: ${activeFreshnessLabel()}`,
     `Conviction: ${activeConvictionLabel()}`,
     `Strategy: ${activeStrategyPostureLabel()}`,
+    `Permission: ${activeDeploymentPermissionLabel()}`,
+    `Trust: ${activeTrustTierLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
   ];
   qs("#assistant-active-analysis-meta").innerHTML = metaChips
@@ -397,6 +437,8 @@ const renderActiveAnalysisLabels = () => {
     `Signal: ${activeSignalLabel()}`,
     `Conviction: ${activeConvictionLabel()}`,
     `Strategy: ${activeStrategyPostureLabel()}`,
+    `Permission: ${activeDeploymentPermissionLabel()}`,
+    `Readiness: ${activeReadinessLabel()}`,
     `Freshness: ${activeFreshnessLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
     `Session: ${state.assistantChatSessionId ? "active" : "local"}`,
@@ -405,7 +447,7 @@ const renderActiveAnalysisLabels = () => {
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");
   qs("#assistant-chat-grounding-note").textContent = analysis?.symbol
-    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report and strategy.`
+    ? `Narrator is grounded to the active ${analysis.symbol} analysis artifact and will answer follow-up questions from the stored report, strategy, evaluation, and deployment-readiness layers.`
     : "Run Assistant Analyze to establish the active artifact the narrator should use.";
   if (qs("#assistant-compare-active-symbol")) {
     qs("#assistant-compare-active-symbol").value = analysis?.symbol || "";
@@ -603,6 +645,19 @@ const renderDashboardSummary = (report) => {
       value: report.scenario || "base",
       note: `execution ${strategy.execution_posture?.preferred_posture || "staged_watch"}`,
     },
+    {
+      label: "Deployment",
+      value: report.deployment_permission || "analysis_only",
+      note: `${report.deployment_mode || "research_only"} · trust ${report.trust_tier || "blocked"}`,
+    },
+    {
+      label: "Live Readiness",
+      value:
+        report.live_readiness_score == null
+          ? report.model_readiness_status || "unknown"
+          : Number(report.live_readiness_score).toFixed(1),
+      note: report.model_readiness_status || "model readiness",
+    },
   ];
   container.innerHTML = `
     <div class="summary-grid">
@@ -689,6 +744,11 @@ const renderDashboardWorkflow = (report) => {
   const steps = [
     ["Signal and Thesis", report.signal_summary, "analyze"],
     ["Strategy Console", report.strategy_view, "strategy"],
+    [
+      "Deployment Readiness",
+      report.deployment_readiness_summary || report.deployment_permission_analysis,
+      "strategy",
+    ],
     ["Proof and Trust", report.evaluation_research_analysis || report.evidence_provenance, "evaluation"],
   ];
   container.innerHTML = steps
@@ -742,6 +802,27 @@ const renderDashboardTrustStrip = (report) => {
           ? "sample pending"
           : `${report.evaluation.prediction_linkage_summary.total_predictions} tracked predictions`,
     },
+    {
+      label: "Deployment Mode",
+      value: report.deployment_mode || "research_only",
+      note: report.rollout_stage || "historical_validation",
+    },
+    {
+      label: "Trust Tier",
+      value: report.trust_tier || "blocked",
+      note: report.deployment_permission || "analysis_only",
+    },
+    {
+      label: "Readiness",
+      value:
+        report.live_readiness_score == null
+          ? report.model_readiness_status || "unknown"
+          : Number(report.live_readiness_score).toFixed(1),
+      note:
+        report.human_review_required == null
+          ? "review policy pending"
+          : `human review ${report.human_review_required ? "required" : "still advised"}`,
+    },
   ]);
 };
 
@@ -778,6 +859,9 @@ const renderRecentAnalyses = () => {
                 )}</span>
                 <span class="micro-chip">fragility ${escapeHtml(
                   snapshot.fragility_tier || "unknown"
+                )}</span>
+                <span class="micro-chip">permission ${escapeHtml(
+                  snapshot.deployment_permission || "analysis_only"
                 )}</span>
                 <span class="micro-chip">freshness ${escapeHtml(
                   snapshot.freshness_status || "unknown"
@@ -847,6 +931,19 @@ const renderStrategyMetrics = (report) => {
       label: "Fragility Veto",
       value: strategy.hard_veto ? "active" : "none",
       note: `${(strategy.fragility_vetoes || []).length} dampener(s)`,
+    },
+    {
+      label: "Deployability",
+      value: report?.deployment_permission || "analysis_only",
+      note: report?.trust_tier || "blocked",
+    },
+    {
+      label: "Live Readiness",
+      value:
+        report?.live_readiness_score == null
+          ? report?.model_readiness_status || "unknown"
+          : Number(report.live_readiness_score).toFixed(1),
+      note: report?.deployment_mode || "research_only",
     },
   ]);
 };
@@ -967,6 +1064,114 @@ const renderStrategyPlaybook = (report) => {
           Boolean
         ),
         "No additional risk context surfaced."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderDeploymentReadiness = (report) => {
+  const summary = qs("#assistant-deployment-summary-section");
+  const detail = qs("#assistant-deployment-readiness");
+  if (!report) {
+    renderTextSection(
+      "#assistant-deployment-summary-section",
+      "Deployment Readiness Summary",
+      ""
+    );
+    detail.innerHTML = emptyStateCard(
+      "Deployment permission, blockers, and review requirements will render here."
+    );
+    return;
+  }
+  renderTextSection(
+    "#assistant-deployment-summary-section",
+    "Deployment Readiness Summary",
+    report.deployment_readiness_summary
+  );
+  detail.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Permission / Trust</h5>
+      ${renderBullets(
+        [
+          `Deployment mode: ${report.deployment_mode || "research_only"}`,
+          `Permission: ${report.deployment_permission || "analysis_only"}`,
+          `Trust tier: ${report.trust_tier || "blocked"}`,
+          `Live readiness: ${
+            report.live_readiness_score == null
+              ? report.model_readiness_status || "unknown"
+              : `${Number(report.live_readiness_score).toFixed(1)} / 100`
+          }`,
+        ],
+        "No deployment permission state available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Blockers / Review</h5>
+      ${renderBullets(
+        [
+          ...(report.deployment_blockers || []),
+          ...(report.live_readiness_blockers || []),
+          report.minimum_required_review
+            ? `Minimum review: ${report.minimum_required_review}`
+            : null,
+          report.human_review_required == null
+            ? null
+            : `Human review required: ${report.human_review_required ? "yes" : "still expected"}`,
+        ].filter(Boolean),
+        "No active blockers surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Drift / Pause Alerts</h5>
+      ${renderBullets(
+        [
+          ...(report.recent_degradation_flags || []),
+          ...(report.drift_alerts || []),
+          ...(report.deployment_risk_alerts || []),
+          report.pause_recommended ? "Pause recommended for live-use support." : null,
+          report.degrade_to_paper_recommended
+            ? "Degrade to paper/shadow recommended."
+            : null,
+        ].filter(Boolean),
+        "No active drift or pause alert surfaced."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderDeploymentRiskBudget = (report) => {
+  const container = qs("#assistant-deployment-risk-budget");
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Risk-budget and exposure-caution guidance will render here."
+    );
+    return;
+  }
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Risk Budget / Exposure</h5>
+      ${renderBullets(
+        [
+          `Risk budget tier: ${report.risk_budget_tier || "none"}`,
+          `Exposure caution: ${report.exposure_caution_level || "extreme"}`,
+          `Fragility-adjusted size band: ${report.fragility_adjusted_size_band || "none"}`,
+          `Confidence-adjusted size band: ${report.confidence_adjusted_size_band || "none"}`,
+          `Maximum risk mode allowed: ${report.maximum_risk_mode_allowed || "research_only"}`,
+        ],
+        "No risk-budget guidance available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Rollout Discipline</h5>
+      ${renderBullets(
+        [
+          `Rollout stage: ${report.rollout_stage || "historical_validation"}`,
+          `Readiness checkpoint: ${report.readiness_checkpoint || "watch"}`,
+          ...(report.promotion_criteria || []),
+          ...(report.demotion_criteria || []),
+          ...(report.stage_transition_notes || []),
+        ].filter(Boolean),
+        "No rollout criteria available."
       )}
     </section>`,
   ].join("");
@@ -1230,9 +1435,13 @@ const renderEvidenceSupport = (report) => {
     `<section class="drilldown-card">
       <h5>Provenance Notes</h5>
       ${renderBullets(
-        [report.evidence_provenance, report.evaluation_summary, report.regime_usefulness_summary].filter(
-          Boolean
-        ),
+        [
+          report.evidence_provenance,
+          report.evaluation_summary,
+          report.regime_usefulness_summary,
+          report.deployment_readiness_summary,
+          report.deployment_permission_analysis,
+        ].filter(Boolean),
         "No provenance note available."
       )}
     </section>`,
@@ -1246,6 +1455,17 @@ const renderEvidenceSupport = (report) => {
     `<section class="drilldown-card">
       <h5>Missingness / Freshness Caveats</h5>
       ${renderBullets(caveats, "No missing-data or freshness caveat surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Deployment Blockers</h5>
+      ${renderBullets(
+        [
+          ...(report.deployment_blockers || []),
+          ...(report.live_readiness_blockers || []),
+          ...(report.drift_alerts || []),
+        ],
+        "No explicit deployment blocker surfaced."
+      )}
     </section>`,
   ].join("");
 };
@@ -1262,6 +1482,11 @@ const renderArtifactLedger = (report) => {
     `Report version: ${report.report_version || "n/a"}`,
     `Strategy version: ${report.strategy?.strategy_version || "n/a"}`,
     `Evaluation version: ${report.evaluation?.evaluation_version || "phase6"}`,
+    `Deployment mode: ${report.deployment_mode || "research_only"}`,
+    `Deployment permission: ${report.deployment_permission || "analysis_only"}`,
+    `Trust tier: ${report.trust_tier || "blocked"}`,
+    `Deployment readiness artifact: ${report.deployment_readiness_artifact_id || "n/a"}`,
+    `Deployment audit artifact: ${report.deployment_audit_artifact_id || "n/a"}`,
     `Prediction artifact: ${
       report.prediction_record_id || report.prediction_record_artifact_id || "n/a"
     }`,
@@ -1277,9 +1502,13 @@ const renderArtifactLedger = (report) => {
     `<section class="drilldown-card">
       <h5>Traceability</h5>
       ${renderBullets(
-        [report.signal_summary, report.strategy_view, report.evaluation_research_analysis].filter(
-          Boolean
-        ),
+        [
+          report.signal_summary,
+          report.strategy_view,
+          report.evaluation_research_analysis,
+          report.deployment_readiness_summary,
+          report.rollout_stage_summary,
+        ].filter(Boolean),
         "No traceability notes available."
       )}
     </section>`,
@@ -1352,7 +1581,77 @@ const renderSystemAudit = (report) => {
       <h5>Freshness by Domain</h5>
       ${renderBullets(domainNotes, "No domain freshness breakdown available.")}
     </section>`,
+    `<section class="drilldown-card">
+      <h5>Deployment Trust Layer</h5>
+      ${renderBullets(
+        [
+          `Mode ${report.deployment_mode || "research_only"} / permission ${report.deployment_permission || "analysis_only"}`,
+          `Trust ${report.trust_tier || "blocked"} / readiness ${
+            report.live_readiness_score == null
+              ? report.model_readiness_status || "unknown"
+              : `${Number(report.live_readiness_score).toFixed(1)} / 100`
+          }`,
+          ...(report.deployment_risk_alerts || []),
+        ].filter(Boolean),
+        "No deployment trust layer data available."
+      )}
+    </section>`,
   ].join("");
+};
+
+const renderDeploymentAudit = (report) => {
+  const evidenceContainer = qs("#assistant-deployment-audit");
+  const governanceContainer = qs("#assistant-deployment-governance");
+  const containers = [evidenceContainer, governanceContainer].filter(Boolean);
+  if (!containers.length) {
+    return;
+  }
+  if (!report) {
+    containers.forEach((container) => {
+      container.innerHTML = emptyStateCard(
+        "Deployment permission, rollout stage, audit snapshot, and pause conditions will render here."
+      );
+    });
+    return;
+  }
+  const audit = report.live_use_audit_snapshot || {};
+  const html = [
+    `<section class="drilldown-card">
+      <h5>Audit Snapshot</h5>
+      ${renderBullets(
+        [
+          `Mode ${report.deployment_mode || "research_only"} / ${report.deployment_permission || "analysis_only"}`,
+          `Trust ${report.trust_tier || "blocked"} / readiness ${
+            report.live_readiness_score == null
+              ? report.model_readiness_status || "unknown"
+              : `${Number(report.live_readiness_score).toFixed(1)} / 100`
+          }`,
+          `Rollout stage ${report.rollout_stage || "historical_validation"} / checkpoint ${
+            report.readiness_checkpoint || "watch"
+          }`,
+          `Human review required: ${report.human_review_required ? "yes" : "still advised"}`,
+        ],
+        "No audit snapshot available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Alerts / Rollback</h5>
+      ${renderBullets(
+        [
+          ...(report.drift_alerts || []),
+          ...(report.deployment_risk_alerts || []),
+          report.rollback_reason,
+          report.pause_recommended ? "Pause recommended." : null,
+          report.degrade_to_paper_recommended ? "Degrade to paper/shadow recommended." : null,
+          audit.rationale_summary,
+        ].filter(Boolean),
+        "No deployment alert or rollback note surfaced."
+      )}
+    </section>`,
+  ].join("");
+  containers.forEach((container) => {
+    container.innerHTML = html;
+  });
 };
 
 const refreshCompareOptions = () => {
@@ -1425,6 +1724,8 @@ const renderWatchlistWorkspace = () => {
             <th>Conviction</th>
             <th>Opportunity</th>
             <th>Fragility</th>
+            <th>Permission</th>
+            <th>Trust</th>
             <th>Freshness</th>
             <th>Actions</th>
           </tr>
@@ -1447,6 +1748,8 @@ const renderWatchlistWorkspace = () => {
                   <td>${escapeHtml(snapshot.conviction_tier || "unknown")}</td>
                   <td>${escapeHtml(formatScore(snapshot.opportunity_quality))}</td>
                   <td>${escapeHtml(snapshot.fragility_tier || "unknown")}</td>
+                  <td>${escapeHtml(snapshot.deployment_permission || "analysis_only")}</td>
+                  <td>${escapeHtml(snapshot.trust_tier || "blocked")}</td>
                   <td>${escapeHtml(snapshot.freshness_status || "unknown")}</td>
                   <td>
                     <div class="table-actions">
@@ -1577,12 +1880,28 @@ const renderCompareWorkspace = () => {
         right.evaluation_reliability
       )}`,
     },
+    {
+      label: "Higher Readiness",
+      value:
+        compareMetricLeader(left.live_readiness_score, right.live_readiness_score, true) === "active"
+          ? active.symbol
+          : compareMetricLeader(left.live_readiness_score, right.live_readiness_score, true) === "peer"
+            ? peer.symbol
+            : "balanced",
+      note: `${active.symbol} ${formatScore(left.live_readiness_score)} vs ${peer.symbol} ${formatScore(
+        right.live_readiness_score
+      )}`,
+    },
   ]);
 
   const metrics = [
     ["Final Signal", left.final_signal, right.final_signal],
     ["Strategy Posture", left.strategy_posture, right.strategy_posture],
     ["Conviction Tier", left.conviction_tier, right.conviction_tier],
+    ["Deployment Permission", left.deployment_permission, right.deployment_permission],
+    ["Trust Tier", left.trust_tier, right.trust_tier],
+    ["Live Readiness", formatScore(left.live_readiness_score), formatScore(right.live_readiness_score)],
+    ["Rollout Stage", left.rollout_stage, right.rollout_stage],
     ["Actionability", formatScore(left.actionability_score), formatScore(right.actionability_score)],
     ["Opportunity Quality", formatScore(left.opportunity_quality), formatScore(right.opportunity_quality)],
     ["Cross-Domain Conviction", formatScore(left.cross_domain_conviction), formatScore(right.cross_domain_conviction)],
@@ -1673,12 +1992,16 @@ const renderAssistantReport = (report) => {
       ""
     );
     renderTextSection("#assistant-evidence-section", "Evidence / Provenance", "");
+    renderTextSection("#assistant-deployment-summary-section", "Deployment Readiness Summary", "");
     renderEvidenceSupport(null);
     renderArtifactLedger(null);
     renderDomainStatusGrid(null);
     renderFactorGrid(null);
     renderResearchDrilldown(null);
     renderSystemAudit(null);
+    renderDeploymentReadiness(null);
+    renderDeploymentRiskBudget(null);
+    renderDeploymentAudit(null);
     renderCompareWorkspace();
     renderWatchlistWorkspace();
     renderActiveAnalysisLabels();
@@ -1708,6 +2031,15 @@ const renderAssistantReport = (report) => {
     },
     { label: "Fragility", value: report.strategy?.fragility_tier || "N/A" },
     { label: "Participant", value: report.strategy?.primary_participant_fit || "N/A" },
+    { label: "Deployment", value: report.deployment_permission || "N/A" },
+    { label: "Trust Tier", value: report.trust_tier || "N/A" },
+    {
+      label: "Readiness",
+      value:
+        report.live_readiness_score == null
+          ? report.model_readiness_status || "N/A"
+          : Number(report.live_readiness_score).toFixed(1),
+    },
     { label: "Freshness", value: report.freshness_summary?.overall_status || "N/A" },
     { label: "As Of", value: report.as_of_date || "N/A" },
     { label: "Scenario", value: report.scenario || "N/A" },
@@ -1800,6 +2132,19 @@ const renderAssistantReport = (report) => {
             ).toFixed(1),
       note: `freshness ${report.freshness_summary?.overall_status || "unknown"}`,
     },
+    {
+      label: "Deployment Permission",
+      value: report.deployment_permission || "analysis_only",
+      note: report.trust_tier || "blocked",
+    },
+    {
+      label: "Live Readiness",
+      value:
+        report.live_readiness_score == null
+          ? report.model_readiness_status || "unknown"
+          : Number(report.live_readiness_score).toFixed(1),
+      note: report.deployment_mode || "research_only",
+    },
   ];
   qs("#assistant-analyze-response").textContent = formatJson(report);
   renderDashboardSummary(report);
@@ -1863,12 +2208,20 @@ const renderAssistantReport = (report) => {
     "Evidence / Provenance",
     report.evidence_provenance
   );
+  renderTextSection(
+    "#assistant-deployment-summary-section",
+    "Deployment Readiness Summary",
+    report.deployment_readiness_summary
+  );
   renderEvidenceSupport(report);
   renderArtifactLedger(report);
   renderDomainStatusGrid(report);
   renderFactorGrid(report);
   renderResearchDrilldown(report);
   renderSystemAudit(report);
+  renderDeploymentReadiness(report);
+  renderDeploymentRiskBudget(report);
+  renderDeploymentAudit(report);
   renderCompareWorkspace();
   renderWatchlistWorkspace();
   renderRecentAnalyses();

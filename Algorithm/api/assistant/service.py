@@ -18,6 +18,11 @@ from api.assistant.phase6 import (
     build_evaluation_artifact,
     build_prediction_record,
 )
+from api.assistant.phase8 import (
+    DEPLOYMENT_AUDIT_RECORD_KIND,
+    DEPLOYMENT_READINESS_ARTIFACT_KIND,
+    build_deployment_readiness_artifact,
+)
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
@@ -246,6 +251,26 @@ async def generate_analysis_report(
         prediction_record_id=prediction_record_id,
         evaluation_artifact_id=evaluation_artifact_id,
     )
+    deployment_readiness = build_deployment_readiness_artifact(
+        current_report=report,
+        store=store,
+    )
+    deployment_readiness_artifact_id = store.save_artifact(
+        sid,
+        DEPLOYMENT_READINESS_ARTIFACT_KIND,
+        deployment_readiness,
+    )
+    deployment_audit_artifact_id = store.save_artifact(
+        sid,
+        DEPLOYMENT_AUDIT_RECORD_KIND,
+        deployment_readiness.get("audit_snapshot") or {},
+    )
+    report = reports.attach_deployment_context(
+        report,
+        deployment_readiness,
+        readiness_artifact_id=deployment_readiness_artifact_id,
+        deployment_audit_artifact_id=deployment_audit_artifact_id,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -258,6 +283,15 @@ async def generate_analysis_report(
                 "job_id": job_context.get("job_id"),
                 "trace_id": job_context.get("trace_id"),
                 "artifact_id": job_context_id,
+            },
+            "deployment_readiness": {
+                "artifact_id": deployment_readiness_artifact_id,
+                "audit_artifact_id": deployment_audit_artifact_id,
+                "deployment_mode": report.get("deployment_mode"),
+                "deployment_permission": report.get("deployment_permission"),
+                "trust_tier": report.get("trust_tier"),
+                "live_readiness_score": report.get("live_readiness_score"),
+                "rollout_stage": report.get("rollout_stage"),
             },
         },
     )
@@ -274,6 +308,8 @@ async def generate_analysis_report(
             "strategy_artifact_id": strategy_id,
             "prediction_record_artifact_id": prediction_record_id,
             "evaluation_artifact_id": evaluation_artifact_id,
+            "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
+            "deployment_audit_artifact_id": deployment_audit_artifact_id,
             "active_analysis": active_analysis,
         },
     )
@@ -287,6 +323,8 @@ async def generate_analysis_report(
         "strategy_artifact_id": strategy_id,
         "prediction_record_artifact_id": prediction_record_id,
         "evaluation_artifact_id": evaluation_artifact_id,
+        "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
+        "deployment_audit_artifact_id": deployment_audit_artifact_id,
         "active_analysis": active_analysis,
     }
 

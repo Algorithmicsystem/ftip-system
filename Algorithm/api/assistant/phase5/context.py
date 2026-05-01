@@ -73,6 +73,10 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "risks_weaknesses_invalidators": report.get("risks_weaknesses_invalidators") or "",
         "evidence_provenance": report.get("evidence_provenance") or "",
         "evaluation_research_analysis": report.get("evaluation_research_analysis") or "",
+        "deployment_readiness_summary": report.get("deployment_readiness_summary") or "",
+        "deployment_permission_analysis": report.get("deployment_permission_analysis") or "",
+        "risk_budget_exposure_analysis": report.get("risk_budget_exposure_analysis") or "",
+        "rollout_stage_summary": report.get("rollout_stage_summary") or "",
     }
 
 
@@ -128,6 +132,13 @@ def build_narrator_context(
     }
 
     freshness_summary = report.get("freshness_summary") or {}
+    deployment_readiness = report.get("deployment_readiness") or {}
+    deployment_mode = deployment_readiness.get("deployment_mode") or {}
+    model_readiness = deployment_readiness.get("model_readiness") or {}
+    deployment_permission = deployment_readiness.get("deployment_permission") or {}
+    risk_budgeting = deployment_readiness.get("risk_budgeting") or {}
+    rollout = deployment_readiness.get("rollout_workflow") or {}
+    drift_monitor = deployment_readiness.get("drift_monitor") or {}
     active_context = {
         "session_id": active_analysis.get("session_id"),
         "symbol": active_analysis.get("symbol") or report.get("symbol"),
@@ -146,6 +157,15 @@ def build_narrator_context(
         "strategy_version": active_analysis.get("strategy_version")
         or report.get("strategy_version")
         or strategy.get("strategy_version"),
+        "deployment_mode": active_analysis.get("deployment_mode") or report.get("deployment_mode"),
+        "deployment_permission": active_analysis.get("deployment_permission")
+        or report.get("deployment_permission"),
+        "trust_tier": active_analysis.get("trust_tier") or report.get("trust_tier"),
+        "live_readiness_status": active_analysis.get("live_readiness_status")
+        or report.get("model_readiness_status"),
+        "live_readiness_score": active_analysis.get("live_readiness_score")
+        or report.get("live_readiness_score"),
+        "rollout_stage": active_analysis.get("rollout_stage") or report.get("rollout_stage"),
     }
 
     return {
@@ -206,8 +226,53 @@ def build_narrator_context(
             "risks_weaknesses_invalidators": sections["risks_weaknesses_invalidators"],
             "evidence_provenance": sections["evidence_provenance"],
             "evaluation_research_analysis": sections["evaluation_research_analysis"],
+            "deployment_readiness_summary": sections["deployment_readiness_summary"],
+            "deployment_permission_analysis": sections["deployment_permission_analysis"],
+            "risk_budget_exposure_analysis": sections["risk_budget_exposure_analysis"],
+            "rollout_stage_summary": sections["rollout_stage_summary"],
         },
         "evaluation_snapshot": report.get("evaluation") or {},
+        "deployment_readiness_snapshot": {
+            "deployment_mode": deployment_mode.get("active_mode") or report.get("deployment_mode"),
+            "trust_tier": deployment_permission.get("trust_tier") or report.get("trust_tier"),
+            "deployment_permission": deployment_permission.get("deployment_permission")
+            or report.get("deployment_permission"),
+            "paper_vs_live_classification": deployment_permission.get("paper_vs_live_classification"),
+            "model_readiness_status": model_readiness.get("model_readiness_status")
+            or report.get("model_readiness_status"),
+            "live_readiness_score": model_readiness.get("live_readiness_score")
+            or report.get("live_readiness_score"),
+            "blockers": _compact_list(
+                deployment_permission.get("deployment_blockers")
+                or model_readiness.get("live_readiness_blockers")
+                or report.get("deployment_blockers")
+                or report.get("live_readiness_blockers")
+                or []
+            ),
+            "minimum_required_review": deployment_permission.get("minimum_required_review")
+            or report.get("minimum_required_review"),
+            "human_review_required": deployment_permission.get("human_review_required")
+            if deployment_permission
+            else report.get("human_review_required"),
+            "risk_budget_tier": risk_budgeting.get("risk_budget_tier")
+            or report.get("risk_budget_tier"),
+            "exposure_caution_level": risk_budgeting.get("exposure_caution_level")
+            or report.get("exposure_caution_level"),
+            "rollout_stage": rollout.get("rollout_stage") or report.get("rollout_stage"),
+            "readiness_checkpoint": rollout.get("readiness_checkpoint")
+            or report.get("readiness_checkpoint"),
+            "pause_recommended": drift_monitor.get("pause_recommended")
+            if drift_monitor
+            else report.get("pause_recommended"),
+            "degrade_to_paper_recommended": drift_monitor.get("degrade_to_paper_recommended")
+            if drift_monitor
+            else report.get("degrade_to_paper_recommended"),
+            "drift_alerts": _compact_list(
+                drift_monitor.get("drift_alerts")
+                or report.get("drift_alerts")
+                or []
+            ),
+        },
         "selected_sections": selected_sections,
         "scenario_matrix": _scenario_snapshot(report),
         "invalidators": {
