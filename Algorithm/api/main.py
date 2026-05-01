@@ -89,6 +89,15 @@ def _clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 # =============================================================================
 # Phase 4: Prosperity DB (Railway Postgres) - SAFE feature-flagged persistence
 # =============================================================================
@@ -403,6 +412,9 @@ def _load_calibration_single() -> Tuple[bool, Optional[Dict[str, Any]]]:
 class Candle(BaseModel):
     timestamp: str  # ISO date "YYYY-MM-DD" (daily)
     close: float
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
     volume: Optional[float] = None
 
     # optional extra features (supported for future use)
@@ -456,6 +468,18 @@ class SignalResponse(BaseModel):
     # calibration diagnostics
     calibration_loaded: bool = False
     calibration_meta: Optional[Dict[str, Any]] = None
+    reason_codes: List[str] = Field(default_factory=list)
+    reason_details: Dict[str, Any] = Field(default_factory=dict)
+    entry_low: Optional[float] = None
+    entry_high: Optional[float] = None
+    stop_loss: Optional[float] = None
+    take_profit_1: Optional[float] = None
+    take_profit_2: Optional[float] = None
+    meta: Optional[Dict[str, Any]] = None
+    snapshot_id: Optional[str] = None
+    snapshot_version: Optional[str] = None
+    feature_version: Optional[str] = None
+    signal_version: Optional[str] = None
 
 
 class SignalsRequest(BaseModel):
@@ -694,6 +718,9 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
             candles.append(
                 Candle(
                     timestamp=day,
+                    open=float(r.get("o")) if r.get("o") is not None else None,
+                    high=float(r.get("h")) if r.get("h") is not None else None,
+                    low=float(r.get("l")) if r.get("l") is not None else None,
                     close=float(c),
                     volume=float(v) if v is not None else None,
                 )
@@ -731,7 +758,7 @@ def massive_fetch_daily_bars_cached(
             end_d = _dt.date.fromisoformat(to_date)
             rows = db.safe_fetchall(
                 """
-                SELECT date, close, volume FROM prosperity_daily_bars
+                SELECT date, open, high, low, close, volume FROM prosperity_daily_bars
                 WHERE symbol=%s AND date BETWEEN %s AND %s ORDER BY date ASC
                 """,
                 (s, start_d, end_d),
@@ -755,8 +782,11 @@ def massive_fetch_daily_bars_cached(
                 bars = [
                     Candle(
                         timestamp=r[0].isoformat(),
-                        close=float(r[1]),
-                        volume=float(r[2]) if r[2] is not None else None,
+                        open=float(r[1]) if r[1] is not None else None,
+                        high=float(r[2]) if r[2] is not None else None,
+                        low=float(r[3]) if r[3] is not None else None,
+                        close=float(r[4]),
+                        volume=float(r[5]) if r[5] is not None else None,
                     )
                     for r in rows
                 ]
@@ -857,77 +887,52 @@ def _zscore_last(values: List[float], window: int) -> float:
     return float((w[-1] - mu) / sd)
 
 
-def compute_features(candles: List[Candle]) -> Dict[str, float]:
-    closes = [c.close for c in candles]
-    vols = [float(c.volume or 0.0) for c in candles]
+def compute_features(candles: List[Candle]) -> Dict[str, Any]:
+    from api.alpha import build_canonical_features
+    from api.research import build_research_snapshot_from_candles
 
-    def mom(k: int) -> float:
-        if len(closes) < k + 1:
-            return 0.0
-        return float(closes[-1] / closes[-1 - k] - 1.0)
-
-    r = _pct_change(closes)
-    vol_ann = _std(r[1:]) * math.sqrt(252.0) if len(r) > 2 else 0.0
-
-    sma20 = _sma(closes, 20)
-    sma50 = _sma(closes, 50)
-    trend = 0.0
-    if not (math.isnan(sma20) or math.isnan(sma50)) and sma50 != 0:
-        trend = float((sma20 / sma50) - 1.0)
-
-    return {
-        "mom_5": mom(5),
-        "mom_21": mom(21),
-        "mom_63": mom(63),
-        "trend_sma20_50": trend,
-        "volatility_ann": float(vol_ann),
-        "rsi14": float(_rsi(closes, 14)),
-        "volume_z20": float(_zscore_last(vols, 20)),
-        "last_close": float(closes[-1]),
-    }
+    if not candles:
+        return {}
+    latest_date = max(_parse_date(c.timestamp) for c in candles)
+    snapshot = build_research_snapshot_from_candles(
+        "UNKNOWN",
+        latest_date,
+        252,
+        candles,
+        source_hint="provided_market_bars",
+        include_reference_context=False,
+    )
+    payload = build_canonical_features(snapshot)
+    features = payload.get("features") or {}
+    normalized: Dict[str, Any] = {}
+    for key, value in features.items():
+        if isinstance(value, (int, float)):
+            normalized[key] = float(value)
+        else:
+            normalized[key] = value
+    return normalized
 
 
 def detect_regime(features: Dict[str, float]) -> str:
-    vol = float(features.get("volatility_ann", 0.0))
-    trend = abs(float(features.get("trend_sma20_50", 0.0)))
+    from api.alpha.canonical_features import classify_signal_regime
 
-    if vol >= 0.45:
-        return "HIGH_VOL"
-    if trend >= 0.05:
-        return "TRENDING"
-    return "CHOPPY"
+    _label, _strength, signal_regime = classify_signal_regime(features)
+    return signal_regime
 
 
 def score_from_features(features: Dict[str, float]) -> Tuple[float, List[str]]:
-    notes: List[str] = []
+    from api.alpha import build_signal_from_features
 
-    rsi = float(features.get("rsi14", 50.0))
-    rsi_sig = _clamp((rsi - 50.0) / 25.0, -1.0, 1.0)
-
-    mom = 0.4 * float(features.get("mom_21", 0.0)) + 0.6 * float(
-        features.get("mom_63", 0.0)
+    payload = build_signal_from_features(
+        dict(features),
+        quality_score=100,
+        latest_close=_safe_float(features.get("last_close")),
+        snapshot_meta={"coverage_status": "available", "available_history_bars": 252},
+        mode_hint="base",
     )
-    mom_sig = _clamp(mom / 0.25, -1.0, 1.0)
-
-    trend = float(features.get("trend_sma20_50", 0.0))
-    trend_sig = _clamp(trend / 0.10, -1.0, 1.0)
-    if trend > 0:
-        notes.append("Short-term trend (SMA20 vs SMA50) is positive.")
-    elif trend < 0:
-        notes.append("Short-term trend (SMA20 vs SMA50) is negative.")
-
-    volz = float(features.get("volume_z20", 0.0))
-    vol_sig = _clamp(volz / 3.0, -1.0, 1.0)
-
-    vola = float(features.get("volatility_ann", 0.0))
-    vola_pen = _clamp((vola - 0.25) / 0.50, 0.0, 0.5)
-
-    raw = 0.45 * mom_sig + 0.30 * trend_sig + 0.20 * rsi_sig + 0.05 * vol_sig
-    score = _clamp(raw * (1.0 - vola_pen), -1.0, 1.0)
-
-    if vola >= 0.45:
-        notes.append("Volatility is elevated; treat signal with caution.")
-    return float(score), notes
+    return float(payload.get("base_score") or payload.get("score") or 0.0), list(
+        payload.get("notes") or []
+    )
 
 
 def _env_csv_floats(name: str, default: List[float]) -> List[float]:
@@ -984,26 +989,18 @@ def _score_components_from_features(features: Dict[str, float]) -> Dict[str, flo
 def stacked_score_from_features(
     features: Dict[str, float], regime: str
 ) -> Tuple[float, Dict[str, Any]]:
-    comps = _score_components_from_features(features)
-    w = _stack_weights_for_regime(regime)
+    from api.alpha import build_signal_from_features
 
-    raw = (
-        w["short"] * comps["short"]
-        + w["mid"] * comps["mid"]
-        + w["long"] * comps["long"]
+    payload = build_signal_from_features(
+        dict(features),
+        quality_score=100,
+        latest_close=_safe_float(features.get("last_close")),
+        snapshot_meta={"coverage_status": "available", "available_history_bars": 252},
+        mode_hint="stacked",
     )
-
-    vola = float(features.get("volatility_ann", 0.0))
-    vola_pen = _clamp((vola - 0.25) / 0.50, 0.0, 0.5)
-    score = _clamp(raw * (1.0 - vola_pen), -1.0, 1.0)
-
-    meta = {
-        "stack_weights": w,
-        "components": comps,
-        "vola_penalty": float(vola_pen),
-        "raw_before_vol_penalty": float(raw),
-    }
-    return float(score), meta
+    return float(payload.get("stacked_score") or payload.get("score") or 0.0), dict(
+        payload.get("stacked_meta") or {}
+    )
 
 
 # =============================================================================
@@ -1107,91 +1104,7 @@ def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalR
     from_guess = (as_of_d - dt.timedelta(days=900)).isoformat()
 
     candles_all = massive_fetch_daily_bars_cached(symbol, from_guess, as_of)
-    candles_upto = _filter_upto(candles_all, as_of)
-
-    if len(candles_upto) < 30:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Not enough data <= {as_of}. Need 30, got {len(candles_upto)}.",
-        )
-
-    effective = min(int(lookback), len(candles_upto))
-    window = candles_upto[-effective:]
-
-    feats = compute_features(window)
-    regime = detect_regime(feats)
-
-    base_score, notes = score_from_features(feats)
-    stack_score, stack_meta = stacked_score_from_features(feats, regime)
-
-    mode = _score_mode()
-    if mode == "stacked":
-        score = float(stack_score)
-        notes.append("Score mode: STACKED (multi-horizon).")
-    else:
-        score = float(base_score)
-        notes.append("Score mode: BASE (legacy).")
-
-    cal_loaded, cal = _load_calibration_for_symbol(symbol)
-    thr = _thresholds_for_regime(regime, cal)
-
-    sig = "HOLD"
-    if score >= thr["buy"]:
-        sig = "BUY"
-    elif score <= thr["sell"]:
-        sig = "SELL"
-
-    conf = abs(score)
-    if regime == "HIGH_VOL":
-        conf *= 0.65
-        notes.append("Confidence reduced due to HIGH_VOL regime.")
-
-    if effective < lookback:
-        notes.insert(
-            0,
-            f"Requested lookback={lookback}, only {effective} bars available. Using effective_lookback={effective}.",
-        )
-
-    if regime == "TRENDING":
-        notes.append("Regime: TRENDING.")
-    elif regime == "CHOPPY":
-        notes.append("Regime: CHOPPY.")
-    else:
-        notes.append("Regime: HIGH_VOL.")
-
-    if cal_loaded:
-        notes.append(
-            "Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON."
-        )
-
-    meta = None
-    if cal_loaded and cal:
-        meta = {
-            "optimize_horizon": cal.get("optimize_horizon"),
-            "created_at_utc": cal.get("created_at_utc"),
-            "symbol": cal.get("symbol"),
-            "train_range": cal.get("train_range"),
-        }
-
-    return SignalResponse(
-        symbol=(symbol or "").strip().upper(),
-        as_of=as_of,
-        lookback=int(lookback),
-        effective_lookback=int(effective),
-        regime=regime,
-        thresholds=thr,
-        score=float(score),
-        signal=sig,
-        confidence=float(conf),
-        features={k: float(v) for k, v in feats.items()},
-        notes=notes,
-        score_mode=mode,
-        base_score=float(base_score),
-        stacked_score=float(stack_score),
-        stacked_meta=stack_meta,
-        calibration_loaded=bool(cal_loaded),
-        calibration_meta=meta,
-    )
+    return compute_signal_for_symbol_from_candles(symbol, as_of, lookback, candles_all)
 
 
 def compute_signal_for_symbol_from_candles(
@@ -1200,6 +1113,9 @@ def compute_signal_for_symbol_from_candles(
     lookback: int,
     candles_all: List[Candle],
 ) -> SignalResponse:
+    from api.alpha import build_canonical_features, build_canonical_signal
+    from api.research import build_research_snapshot_from_candles
+
     candles_upto = _filter_upto(candles_all, as_of)
 
     if len(candles_upto) < 30:
@@ -1208,82 +1124,47 @@ def compute_signal_for_symbol_from_candles(
             detail=f"Not enough data to compute signal. Need at least 30 bars <= {as_of}, got {len(candles_upto)}.",
         )
 
-    effective = min(int(lookback), len(candles_upto))
-    window = candles_upto[-effective:]
-
-    feats = compute_features(window)
-    regime = detect_regime(feats)
-
-    base_score, notes = score_from_features(feats)
-    stack_score, stack_meta = stacked_score_from_features(feats, regime)
-
-    mode = _score_mode()
-    if mode == "stacked":
-        score = float(stack_score)
-        notes.append("Score mode: STACKED (multi-horizon).")
-    else:
-        score = float(base_score)
-        notes.append("Score mode: BASE (legacy).")
-
-    cal_loaded, cal = _load_calibration_for_symbol(symbol)
-    thr = _thresholds_for_regime(regime, cal)
-
-    sig = "HOLD"
-    if score >= thr["buy"]:
-        sig = "BUY"
-    elif score <= thr["sell"]:
-        sig = "SELL"
-
-    conf = abs(score)
-    if regime == "HIGH_VOL":
-        conf *= 0.65
-        notes.append("Confidence reduced due to HIGH_VOL regime.")
-
-    if effective < lookback:
-        notes.insert(
-            0,
-            f"Requested lookback={lookback}, but only {effective} bars available by {as_of}. Using effective_lookback={effective}.",
-        )
-
-    if regime == "TRENDING":
-        notes.append("Regime: TRENDING.")
-    elif regime == "CHOPPY":
-        notes.append("Regime: CHOPPY.")
-    else:
-        notes.append("Regime: HIGH_VOL.")
-
-    if cal_loaded:
-        notes.append(
-            "Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON."
-        )
-
-    meta = None
-    if cal_loaded and cal:
-        meta = {
-            "optimize_horizon": cal.get("optimize_horizon"),
-            "created_at_utc": cal.get("created_at_utc"),
-            "symbol": cal.get("symbol"),
-            "train_range": cal.get("train_range"),
-        }
+    snapshot = build_research_snapshot_from_candles(
+        symbol,
+        _parse_date(as_of),
+        lookback,
+        candles_upto,
+        source_hint="provided_market_bars",
+        include_reference_context=False,
+    )
+    feature_payload = build_canonical_features(snapshot)
+    signal_payload = build_canonical_signal(snapshot, feature_payload)
 
     return SignalResponse(
         symbol=(symbol or "").strip().upper(),
         as_of=as_of,
         lookback=int(lookback),
-        effective_lookback=int(effective),
-        regime=regime,
-        thresholds=thr,
-        score=float(score),
-        signal=sig,
-        confidence=float(conf),
-        features={k: float(v) for k, v in feats.items()},
-        notes=notes,
-        score_mode=mode,
-        base_score=float(base_score),
-        stacked_score=float(stack_score),
-        stacked_meta=stack_meta,
-        calibration_loaded=bool(cal_loaded),
-        calibration_meta=meta,
+        effective_lookback=int(signal_payload.get("effective_lookback") or len(candles_upto)),
+        regime=str(signal_payload.get("regime") or "CHOPPY"),
+        thresholds=dict(signal_payload.get("thresholds") or {}),
+        score=float(signal_payload.get("score") or 0.0),
+        signal=str(signal_payload.get("signal") or "HOLD"),
+        confidence=float(signal_payload.get("confidence") or 0.0),
+        features={k: float(v) for k, v in (signal_payload.get("features") or {}).items()},
+        notes=list(signal_payload.get("notes") or []),
+        score_mode=str(signal_payload.get("score_mode") or "stacked"),
+        base_score=_safe_float(signal_payload.get("base_score")),
+        stacked_score=_safe_float(signal_payload.get("stacked_score")),
+        stacked_meta=dict(signal_payload.get("stacked_meta") or {}),
+        calibration_loaded=bool(signal_payload.get("calibration_loaded")),
+        calibration_meta=signal_payload.get("calibration_meta"),
+        reason_codes=list(signal_payload.get("reason_codes") or []),
+        reason_details=dict(signal_payload.get("reason_details") or {}),
+        entry_low=_safe_float(signal_payload.get("entry_low")),
+        entry_high=_safe_float(signal_payload.get("entry_high")),
+        stop_loss=_safe_float(signal_payload.get("stop_loss")),
+        take_profit_1=_safe_float(signal_payload.get("take_profit_1")),
+        take_profit_2=_safe_float(signal_payload.get("take_profit_2")),
+        meta=dict(signal_payload.get("meta") or {}),
+        snapshot_id=(signal_payload.get("meta") or {}).get("snapshot_id"),
+        snapshot_version=(signal_payload.get("meta") or {}).get("snapshot_version"),
+        feature_version=(signal_payload.get("meta") or {}).get("feature_version"),
+        signal_version=(signal_payload.get("meta") or {}).get("signal_version"),
     )
 
 
@@ -1318,24 +1199,20 @@ def walk_forward_table(
         if len(window) < 30:
             continue
 
-        feats = compute_features(window)
-        regime = detect_regime(feats)
-
-        base_score, _ = score_from_features(feats)
-        stack_score, _stack_meta = stacked_score_from_features(feats, regime)
-        score = float(stack_score) if mode == "stacked" else float(base_score)
-
-        thr = _thresholds_for_regime(regime, cal)
-
-        sig = "HOLD"
-        if score >= thr["buy"]:
-            sig = "BUY"
-        elif score <= thr["sell"]:
-            sig = "SELL"
-
-        conf = abs(score)
-        if regime == "HIGH_VOL":
-            conf *= 0.65
+        signal_payload = compute_signal_for_symbol_from_candles(
+            symbol,
+            dates[i],
+            lookback,
+            candles_all,
+        )
+        score = float(
+            signal_payload.stacked_score
+            if mode == "stacked"
+            else signal_payload.base_score or signal_payload.score
+        )
+        sig = signal_payload.signal
+        conf = float(signal_payload.confidence)
+        regime = signal_payload.regime
 
         row: Dict[str, Any] = {
             "date": dates[i],
@@ -1728,83 +1605,13 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             cs_all = candles_by_sym.get(symbol, [])
             if not cs_all:
                 return None
-
-            cutoff = _parse_date(as_of)
-            cs_upto: List[Candle] = []
-            for c in cs_all:
-                try:
-                    d0 = _parse_date(c.timestamp)
-                except Exception:
-                    continue
-                if d0 <= cutoff:
-                    cs_upto.append(c)
-
-            if len(cs_upto) < 30:
-                return None
-
-            eff = min(int(lookback), len(cs_upto))
-            window = cs_upto[-eff:]
-
-            feats = compute_features(window)
-            regime = detect_regime(feats)
-
-            base_score, notes = score_from_features(feats)
-            stack_score, stack_meta = stacked_score_from_features(feats, regime)
-
-            if mode == "stacked":
-                score = float(stack_score)
-                notes.append("Score mode: STACKED (multi-horizon).")
-            else:
-                score = float(base_score)
-                notes.append("Score mode: BASE (legacy).")
-
-            cal_loaded, cal = _load_calibration_for_symbol(symbol)
-            thr = _thresholds_for_regime(regime, cal)
-
-            sig = "HOLD"
-            if score >= thr["buy"]:
-                sig = "BUY"
-            elif score <= thr["sell"]:
-                sig = "SELL"
-
-            conf = abs(score)
-            if regime == "HIGH_VOL":
-                conf *= 0.65
-                notes.append("Confidence reduced due to HIGH_VOL regime.")
-
-            if cal_loaded:
-                notes.append(
-                    "Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON."
+            try:
+                payload = compute_signal_for_symbol_from_candles(
+                    symbol, as_of, lookback, cs_all
                 )
-
-            meta = None
-            if cal_loaded and cal:
-                meta = {
-                    "optimize_horizon": cal.get("optimize_horizon"),
-                    "created_at_utc": cal.get("created_at_utc"),
-                    "symbol": cal.get("symbol"),
-                    "train_range": cal.get("train_range"),
-                }
-
-            return {
-                "symbol": symbol,
-                "as_of": as_of,
-                "lookback": int(lookback),
-                "effective_lookback": int(eff),
-                "regime": regime,
-                "thresholds": thr,
-                "score": float(score),
-                "signal": sig,
-                "confidence": float(conf),
-                "features": {k: float(v) for k, v in feats.items()},
-                "notes": notes,
-                "score_mode": mode,
-                "base_score": float(base_score),
-                "stacked_score": float(stack_score),
-                "stacked_meta": stack_meta,
-                "calibration_loaded": bool(cal_loaded),
-                "calibration_meta": meta,
-            }
+            except HTTPException:
+                return None
+            return payload.model_dump()
 
         def _weights_for_date(as_of: str) -> Tuple[Dict[str, float], float]:
             max_w = (

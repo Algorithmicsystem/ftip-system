@@ -7,8 +7,10 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
+from api.alpha import CANONICAL_SIGNAL_VERSION, build_canonical_features, build_canonical_signal
 from api import config, db
 from api.data_providers import canonical_symbol
+from api.research import build_research_snapshot
 from ftip.friction import CostModel as FrictionCostModel
 from ftip.friction import ExecutionPlan, FrictionEngine, MarketStateInputs
 
@@ -130,27 +132,42 @@ def _fetch_quality_score(symbol: str, as_of_date: dt.date) -> int:
 def _compute_signal_if_missing(
     symbol: str, as_of_date: dt.date
 ) -> Optional[Dict[str, Any]]:
-    from api.signal_engine import compute_daily_signal
-
-    features = _fetch_features(symbol, as_of_date)
-    if not features:
+    signal = _compute_canonical_signal_for_date(symbol, as_of_date)
+    if not signal:
         return None
-    bars = db.safe_fetchone(
-        """
-        SELECT close
-        FROM market_bars_daily
-        WHERE symbol = %s AND as_of_date = %s
-        """,
-        (symbol, as_of_date),
-    )
-    if not bars:
-        return None
-    quality_score = _fetch_quality_score(symbol, as_of_date)
-    signal = compute_daily_signal(features, quality_score, float(bars[0]))
     return {
         "action": signal["action"],
         "score": signal["score"],
         "confidence": signal["confidence"],
+    }
+
+
+def _compute_canonical_signal_for_date(
+    symbol: str, as_of_date: dt.date, lookback: int = 252
+) -> Optional[Dict[str, Any]]:
+    try:
+        snapshot = build_research_snapshot(
+            symbol,
+            as_of_date,
+            lookback,
+            lookback_days=max(420, lookback * 2),
+            include_reference_context=False,
+        )
+    except Exception:
+        return None
+    if len(snapshot.get("price_bars") or []) < 30:
+        return None
+    feature_payload = build_canonical_features(snapshot)
+    signal_payload = build_canonical_signal(
+        snapshot,
+        feature_payload,
+        quality_score=_fetch_quality_score(symbol, as_of_date),
+    )
+    return {
+        "action": signal_payload.get("signal"),
+        "score": signal_payload.get("score"),
+        "confidence": signal_payload.get("confidence"),
+        "payload": signal_payload,
     }
 
 
@@ -282,7 +299,7 @@ def run_backtest(
 
     signal_version = signal_version_hash
     if signal_version_hash == "auto":
-        signal_version = config.env("FTIP_SIGNAL_VERSION_HASH", "auto") or "auto"
+        signal_version = config.env("FTIP_SIGNAL_VERSION_HASH", CANONICAL_SIGNAL_VERSION) or CANONICAL_SIGNAL_VERSION
 
     symbols = _resolve_symbols(symbol, universe)
     if not symbols:

@@ -166,6 +166,11 @@ def build_narrator_context(
         "strategy_version": active_analysis.get("strategy_version")
         or report.get("strategy_version")
         or strategy.get("strategy_version"),
+        "snapshot_id": active_analysis.get("snapshot_id") or report.get("snapshot_id"),
+        "snapshot_version": active_analysis.get("snapshot_version")
+        or report.get("snapshot_version"),
+        "feature_version": active_analysis.get("feature_version") or report.get("feature_version"),
+        "signal_version": active_analysis.get("signal_version") or report.get("signal_version"),
         "deployment_mode": active_analysis.get("deployment_mode") or report.get("deployment_mode"),
         "deployment_permission": active_analysis.get("deployment_permission")
         or report.get("deployment_permission"),

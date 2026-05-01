@@ -357,7 +357,34 @@ def fetch_key_features(symbol: str, as_of_date: dt.date) -> Dict[str, Any]:
         (symbol, as_of_date),
     )
     if not row:
-        return {}
+        prosperity_row = db.safe_fetchone(
+            """
+            SELECT features, meta
+            FROM prosperity_features_daily
+            WHERE symbol = %s AND as_of = %s
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (symbol, as_of_date),
+        )
+        if not prosperity_row:
+            return {}
+        features = dict(prosperity_row[0] or {})
+        return {
+            "ret_1d": features.get("ret_1d"),
+            "ret_5d": features.get("ret_5d"),
+            "ret_21d": features.get("ret_21d"),
+            "vol_21d": features.get("vol_21d"),
+            "vol_63d": features.get("vol_63d"),
+            "atr_pct": features.get("atr_pct"),
+            "trend_slope_21d": features.get("trend_slope_21d"),
+            "trend_slope_63d": features.get("trend_slope_63d"),
+            "mom_vol_adj_21d": features.get("mom_vol_adj_21d"),
+            "sentiment_score": features.get("sentiment_score"),
+            "sentiment_surprise": features.get("sentiment_surprise"),
+            "regime_label": features.get("regime_label"),
+            "regime_strength": features.get("regime_strength"),
+        }
     return {
         "ret_1d": row[0],
         "ret_5d": row[1],
@@ -372,6 +399,134 @@ def fetch_key_features(symbol: str, as_of_date: dt.date) -> Dict[str, Any]:
         "sentiment_surprise": row[10],
         "regime_label": row[11],
         "regime_strength": row[12],
+    }
+
+
+def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, Any]:
+    try:
+        if not db.db_enabled() or not db.db_read_enabled():
+            return {}
+    except Exception:
+        return {}
+
+    feature_row = db.safe_fetchone(
+        """
+        SELECT feature_version, effective_lookback, snapshot_id, snapshot_version,
+               canonical_features, feature_meta
+        FROM features_daily
+        WHERE symbol = %s AND as_of_date = %s
+        """,
+        (symbol, as_of_date),
+    )
+    signal_row = db.safe_fetchone(
+        """
+        SELECT signal_version, effective_lookback, regime, thresholds, score_mode,
+               base_score, stacked_score, snapshot_id, snapshot_version, signal_meta
+        FROM signals_daily
+        WHERE symbol = %s AND as_of_date = %s
+        """,
+        (symbol, as_of_date),
+    )
+
+    feature_vector: Dict[str, Any] = {}
+    feature_meta: Dict[str, Any] = {}
+    signal_meta: Dict[str, Any] = {}
+    lineage: Dict[str, Any] = {}
+    signal_payload: Dict[str, Any] = {}
+
+    if feature_row:
+        feature_meta = dict(feature_row[5] or {})
+        feature_vector = dict(feature_row[4] or {})
+        lineage.update(
+            {
+                "feature_version": feature_meta.get("feature_version")
+                or feature_meta.get("feature_schema_version")
+                or feature_row[0],
+                "effective_lookback": feature_row[1],
+                "snapshot_id": feature_row[2],
+                "snapshot_version": feature_row[3],
+            }
+        )
+    else:
+        prosperity_feature = db.safe_fetchone(
+            """
+            SELECT features, meta
+            FROM prosperity_features_daily
+            WHERE symbol = %s AND as_of = %s
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (symbol, as_of_date),
+        )
+        if prosperity_feature:
+            feature_vector = dict(prosperity_feature[0] or {})
+            feature_meta = dict(prosperity_feature[1] or {})
+            lineage.update(
+                {
+                    "feature_version": feature_meta.get("feature_version"),
+                    "effective_lookback": feature_meta.get("effective_lookback"),
+                    "snapshot_id": feature_meta.get("snapshot_id"),
+                    "snapshot_version": feature_meta.get("snapshot_version"),
+                }
+            )
+
+    if signal_row:
+        signal_meta = dict(signal_row[9] or {})
+        signal_payload = {
+            "regime": signal_row[2],
+            "thresholds": signal_row[3] or {},
+            "score_mode": signal_row[4],
+            "base_score": signal_row[5],
+            "stacked_score": signal_row[6],
+            "signal_meta": signal_meta,
+        }
+        lineage.update(
+            {
+                "signal_version": signal_meta.get("signal_version") or signal_row[0],
+                "effective_lookback": lineage.get("effective_lookback") or signal_row[1],
+                "snapshot_id": lineage.get("snapshot_id") or signal_row[7],
+                "snapshot_version": lineage.get("snapshot_version") or signal_row[8],
+            }
+        )
+    else:
+        as_of_column = _prosperity_signal_asof_column()
+        prosperity_signal = db.safe_fetchone(
+            f"""
+            SELECT score_mode, base_score, stacked_score, regime, thresholds, meta
+            FROM prosperity_signals_daily
+            WHERE symbol = %s AND {as_of_column} = %s
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (symbol, as_of_date),
+        )
+        if prosperity_signal:
+            signal_meta = dict(prosperity_signal[5] or {})
+            signal_payload = {
+                "score_mode": prosperity_signal[0],
+                "base_score": prosperity_signal[1],
+                "stacked_score": prosperity_signal[2],
+                "regime": prosperity_signal[3],
+                "thresholds": prosperity_signal[4] or {},
+                "signal_meta": signal_meta,
+            }
+            lineage.update(
+                {
+                    "signal_version": signal_meta.get("signal_version"),
+                    "snapshot_id": lineage.get("snapshot_id") or signal_meta.get("snapshot_id"),
+                    "snapshot_version": lineage.get("snapshot_version")
+                    or signal_meta.get("snapshot_version"),
+                }
+            )
+
+    if not lineage and not feature_vector and not signal_payload:
+        return {}
+    return {
+        "lineage": lineage,
+        "feature_vector": feature_vector,
+        "feature_meta": feature_meta,
+        "signal_payload": signal_payload,
+        "signal_meta": signal_meta,
     }
 
 

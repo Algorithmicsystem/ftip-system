@@ -184,6 +184,15 @@ async def generate_analysis_report(
 
     key_features = orchestrator.fetch_key_features(symbol, as_of_date)
     quality = orchestrator.fetch_quality(symbol, as_of_date, freshness)
+    canonical_core = orchestrator.fetch_canonical_core_record(symbol, as_of_date)
+    if canonical_core:
+        job_context["canonical_lineage"] = canonical_core.get("lineage") or {}
+        job_context["canonical_feature_vector"] = (
+            canonical_core.get("feature_vector") or {}
+        )
+        job_context["canonical_signal_payload"] = (
+            canonical_core.get("signal_payload") or {}
+        )
     evidence = {
         "reason_codes": signal.get("reason_codes") or [],
         "reason_details": signal.get("reason_details") or {},
@@ -366,6 +375,7 @@ async def generate_analysis_report(
             "deployment_audit_artifact_id": deployment_audit_artifact_id,
             "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
             "continuous_learning_artifact_id": continuous_learning_artifact_id,
+            "canonical_lineage": job_context.get("canonical_lineage") or {},
             "active_analysis": active_analysis,
         },
     )

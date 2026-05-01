@@ -563,6 +563,11 @@ def _migration_prosperity_signals_v1_uniqueness(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_canonical_alpha_core_lineage(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("024_canonical_alpha_core_lineage.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -594,6 +599,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "023_prosperity_signals_v1_uniqueness",
         _migration_prosperity_signals_v1_uniqueness,
+    ),
+    (
+        "024_canonical_alpha_core_lineage",
+        _migration_canonical_alpha_core_lineage,
     ),
 ]
 

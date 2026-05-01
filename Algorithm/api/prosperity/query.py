@@ -124,6 +124,9 @@ def latest_signal(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
         "calibration_meta": row[13],
         "meta": row[14],
         "signal_hash": row[15],
+        "signal_version": (row[14] or {}).get("signal_version") if isinstance(row[14], dict) else None,
+        "snapshot_id": (row[14] or {}).get("snapshot_id") if isinstance(row[14], dict) else None,
+        "snapshot_version": (row[14] or {}).get("snapshot_version") if isinstance(row[14], dict) else None,
     }
 
 
@@ -160,6 +163,9 @@ def signal_as_of(
         "calibration_meta": row[13],
         "meta": row[14],
         "signal_hash": row[15],
+        "signal_version": (row[14] or {}).get("signal_version") if isinstance(row[14], dict) else None,
+        "snapshot_id": (row[14] or {}).get("snapshot_id") if isinstance(row[14], dict) else None,
+        "snapshot_version": (row[14] or {}).get("snapshot_version") if isinstance(row[14], dict) else None,
     }
 
 
@@ -211,6 +217,9 @@ def latest_features(symbol: str, lookback: int) -> Optional[Dict[str, Any]]:
         "lookback": row[2],
         "features": row[3],
         "meta": row[4],
+        "feature_version": (row[4] or {}).get("feature_version") if isinstance(row[4], dict) else None,
+        "snapshot_id": (row[4] or {}).get("snapshot_id") if isinstance(row[4], dict) else None,
+        "snapshot_version": (row[4] or {}).get("snapshot_version") if isinstance(row[4], dict) else None,
     }
 
 
@@ -235,4 +244,7 @@ def features_as_of(
         "lookback": row[2],
         "features": row[3],
         "meta": row[4],
+        "feature_version": (row[4] or {}).get("feature_version") if isinstance(row[4], dict) else None,
+        "snapshot_id": (row[4] or {}).get("snapshot_id") if isinstance(row[4], dict) else None,
+        "snapshot_version": (row[4] or {}).get("snapshot_version") if isinstance(row[4], dict) else None,
     }

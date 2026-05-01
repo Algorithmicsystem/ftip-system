@@ -1,0 +1,17 @@
+ALTER TABLE features_daily
+    ADD COLUMN IF NOT EXISTS effective_lookback INT NULL,
+    ADD COLUMN IF NOT EXISTS snapshot_id TEXT NULL,
+    ADD COLUMN IF NOT EXISTS snapshot_version TEXT NULL,
+    ADD COLUMN IF NOT EXISTS canonical_features JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS feature_meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+ALTER TABLE signals_daily
+    ADD COLUMN IF NOT EXISTS effective_lookback INT NULL,
+    ADD COLUMN IF NOT EXISTS regime TEXT NULL,
+    ADD COLUMN IF NOT EXISTS thresholds JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS score_mode TEXT NULL,
+    ADD COLUMN IF NOT EXISTS base_score NUMERIC NULL,
+    ADD COLUMN IF NOT EXISTS stacked_score NUMERIC NULL,
+    ADD COLUMN IF NOT EXISTS snapshot_id TEXT NULL,
+    ADD COLUMN IF NOT EXISTS snapshot_version TEXT NULL,
+    ADD COLUMN IF NOT EXISTS signal_meta JSONB NOT NULL DEFAULT '{}'::jsonb;

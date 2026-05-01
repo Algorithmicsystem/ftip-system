@@ -897,6 +897,7 @@ def build_active_analysis_reference(
     report_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     strategy = report.get("strategy") or {}
+    canonical_lineage = report.get("canonical_lineage") or {}
     return sanitize_payload(
         {
             "report_id": report_id,
@@ -935,6 +936,10 @@ def build_active_analysis_reference(
                 strategy.get("strategy_version"),
                 report.get("strategy_version"),
             ),
+            "snapshot_id": canonical_lineage.get("snapshot_id"),
+            "snapshot_version": canonical_lineage.get("snapshot_version"),
+            "feature_version": canonical_lineage.get("feature_version"),
+            "signal_version": canonical_lineage.get("signal_version"),
             "deployment_mode": report.get("deployment_mode"),
             "deployment_permission": report.get("deployment_permission"),
             "trust_tier": report.get("trust_tier"),
@@ -1396,6 +1401,9 @@ def build_analysis_report(
     job_context = job_context or {}
     data_bundle = data_bundle or {}
     feature_factor_bundle = feature_factor_bundle or {}
+    canonical_lineage = sanitize_payload(
+        (job_context.get("canonical_lineage") or {})
+    )
 
     strategy_signal = (strategy.get("final_signal") or action).upper()
     strategy_confidence = _first_available(strategy.get("confidence"), confidence)
@@ -1613,6 +1621,11 @@ def build_analysis_report(
         "refresh_mode": job_context.get("refresh_mode"),
         "market_regime": job_context.get("market_regime"),
         "analysis_job": job_context,
+        "canonical_lineage": canonical_lineage,
+        "snapshot_id": canonical_lineage.get("snapshot_id"),
+        "snapshot_version": canonical_lineage.get("snapshot_version"),
+        "feature_version": canonical_lineage.get("feature_version"),
+        "signal_version": canonical_lineage.get("signal_version"),
         "freshness_summary": freshness_summary,
         "signal": signal_view,
         "key_features": key_features,

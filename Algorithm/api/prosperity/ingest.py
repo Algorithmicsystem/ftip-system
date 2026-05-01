@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Tuple
 from fastapi import HTTPException
 
 from api import db
+from api.alpha import CANONICAL_FEATURE_VERSION, build_canonical_features
+from api.research import build_research_snapshot_from_bars
 
 
 # Utility hashing
@@ -16,6 +18,26 @@ from api import db
 def _hash_dict(payload: Dict[str, Any]) -> str:
     blob = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _rows_to_bars(rows: List[Tuple[Any, ...]]) -> List[Dict[str, Any]]:
+    bars: List[Dict[str, Any]] = []
+    for row in rows:
+        date_value = row[0]
+        close_value = row[4] if len(row) > 4 else row[1]
+        volume_value = row[5] if len(row) > 5 else row[2] if len(row) > 2 else None
+        bars.append(
+            {
+                "date": date_value.isoformat() if hasattr(date_value, "isoformat") else str(date_value),
+                "open": row[1] if len(row) > 4 else close_value,
+                "high": row[2] if len(row) > 4 else close_value,
+                "low": row[3] if len(row) > 4 else close_value,
+                "close": close_value,
+                "volume": volume_value,
+                "source": "prosperity_daily_bars",
+            }
+        )
+    return bars
 
 
 def upsert_universe(symbols: List[str]) -> Tuple[int, List[str]]:
@@ -127,26 +149,27 @@ def compute_and_store_features(
     sym = (symbol or "").strip().upper()
     rows = db.safe_fetchall(
         """
-        SELECT date, close, volume FROM prosperity_daily_bars
+        SELECT date, open, high, low, close, volume
+        FROM prosperity_daily_bars
         WHERE symbol=%s AND date<=%s ORDER BY date ASC
         """,
         (sym, as_of_date),
     )
     if len(rows) < lookback:
         raise HTTPException(status_code=400, detail="insufficient bars for lookback")
-    window = rows[-lookback:]
-    from api.main import Candle, compute_features, detect_regime  # type: ignore
-
-    candles = [
-        Candle(
-            timestamp=r[0].isoformat(),
-            close=float(r[1]),
-            volume=float(r[2]) if r[2] is not None else None,
-        )
-        for r in window
-    ]
-    feats = compute_features(candles)
-    regime = detect_regime(feats)
+    bars = _rows_to_bars(rows)
+    snapshot = build_research_snapshot_from_bars(
+        sym,
+        as_of_date,
+        lookback,
+        bars,
+        source_hint="provided_market_bars",
+        include_reference_context=False,
+    )
+    feature_payload = build_canonical_features(snapshot)
+    feats = feature_payload.get("features") or {}
+    meta_payload = feature_payload.get("meta") or {}
+    regime = feats.get("signal_regime")
     payload = {
         **feats,
         "regime": regime,
@@ -154,6 +177,16 @@ def compute_and_store_features(
         "lookback": int(lookback),
     }
     features_hash = _hash_dict(payload)
+    meta = {
+        "regime": regime,
+        "features_hash": features_hash,
+        "feature_version": CANONICAL_FEATURE_VERSION,
+        "feature_schema_version": feature_payload.get("feature_schema_version"),
+        "snapshot_id": feature_payload.get("snapshot_id"),
+        "snapshot_version": feature_payload.get("snapshot_version"),
+        "effective_lookback": feature_payload.get("effective_lookback"),
+        "feature_meta": meta_payload,
+    }
 
     db.safe_execute(
         """
@@ -170,7 +203,7 @@ def compute_and_store_features(
             as_of_date,
             lookback,
             json.dumps(feats),
-            json.dumps({"regime": regime, "features_hash": features_hash}),
+            json.dumps(meta),
         ),
     )
     return {
@@ -180,6 +213,9 @@ def compute_and_store_features(
         "stored": True,
         "features": feats,
         "regime": regime,
+        "feature_version": CANONICAL_FEATURE_VERSION,
+        "snapshot_id": feature_payload.get("snapshot_id"),
+        "snapshot_version": feature_payload.get("snapshot_version"),
     }
 
 
@@ -189,7 +225,7 @@ def compute_and_store_signal(
     sym = (symbol or "").strip().upper()
     rows = db.safe_fetchall(
         """
-        SELECT date, close, volume FROM prosperity_daily_bars
+        SELECT date, open, high, low, close, volume FROM prosperity_daily_bars
         WHERE symbol=%s AND date<=%s ORDER BY date ASC
         """,
         (sym, as_of_date),
@@ -199,8 +235,11 @@ def compute_and_store_signal(
     candles_all = [
         Candle(
             timestamp=r[0].isoformat(),
-            close=float(r[1]),
-            volume=float(r[2]) if r[2] is not None else None,
+            open=float(r[1]) if len(r) > 4 and r[1] is not None else None,
+            high=float(r[2]) if len(r) > 4 and r[2] is not None else None,
+            low=float(r[3]) if len(r) > 4 and r[3] is not None else None,
+            close=float(r[4] if len(r) > 4 else r[1]),
+            volume=float(r[5] if len(r) > 5 else r[2]) if (r[5] if len(r) > 5 else r[2] if len(r) > 2 else None) is not None else None,
         )
         for r in rows
     ]

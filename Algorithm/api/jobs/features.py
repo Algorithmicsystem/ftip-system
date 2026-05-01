@@ -11,9 +11,11 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
 
+from api.alpha import build_canonical_features, features_daily_row
 from api import config, db, security
 from api.data_providers import canonical_symbol
-from api.feature_engine import compute_daily_features, compute_intraday_features
+from api.feature_engine import compute_intraday_features
+from api.research import build_research_snapshot_from_bars
 
 router = APIRouter(
     prefix="/jobs",
@@ -308,21 +310,36 @@ async def compute_features_daily(req: FeaturesDailyRequest):
             sentiment_score = sentiment_row[0] if sentiment_row else None
             sentiment_mean = sentiment_row[1] if sentiment_row else None
 
-            features = compute_daily_features(
-                bar_rows, sentiment_score=sentiment_score, sentiment_mean=sentiment_mean
+            snapshot = build_research_snapshot_from_bars(
+                symbol,
+                as_of_date,
+                252,
+                bar_rows,
+                source_hint="market_bars_daily",
             )
+            if sentiment_score is not None or sentiment_mean is not None:
+                snapshot["sentiment_history"] = [
+                    {
+                        "as_of_date": as_of_date.isoformat(),
+                        "sentiment_score": sentiment_score,
+                        "sentiment_mean": sentiment_mean,
+                    }
+                ]
+            feature_payload = build_canonical_features(snapshot)
+            feature_row = features_daily_row(feature_payload)
+            features = feature_payload.get("features") or {}
             if not features:
                 raise ValueError("feature computation failed")
-
             db.safe_execute(
                 """
                 INSERT INTO features_daily(
                     symbol, as_of_date, ret_1d, ret_5d, ret_21d, vol_21d, vol_63d,
                     atr_14, atr_pct, trend_slope_21d, trend_r2_21d, trend_slope_63d, trend_r2_63d,
                     mom_vol_adj_21d, maxdd_63d, dollar_vol_21d, sentiment_score, sentiment_surprise,
-                    regime_label, regime_strength, feature_version, computed_at
+                    regime_label, regime_strength, feature_version, effective_lookback, snapshot_id, snapshot_version,
+                    canonical_features, feature_meta, computed_at
                 ) VALUES (
-                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,now()
+                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,now()
                 )
                 ON CONFLICT (symbol, as_of_date)
                 DO UPDATE SET
@@ -344,30 +361,41 @@ async def compute_features_daily(req: FeaturesDailyRequest):
                     sentiment_surprise = EXCLUDED.sentiment_surprise,
                     regime_label = EXCLUDED.regime_label,
                     regime_strength = EXCLUDED.regime_strength,
-                    feature_version = 1,
+                    feature_version = EXCLUDED.feature_version,
+                    effective_lookback = EXCLUDED.effective_lookback,
+                    snapshot_id = EXCLUDED.snapshot_id,
+                    snapshot_version = EXCLUDED.snapshot_version,
+                    canonical_features = EXCLUDED.canonical_features,
+                    feature_meta = EXCLUDED.feature_meta,
                     computed_at = now()
                 """,
                 (
                     symbol,
                     as_of_date,
-                    features.get("ret_1d"),
-                    features.get("ret_5d"),
-                    features.get("ret_21d"),
-                    features.get("vol_21d"),
-                    features.get("vol_63d"),
-                    features.get("atr_14"),
-                    features.get("atr_pct"),
-                    features.get("trend_slope_21d"),
-                    features.get("trend_r2_21d"),
-                    features.get("trend_slope_63d"),
-                    features.get("trend_r2_63d"),
-                    features.get("mom_vol_adj_21d"),
-                    features.get("maxdd_63d"),
-                    features.get("dollar_vol_21d"),
-                    features.get("sentiment_score"),
-                    features.get("sentiment_surprise"),
-                    features.get("regime_label"),
-                    features.get("regime_strength"),
+                    feature_row.get("ret_1d"),
+                    feature_row.get("ret_5d"),
+                    feature_row.get("ret_21d"),
+                    feature_row.get("vol_21d"),
+                    feature_row.get("vol_63d"),
+                    feature_row.get("atr_14"),
+                    feature_row.get("atr_pct"),
+                    feature_row.get("trend_slope_21d"),
+                    feature_row.get("trend_r2_21d"),
+                    feature_row.get("trend_slope_63d"),
+                    feature_row.get("trend_r2_63d"),
+                    feature_row.get("mom_vol_adj_21d"),
+                    feature_row.get("maxdd_63d"),
+                    feature_row.get("dollar_vol_21d"),
+                    feature_row.get("sentiment_score"),
+                    feature_row.get("sentiment_surprise"),
+                    feature_row.get("regime_label"),
+                    feature_row.get("regime_strength"),
+                    feature_row.get("feature_version"),
+                    feature_row.get("effective_lookback"),
+                    feature_row.get("snapshot_id"),
+                    feature_row.get("snapshot_version"),
+                    Json(feature_row.get("canonical_features") or {}),
+                    Json(feature_row.get("feature_meta") or {}),
                 ),
             )
             rows_written += 1

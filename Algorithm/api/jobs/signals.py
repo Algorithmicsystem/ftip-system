@@ -11,9 +11,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from psycopg.types.json import Json
 
+from api.alpha import build_signal_from_features, signals_daily_row
 from api import config, db, security
 from api.data_providers import canonical_symbol
-from api.signal_engine import compute_daily_signal
 
 router = APIRouter(
     prefix="/jobs",
@@ -248,7 +248,8 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                 SELECT ret_1d, ret_5d, ret_21d, vol_21d, vol_63d, atr_14, atr_pct,
                        trend_slope_21d, trend_r2_21d, trend_slope_63d, trend_r2_63d,
                        mom_vol_adj_21d, maxdd_63d, dollar_vol_21d, sentiment_score, sentiment_surprise,
-                       regime_label, regime_strength
+                       regime_label, regime_strength, effective_lookback, snapshot_id, snapshot_version,
+                       canonical_features, feature_meta
                 FROM features_daily
                 WHERE symbol = %s AND as_of_date = %s
                 """,
@@ -276,7 +277,14 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                 "regime_label",
                 "regime_strength",
             ]
-            features = dict(zip(feature_keys, feat_row))
+            features = dict(zip(feature_keys, feat_row[: len(feature_keys)]))
+            effective_lookback = feat_row[18] if len(feat_row) > 18 else None
+            snapshot_id = feat_row[19] if len(feat_row) > 19 else None
+            snapshot_version = feat_row[20] if len(feat_row) > 20 else None
+            canonical_features = feat_row[21] if len(feat_row) > 21 else None
+            feature_meta = feat_row[22] if len(feat_row) > 22 else None
+            if canonical_features:
+                features = {**features, **dict(canonical_features)}
 
             quality_row = db.safe_fetchone(
                 """
@@ -300,14 +308,30 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                 float(close_row[0]) if close_row and close_row[0] is not None else None
             )
 
-            signal = compute_daily_signal(features, quality_score, latest_close)
+            signal_payload = build_signal_from_features(
+                features,
+                symbol=symbol,
+                as_of=as_of_date.isoformat(),
+                lookback=int(effective_lookback or 252),
+                quality_score=quality_score,
+                latest_close=latest_close,
+                snapshot_meta={
+                    "snapshot_id": snapshot_id,
+                    "snapshot_version": snapshot_version,
+                    "coverage_status": (feature_meta or {}).get("coverage_status"),
+                    "feature_hash": (feature_meta or {}).get("feature_hash"),
+                    "available_history_bars": effective_lookback or 252,
+                },
+            )
+            signal = signals_daily_row(signal_payload)
             db.safe_execute(
                 """
                 INSERT INTO signals_daily(
                     symbol, as_of_date, action, score, confidence, entry_low, entry_high, stop_loss,
                     take_profit_1, take_profit_2, horizon_days, reason_codes, reason_details,
-                    signal_version, computed_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,now())
+                    signal_version, effective_lookback, regime, thresholds, score_mode, base_score,
+                    stacked_score, snapshot_id, snapshot_version, signal_meta, computed_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s::jsonb,now())
                 ON CONFLICT (symbol, as_of_date)
                 DO UPDATE SET
                     action = EXCLUDED.action,
@@ -321,7 +345,16 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                     horizon_days = EXCLUDED.horizon_days,
                     reason_codes = EXCLUDED.reason_codes,
                     reason_details = EXCLUDED.reason_details,
-                    signal_version = 1,
+                    signal_version = EXCLUDED.signal_version,
+                    effective_lookback = EXCLUDED.effective_lookback,
+                    regime = EXCLUDED.regime,
+                    thresholds = EXCLUDED.thresholds,
+                    score_mode = EXCLUDED.score_mode,
+                    base_score = EXCLUDED.base_score,
+                    stacked_score = EXCLUDED.stacked_score,
+                    snapshot_id = EXCLUDED.snapshot_id,
+                    snapshot_version = EXCLUDED.snapshot_version,
+                    signal_meta = EXCLUDED.signal_meta,
                     computed_at = now()
                 """,
                 (
@@ -335,9 +368,19 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                     signal.get("stop_loss"),
                     signal.get("take_profit_1"),
                     signal.get("take_profit_2"),
-                    21,
+                    signal.get("horizon_days") or 21,
                     Json(signal.get("reason_codes") or []),
-                    Json({}),
+                    Json(signal.get("reason_details") or {}),
+                    signal.get("signal_version"),
+                    signal.get("effective_lookback"),
+                    signal.get("regime"),
+                    Json(signal.get("thresholds") or {}),
+                    signal.get("score_mode"),
+                    signal.get("base_score"),
+                    signal.get("stacked_score"),
+                    signal.get("snapshot_id"),
+                    signal.get("snapshot_version"),
+                    Json(signal.get("signal_meta") or {}),
                 ),
             )
             rows_written += 1

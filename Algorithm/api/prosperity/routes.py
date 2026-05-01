@@ -207,6 +207,9 @@ def _candles_from_bars(bars: List[Dict[str, Any]]):
     candles = [
         Candle(
             timestamp=b["date"],
+            open=float(b.get("open")) if b.get("open") is not None else None,
+            high=float(b.get("high")) if b.get("high") is not None else None,
+            low=float(b.get("low")) if b.get("low") is not None else None,
             close=float(b["close"]),
             volume=float(b["volume"]) if b.get("volume") is not None else None,
         )
@@ -216,17 +219,37 @@ def _candles_from_bars(bars: List[Dict[str, Any]]):
 
 
 def _compute_features_payload(symbol: str, as_of_date: dt.date, lookback: int, candles):
-    from api.main import compute_features, detect_regime  # type: ignore
+    from api.alpha import build_canonical_features
+    from api.research import build_research_snapshot_from_candles
 
-    feats = compute_features(candles[-lookback:])
-    regime = detect_regime(feats)
+    snapshot = build_research_snapshot_from_candles(
+        symbol,
+        as_of_date,
+        lookback,
+        candles,
+        source_hint="provided_market_bars",
+        include_reference_context=False,
+    )
+    feature_payload = build_canonical_features(snapshot)
+    feats = dict(feature_payload.get("features") or {})
+    meta_payload = dict(feature_payload.get("meta") or {})
+    regime = feats.get("signal_regime")
     payload = {
         **feats,
         "regime": regime,
         "as_of": as_of_date.isoformat(),
         "lookback": int(lookback),
     }
-    meta = {"regime": regime, "features_hash": ingest._hash_dict(payload)}
+    meta = {
+        "regime": regime,
+        "features_hash": ingest._hash_dict(payload),
+        "feature_version": feature_payload.get("feature_version"),
+        "feature_schema_version": feature_payload.get("feature_schema_version"),
+        "snapshot_id": feature_payload.get("snapshot_id"),
+        "snapshot_version": feature_payload.get("snapshot_version"),
+        "effective_lookback": feature_payload.get("effective_lookback"),
+        "feature_meta": meta_payload,
+    }
     return feats, meta, regime
 
 
@@ -598,7 +621,7 @@ def _try_cached_bars_recovery(
         window_end=effective_as_of,
     )
     return {
-        "bars": bars[-required:],
+        "bars": bars,
         "effective_as_of": effective_as_of,
         "bars_returned": len(bars),
     }

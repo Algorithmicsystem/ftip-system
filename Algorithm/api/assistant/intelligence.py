@@ -1455,6 +1455,11 @@ def build_normalized_data_bundle(
 
     data_bundle = {
         "symbol_meta": symbol_meta,
+        "canonical_alpha_core": {
+            "lineage": job_context.get("canonical_lineage") or {},
+            "feature_vector": job_context.get("canonical_feature_vector") or {},
+            "signal_payload": job_context.get("canonical_signal_payload") or {},
+        },
         "market_price_volume": market_domain,
         "technical_market_structure": technical_domain,
         "fundamental_filing": fundamental_domain,
@@ -1467,6 +1472,7 @@ def build_normalized_data_bundle(
             "signal": signal,
             "key_features": key_features,
             "quality": quality,
+            "canonical_lineage": job_context.get("canonical_lineage") or {},
             "recent_news_headlines": [row.get("title") for row in recent_news[:8]],
             "sentiment_history": sentiment_history[-5:],
             "recent_daily_bars": daily_bars[-10:],

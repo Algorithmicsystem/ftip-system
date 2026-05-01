@@ -29,6 +29,10 @@ class AnalysisReference(BaseModel):
     freshness_status: Optional[str] = None
     report_version: Optional[str] = None
     strategy_version: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    snapshot_version: Optional[str] = None
+    feature_version: Optional[str] = None
+    signal_version: Optional[str] = None
     deployment_mode: Optional[str] = None
     deployment_permission: Optional[str] = None
     trust_tier: Optional[str] = None
