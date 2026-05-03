@@ -164,7 +164,7 @@ def compute_and_store_features(
         lookback,
         bars,
         source_hint="provided_market_bars",
-        include_reference_context=False,
+        include_reference_context=True,
     )
     feature_payload = build_canonical_features(snapshot)
     feats = feature_payload.get("features") or {}

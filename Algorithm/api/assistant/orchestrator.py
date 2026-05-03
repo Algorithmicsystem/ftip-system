@@ -420,7 +420,8 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
     )
     signal_row = db.safe_fetchone(
         """
-        SELECT signal_version, effective_lookback, regime, thresholds, score_mode,
+        SELECT action, score, confidence, reason_codes, reason_details,
+               signal_version, effective_lookback, regime, thresholds, score_mode,
                base_score, stacked_score, snapshot_id, snapshot_version, signal_meta
         FROM signals_daily
         WHERE symbol = %s AND as_of_date = %s
@@ -471,28 +472,42 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
             )
 
     if signal_row:
-        signal_meta = dict(signal_row[9] or {})
+        signal_meta = dict(signal_row[14] or {})
+        depth_adjustments = dict(signal_meta.get("depth_adjustments") or {})
         signal_payload = {
-            "regime": signal_row[2],
-            "thresholds": signal_row[3] or {},
-            "score_mode": signal_row[4],
-            "base_score": signal_row[5],
-            "stacked_score": signal_row[6],
+            "action": signal_row[0],
+            "score": signal_row[1],
+            "confidence": signal_row[2],
+            "reason_codes": signal_row[3] or [],
+            "reason_details": signal_row[4] or {},
+            "regime": signal_row[7],
+            "thresholds": signal_row[8] or {},
+            "score_mode": signal_row[9],
+            "base_score": signal_row[10],
+            "stacked_score": signal_row[11],
             "signal_meta": signal_meta,
+            "suppression_flags": depth_adjustments.get("suppression_flags") or [],
+            "environment_penalties": depth_adjustments.get("environment_penalties") or {},
+            "event_penalties": depth_adjustments.get("event_penalties") or {},
+            "liquidity_penalties": depth_adjustments.get("liquidity_penalties") or {},
+            "breadth_penalties": depth_adjustments.get("breadth_penalties") or {},
+            "cross_asset_penalties": depth_adjustments.get("cross_asset_penalties") or {},
+            "stress_penalties": depth_adjustments.get("stress_penalties") or {},
+            "adjusted_confidence_notes": depth_adjustments.get("adjusted_confidence_notes") or [],
         }
         lineage.update(
             {
-                "signal_version": signal_meta.get("signal_version") or signal_row[0],
-                "effective_lookback": lineage.get("effective_lookback") or signal_row[1],
-                "snapshot_id": lineage.get("snapshot_id") or signal_row[7],
-                "snapshot_version": lineage.get("snapshot_version") or signal_row[8],
+                "signal_version": signal_meta.get("signal_version") or signal_row[5],
+                "effective_lookback": lineage.get("effective_lookback") or signal_row[6],
+                "snapshot_id": lineage.get("snapshot_id") or signal_row[12],
+                "snapshot_version": lineage.get("snapshot_version") or signal_row[13],
             }
         )
     else:
         as_of_column = _prosperity_signal_asof_column()
         prosperity_signal = db.safe_fetchone(
             f"""
-            SELECT score_mode, base_score, stacked_score, regime, thresholds, meta
+            SELECT signal, score, confidence, score_mode, base_score, stacked_score, regime, thresholds, meta
             FROM prosperity_signals_daily
             WHERE symbol = %s AND {as_of_column} = %s
             ORDER BY updated_at DESC NULLS LAST
@@ -501,14 +516,26 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
             (symbol, as_of_date),
         )
         if prosperity_signal:
-            signal_meta = dict(prosperity_signal[5] or {})
+            signal_meta = dict(prosperity_signal[8] or {})
+            depth_adjustments = dict(signal_meta.get("depth_adjustments") or {})
             signal_payload = {
-                "score_mode": prosperity_signal[0],
-                "base_score": prosperity_signal[1],
-                "stacked_score": prosperity_signal[2],
-                "regime": prosperity_signal[3],
-                "thresholds": prosperity_signal[4] or {},
+                "action": prosperity_signal[0],
+                "score": prosperity_signal[1],
+                "confidence": prosperity_signal[2],
+                "score_mode": prosperity_signal[3],
+                "base_score": prosperity_signal[4],
+                "stacked_score": prosperity_signal[5],
+                "regime": prosperity_signal[6],
+                "thresholds": prosperity_signal[7] or {},
                 "signal_meta": signal_meta,
+                "suppression_flags": depth_adjustments.get("suppression_flags") or [],
+                "environment_penalties": depth_adjustments.get("environment_penalties") or {},
+                "event_penalties": depth_adjustments.get("event_penalties") or {},
+                "liquidity_penalties": depth_adjustments.get("liquidity_penalties") or {},
+                "breadth_penalties": depth_adjustments.get("breadth_penalties") or {},
+                "cross_asset_penalties": depth_adjustments.get("cross_asset_penalties") or {},
+                "stress_penalties": depth_adjustments.get("stress_penalties") or {},
+                "adjusted_confidence_notes": depth_adjustments.get("adjusted_confidence_notes") or [],
             }
             lineage.update(
                 {

@@ -121,6 +121,42 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "What macro change would alter the posture?",
         ),
     },
+    "market_depth": {
+        "keywords": (
+            "event",
+            "earnings",
+            "catalyst",
+            "liquidity",
+            "gap",
+            "slippage",
+            "implementation",
+            "breadth",
+            "leadership",
+            "internals",
+            "dispersion",
+            "cross asset",
+            "sector support",
+            "benchmark support",
+            "stress",
+            "spillover",
+            "contagion",
+            "unstable environment",
+        ),
+        "mode": "risk",
+        "sections": (
+            "event_catalyst_risk_analysis",
+            "liquidity_execution_fragility_analysis",
+            "market_breadth_internal_state_analysis",
+            "cross_asset_confirmation_analysis",
+            "stress_spillover_analysis",
+            "risk_quality_analysis",
+        ),
+        "followups": (
+            "Is this setup distorted by an event or catalyst window?",
+            "Is liquidity or implementation fragility suppressing confidence?",
+            "Do breadth and cross-asset context actually support the move?",
+        ),
+    },
     "strategy": {
         "keywords": (
             "strategy",
@@ -413,6 +449,27 @@ def route_question(message: str) -> Dict[str, Any]:
         if "invalid" in text or "fragile" in text:
             if intent == "risk_invalidation":
                 score += 2
+        if any(
+            phrase in text
+            for phrase in (
+                "earnings",
+                "catalyst",
+                "liquidity",
+                "gap risk",
+                "implementation",
+                "breadth",
+                "internals",
+                "cross asset",
+                "sector support",
+                "benchmark support",
+                "stress",
+                "spillover",
+                "contagion",
+                "unstable environment",
+            )
+        ):
+            if intent == "market_depth":
+                score += 3
         if any(
             phrase in text
             for phrase in (

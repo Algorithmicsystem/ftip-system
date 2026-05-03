@@ -40,6 +40,11 @@ def build_fragility_vetoes(
         or feature_factor_bundle.get("relative_peer")
         or {}
     )
+    event_risk = data_bundle.get("event_catalyst_risk") or {}
+    liquidity = data_bundle.get("liquidity_execution_fragility") or {}
+    breadth = data_bundle.get("market_breadth_internals") or {}
+    cross_asset_depth = data_bundle.get("cross_asset_confirmation") or {}
+    stress = data_bundle.get("stress_spillover_conditions") or {}
     fundamentals = (
         feature_factor_bundle.get("fundamental_durability")
         or feature_factor_bundle.get("fundamental_intelligence")
@@ -84,6 +89,11 @@ def build_fragility_vetoes(
     missingness = min(safe_float(quality.get("missingness")) or 0.0, 0.3)
     freshness_risk = freshness_penalty(quality)
     relative_quality = safe_float(relative.get("relative_context_quality")) or 50.0
+    event_overhang = safe_float(event_risk.get("event_overhang_score")) or 0.0
+    implementation_fragility = safe_float(liquidity.get("implementation_fragility_score")) or 0.0
+    breadth_confirmation = safe_float(breadth.get("breadth_confirmation_score")) or 50.0
+    cross_asset_conflict = safe_float(cross_asset_depth.get("cross_asset_conflict_score")) or 0.0
+    market_stress = safe_float(stress.get("market_stress_score")) or 0.0
 
     if fragility_score >= 72 and regime_stability <= 45:
         add_veto(
@@ -162,6 +172,54 @@ def build_fragility_vetoes(
             actionability_penalty=7,
             confidence_penalty=6,
             directional_multiplier=0.92,
+        )
+    if event_overhang >= 72:
+        add_veto(
+            "event_window_overhang",
+            "high" if event_overhang >= 82 else "medium",
+            "The setup is too close to a catalyst or repricing window to treat as a clean structural deployment candidate.",
+            actionability_penalty=16,
+            confidence_penalty=14,
+            directional_multiplier=0.74,
+            hard_veto=event_overhang >= 84,
+        )
+    if implementation_fragility >= 70:
+        add_veto(
+            "implementation_fragility",
+            "high" if implementation_fragility >= 78 else "medium",
+            "Liquidity, gap, or execution fragility is high enough that the engine suppresses posture aggressiveness.",
+            actionability_penalty=14,
+            confidence_penalty=12,
+            directional_multiplier=0.80,
+            hard_veto=implementation_fragility >= 82,
+        )
+    if breadth_confirmation <= 42:
+        add_veto(
+            "weak_market_internals",
+            "medium",
+            "Breadth and leadership internals are not supporting the move cleanly.",
+            actionability_penalty=10,
+            confidence_penalty=9,
+            directional_multiplier=0.88,
+        )
+    if cross_asset_conflict >= 65:
+        add_veto(
+            "cross_asset_contradiction",
+            "medium",
+            "Sector, benchmark, or macro-asset context is contradicting the stock-level signal.",
+            actionability_penalty=11,
+            confidence_penalty=10,
+            directional_multiplier=0.86,
+        )
+    if market_stress >= 70:
+        add_veto(
+            "market_stress_spillover",
+            "high" if market_stress >= 82 else "medium",
+            "Market stress and spillover conditions are elevated enough to force a more defensive posture.",
+            actionability_penalty=15,
+            confidence_penalty=13,
+            directional_multiplier=0.76,
+            hard_veto=market_stress >= 86,
         )
 
     explicit_availability_penalty = sum(

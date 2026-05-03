@@ -10,7 +10,7 @@ from api.data import service as pit_service
 from api.data_providers import canonical_symbol
 
 
-CANONICAL_SNAPSHOT_VERSION = "phase8_canonical_snapshot_v1"
+CANONICAL_SNAPSHOT_VERSION = "phase9_canonical_snapshot_v1"
 
 _SECTOR_PROXY_MAP = {
     "technology": "XLK",
@@ -27,6 +27,23 @@ _SECTOR_PROXY_MAP = {
     "materials": "XLB",
     "real estate": "XLRE",
 }
+
+_EVENT_KEYWORDS = (
+    "earnings",
+    "guidance",
+    "outlook",
+    "forecast",
+    "revenue",
+    "margin",
+    "quarter",
+    "results",
+    "filing",
+    "filed",
+    "8-k",
+    "10-q",
+    "10-k",
+    "sec",
+)
 
 
 def _db_ready() -> bool:
@@ -463,8 +480,307 @@ def _load_intraday(symbol: str, as_of_date: dt.date) -> List[Dict[str, Any]]:
     ]
 
 
+def _event_keyword_matches(news_items: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    matches: List[Dict[str, Any]] = []
+    for item in news_items:
+        text = " ".join(
+            [
+                str(item.get("title") or ""),
+                str(item.get("content_snippet") or ""),
+            ]
+        ).lower()
+        matched_keywords = [keyword for keyword in _EVENT_KEYWORDS if keyword in text]
+        if matched_keywords:
+            matches.append(
+                {
+                    "published_at": item.get("published_at"),
+                    "title": item.get("title"),
+                    "matched_keywords": matched_keywords,
+                }
+            )
+    return matches
+
+
+def _latest_event_date(
+    fundamentals: Sequence[Dict[str, Any]],
+    event_matches: Sequence[Dict[str, Any]],
+) -> Optional[dt.date]:
+    candidates: List[dt.date] = []
+    for row in fundamentals:
+        for field in ("report_date", "published_ts", "as_of_ts", "period_end"):
+            parsed = _iso_date(row.get(field))
+            if not parsed:
+                continue
+            try:
+                candidates.append(dt.date.fromisoformat(parsed[:10]))
+            except ValueError:
+                continue
+    for item in event_matches:
+        parsed = _iso_date(item.get("published_at"))
+        if not parsed:
+            continue
+        try:
+            candidates.append(dt.date.fromisoformat(parsed[:10]))
+        except ValueError:
+            continue
+    return max(candidates) if candidates else None
+
+
+def _load_event_context(
+    *,
+    as_of_date: dt.date,
+    fundamentals: Sequence[Dict[str, Any]],
+    news_items: Sequence[Dict[str, Any]],
+) -> Dict[str, Any]:
+    matches = _event_keyword_matches(news_items)
+    latest_event_date = _latest_event_date(fundamentals, matches)
+    estimated_next_event_date = (
+        latest_event_date + dt.timedelta(days=90)
+        if latest_event_date is not None
+        else None
+    )
+    days_to_next_event = (
+        max((estimated_next_event_date - as_of_date).days, 0)
+        if estimated_next_event_date is not None
+        else None
+    )
+    days_since_last_major_event = (
+        max((as_of_date - latest_event_date).days, 0)
+        if latest_event_date is not None
+        else None
+    )
+    recent_3d = 0
+    recent_7d = 0
+    recent_21d = 0
+    for item in matches:
+        published = _iso_date(item.get("published_at"))
+        if not published:
+            continue
+        try:
+            published_date = dt.date.fromisoformat(published[:10])
+        except ValueError:
+            continue
+        if published_date > as_of_date:
+            continue
+        delta = (as_of_date - published_date).days
+        if delta <= 3:
+            recent_3d += 1
+        if delta <= 7:
+            recent_7d += 1
+        if delta <= 21:
+            recent_21d += 1
+
+    earnings_window_flag = bool(
+        (days_to_next_event is not None and days_to_next_event <= 7)
+        or (days_since_last_major_event is not None and days_since_last_major_event <= 2)
+    )
+    post_event_instability_flag = bool(
+        days_since_last_major_event is not None
+        and 0 <= days_since_last_major_event <= 5
+        and (recent_3d > 0 or recent_7d >= 2)
+    )
+    event_density_score = min((recent_7d + recent_21d * 0.35) / 8.0, 1.0)
+    catalyst_burst_score = min(recent_3d / max((recent_21d - recent_7d) / 2.0, 1.0), 3.0) / 3.0
+    return {
+        "latest_event_date": latest_event_date.isoformat() if latest_event_date else None,
+        "estimated_next_event_date": (
+            estimated_next_event_date.isoformat()
+            if estimated_next_event_date
+            else None
+        ),
+        "days_to_next_event": days_to_next_event,
+        "days_since_last_major_event": days_since_last_major_event,
+        "earnings_window_flag": earnings_window_flag,
+        "post_event_instability_flag": post_event_instability_flag,
+        "event_match_count_3d": recent_3d,
+        "event_match_count_7d": recent_7d,
+        "event_match_count_21d": recent_21d,
+        "event_density_score": round(event_density_score * 100.0, 2),
+        "catalyst_burst_score": round(catalyst_burst_score * 100.0, 2),
+        "major_event_matches": matches[:8],
+    }
+
+
+def _load_breadth_context(
+    symbol_meta: Dict[str, Any],
+    as_of_date: dt.date,
+) -> Dict[str, Any]:
+    if not _db_ready():
+        return {}
+
+    rows = db.safe_fetchall(
+        """
+        SELECT b.symbol,
+               COALESCE(m.sector, ''),
+               b.as_of_date,
+               b.close
+        FROM market_bars_daily b
+        LEFT JOIN market_symbols m ON m.symbol = b.symbol
+        WHERE b.as_of_date BETWEEN %s AND %s
+          AND EXISTS (
+              SELECT 1
+              FROM market_symbols ms
+              WHERE ms.symbol = b.symbol
+                AND ms.is_active = TRUE
+          )
+        ORDER BY b.symbol ASC, b.as_of_date ASC
+        """,
+        (as_of_date - dt.timedelta(days=70), as_of_date),
+    )
+    if not rows:
+        return {}
+
+    sector = str(symbol_meta.get("sector") or "").strip().lower()
+    symbol_rows: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        sym = str(row[0] or "").strip().upper()
+        if not sym:
+            continue
+        bucket = symbol_rows.setdefault(
+            sym,
+            {"sector": str(row[1] or "").strip().lower(), "closes": []},
+        )
+        close = _safe_float(row[3])
+        if close is not None:
+            bucket["closes"].append(close)
+
+    derived_rows: List[Dict[str, Any]] = []
+    for sym, payload in symbol_rows.items():
+        closes = payload.get("closes") or []
+        if len(closes) < 22:
+            continue
+        ret_1d = closes[-1] / closes[-2] - 1.0 if closes[-2] != 0 else None
+        ret_21d = closes[-1] / closes[-22] - 1.0 if closes[-22] != 0 else None
+        trend_sma20_50 = None
+        if len(closes) >= 50:
+            ma20 = sum(closes[-20:]) / 20.0
+            ma50 = sum(closes[-50:]) / 50.0
+            if ma50 != 0:
+                trend_sma20_50 = ma20 / ma50 - 1.0
+        derived_rows.append(
+            {
+                "symbol": sym,
+                "sector": payload.get("sector"),
+                "ret_1d": ret_1d,
+                "ret_21d": ret_21d,
+                "trend_sma20_50": trend_sma20_50,
+            }
+        )
+
+    if not derived_rows:
+        return {}
+
+    universe_count = len(derived_rows)
+    ret_1d_values = [row.get("ret_1d") for row in derived_rows]
+    ret_21d_values = [row.get("ret_21d") for row in derived_rows]
+    trend_values = [row.get("trend_sma20_50") for row in derived_rows]
+    non_null_ret_1d = [value for value in ret_1d_values if value is not None]
+    non_null_ret_21d = [value for value in ret_21d_values if value is not None]
+    non_null_trend = [value for value in trend_values if value is not None]
+    advancing_1d_ratio = (
+        sum(1 for value in non_null_ret_1d if value > 0) / len(non_null_ret_1d)
+        if non_null_ret_1d
+        else None
+    )
+    advancing_21d_ratio = (
+        sum(1 for value in non_null_ret_21d if value > 0) / len(non_null_ret_21d)
+        if non_null_ret_21d
+        else None
+    )
+    above_trend_ratio = (
+        sum(1 for value in non_null_trend if value > 0) / len(non_null_trend)
+        if non_null_trend
+        else None
+    )
+
+    sector_rows = [row for row in derived_rows if str(row.get("sector") or "").strip().lower() == sector] if sector else []
+    sector_ret_21d = [row.get("ret_21d") for row in sector_rows if row.get("ret_21d") is not None]
+    sector_trend = [row.get("trend_sma20_50") for row in sector_rows if row.get("trend_sma20_50") is not None]
+    sector_participation_ratio = (
+        sum(1 for value in sector_trend if value > 0) / len(sector_trend)
+        if sector_trend
+        else None
+    )
+
+    dispersion = None
+    if len(non_null_ret_21d) >= 2:
+        try:
+            dispersion = float(statistics.pstdev(non_null_ret_21d))
+        except statistics.StatisticsError:
+            dispersion = None
+    sector_dispersion = None
+    if len(sector_ret_21d) >= 2:
+        try:
+            sector_dispersion = float(statistics.pstdev(sector_ret_21d))
+        except statistics.StatisticsError:
+            sector_dispersion = None
+
+    sorted_rets = sorted(non_null_ret_21d)
+    if sorted_rets:
+        bucket_size = max(1, len(sorted_rets) // 10)
+        leader_strength = sum(sorted_rets[-bucket_size:]) / bucket_size
+        laggard_pressure = sum(sorted_rets[:bucket_size]) / bucket_size
+        positive_sum = sum(value for value in sorted_rets if value > 0) or 1e-9
+        leadership_concentration = min(
+            max(sum(value for value in sorted_rets[-bucket_size:] if value > 0) / positive_sum, 0.0),
+            1.0,
+        )
+    else:
+        leader_strength = None
+        laggard_pressure = None
+        leadership_concentration = None
+
+    top_symbols = [
+        {
+            "symbol": row["symbol"],
+            "ret_21d": _safe_float(row["ret_21d"]),
+        }
+        for row in sorted(derived_rows, key=lambda item: _safe_float(item.get("ret_21d")) or -999.0, reverse=True)[:5]
+    ]
+
+    leader_momentum = [row.get("ret_21d") for row in derived_rows if row.get("ret_21d") is not None]
+    leadership_rotation = None
+    if leader_momentum and non_null_ret_21d:
+        try:
+            leadership_rotation = min(
+                abs(statistics.fmean(leader_momentum[-10:]) - statistics.fmean(non_null_ret_21d[-10:])),
+                1.0,
+            )
+        except statistics.StatisticsError:
+            leadership_rotation = None
+
+    leadership_instability = None
+    if leadership_concentration is not None or dispersion is not None or leadership_rotation is not None:
+        pieces = [
+            leadership_concentration,
+            min(dispersion / 0.06, 1.0) if dispersion is not None else None,
+            leadership_rotation,
+        ]
+        clean = [float(value) for value in pieces if value is not None]
+        leadership_instability = sum(clean) / len(clean) if clean else None
+
+    return {
+        "as_of_date": as_of_date.isoformat(),
+        "universe_count": universe_count,
+        "sector_universe_count": len(sector_rows),
+        "advancing_1d_ratio": advancing_1d_ratio,
+        "advancing_21d_ratio": advancing_21d_ratio,
+        "above_trend_ratio": above_trend_ratio,
+        "sector_participation_ratio": sector_participation_ratio,
+        "cross_sectional_dispersion": dispersion,
+        "sector_dispersion": sector_dispersion,
+        "leader_strength": leader_strength,
+        "laggard_pressure": laggard_pressure,
+        "leadership_concentration": leadership_concentration,
+        "leadership_rotation": leadership_rotation,
+        "leadership_instability": leadership_instability,
+        "top_leaders": top_symbols,
+        "source": "market_bars_daily",
+    }
+
+
 def _reference_symbols(symbol_meta: Dict[str, Any]) -> List[str]:
-    symbols = ["SPY", "QQQ", "IWM"]
+    symbols = ["SPY", "QQQ", "IWM", "TLT", "GLD", "USO", "UUP"]
     sector = str(symbol_meta.get("sector") or "").strip().lower()
     sector_proxy = _SECTOR_PROXY_MAP.get(sector)
     if sector_proxy and sector_proxy not in symbols:
@@ -501,6 +817,12 @@ def build_research_snapshot(
     sentiment_history = _load_sentiment_history(sym, as_of_date)
     quality = _load_quality(sym, as_of_date)
     intraday_bars = _load_intraday(sym, as_of_date) if include_intraday else []
+    event_context = _load_event_context(
+        as_of_date=as_of_date,
+        fundamentals=fundamentals,
+        news_items=news_items,
+    )
+    breadth_context = _load_breadth_context(symbol_meta, as_of_date)
     reference_context: Dict[str, Any] = {}
     if include_reference_context:
         reference_context = _query_reference_bars(
@@ -525,6 +847,8 @@ def build_research_snapshot(
         "news": news_items,
         "sentiment_history": sentiment_history,
         "quality": quality,
+        "event_context": event_context,
+        "breadth_context": breadth_context,
         "reference_context": reference_context,
         "coverage": {
             "bars": len(price_bars),
@@ -532,6 +856,8 @@ def build_research_snapshot(
             "fundamentals": len(fundamentals),
             "news": len(news_items),
             "sentiment_points": len(sentiment_history),
+            "event_matches": len(event_context.get("major_event_matches") or []),
+            "breadth_universe_count": breadth_context.get("universe_count") or 0,
             "reference_symbols": sorted(reference_context.keys()),
         },
         "provenance": {
@@ -540,6 +866,8 @@ def build_research_snapshot(
             "news_source": news_source,
             "sentiment_source": "sentiment_daily",
             "quality_source": "quality_daily" if quality else "none",
+            "event_source": "fundamentals+news_heuristic",
+            "breadth_source": breadth_context.get("source") or "none",
             "fallbacks_used": fallbacks_used,
             "point_in_time_precision": {
                 "prices": "versioned_pit" if bars_source == "prices_daily_versioned" else "operational",

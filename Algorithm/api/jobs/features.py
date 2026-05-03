@@ -316,6 +316,7 @@ async def compute_features_daily(req: FeaturesDailyRequest):
                 252,
                 bar_rows,
                 source_hint="market_bars_daily",
+                include_reference_context=True,
             )
             if sentiment_score is not None or sentiment_mean is not None:
                 snapshot["sentiment_history"] = [

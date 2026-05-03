@@ -1395,6 +1395,11 @@ def _build_domain_availability_map(data_bundle: Dict[str, Any]) -> Dict[str, Dic
         "macro": data_bundle.get("macro_cross_asset") or {},
         "geopolitical": data_bundle.get("geopolitical_policy") or {},
         "cross_asset": data_bundle.get("relative_context") or {},
+        "event": data_bundle.get("event_catalyst_risk") or {},
+        "liquidity": data_bundle.get("liquidity_execution_fragility") or {},
+        "breadth": data_bundle.get("market_breadth_internals") or {},
+        "cross_asset_depth": data_bundle.get("cross_asset_confirmation") or {},
+        "stress": data_bundle.get("stress_spillover_conditions") or {},
         "quality": data_bundle.get("quality_provenance") or {},
     }
     availability: Dict[str, Dict[str, Any]] = {}
@@ -1410,6 +1415,181 @@ def _build_domain_availability_map(data_bundle: Dict[str, Any]) -> Dict[str, Dic
             "data_quality_note": meta.get("data_quality_note") or meta.get("relevance_note"),
         }
     return availability
+
+
+def _canonical_depth_domains(job_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    canonical = {
+        "lineage": job_context.get("canonical_lineage") or {},
+        "features": job_context.get("canonical_feature_vector") or {},
+        "signal": job_context.get("canonical_signal_payload") or {},
+    }
+    features = canonical["features"]
+    signal_payload = canonical["signal"]
+
+    def _domain_meta(has_data: bool, note: str) -> Dict[str, Any]:
+        return {
+            **availability_payload(
+                has_data=has_data,
+                coverage_score=1.0 if has_data else 0.0,
+                freshness_status="fresh" if has_data else "limited",
+                missing_reason=None if has_data else "unavailable",
+                data_quality_note=note,
+            ),
+            "status": "fresh" if has_data else "limited",
+        }
+
+    event_present = any(
+        features.get(key) is not None
+        for key in (
+            "event_overhang_score",
+            "days_to_next_event",
+            "event_density_score",
+        )
+    )
+    event_domain = {
+        "days_to_next_event": features.get("days_to_next_event"),
+        "days_since_last_major_event": features.get("days_since_last_major_event"),
+        "earnings_window_flag": features.get("earnings_window_flag"),
+        "post_event_instability_flag": features.get("post_event_instability_flag"),
+        "event_density_score": features.get("event_density_score"),
+        "event_overhang_score": features.get("event_overhang_score"),
+        "event_uncertainty_score": features.get("event_uncertainty_score"),
+        "catalyst_burst_score": features.get("catalyst_burst_score"),
+        "event_risk_classification": features.get("event_risk_classification"),
+        "major_event_titles": features.get("major_event_titles") or [],
+        "meta": _domain_meta(
+            event_present,
+            "Event context is being inferred from filing recency and catalyst-tagged headline bursts."
+            if event_present
+            else "Event and catalyst context is currently unavailable.",
+        ),
+    }
+
+    liquidity_present = any(
+        features.get(key) is not None
+        for key in (
+            "implementation_fragility_score",
+            "liquidity_quality_score",
+            "friction_proxy_score",
+        )
+    )
+    liquidity_domain = {
+        "liquidity_quality_score": features.get("liquidity_quality_score"),
+        "gap_instability_score": features.get("gap_instability_score"),
+        "range_instability_score": features.get("range_instability_score"),
+        "turnover_stability_score": features.get("turnover_stability_score"),
+        "volume_instability_score": features.get("volume_instability_score"),
+        "tradability_caution_score": features.get("tradability_caution_score"),
+        "implementation_fragility_score": features.get("implementation_fragility_score"),
+        "overnight_gap_risk_score": features.get("overnight_gap_risk_score"),
+        "friction_proxy_score": features.get("friction_proxy_score"),
+        "execution_cleanliness_score": features.get("execution_cleanliness_score"),
+        "tradability_state": features.get("tradability_state"),
+        "meta": _domain_meta(
+            liquidity_present,
+            "Liquidity and implementation context is coming from gap behavior, range instability, volume stability, and friction proxies."
+            if liquidity_present
+            else "Liquidity and implementation context is currently unavailable.",
+        ),
+    }
+
+    breadth_present = any(
+        features.get(key) is not None
+        for key in (
+            "breadth_confirmation_score",
+            "participation_breadth_score",
+            "breadth_thrust_proxy",
+        )
+    )
+    breadth_domain = {
+        "breadth_thrust_proxy": features.get("breadth_thrust_proxy"),
+        "participation_breadth_score": features.get("participation_breadth_score"),
+        "breadth_confirmation_score": features.get("breadth_confirmation_score"),
+        "cross_sectional_dispersion_proxy": features.get("cross_sectional_dispersion_proxy"),
+        "sector_dispersion_proxy": features.get("sector_dispersion_proxy"),
+        "leadership_concentration_score": features.get("leadership_concentration_score"),
+        "narrow_leadership_warning": features.get("narrow_leadership_warning"),
+        "broad_participation_confirmation": features.get("broad_participation_confirmation"),
+        "internal_market_divergence_score": features.get("internal_market_divergence_score"),
+        "leader_strength_score": features.get("leader_strength_score"),
+        "laggard_pressure_score": features.get("laggard_pressure_score"),
+        "leadership_rotation_score": features.get("leadership_rotation_score"),
+        "leadership_instability_score": features.get("leadership_instability_score"),
+        "breadth_state": features.get("breadth_state"),
+        "meta": _domain_meta(
+            breadth_present,
+            "Market-internals context is built from participation breadth, leadership concentration, and dispersion proxies."
+            if breadth_present
+            else "Breadth and market-internals context is currently unavailable.",
+        ),
+    }
+
+    cross_asset_present = any(
+        features.get(key) is not None
+        for key in (
+            "benchmark_confirmation_score",
+            "sector_confirmation_score",
+            "cross_asset_conflict_score",
+        )
+    )
+    cross_asset_domain = {
+        "benchmark_proxy": features.get("benchmark_proxy"),
+        "sector_proxy": features.get("sector_proxy"),
+        "benchmark_confirmation_score": features.get("benchmark_confirmation_score"),
+        "sector_confirmation_score": features.get("sector_confirmation_score"),
+        "macro_asset_alignment_score": features.get("macro_asset_alignment_score"),
+        "cross_asset_conflict_score": features.get("cross_asset_conflict_score"),
+        "cross_asset_divergence_score": features.get("cross_asset_divergence_score"),
+        "beta_context_score": features.get("beta_context_score"),
+        "idiosyncratic_strength_score": features.get("idiosyncratic_strength_score"),
+        "idiosyncratic_weakness_score": features.get("idiosyncratic_weakness_score"),
+        "meta": _domain_meta(
+            cross_asset_present,
+            "Cross-asset confirmation uses benchmark, sector, and defensive-asset context."
+            if cross_asset_present
+            else "Cross-asset confirmation context is currently unavailable.",
+        ),
+    }
+
+    stress_present = any(
+        features.get(key) is not None
+        for key in (
+            "market_stress_score",
+            "spillover_risk_score",
+            "correlation_breakdown_proxy",
+        )
+    )
+    depth_adjustments = ((signal_payload.get("signal_meta") or {}).get("depth_adjustments") or {})
+    stress_domain = {
+        "market_stress_score": features.get("market_stress_score"),
+        "spillover_risk_score": features.get("spillover_risk_score"),
+        "correlation_breakdown_proxy": features.get("correlation_breakdown_proxy"),
+        "volatility_shock_score": features.get("volatility_shock_score"),
+        "stress_transition_score": features.get("stress_transition_score"),
+        "contagion_risk_proxy": features.get("contagion_risk_proxy"),
+        "defensive_regime_flag": features.get("defensive_regime_flag"),
+        "unstable_environment_flag": features.get("unstable_environment_flag"),
+        "suppression_flags": signal_payload.get("suppression_flags")
+        or depth_adjustments.get("suppression_flags")
+        or [],
+        "adjusted_confidence_notes": signal_payload.get("adjusted_confidence_notes")
+        or depth_adjustments.get("adjusted_confidence_notes")
+        or [],
+        "meta": _domain_meta(
+            stress_present,
+            "Stress context is built from volatility shocks, breadth deterioration, spillover risk, and cross-asset contradictions."
+            if stress_present
+            else "Stress and spillover context is currently unavailable.",
+        ),
+    }
+
+    return {
+        "event_catalyst_risk": event_domain,
+        "liquidity_execution_fragility": liquidity_domain,
+        "market_breadth_internals": breadth_domain,
+        "cross_asset_confirmation": cross_asset_domain,
+        "stress_spillover_conditions": stress_domain,
+    }
 
 
 def build_normalized_data_bundle(
@@ -1452,6 +1632,7 @@ def build_normalized_data_bundle(
         },
         as_of_date,
     )
+    canonical_depth = _canonical_depth_domains(job_context)
 
     data_bundle = {
         "symbol_meta": symbol_meta,
@@ -1467,6 +1648,11 @@ def build_normalized_data_bundle(
         "macro_cross_asset": macro_domain,
         "geopolitical_policy": geopolitical_domain,
         "relative_context": relative_domain,
+        "event_catalyst_risk": canonical_depth.get("event_catalyst_risk") or {},
+        "liquidity_execution_fragility": canonical_depth.get("liquidity_execution_fragility") or {},
+        "market_breadth_internals": canonical_depth.get("market_breadth_internals") or {},
+        "cross_asset_confirmation": canonical_depth.get("cross_asset_confirmation") or {},
+        "stress_spillover_conditions": canonical_depth.get("stress_spillover_conditions") or {},
         "quality_provenance": quality_domain,
         "raw_supporting_fields": {
             "signal": signal,

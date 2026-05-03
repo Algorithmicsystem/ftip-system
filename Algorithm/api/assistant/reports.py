@@ -592,6 +592,132 @@ def _macro_geopolitical_analysis_text(
     )
 
 
+def _event_catalyst_risk_text(
+    event_domain: Dict[str, Any],
+    signal_payload: Dict[str, Any],
+) -> str:
+    meta = event_domain.get("meta") or {}
+    classification = str(event_domain.get("event_risk_classification") or "unknown").replace("_", " ")
+    titles = event_domain.get("major_event_titles") or []
+    return _join_sentences(
+        [
+            f"Event posture currently reads as {classification}, with event overhang {_fmt_num(event_domain.get('event_overhang_score'), digits=1, signed=False)} / 100, uncertainty {_fmt_num(event_domain.get('event_uncertainty_score'), digits=1, signed=False)} / 100, and catalyst burst {_fmt_num(event_domain.get('catalyst_burst_score'), digits=1, signed=False)} / 100."
+            if event_domain
+            else _coverage_note(meta, "Event"),
+            f"Days to next estimated major event: {_fmt_num(event_domain.get('days_to_next_event'), digits=0, signed=False)}; days since the last major event: {_fmt_num(event_domain.get('days_since_last_major_event'), digits=0, signed=False)}."
+            if event_domain.get("days_to_next_event") is not None or event_domain.get("days_since_last_major_event") is not None
+            else None,
+            f"Earnings-window flag is {event_domain.get('earnings_window_flag')}, post-event instability flag is {event_domain.get('post_event_instability_flag')}."
+            if event_domain.get("earnings_window_flag") is not None or event_domain.get("post_event_instability_flag") is not None
+            else None,
+            f"Recent catalyst headlines are {_fmt_list(titles[:4])}."
+            if titles
+            else None,
+            f"Event suppression flags currently active are {_fmt_list((signal_payload.get('suppression_flags') or []))}."
+            if "event_overhang" in (signal_payload.get("suppression_flags") or [])
+            else None,
+            meta.get("data_quality_note"),
+        ]
+    )
+
+
+def _liquidity_execution_fragility_text(
+    liquidity_domain: Dict[str, Any],
+    signal_payload: Dict[str, Any],
+) -> str:
+    meta = liquidity_domain.get("meta") or {}
+    return _join_sentences(
+        [
+            f"Implementation posture reads as {str(liquidity_domain.get('tradability_state') or 'unknown').replace('_', ' ')}, with liquidity quality {_fmt_num(liquidity_domain.get('liquidity_quality_score'), digits=1, signed=False)} / 100, execution cleanliness {_fmt_num(liquidity_domain.get('execution_cleanliness_score'), digits=1, signed=False)} / 100, and implementation fragility {_fmt_num(liquidity_domain.get('implementation_fragility_score'), digits=1, signed=False)} / 100."
+            if liquidity_domain
+            else _coverage_note(meta, "Liquidity"),
+            f"Gap instability is {_fmt_num(liquidity_domain.get('gap_instability_score'), digits=1, signed=False)} / 100, range instability is {_fmt_num(liquidity_domain.get('range_instability_score'), digits=1, signed=False)} / 100, turnover stability is {_fmt_num(liquidity_domain.get('turnover_stability_score'), digits=1, signed=False)} / 100, and friction proxy is {_fmt_num(liquidity_domain.get('friction_proxy_score'), digits=1, signed=False)} / 100."
+            if liquidity_domain
+            else None,
+            f"Tradability caution is {_fmt_num(liquidity_domain.get('tradability_caution_score'), digits=1, signed=False)} / 100 and overnight gap risk is {_fmt_num(liquidity_domain.get('overnight_gap_risk_score'), digits=1, signed=False)} / 100."
+            if liquidity_domain
+            else None,
+            "The canonical signal is explicitly suppressing confidence because the setup is implementation-fragile."
+            if "implementation_fragility" in (signal_payload.get("suppression_flags") or [])
+            else None,
+            meta.get("data_quality_note"),
+        ]
+    )
+
+
+def _market_breadth_internal_state_text(
+    breadth_domain: Dict[str, Any],
+    signal_payload: Dict[str, Any],
+) -> str:
+    meta = breadth_domain.get("meta") or {}
+    breadth_state = str(breadth_domain.get("breadth_state") or "unknown").replace("_", " ")
+    return _join_sentences(
+        [
+            f"Internal market state currently reads as {breadth_state}, with breadth confirmation {_fmt_num(breadth_domain.get('breadth_confirmation_score'), digits=1, signed=False)} / 100, participation breadth {_fmt_num(breadth_domain.get('participation_breadth_score'), digits=1, signed=False)} / 100, and breadth thrust {_fmt_num(breadth_domain.get('breadth_thrust_proxy'), digits=1, signed=False)} / 100."
+            if breadth_domain
+            else _coverage_note(meta, "Breadth"),
+            f"Cross-sectional dispersion is {_fmt_num(breadth_domain.get('cross_sectional_dispersion_proxy'), digits=1, signed=False)} / 100, sector dispersion is {_fmt_num(breadth_domain.get('sector_dispersion_proxy'), digits=1, signed=False)} / 100, and internal divergence is {_fmt_num(breadth_domain.get('internal_market_divergence_score'), digits=1, signed=False)} / 100."
+            if breadth_domain
+            else None,
+            f"Leadership concentration is {_fmt_num(breadth_domain.get('leadership_concentration_score'), digits=1, signed=False)} / 100, leader strength is {_fmt_num(breadth_domain.get('leader_strength_score'), digits=1, signed=False)} / 100, laggard pressure is {_fmt_num(breadth_domain.get('laggard_pressure_score'), digits=1, signed=False)} / 100, and leadership instability is {_fmt_num(breadth_domain.get('leadership_instability_score'), digits=1, signed=False)} / 100."
+            if breadth_domain
+            else None,
+            "Breadth is not confirming the move cleanly, which is one of the reasons the raw score is being dampened."
+            if "weak_breadth" in (signal_payload.get("suppression_flags") or [])
+            else None,
+            meta.get("data_quality_note"),
+        ]
+    )
+
+
+def _cross_asset_confirmation_text(
+    cross_asset_domain: Dict[str, Any],
+    signal_payload: Dict[str, Any],
+) -> str:
+    meta = cross_asset_domain.get("meta") or {}
+    return _join_sentences(
+        [
+            f"Cross-asset context is anchored to benchmark {cross_asset_domain.get('benchmark_proxy') or 'n/a'} and sector proxy {cross_asset_domain.get('sector_proxy') or 'n/a'}, with benchmark confirmation {_fmt_num(cross_asset_domain.get('benchmark_confirmation_score'), digits=1, signed=False)} / 100 and sector confirmation {_fmt_num(cross_asset_domain.get('sector_confirmation_score'), digits=1, signed=False)} / 100."
+            if cross_asset_domain
+            else _coverage_note(meta, "Cross-asset depth"),
+            f"Macro-asset alignment is {_fmt_num(cross_asset_domain.get('macro_asset_alignment_score'), digits=1, signed=False)} / 100, beta context is {_fmt_num(cross_asset_domain.get('beta_context_score'), digits=1, signed=False)} / 100, and cross-asset conflict is {_fmt_num(cross_asset_domain.get('cross_asset_conflict_score'), digits=1, signed=False)} / 100."
+            if cross_asset_domain
+            else None,
+            f"Cross-asset divergence is {_fmt_num(cross_asset_domain.get('cross_asset_divergence_score'), digits=1, signed=False)} / 100, with idiosyncratic strength {_fmt_num(cross_asset_domain.get('idiosyncratic_strength_score'), digits=1, signed=False)} / 100 versus idiosyncratic weakness {_fmt_num(cross_asset_domain.get('idiosyncratic_weakness_score'), digits=1, signed=False)} / 100."
+            if cross_asset_domain
+            else None,
+            "Cross-asset contradiction is explicitly suppressing the canonical score."
+            if "cross_asset_conflict" in (signal_payload.get("suppression_flags") or [])
+            else None,
+            meta.get("data_quality_note"),
+        ]
+    )
+
+
+def _stress_spillover_text(
+    stress_domain: Dict[str, Any],
+    signal_payload: Dict[str, Any],
+) -> str:
+    meta = stress_domain.get("meta") or {}
+    return _join_sentences(
+        [
+            f"Stress posture currently shows market stress {_fmt_num(stress_domain.get('market_stress_score'), digits=1, signed=False)} / 100, spillover risk {_fmt_num(stress_domain.get('spillover_risk_score'), digits=1, signed=False)} / 100, and contagion risk {_fmt_num(stress_domain.get('contagion_risk_proxy'), digits=1, signed=False)} / 100."
+            if stress_domain
+            else _coverage_note(meta, "Stress"),
+            f"Correlation-breakdown proxy is {_fmt_num(stress_domain.get('correlation_breakdown_proxy'), digits=1, signed=False)} / 100, volatility shock is {_fmt_num(stress_domain.get('volatility_shock_score'), digits=1, signed=False)} / 100, and stress transition is {_fmt_num(stress_domain.get('stress_transition_score'), digits=1, signed=False)} / 100."
+            if stress_domain
+            else None,
+            f"Defensive regime flag is {stress_domain.get('defensive_regime_flag')}, unstable environment flag is {stress_domain.get('unstable_environment_flag')}."
+            if stress_domain.get("defensive_regime_flag") is not None or stress_domain.get("unstable_environment_flag") is not None
+            else None,
+            f"Active confidence-suppression notes are {_fmt_list(signal_payload.get('adjusted_confidence_notes') or [])}."
+            if signal_payload.get("adjusted_confidence_notes")
+            else None,
+            meta.get("data_quality_note"),
+        ]
+    )
+
+
 def _risk_quality_analysis_text(
     signal: Dict[str, Any],
     quality: Dict[str, Any],
@@ -1439,6 +1565,13 @@ def build_analysis_report(
     macro = data_bundle.get("macro_cross_asset") or {}
     geopolitical = data_bundle.get("geopolitical_policy") or {}
     relative = data_bundle.get("relative_context") or {}
+    canonical_feature_vector = ((data_bundle.get("canonical_alpha_core") or {}).get("feature_vector") or {})
+    canonical_signal_payload = ((data_bundle.get("canonical_alpha_core") or {}).get("signal_payload") or {})
+    event_catalyst_risk = data_bundle.get("event_catalyst_risk") or {}
+    liquidity_execution_fragility = data_bundle.get("liquidity_execution_fragility") or {}
+    market_breadth_internals = data_bundle.get("market_breadth_internals") or {}
+    cross_asset_confirmation = data_bundle.get("cross_asset_confirmation") or {}
+    stress_spillover_conditions = data_bundle.get("stress_spillover_conditions") or {}
     composites = feature_factor_bundle.get("composite_intelligence") or {}
     proprietary_scores = feature_factor_bundle.get("proprietary_scores") or {}
     factor_groups = feature_factor_bundle.get("factor_groups") or {}
@@ -1471,14 +1604,20 @@ def build_analysis_report(
         "actionability_score": actionability_score,
     }
 
-    signal_summary = " ".join(
+    signal_summary = _join_sentences(
         [
             f"As of {as_of_text}, the assistant pipeline lands on a {strategy_signal} posture for {symbol}, framed on the {horizon} horizon under {risk_mode} risk mode.",
             f"The underlying signal engine prints {action} with score {_fmt_num(score)} and confidence {_fmt_num(confidence)}, while the strategy layer converts that into {strategy_signal} / {strategy_posture} with probability-like confidence {_fmt_num(strategy_confidence)} ({_fmt_num(confidence_score, digits=1, signed=False)} / 100), {conviction_tier} conviction, {fragility_tier} fragility, and actionability {_fmt_num(actionability_score, digits=1, signed=False)} / 100.",
             f"Structural quality is {_fmt_num(composites.get('Market Structure Integrity Score'), digits=1, signed=False)} / 100, regime stability is {_fmt_num(composites.get('Regime Stability Score'), digits=1, signed=False)} / 100, signal fragility is {_fmt_num(composites.get('Signal Fragility Index'), digits=1, signed=False)} / 100, and opportunity quality is {_fmt_num(composites.get('Opportunity Quality Score'), digits=1, signed=False)} / 100.",
+            f"Depth overlays currently show event risk {str(event_catalyst_risk.get('event_risk_classification') or 'unknown').replace('_', ' ')}, implementation fragility {_fmt_num(liquidity_execution_fragility.get('implementation_fragility_score'), digits=1, signed=False)} / 100, breadth state {str(market_breadth_internals.get('breadth_state') or 'unknown').replace('_', ' ')}, cross-asset conflict {_fmt_num(cross_asset_confirmation.get('cross_asset_conflict_score'), digits=1, signed=False)} / 100, and market stress {_fmt_num(stress_spillover_conditions.get('market_stress_score'), digits=1, signed=False)} / 100."
+            if event_catalyst_risk or liquidity_execution_fragility or market_breadth_internals or cross_asset_confirmation or stress_spillover_conditions
+            else None,
             f"Cross-domain agreement is {_fmt_num(domain_agreement.get('domain_agreement_score'), digits=1, signed=False)} / 100 versus conflict {_fmt_num(domain_agreement.get('domain_conflict_score'), digits=1, signed=False)} / 100; the strongest confirming domains are {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_confirming_domains') or []))}, while conflicts are concentrated in {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_conflicting_domains') or []))}.",
             f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, participant fit is {_fmt_list(participant_fit)}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
             f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'} and execution posture {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')}.",
+            f"Canonical suppression flags are {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}."
+            if canonical_signal_payload.get("suppression_flags")
+            else None,
             f"Coverage headwinds are concentrated in {_fmt_list(coverage_headwinds)}, which is dampening conviction."
             if coverage_headwinds
             else "Cross-domain coverage is broadly in place, so the signal is not being driven by one thin data pocket alone.",
@@ -1518,6 +1657,26 @@ def build_analysis_report(
         relative,
         data_bundle,
     )
+    event_catalyst_risk_analysis = _event_catalyst_risk_text(
+        event_catalyst_risk,
+        canonical_signal_payload,
+    )
+    liquidity_execution_fragility_analysis = _liquidity_execution_fragility_text(
+        liquidity_execution_fragility,
+        canonical_signal_payload,
+    )
+    market_breadth_internal_state_analysis = _market_breadth_internal_state_text(
+        market_breadth_internals,
+        canonical_signal_payload,
+    )
+    cross_asset_confirmation_analysis = _cross_asset_confirmation_text(
+        cross_asset_confirmation,
+        canonical_signal_payload,
+    )
+    stress_spillover_analysis = _stress_spillover_text(
+        stress_spillover_conditions,
+        canonical_signal_payload,
+    )
 
     risk_quality_analysis = _risk_quality_analysis_text(
         signal,
@@ -1529,13 +1688,27 @@ def build_analysis_report(
         domain_agreement,
         data_bundle,
     )
+    risk_quality_analysis = _join_sentences(
+        [
+            risk_quality_analysis,
+            f"False-positive suppression flags are {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}, and adjusted confidence notes are {_fmt_list(canonical_signal_payload.get('adjusted_confidence_notes') or [])}."
+            if canonical_signal_payload.get("suppression_flags") or canonical_signal_payload.get("adjusted_confidence_notes")
+            else None,
+        ]
+    )
 
-    overall_analysis = " ".join(
+    overall_analysis = _join_sentences(
         [
             f"The unified system view on {symbol} is {strategy_signal} / {strategy_posture}. That posture is not coming from one score alone; it is the result of trend, mean-reversion, sentiment, macro-alignment, quality/fundamental, relative-strength, evidence-quality, and fragility-veto components being fused inside the strategy layer.",
             f"The strongest evidence for the thesis is {_fmt_driver_list(why_signal['top_positive_drivers'])}. The strongest evidence against it is {_fmt_driver_list(why_signal['top_negative_drivers'])}.",
             f"Structural integrity {_fmt_num(composites.get('Market Structure Integrity Score'), digits=1)} / 100, fundamental durability {_fmt_num(composites.get('Fundamental Durability Score'), digits=1)} / 100, macro alignment {_fmt_num(composites.get('Macro Alignment Score'), digits=1)} / 100, and cross-domain conviction {_fmt_num(composites.get('Cross-Domain Conviction Score'), digits=1)} / 100 are being weighed against fragility {_fmt_num(composites.get('Signal Fragility Index'), digits=1)} / 100 and crowding {_fmt_num(composites.get('Narrative Crowding Index'), digits=1)} / 100.",
+            f"Depth realism overlays show event overhang {_fmt_num(canonical_feature_vector.get('event_overhang_score'), digits=1, signed=False)} / 100, implementation fragility {_fmt_num(canonical_feature_vector.get('implementation_fragility_score'), digits=1, signed=False)} / 100, breadth confirmation {_fmt_num(canonical_feature_vector.get('breadth_confirmation_score'), digits=1, signed=False)} / 100, cross-asset conflict {_fmt_num(canonical_feature_vector.get('cross_asset_conflict_score'), digits=1, signed=False)} / 100, and market stress {_fmt_num(canonical_feature_vector.get('market_stress_score'), digits=1, signed=False)} / 100."
+            if canonical_feature_vector
+            else None,
             f"The final posture stays at {strategy_signal} because raw signal action {action}, regime {regime}, opportunity-quality score {_fmt_num(composites.get('Opportunity Quality Score'), digits=1)} / 100, and execution framing {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')} outweigh the current detractors, but the system is explicitly least certain where {strategy.get('where_least_certain') or 'cross-domain disagreement is highest'}.",
+            f"Suppression logic remains active through {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}, which is why the platform is treating superficially attractive setups more defensively when event windows, liquidity fragility, weak breadth, cross-asset conflict, or stress spillover are elevated."
+            if canonical_signal_payload.get("suppression_flags")
+            else None,
             f"Scenario discipline matters: base case is {(scenario_matrix.get('base') or {}).get('summary') or strategy.get('base_case')}, bull transition requires {_fmt_list((strategy.get('confirmation_triggers') or []))}, bear deterioration comes through {_fmt_list((strategy.get('deterioration_triggers') or []))}, and top invalidators are {_fmt_list((invalidation_map.get('top_invalidators') or []))}.",
             "This remains a description of the platform's computed state, not personalized investment advice.",
         ]
@@ -1587,6 +1760,29 @@ def build_analysis_report(
             "data_bundle.relative_context",
             "feature_factor_bundle.macro_alignment",
         ],
+        "event_catalyst_risk_analysis": [
+            "data_bundle.event_catalyst_risk",
+            "canonical_alpha_core.feature_vector.event_*",
+            "canonical_alpha_core.signal_payload.event_penalties",
+        ],
+        "liquidity_execution_fragility_analysis": [
+            "data_bundle.liquidity_execution_fragility",
+            "canonical_alpha_core.feature_vector.implementation_fragility_*",
+            "canonical_alpha_core.signal_payload.liquidity_penalties",
+        ],
+        "market_breadth_internal_state_analysis": [
+            "data_bundle.market_breadth_internals",
+            "canonical_alpha_core.feature_vector.breadth_*",
+        ],
+        "cross_asset_confirmation_analysis": [
+            "data_bundle.cross_asset_confirmation",
+            "canonical_alpha_core.feature_vector.cross_asset_*",
+        ],
+        "stress_spillover_analysis": [
+            "data_bundle.stress_spillover_conditions",
+            "canonical_alpha_core.feature_vector.market_stress_*",
+            "canonical_alpha_core.signal_payload.stress_penalties",
+        ],
         "strategy_view": [
             "strategy.strategy_summary",
             "strategy.strategy_posture",
@@ -1634,6 +1830,11 @@ def build_analysis_report(
         "data_bundle": data_bundle,
         "domain_availability": domain_availability,
         "feature_factor_bundle": feature_factor_bundle,
+        "event_catalyst_risk": event_catalyst_risk,
+        "liquidity_execution_fragility": liquidity_execution_fragility,
+        "market_breadth_internals": market_breadth_internals,
+        "cross_asset_confirmation": cross_asset_confirmation,
+        "stress_spillover_conditions": stress_spillover_conditions,
         "proprietary_scores": proprietary_scores,
         "factor_groups": factor_groups,
         "regime_intelligence": regime_intelligence,
@@ -1808,10 +2009,17 @@ def build_analysis_report(
         "statistical_analysis": statistical_analysis,
         "sentiment_analysis": sentiment_analysis,
         "macro_geopolitical_analysis": macro_geopolitical_analysis,
+        "event_catalyst_risk_analysis": event_catalyst_risk_analysis,
+        "liquidity_execution_fragility_analysis": liquidity_execution_fragility_analysis,
+        "market_breadth_internal_state_analysis": market_breadth_internal_state_analysis,
+        "cross_asset_confirmation_analysis": cross_asset_confirmation_analysis,
+        "stress_spillover_analysis": stress_spillover_analysis,
         "risk_quality_analysis": risk_quality_analysis,
         "overall_analysis": overall_analysis,
         "strategy_view": strategy_view,
         "risks_weaknesses_invalidators": risks_weaknesses_invalidators,
         "evidence_provenance": evidence_provenance,
+        "suppression_flags": canonical_signal_payload.get("suppression_flags") or [],
+        "adjusted_confidence_notes": canonical_signal_payload.get("adjusted_confidence_notes") or [],
     }
     return sanitize_payload(report)

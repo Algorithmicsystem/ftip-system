@@ -151,7 +151,7 @@ def _compute_canonical_signal_for_date(
             as_of_date,
             lookback,
             lookback_days=max(420, lookback * 2),
-            include_reference_context=False,
+            include_reference_context=True,
         )
     except Exception:
         return None

@@ -228,7 +228,7 @@ def _compute_features_payload(symbol: str, as_of_date: dt.date, lookback: int, c
         lookback,
         candles,
         source_hint="provided_market_bars",
-        include_reference_context=False,
+        include_reference_context=True,
     )
     feature_payload = build_canonical_features(snapshot)
     feats = dict(feature_payload.get("features") or {})

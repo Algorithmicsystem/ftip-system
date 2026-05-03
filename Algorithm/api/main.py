@@ -470,6 +470,14 @@ class SignalResponse(BaseModel):
     calibration_meta: Optional[Dict[str, Any]] = None
     reason_codes: List[str] = Field(default_factory=list)
     reason_details: Dict[str, Any] = Field(default_factory=dict)
+    suppression_flags: List[str] = Field(default_factory=list)
+    environment_penalties: Dict[str, Any] = Field(default_factory=dict)
+    event_penalties: Dict[str, Any] = Field(default_factory=dict)
+    liquidity_penalties: Dict[str, Any] = Field(default_factory=dict)
+    breadth_penalties: Dict[str, Any] = Field(default_factory=dict)
+    cross_asset_penalties: Dict[str, Any] = Field(default_factory=dict)
+    stress_penalties: Dict[str, Any] = Field(default_factory=dict)
+    adjusted_confidence_notes: List[str] = Field(default_factory=list)
     entry_low: Optional[float] = None
     entry_high: Optional[float] = None
     stop_loss: Optional[float] = None
@@ -1130,7 +1138,7 @@ def compute_signal_for_symbol_from_candles(
         lookback,
         candles_upto,
         source_hint="provided_market_bars",
-        include_reference_context=False,
+        include_reference_context=True,
     )
     feature_payload = build_canonical_features(snapshot)
     signal_payload = build_canonical_signal(snapshot, feature_payload)
@@ -1155,6 +1163,14 @@ def compute_signal_for_symbol_from_candles(
         calibration_meta=signal_payload.get("calibration_meta"),
         reason_codes=list(signal_payload.get("reason_codes") or []),
         reason_details=dict(signal_payload.get("reason_details") or {}),
+        suppression_flags=list(signal_payload.get("suppression_flags") or []),
+        environment_penalties=dict(signal_payload.get("environment_penalties") or {}),
+        event_penalties=dict(signal_payload.get("event_penalties") or {}),
+        liquidity_penalties=dict(signal_payload.get("liquidity_penalties") or {}),
+        breadth_penalties=dict(signal_payload.get("breadth_penalties") or {}),
+        cross_asset_penalties=dict(signal_payload.get("cross_asset_penalties") or {}),
+        stress_penalties=dict(signal_payload.get("stress_penalties") or {}),
+        adjusted_confidence_notes=list(signal_payload.get("adjusted_confidence_notes") or []),
         entry_low=_safe_float(signal_payload.get("entry_low")),
         entry_high=_safe_float(signal_payload.get("entry_high")),
         stop_loss=_safe_float(signal_payload.get("stop_loss")),

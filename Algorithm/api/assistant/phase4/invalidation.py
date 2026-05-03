@@ -33,6 +33,11 @@ def build_invalidation_map(
         or feature_factor_bundle.get("relative_peer")
         or {}
     )
+    event_risk = data_bundle.get("event_catalyst_risk") or {}
+    liquidity = data_bundle.get("liquidity_execution_fragility") or {}
+    breadth = data_bundle.get("market_breadth_internals") or {}
+    cross_asset_depth = data_bundle.get("cross_asset_confirmation") or {}
+    stress = data_bundle.get("stress_spillover_conditions") or {}
     agreement = feature_factor_bundle.get("domain_agreement") or {}
     composites = feature_factor_bundle.get("composite_intelligence") or {}
 
@@ -47,6 +52,11 @@ def build_invalidation_map(
     breakout_follow_through = safe_float(market_structure.get("breakout_follow_through_score")) or 50.0
     regime_stability = safe_float(composites.get("Regime Stability Score")) or 50.0
     missingness = min(safe_float(quality.get("missingness")) or 0.0, 1.0)
+    event_overhang = safe_float(event_risk.get("event_overhang_score")) or 0.0
+    implementation_fragility = safe_float(liquidity.get("implementation_fragility_score")) or 0.0
+    breadth_confirmation = safe_float(breadth.get("breadth_confirmation_score")) or 50.0
+    cross_asset_conflict = safe_float(cross_asset_depth.get("cross_asset_conflict_score")) or 0.0
+    market_stress = safe_float(stress.get("market_stress_score")) or 0.0
 
     regime_invalidators = compact_list(
         [
@@ -89,6 +99,12 @@ def build_invalidation_map(
             "Missingness rising materially above current levels would force the posture back toward observation only."
             if missingness >= 0.08
             else "A material increase in missingness would degrade the strategy layer quickly.",
+            "A new event-overhang window would invalidate treating the setup as clean structural alpha."
+            if event_overhang < 70
+            else "Event overhang is already elevated; another catalyst pulse would keep the setup suppressed.",
+            "Implementation fragility worsening would invalidate any attempt to treat the setup as fully deployable."
+            if implementation_fragility >= 55
+            else None,
         ]
     )
 
@@ -104,6 +120,15 @@ def build_invalidation_map(
             narrative_invalidators[0] if narrative_invalidators else None,
             macro_invalidators[0] if macro_invalidators else None,
             quality_invalidators[0] if quality_invalidators else None,
+            "Breadth confirmation breaking lower would invalidate the current posture."
+            if breadth_confirmation >= 45
+            else "Breadth is already weak; another deterioration would reinforce the invalidation path.",
+            "Cross-asset contradiction intensifying would invalidate the thesis."
+            if cross_asset_conflict >= 55
+            else None,
+            "Market stress spilling higher would invalidate the setup even if stock-level structure still looks intact."
+            if market_stress >= 55
+            else None,
             "Relative strength turning decisively against the thesis would invalidate the current read."
             if relative_strength >= 50 and final_signal == "BUY"
             else "Relative weakness failing to persist would undercut the bearish read."
@@ -126,6 +151,9 @@ def build_invalidation_map(
             "Relative strength improving versus the benchmark would confirm idiosyncratic strength."
             if relative_strength < 58
             else "Relative strength staying above benchmark context would confirm the thesis.",
+            "Event overhang needs to recede before the setup can be treated as cleaner actionability."
+            if event_overhang >= 60
+            else None,
         ]
     )
 
@@ -139,6 +167,12 @@ def build_invalidation_map(
             else "A rise in domain conflict would shift the setup toward wait / watchlist.",
             "Relative momentum fading against the benchmark would weaken the setup.",
             "Freshness or coverage deterioration would lower the stance toward observation only.",
+            "Breadth deterioration or narrow leadership would weaken the setup further."
+            if breadth_confirmation < 60
+            else None,
+            "Stress and spillover rising would force a more defensive stance."
+            if market_stress >= 55
+            else None,
         ]
     )
 

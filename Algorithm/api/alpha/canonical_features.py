@@ -6,9 +6,16 @@ import math
 import statistics
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+from .depth_layers import (
+    build_breadth_depth,
+    build_cross_asset_depth,
+    build_event_depth,
+    build_liquidity_depth,
+    build_stress_depth,
+)
 
-CANONICAL_FEATURE_VERSION = "phase8_canonical_features_v1"
-FEATURE_SCHEMA_VERSION = 2
+CANONICAL_FEATURE_VERSION = "phase9_canonical_features_v1"
+FEATURE_SCHEMA_VERSION = 3
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -311,6 +318,24 @@ def build_canonical_features(snapshot: Dict[str, Any]) -> Dict[str, Any]:
     features["regime_strength"] = regime_strength
     features["signal_regime"] = signal_regime
 
+    event_depth = build_event_depth(snapshot, features)
+    liquidity_depth = build_liquidity_depth(snapshot, features, event_depth)
+    breadth_depth = build_breadth_depth(snapshot, features)
+    cross_asset_depth = build_cross_asset_depth(snapshot, features, breadth_depth)
+    stress_depth = build_stress_depth(
+        snapshot,
+        features,
+        event_depth,
+        liquidity_depth,
+        breadth_depth,
+        cross_asset_depth,
+    )
+    features.update(event_depth)
+    features.update(liquidity_depth)
+    features.update(breadth_depth)
+    features.update(cross_asset_depth)
+    features.update(stress_depth)
+
     feature_hash = _hash_payload(
         {
             "snapshot_id": snapshot.get("snapshot_id"),
@@ -338,6 +363,8 @@ def build_canonical_features(snapshot: Dict[str, Any]) -> Dict[str, Any]:
             "available_history_bars": len(price_rows),
             "feature_hash": feature_hash,
             "price_source": (snapshot.get("provenance") or {}).get("market_bars_source"),
+            "event_source": (snapshot.get("provenance") or {}).get("event_source"),
+            "breadth_source": (snapshot.get("provenance") or {}).get("breadth_source"),
         },
     }
 

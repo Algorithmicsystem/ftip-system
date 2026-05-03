@@ -51,6 +51,11 @@ def build_scenario_matrix(
         or feature_factor_bundle.get("volatility_risk_microstructure")
         or {}
     )
+    event_risk = data_bundle.get("event_catalyst_risk") or {}
+    liquidity = data_bundle.get("liquidity_execution_fragility") or {}
+    breadth = data_bundle.get("market_breadth_internals") or {}
+    cross_asset_depth = data_bundle.get("cross_asset_confirmation") or {}
+    stress = data_bundle.get("stress_spillover_conditions") or {}
     agreement = feature_factor_bundle.get("domain_agreement") or {}
     composites = feature_factor_bundle.get("composite_intelligence") or {}
 
@@ -107,6 +112,9 @@ def build_scenario_matrix(
                     "Relative strength stays supportive."
                     if (safe_float(relative_component.get("normalized_score")) or 0.0) >= 55
                     else "Relative context must stabilize before any upgrade.",
+                    "Event overhang recedes enough that the setup can be treated as structural rather than event-distorted."
+                    if (safe_float(event_risk.get("event_overhang_score")) or 0.0) >= 60
+                    else None,
                 ]
             ),
             "risk_conditions": compact_list(
@@ -119,6 +127,9 @@ def build_scenario_matrix(
                     else None,
                     "Narrative crowding stays a live risk."
                     if (safe_float(composites.get("Narrative Crowding Index")) or 0.0) >= 55
+                    else None,
+                    "Implementation fragility remains elevated."
+                    if (safe_float(liquidity.get("implementation_fragility_score")) or 0.0) >= 60
                     else None,
                 ]
             ),
@@ -155,12 +166,18 @@ def build_scenario_matrix(
                     "Macro alignment remains supportive.",
                     "Relative strength continues to confirm the move.",
                     "Crowding stays contained while sentiment remains constructive.",
+                    "Breadth confirmation and cross-asset context keep improving."
+                    if (safe_float(breadth.get("breadth_confirmation_score")) or 0.0) < 60
+                    else None,
                 ]
             ),
             "risk_conditions": compact_list(
                 [
                     "Overcrowding without better price confirmation would block the bull upgrade.",
                     "A macro wobble or new conflict pulse would cap upside posture.",
+                    "A fresh event window or catalyst burst would stop the setup from graduating into a cleaner bull case."
+                    if (safe_float(event_risk.get("event_overhang_score")) or 0.0) >= 55
+                    else None,
                 ]
             ),
             "what_needs_to_improve": compact_list(
@@ -199,6 +216,7 @@ def build_scenario_matrix(
                     "Fragility and instability continue to rise.",
                     "Macro alignment deteriorates or relative strength rolls over.",
                     "Cross-domain conflict becomes the dominant read.",
+                    "Breadth stays weak while cross-asset contradiction grows.",
                 ]
             ),
             "risk_conditions": compact_list(
@@ -241,6 +259,7 @@ def build_scenario_matrix(
                     "Regime transitions into high-volatility chop or instability.",
                     "Fragility crosses into a clearly elevated state.",
                     "Evidence freshness degrades while conflicts remain unresolved.",
+                    "Stress spillover and correlation breakdown keep rising.",
                 ]
             ),
             "risk_conditions": compact_list(

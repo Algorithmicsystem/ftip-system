@@ -3,13 +3,18 @@ import math
 
 import pytest
 
-from api.alpha import build_canonical_features, build_canonical_signal
+from api.alpha import (
+    CANONICAL_FEATURE_VERSION,
+    CANONICAL_SIGNAL_VERSION,
+    build_canonical_features,
+    build_canonical_signal,
+)
 from api.assistant import reports
 from api.backtest import service as backtest_service
 from api.feature_engine import compute_daily_features
 from api.main import Candle, compute_features, compute_signal_for_symbol_from_candles
 from api.prosperity import routes as prosperity_routes
-from api.research import build_research_snapshot_from_bars
+from api.research import CANONICAL_SNAPSHOT_VERSION, build_research_snapshot_from_bars
 from api.signal_engine import compute_daily_signal
 
 
@@ -246,9 +251,9 @@ def test_canonical_lineage_propagates_into_report_and_active_context() -> None:
             "refresh_mode": "refresh_stale",
             "canonical_lineage": {
                 "snapshot_id": "snap-test",
-                "snapshot_version": "phase8_canonical_snapshot_v1",
-                "feature_version": "phase8_canonical_features_v1",
-                "signal_version": "phase8_canonical_signal_v1",
+                "snapshot_version": CANONICAL_SNAPSHOT_VERSION,
+                "feature_version": CANONICAL_FEATURE_VERSION,
+                "signal_version": CANONICAL_SIGNAL_VERSION,
             },
         },
         data_bundle={"quality_provenance": {"quality_score": 80}},
@@ -258,10 +263,10 @@ def test_canonical_lineage_propagates_into_report_and_active_context() -> None:
     active_analysis = reports.build_active_analysis_reference(report)
 
     assert report["snapshot_id"] == "snap-test"
-    assert report["snapshot_version"] == "phase8_canonical_snapshot_v1"
-    assert report["feature_version"] == "phase8_canonical_features_v1"
-    assert report["signal_version"] == "phase8_canonical_signal_v1"
+    assert report["snapshot_version"] == CANONICAL_SNAPSHOT_VERSION
+    assert report["feature_version"] == CANONICAL_FEATURE_VERSION
+    assert report["signal_version"] == CANONICAL_SIGNAL_VERSION
     assert active_analysis["snapshot_id"] == "snap-test"
-    assert active_analysis["snapshot_version"] == "phase8_canonical_snapshot_v1"
-    assert active_analysis["feature_version"] == "phase8_canonical_features_v1"
-    assert active_analysis["signal_version"] == "phase8_canonical_signal_v1"
+    assert active_analysis["snapshot_version"] == CANONICAL_SNAPSHOT_VERSION
+    assert active_analysis["feature_version"] == CANONICAL_FEATURE_VERSION
+    assert active_analysis["signal_version"] == CANONICAL_SIGNAL_VERSION
