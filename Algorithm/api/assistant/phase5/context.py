@@ -78,6 +78,11 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "risks_weaknesses_invalidators": report.get("risks_weaknesses_invalidators") or "",
         "evidence_provenance": report.get("evidence_provenance") or "",
         "evaluation_research_analysis": report.get("evaluation_research_analysis") or "",
+        "canonical_validation_summary": report.get("canonical_validation_summary") or "",
+        "walkforward_validation_summary": report.get("walkforward_validation_summary") or "",
+        "net_of_friction_validation_summary": report.get("net_of_friction_validation_summary") or "",
+        "suppression_readiness_validation_summary": report.get("suppression_readiness_validation_summary") or "",
+        "drawdown_invalidation_validation_summary": report.get("drawdown_invalidation_validation_summary") or "",
         "deployment_readiness_summary": report.get("deployment_readiness_summary") or "",
         "deployment_permission_analysis": report.get("deployment_permission_analysis") or "",
         "risk_budget_exposure_analysis": report.get("risk_budget_exposure_analysis") or "",
@@ -198,6 +203,8 @@ def build_narrator_context(
         or report.get("research_version"),
         "learning_priority": active_analysis.get("learning_priority")
         or report.get("learning_priority"),
+        "validation_version": active_analysis.get("validation_version")
+        or report.get("validation_version"),
     }
 
     return {
@@ -245,6 +252,14 @@ def build_narrator_context(
             "suppression_flags": _compact_list(report.get("suppression_flags") or []),
             "adjusted_confidence_notes": _compact_list(report.get("adjusted_confidence_notes") or []),
         },
+        "canonical_validation_snapshot": {
+            "validation_version": report.get("validation_version"),
+            "validation_status": (report.get("canonical_validation") or {}).get("status"),
+            "matured_count": ((report.get("canonical_validation") or {}).get("prediction_linkage_summary") or {}).get("matured_count"),
+            "walkforward_windows": ((report.get("canonical_validation") or {}).get("walkforward_summary") or {}).get("window_count"),
+            "net_edge_return": ((report.get("canonical_validation") or {}).get("net_return_summary") or {}).get("average_edge_return"),
+            "average_cost_drag": ((report.get("canonical_validation") or {}).get("friction_cost_summary") or {}).get("average_cost_drag"),
+        },
         "domain_agreement": {
             "domain_agreement_score": agreement.get("domain_agreement_score"),
             "domain_conflict_score": agreement.get("domain_conflict_score"),
@@ -272,6 +287,11 @@ def build_narrator_context(
             "risks_weaknesses_invalidators": sections["risks_weaknesses_invalidators"],
             "evidence_provenance": sections["evidence_provenance"],
             "evaluation_research_analysis": sections["evaluation_research_analysis"],
+            "canonical_validation_summary": sections["canonical_validation_summary"],
+            "walkforward_validation_summary": sections["walkforward_validation_summary"],
+            "net_of_friction_validation_summary": sections["net_of_friction_validation_summary"],
+            "suppression_readiness_validation_summary": sections["suppression_readiness_validation_summary"],
+            "drawdown_invalidation_validation_summary": sections["drawdown_invalidation_validation_summary"],
             "deployment_readiness_summary": sections["deployment_readiness_summary"],
             "deployment_permission_analysis": sections["deployment_permission_analysis"],
             "risk_budget_exposure_analysis": sections["risk_budget_exposure_analysis"],

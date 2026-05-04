@@ -10,7 +10,11 @@ from fastapi import HTTPException
 from api.alpha import CANONICAL_SIGNAL_VERSION, build_canonical_features, build_canonical_signal
 from api import config, db
 from api.data_providers import canonical_symbol
-from api.research import build_research_snapshot
+from api.research import (
+    BACKTEST_VALIDATION_ARTIFACT_KIND,
+    build_research_snapshot,
+    run_canonical_backtest as run_canonical_backtest_engine,
+)
 from ftip.friction import CostModel as FrictionCostModel
 from ftip.friction import ExecutionPlan, FrictionEngine, MarketStateInputs
 
@@ -168,13 +172,16 @@ def _compute_canonical_signal_for_date(
         "score": signal_payload.get("score"),
         "confidence": signal_payload.get("confidence"),
         "payload": signal_payload,
+        "feature_payload": feature_payload,
+        "feature_vector": feature_payload.get("features") or {},
+        "snapshot_id": snapshot.get("snapshot_id"),
+        "snapshot_version": snapshot.get("snapshot_version"),
+        "feature_version": feature_payload.get("feature_version"),
+        "signal_version": signal_payload.get("signal_version"),
     }
 
 
 def _signal_for_date(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
-    signal = _fetch_signal(symbol, as_of_date)
-    if signal:
-        return signal
     return _compute_signal_if_missing(symbol, as_of_date)
 
 
@@ -324,207 +331,20 @@ def run_backtest(
     friction_cost_model = FrictionCostModel.from_legacy(cost_model)
     friction_engine = FrictionEngine(friction_cost_model)
     market_states = _fetch_market_states(symbols, start, end)
-    positions: Dict[str, Dict[str, Any]] = {}
-    trades: List[Dict[str, Any]] = []
-    equity_curve: List[Dict[str, Any]] = []
-
-    equity = 1.0
-    daily_returns: List[float] = []
-    daily_equity: List[float] = [equity]
-    daily_dates: List[dt.date] = [all_dates[0]]
-    trades_notional = 0.0
-
-    for i, date in enumerate(all_dates[1:], start=1):
-        active_returns: List[float] = []
-        trade_cost = 0.0
-
-        for sym in symbols:
-            closes = bars.get(sym, {})
-            if date not in closes:
-                continue
-            signal = _signal_for_date(sym, date)
-            desired = None
-            if signal:
-                action = (signal.get("action") or "").upper()
-                if action == "BUY":
-                    desired = "LONG"
-                elif action == "SELL":
-                    desired = "SHORT"
-            current = positions.get(sym)
-
-            if current and (desired != current["side"]):
-                exit_px = closes[date]
-                pnl_pct = (exit_px / current["entry_px"] - 1.0) * (
-                    1.0 if current["side"] == "LONG" else -1.0
-                )
-                pnl = pnl_pct * current["qty"]
-                trades.append(
-                    {
-                        "symbol": sym,
-                        "entry_dt": current["entry_dt"],
-                        "exit_dt": date,
-                        "side": current["side"].lower(),
-                        "entry_px": current["entry_px"],
-                        "exit_px": exit_px,
-                        "qty": current["qty"],
-                        "pnl": pnl,
-                        "pnl_pct": pnl_pct,
-                        "holding_days": (date - current["entry_dt"]).days,
-                    }
-                )
-                exit_market = market_states.get(sym, {}).get(date)
-                if exit_market:
-                    exit_result = friction_engine.simulate(
-                        MarketStateInputs(date=date, **exit_market),
-                        ExecutionPlan(
-                            symbol=sym,
-                            date=date,
-                            side="SELL" if current["side"] == "LONG" else "BUY",
-                            notional=current["qty"] * exit_market["close"],
-                            order_type="MARKET",
-                        ),
-                    )
-                    trade_cost += exit_result.total_cost
-                trades_notional += current["qty"]
-                positions.pop(sym, None)
-
-            if desired and sym not in positions:
-                positions[sym] = {
-                    "side": desired,
-                    "entry_dt": date,
-                    "entry_px": closes[date],
-                    "qty": 1.0,
-                }
-                entry_market = market_states.get(sym, {}).get(date)
-                if entry_market:
-                    entry_result = friction_engine.simulate(
-                        MarketStateInputs(date=date, **entry_market),
-                        ExecutionPlan(
-                            symbol=sym,
-                            date=date,
-                            side="BUY" if desired == "LONG" else "SELL",
-                            notional=entry_market["close"],
-                            order_type="MARKET",
-                        ),
-                    )
-                    trade_cost += entry_result.total_cost
-                trades_notional += 1.0
-
-            current = positions.get(sym)
-            if current:
-                prev_px = closes.get(all_dates[i - 1])
-                if prev_px:
-                    ret = (closes[date] / prev_px - 1.0) * (
-                        1.0 if current["side"] == "LONG" else -1.0
-                    )
-                    active_returns.append(ret)
-                current_market = market_states.get(sym, {}).get(date)
-                if current_market:
-                    overnight_result = friction_engine.simulate(
-                        MarketStateInputs(date=date, **current_market),
-                        ExecutionPlan(
-                            symbol=sym,
-                            date=date,
-                            side="BUY",
-                            notional=current_market["close"],
-                            order_type="MARKET",
-                        ),
-                        apply_overnight=True,
-                        held_notional=current_market["close"],
-                    )
-                    trade_cost += overnight_result.overnight_risk_paid
-
-        portfolio_return = (
-            sum(active_returns) / len(active_returns) if active_returns else 0.0
-        )
-        portfolio_return -= trade_cost / max(equity, 1e-12)
-        equity *= 1.0 + portfolio_return
-        daily_returns.append(portfolio_return)
-        daily_equity.append(equity)
-        daily_dates.append(date)
-
-    benchmark_equity = _bench_equity(spy_closes, daily_dates)
-    drawdowns = []
-    peak = daily_equity[0] if daily_equity else 1.0
-    for value in daily_equity:
-        if value > peak:
-            peak = value
-        drawdowns.append(value / peak - 1.0)
-
-    equity_curve = [
-        {
-            "dt": daily_dates[i].isoformat(),
-            "equity": daily_equity[i],
-            "drawdown": drawdowns[i],
-            "benchmark_equity": (
-                benchmark_equity[i]
-                if i < len(benchmark_equity)
-                else benchmark_equity[-1]
-            ),
-        }
-        for i in range(len(daily_dates))
-    ]
-
-    total_return = daily_equity[-1] - 1.0
-    n_days = max(1, len(daily_returns))
-    cagr = (1.0 + total_return) ** (252.0 / n_days) - 1.0
-    volatility = (
-        math.sqrt(
-            sum((r - (sum(daily_returns) / n_days)) ** 2 for r in daily_returns)
-            / max(1, n_days - 1)
-        )
-        * math.sqrt(252.0)
-        if len(daily_returns) > 1
-        else 0.0
+    run_payload = run_canonical_backtest_engine(
+        symbols=symbols,
+        bars=bars,
+        market_states=market_states,
+        start=start,
+        end=end,
+        horizon=horizon,
+        risk_mode=risk_mode,
+        cost_model=cost_model,
+        signal_version_hash=signal_version,
+        quality_score_fetcher=_fetch_quality_score,
+        signal_resolver=_signal_for_date,
+        friction_engine=friction_engine,
     )
-    sharpe = _sharpe(daily_returns)
-    sortino = _sortino(daily_returns)
-    max_dd = _max_drawdown(daily_equity)
-    wins = [t for t in trades if t["pnl"] > 0]
-    winrate = float(len(wins) / len(trades)) if trades else 0.0
-    avg_trade = (
-        float(sum(t["pnl_pct"] for t in trades) / len(trades)) if trades else 0.0
-    )
-    years = max(1e-9, n_days / 252.0)
-    trades_per_year = float(len(trades) / years) if years > 0 else 0.0
-    avg_equity = sum(daily_equity) / len(daily_equity) if daily_equity else 1.0
-    turnover = float(trades_notional / avg_equity) if avg_equity else 0.0
-
-    spy_return = benchmark_equity[-1] - 1.0 if benchmark_equity else 0.0
-    alpha_vs_spy = total_return - spy_return
-
-    regime_labels = _regime_labels(daily_dates, spy_closes)
-    regime_metrics: Dict[str, Dict[str, Any]] = {}
-    for idx, date in enumerate(daily_dates[1:], start=1):
-        label = regime_labels.get(date, "UNKNOWN")
-        bucket = regime_metrics.setdefault(label, {"returns": [], "trades": 0})
-        bucket["returns"].append(daily_returns[idx - 1])
-    for trade in trades:
-        label = regime_labels.get(trade["exit_dt"], "UNKNOWN")
-        regime_metrics.setdefault(label, {"returns": [], "trades": 0})
-        regime_metrics[label]["trades"] += 1
-
-    regime_rows: List[Dict[str, Any]] = []
-    for label, data in regime_metrics.items():
-        rets = data["returns"]
-        if not rets:
-            continue
-        r_cagr = (
-            (1.0 + sum(rets)) ** (252.0 / len(rets)) - 1.0 if len(rets) > 0 else 0.0
-        )
-        r_sharpe = _sharpe(rets)
-        r_maxdd = min(0.0, min(rets)) if rets else 0.0
-        r_winrate = float(len([r for r in rets if r > 0]) / len(rets)) if rets else 0.0
-        regime_rows.append(
-            {
-                "regime_name": label,
-                "cagr": r_cagr,
-                "sharpe": r_sharpe,
-                "maxdd": r_maxdd,
-                "winrate": r_winrate,
-                "trades": data["trades"],
-            }
-        )
 
     run_id = str(uuid.uuid4())
     _persist_backtest(
@@ -538,22 +358,15 @@ def run_backtest(
         signal_version_hash=signal_version,
         cost_model=cost_model,
         status="success",
-        trades=trades,
-        equity_curve=equity_curve,
-        metrics={
-            "cagr": cagr,
-            "sharpe": sharpe,
-            "sortino": sortino,
-            "maxdd": max_dd,
-            "volatility": volatility,
-            "winrate": winrate,
-            "avgtrade": avg_trade,
-            "tradesperyear": trades_per_year,
-            "turnover": turnover,
-            "alpha_vs_spy": alpha_vs_spy,
-            "beta": None,
-        },
-        regime_metrics=regime_rows,
+        trades=run_payload["trades"],
+        equity_curve=run_payload["equity_curve"],
+        metrics=run_payload["metrics"],
+        regime_metrics=run_payload["regime_metrics"],
+    )
+    _persist_backtest_artifact(
+        run_id=run_id,
+        kind=BACKTEST_VALIDATION_ARTIFACT_KIND,
+        payload=run_payload["validation_artifact"],
     )
 
     return {"run_id": run_id, "status": "success"}
@@ -683,6 +496,21 @@ def _persist_backtest(
         conn.commit()
 
 
+def _persist_backtest_artifact(*, run_id: str, kind: str, payload: Dict[str, Any]) -> None:
+    _require_db_enabled(write=True, read=True)
+    with db.with_connection() as (conn, cur):
+        cur.execute(
+            """
+            INSERT INTO backtest_artifacts (run_id, kind, payload)
+            VALUES (%s, %s, %s::jsonb)
+            ON CONFLICT (run_id, kind)
+            DO UPDATE SET payload=EXCLUDED.payload, updated_at=now()
+            """,
+            (run_id, kind, payload),
+        )
+        conn.commit()
+
+
 def fetch_results(run_id: str) -> Dict[str, Any]:
     _require_db_enabled(read=True)
     run_row = db.safe_fetchone(
@@ -712,6 +540,15 @@ def fetch_results(run_id: str) -> Dict[str, Any]:
         FROM backtest_regime_metrics
         WHERE run_id = %s
         ORDER BY regime_name
+        """,
+        (run_id,),
+    )
+    artifact_rows = db.safe_fetchall(
+        """
+        SELECT kind, payload
+        FROM backtest_artifacts
+        WHERE run_id = %s
+        ORDER BY kind
         """,
         (run_id,),
     )
@@ -757,6 +594,15 @@ def fetch_results(run_id: str) -> Dict[str, Any]:
         "worst_regime": worst_regime,
         "turnover": metrics.get("turnover"),
     }
+    artifacts = {row[0]: row[1] for row in artifact_rows}
+    canonical_validation = artifacts.get(BACKTEST_VALIDATION_ARTIFACT_KIND)
+    if canonical_validation:
+        summary["walkforward_windows"] = (
+            canonical_validation.get("walkforward_summary") or {}
+        ).get("window_count")
+        summary["net_edge_return"] = (
+            canonical_validation.get("net_return_summary") or {}
+        ).get("average_edge_return")
 
     return {
         "run": {
@@ -775,6 +621,8 @@ def fetch_results(run_id: str) -> Dict[str, Any]:
         },
         "metrics": metrics,
         "regime_metrics": regime_metrics,
+        "artifacts": artifacts,
+        "canonical_validation": canonical_validation,
         "summary": summary,
     }
 

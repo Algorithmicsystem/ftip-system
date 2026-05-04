@@ -325,6 +325,13 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["adaptation_queue_summary"]
     assert result["experiment_registry_summary"]
     assert result["archetype_motif_summary"]
+    assert result["canonical_validation_artifact_id"]
+    assert result["canonical_validation"]["validation_version"]
+    assert result["canonical_validation_summary"]
+    assert result["walkforward_validation_summary"]
+    assert result["net_of_friction_validation_summary"]
+    assert result["suppression_readiness_validation_summary"]
+    assert result["drawdown_invalidation_validation_summary"]
     assert result["setup_archetype"]["archetype_name"]
     assert result["learning_priority"]
     assert result["actionability_score"] is not None
@@ -347,6 +354,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
         session["metadata"]["continuous_learning"]["artifact_id"]
         == result["learning_artifact_id"]
     )
+    assert (
+        session["metadata"]["canonical_validation"]["artifact_id"]
+        == result["canonical_validation_artifact_id"]
+    )
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
@@ -357,6 +368,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["deployment_readiness"]
     assert report["portfolio_construction"]
     assert report["continuous_learning"]
+    assert report["canonical_validation"]
     assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(

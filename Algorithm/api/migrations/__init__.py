@@ -568,6 +568,11 @@ def _migration_canonical_alpha_core_lineage(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_backtest_artifacts(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("025_backtest_artifacts.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -603,6 +608,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "024_canonical_alpha_core_lineage",
         _migration_canonical_alpha_core_lineage,
+    ),
+    (
+        "025_backtest_artifacts",
+        _migration_backtest_artifacts,
     ),
 ]
 

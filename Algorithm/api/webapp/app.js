@@ -165,6 +165,7 @@ const buildActiveAnalysisFromReport = (report) => ({
   setup_archetype: report?.setup_archetype?.archetype_name || "n/a",
   research_version: report?.research_version || "n/a",
   learning_priority: report?.learning_priority || "observe",
+  validation_version: report?.validation_version || report?.canonical_validation?.validation_version || "n/a",
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -241,6 +242,14 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
       research_version: report?.research_version || analysis?.research_version || "n/a",
       strongest_condition: conditionLabel(report?.evaluation?.strongest_conditions?.[0]),
       weakest_condition: conditionLabel(report?.evaluation?.weakest_conditions?.[0]),
+      validation_version:
+        report?.validation_version || report?.canonical_validation?.validation_version || "phase10",
+      walkforward_windows:
+        report?.canonical_validation?.walkforward_summary?.window_count ?? null,
+      validation_net_edge:
+        report?.canonical_validation?.net_return_summary?.average_edge_return ?? null,
+      validation_cost_drag:
+        report?.canonical_validation?.friction_cost_summary?.average_cost_drag ?? null,
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
       strategy_summary: report?.strategy_view || "",
       portfolio_summary: report?.portfolio_context_summary || "",
@@ -1479,13 +1488,17 @@ const renderPortfolioWorkflow = (report) => {
 
 const renderEvaluationMetrics = (report) => {
   const evaluation = report?.evaluation;
-  if (!evaluation || Object.keys(evaluation).length === 0) {
+  const validation = report?.canonical_validation;
+  if ((!evaluation || Object.keys(evaluation).length === 0) && (!validation || Object.keys(validation).length === 0)) {
     renderMetricCards("#assistant-evaluation-metrics", null);
     return;
   }
   const signal = evaluation.signal_scorecard || {};
   const strategy = evaluation.strategy_scorecard || {};
   const calibration = evaluation.calibration_summary || {};
+  const walkforward = validation?.walkforward_summary || {};
+  const net = validation?.net_return_summary || {};
+  const friction = validation?.friction_cost_summary || {};
   renderMetricCards("#assistant-evaluation-metrics", [
     {
       label: "Matured Signals",
@@ -1525,9 +1538,25 @@ const renderEvaluationMetrics = (report) => {
       note: calibration.confidence_monotonicity || "sample-limited",
     },
     {
+      label: "Walk-Forward",
+      value: walkforward.window_count ?? "n/a",
+      note: walkforward.status || validation?.status || "limited",
+    },
+    {
+      label: "Net Edge",
+      value:
+        net.average_edge_return == null
+          ? "n/a"
+          : Number(net.average_edge_return * 100).toFixed(2) + "%",
+      note:
+        friction.average_cost_drag == null
+          ? "net of friction"
+          : `cost drag ${Number(friction.average_cost_drag * 100).toFixed(2)}%`,
+    },
+    {
       label: "Status",
-      value: evaluation.status || "unknown",
-      note: evaluation.evaluation_version || "phase6",
+      value: validation?.status || evaluation?.status || "unknown",
+      note: validation?.validation_version || evaluation?.evaluation_version || "phase6",
     },
   ]);
 };
@@ -1607,9 +1636,10 @@ const renderEvaluationRegimeGrid = (report) => {
 const renderEvaluationFailureModes = (report) => {
   const container = qs("#assistant-failure-modes");
   const evaluation = report?.evaluation;
+  const validation = report?.canonical_validation;
   const calibration = evaluation?.calibration_summary || {};
   const ranking = evaluation?.bucket_results || [];
-  if (!evaluation || Object.keys(evaluation).length === 0) {
+  if ((!evaluation || Object.keys(evaluation).length === 0) && (!validation || Object.keys(validation).length === 0)) {
     container.innerHTML = emptyStateCard(
       "Failure modes, strongest conditions, and bucket results will render here."
     );
@@ -1627,7 +1657,7 @@ const renderEvaluationFailureModes = (report) => {
             : Number(item.favorable_vs_unfavorable_return_spread * 100).toFixed(2) + "%"
         } · ${item.monotonicity || "mixed"}`
     );
-  const failureModes = (evaluation.failure_modes || []).map(
+  const failureModes = ((validation?.failure_modes || evaluation?.failure_modes || [])).map(
     (item) =>
       `${item.dimension}=${item.label} · avg ${
         item.average_forward_return == null
@@ -1657,6 +1687,9 @@ const renderEvaluationFailureModes = (report) => {
           report.evaluation_summary,
           report.confidence_reliability_summary,
           report.regime_usefulness_summary,
+          report.canonical_validation_summary,
+          report.walkforward_validation_summary,
+          report.net_of_friction_validation_summary,
         ].filter(Boolean),
         "No research summary available."
       )}

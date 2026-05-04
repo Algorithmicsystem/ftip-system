@@ -31,6 +31,10 @@ from api.assistant.phase10 import (
     CONTINUOUS_LEARNING_ARTIFACT_KIND,
     build_continuous_learning_artifact,
 )
+from api.research.backtest import (
+    CANONICAL_VALIDATION_ARTIFACT_KIND,
+    build_validation_artifact,
+)
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
@@ -320,6 +324,29 @@ async def generate_analysis_report(
         continuous_learning,
         learning_artifact_id=continuous_learning_artifact_id,
     )
+    enriched_prediction_record = build_prediction_record(
+        report,
+        report_id=report_id,
+        session_id=sid,
+    )
+    store.update_artifact(prediction_record_id, enriched_prediction_record)
+    prediction_artifacts = store.list_artifacts(kind=PREDICTION_RECORD_KIND, limit=750)
+    canonical_validation = build_validation_artifact(
+        records=[artifact.get("payload") or {} for artifact in prediction_artifacts],
+        cohort_symbol=symbol,
+        cohort_horizon=horizon,
+        cohort_risk_mode=risk_mode,
+    )
+    canonical_validation_artifact_id = store.save_artifact(
+        sid,
+        CANONICAL_VALIDATION_ARTIFACT_KIND,
+        canonical_validation,
+    )
+    report = reports.attach_canonical_validation_context(
+        report,
+        canonical_validation,
+        canonical_validation_artifact_id=canonical_validation_artifact_id,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -356,6 +383,12 @@ async def generate_analysis_report(
                 "setup_archetype": report.get("setup_archetype", {}).get("archetype_name"),
                 "learning_priority": report.get("learning_priority"),
             },
+            "canonical_validation": {
+                "artifact_id": canonical_validation_artifact_id,
+                "validation_version": report.get("validation_version"),
+                "status": (report.get("canonical_validation") or {}).get("status"),
+                "walkforward_windows": ((report.get("canonical_validation") or {}).get("walkforward_summary") or {}).get("window_count"),
+            },
         },
     )
     store.add_message(
@@ -375,6 +408,7 @@ async def generate_analysis_report(
             "deployment_audit_artifact_id": deployment_audit_artifact_id,
             "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
             "continuous_learning_artifact_id": continuous_learning_artifact_id,
+            "canonical_validation_artifact_id": canonical_validation_artifact_id,
             "canonical_lineage": job_context.get("canonical_lineage") or {},
             "active_analysis": active_analysis,
         },
@@ -393,6 +427,7 @@ async def generate_analysis_report(
         "deployment_audit_artifact_id": deployment_audit_artifact_id,
         "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
         "continuous_learning_artifact_id": continuous_learning_artifact_id,
+        "canonical_validation_artifact_id": canonical_validation_artifact_id,
         "active_analysis": active_analysis,
     }
 

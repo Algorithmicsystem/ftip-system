@@ -1079,6 +1079,7 @@ def build_active_analysis_reference(
             "setup_archetype": ((report.get("setup_archetype") or {}).get("archetype_name")),
             "research_version": report.get("research_version"),
             "learning_priority": report.get("learning_priority"),
+            "validation_version": report.get("validation_version"),
         }
     )
 
@@ -1499,6 +1500,125 @@ def attach_learning_context(
     evidence_map["archetype_motif_summary"] = [
         "continuous_learning.signal_family_library",
         "continuous_learning.motif_discovery",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def _canonical_validation_summary_text(validation: Dict[str, Any]) -> str:
+    return str(
+        validation.get("validation_summary")
+        or "Canonical research-truth validation is not yet populated."
+    )
+
+
+def _walkforward_validation_text(validation: Dict[str, Any]) -> str:
+    return str(
+        validation.get("walkforward_validation_summary")
+        or "Walk-forward validation is not yet populated."
+    )
+
+
+def _net_of_friction_validation_text(validation: Dict[str, Any]) -> str:
+    return str(
+        validation.get("net_of_friction_summary")
+        or "Net-of-friction validation is not yet populated."
+    )
+
+
+def _suppression_readiness_validation_text(validation: Dict[str, Any]) -> str:
+    return str(
+        validation.get("suppression_readiness_validation_summary")
+        or "Suppression and readiness validation is not yet populated."
+    )
+
+
+def _drawdown_invalidation_validation_text(validation: Dict[str, Any]) -> str:
+    return str(
+        validation.get("drawdown_invalidation_summary")
+        or "MAE / MFE / invalidation validation is not yet populated."
+    )
+
+
+def attach_canonical_validation_context(
+    report: Dict[str, Any],
+    validation: Dict[str, Any],
+    *,
+    canonical_validation_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    validation_summary = _canonical_validation_summary_text(validation)
+    walkforward_summary = _walkforward_validation_text(validation)
+    net_summary = _net_of_friction_validation_text(validation)
+    suppression_summary = _suppression_readiness_validation_text(validation)
+    drawdown_summary = _drawdown_invalidation_validation_text(validation)
+
+    updated["report_version"] = "2.5"
+    updated["canonical_validation_artifact_id"] = canonical_validation_artifact_id
+    updated["canonical_validation"] = validation
+    updated["validation_version"] = validation.get("validation_version")
+    updated["canonical_validation_summary"] = validation_summary
+    updated["walkforward_validation_summary"] = walkforward_summary
+    updated["net_of_friction_validation_summary"] = net_summary
+    updated["suppression_readiness_validation_summary"] = suppression_summary
+    updated["drawdown_invalidation_validation_summary"] = drawdown_summary
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Canonical research truth: {validation_summary}",
+        ]
+    )
+    updated["evaluation_research_analysis"] = _join_sentences(
+        [
+            updated.get("evaluation_research_analysis"),
+            f"Walk-forward: {walkforward_summary}",
+            f"Net of friction: {net_summary}",
+            f"Suppression and readiness: {suppression_summary}",
+            f"Drawdown and invalidation: {drawdown_summary}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Canonical validation says: {suppression_summary}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Excursion and invalidation truth: {drawdown_summary}",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Canonical research-truth provenance is point-in-time: the backtest and walk-forward layer validates the same unified feature and signal engine, and assistant validation artifacts replay stored prediction records against later realized bars.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["canonical_validation_summary"] = [
+        "canonical_validation.prediction_linkage_summary",
+        "canonical_validation.signal_scorecard",
+        "canonical_validation.net_return_summary",
+    ]
+    evidence_map["walkforward_validation_summary"] = [
+        "canonical_validation.walkforward_summary",
+        "canonical_validation.walkforward_runs",
+    ]
+    evidence_map["net_of_friction_validation_summary"] = [
+        "canonical_validation.gross_return_summary",
+        "canonical_validation.net_return_summary",
+        "canonical_validation.friction_cost_summary",
+        "canonical_validation.liquidity_bucket_cost_summary",
+    ]
+    evidence_map["suppression_readiness_validation_summary"] = [
+        "canonical_validation.readiness_scorecard",
+        "canonical_validation.suppression_effect_summary",
+        "canonical_validation.ranking_scorecard",
+    ]
+    evidence_map["drawdown_invalidation_validation_summary"] = [
+        "canonical_validation.mae_mfe_summary",
+        "canonical_validation.failure_modes",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

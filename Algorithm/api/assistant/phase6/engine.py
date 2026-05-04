@@ -36,6 +36,12 @@ def _derived_slices(report: Dict[str, Any]) -> Dict[str, Any]:
     proprietary_scores = report.get("proprietary_scores") or {}
     domain_agreement = report.get("domain_agreement") or {}
     domain_availability = report.get("domain_availability") or {}
+    data_bundle = report.get("data_bundle") or {}
+    event_domain = data_bundle.get("event_catalyst_risk") or {}
+    liquidity_domain = data_bundle.get("liquidity_execution_fragility") or {}
+    breadth_domain = data_bundle.get("market_breadth_internals") or {}
+    cross_asset_domain = data_bundle.get("cross_asset_confirmation") or {}
+    stress_domain = data_bundle.get("stress_spillover_conditions") or {}
     narrative_crowding = score_value(proprietary_scores.get("Narrative Crowding Index"))
     macro_alignment = score_value(proprietary_scores.get("Macro Alignment Score"))
     fragility = score_value(proprietary_scores.get("Signal Fragility Index"))
@@ -75,6 +81,24 @@ def _derived_slices(report: Dict[str, Any]) -> Dict[str, Any]:
             (domain_availability.get("fundamentals") or {}).get("coverage_status")
             or "unknown"
         ),
+        "event_risk_state": event_domain.get("event_risk_classification") or "unknown",
+        "liquidity_state": liquidity_domain.get("tradability_state") or "unknown",
+        "breadth_state": breadth_domain.get("breadth_state") or "unknown",
+        "cross_asset_state": (
+            "conflicted"
+            if safe_float(cross_asset_domain.get("cross_asset_conflict_score")) is not None
+            and safe_float(cross_asset_domain.get("cross_asset_conflict_score")) >= 60
+            else "supportive"
+            if safe_float(cross_asset_domain.get("cross_asset_conflict_score")) is not None
+            and safe_float(cross_asset_domain.get("cross_asset_conflict_score")) <= 35
+            else "mixed"
+        ),
+        "stress_state": (
+            "unstable"
+            if safe_float(stress_domain.get("market_stress_score")) is not None
+            and safe_float(stress_domain.get("market_stress_score")) >= 60
+            else "stable"
+        ),
     }
 
 
@@ -90,6 +114,9 @@ def build_prediction_record(
         name: score_value(payload)
         for name, payload in (report.get("proprietary_scores") or {}).items()
     }
+    canonical_alpha_core = report.get("canonical_alpha_core") or {}
+    canonical_feature_vector = canonical_alpha_core.get("feature_vector") or {}
+    canonical_signal_payload = canonical_alpha_core.get("signal_payload") or {}
     component_scores = {
         name: {
             "score": safe_float((payload or {}).get("score")),
@@ -137,10 +164,30 @@ def build_prediction_record(
         "confirmation_trigger_count": len(report.get("confirmation_triggers") or []),
         "deterioration_trigger_count": len(report.get("deterioration_triggers") or []),
         "fragility_veto_count": len(report.get("fragility_vetoes") or []),
+        "deployment_mode": report.get("deployment_mode"),
+        "deployment_permission": report.get("deployment_permission"),
+        "trust_tier": report.get("trust_tier"),
+        "live_readiness_score": safe_float(report.get("live_readiness_score")),
+        "rollout_stage": report.get("rollout_stage"),
+        "candidate_classification": report.get("candidate_classification"),
+        "portfolio_candidate_score": safe_float(report.get("portfolio_candidate_score")),
+        "ranked_opportunity_score": safe_float(report.get("ranked_opportunity_score")),
+        "portfolio_fit_quality": safe_float(report.get("portfolio_fit_quality")),
+        "watchlist_priority_score": safe_float(report.get("watchlist_priority_score")),
+        "execution_quality_score": safe_float(report.get("execution_quality_score")),
+        "friction_penalty": safe_float(report.get("friction_penalty")),
+        "turnover_penalty": safe_float(report.get("turnover_penalty")),
+        "size_band": report.get("size_band"),
+        "weight_band": report.get("weight_band"),
+        "risk_budget_band": report.get("risk_budget_band"),
+        "suppression_flags": list(report.get("suppression_flags") or []),
+        "adjusted_confidence_notes": list(report.get("adjusted_confidence_notes") or []),
         "report_version": report.get("report_version"),
         "strategy_version": report.get("strategy_version"),
         "proprietary_scores": proprietary_scores,
         "strategy_component_scores": component_scores,
+        "feature_vector": canonical_feature_vector,
+        "signal_payload": canonical_signal_payload,
         "slices": _derived_slices(report),
     }
 

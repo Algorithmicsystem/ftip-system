@@ -515,6 +515,13 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "adaptation_queue_summary",
         "experiment_registry_summary",
         "archetype_motif_summary",
+        "canonical_validation",
+        "canonical_validation_summary",
+        "walkforward_validation_summary",
+        "net_of_friction_validation_summary",
+        "suppression_readiness_validation_summary",
+        "drawdown_invalidation_validation_summary",
+        "canonical_validation_artifact_id",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
@@ -526,6 +533,7 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["active_analysis"]["deployment_permission"]
     assert data["active_analysis"]["candidate_classification"]
     assert data["active_analysis"]["setup_archetype"]
+    assert data["canonical_validation"]["validation_version"]
     assert data["overall_analysis"]
 
 

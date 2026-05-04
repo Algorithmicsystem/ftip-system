@@ -78,6 +78,8 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderEvaluationRegimeGrid" in js
     assert "renderEvaluationFailureModes" in js
     assert "renderEvaluationFactors" in js
+    assert "canonical_validation" in js
+    assert "Walk-Forward" in js
     assert "renderEvidenceSupport" in js
     assert "renderArtifactLedger" in js
     assert "renderCompareWorkspace" in js

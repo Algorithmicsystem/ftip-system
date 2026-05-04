@@ -40,6 +40,7 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Trust tier: {report.get('trust_tier', 'unknown')} with live readiness {report.get('live_readiness_score', 'n/a')}.",
             f"Portfolio classification: {report.get('candidate_classification', 'n/a')} with portfolio score {report.get('portfolio_candidate_score', 'n/a')}.",
             f"Learning archetype: {(report.get('setup_archetype') or {}).get('archetype_name', 'n/a')} with research priority {report.get('learning_priority', 'n/a')}.",
+            f"Canonical validation: {report.get('canonical_validation_summary', 'n/a')}.",
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
     )
@@ -83,6 +84,11 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "deployment_permission_analysis": report.get("deployment_permission_analysis"),
         "risk_budget_exposure_analysis": report.get("risk_budget_exposure_analysis"),
         "rollout_stage_summary": report.get("rollout_stage_summary"),
+        "canonical_validation_summary": report.get("canonical_validation_summary"),
+        "walkforward_validation_summary": report.get("walkforward_validation_summary"),
+        "net_of_friction_validation_summary": report.get("net_of_friction_validation_summary"),
+        "suppression_readiness_validation_summary": report.get("suppression_readiness_validation_summary"),
+        "drawdown_invalidation_validation_summary": report.get("drawdown_invalidation_validation_summary"),
         "portfolio_context_summary": report.get("portfolio_context_summary"),
         "portfolio_fit_analysis": report.get("portfolio_fit_analysis"),
         "execution_quality_analysis": report.get("execution_quality_analysis"),
