@@ -921,6 +921,60 @@ def _execution_quality_text(portfolio: Dict[str, Any]) -> str:
     )
 
 
+def _portfolio_risk_model_text(risk_model: Dict[str, Any]) -> str:
+    if not risk_model:
+        return "Portfolio risk-model context will attach once the realized covariance and exposure layer runs."
+    return str(
+        risk_model.get("portfolio_risk_model_summary")
+        or "Portfolio risk-model summary is unavailable."
+    )
+
+
+def _hidden_overlap_redundancy_text(risk_model: Dict[str, Any]) -> str:
+    if not risk_model:
+        return "Hidden overlap and redundancy analysis will attach once the portfolio risk-model layer runs."
+    return str(
+        risk_model.get("hidden_overlap_redundancy_analysis")
+        or "Hidden overlap analysis is unavailable."
+    )
+
+
+def _factor_exposure_summary_text(risk_model: Dict[str, Any]) -> str:
+    if not risk_model:
+        return "Factor exposure summary will attach once the portfolio risk-model layer runs."
+    return str(
+        risk_model.get("factor_exposure_summary")
+        or "Factor exposure summary is unavailable."
+    )
+
+
+def _concentration_cluster_risk_text(risk_model: Dict[str, Any]) -> str:
+    if not risk_model:
+        return "Concentration and cluster-risk analysis will attach once the portfolio risk-model layer runs."
+    return str(
+        risk_model.get("concentration_cluster_risk_analysis")
+        or "Concentration and cluster-risk analysis is unavailable."
+    )
+
+
+def _replacement_diversification_text(risk_model: Dict[str, Any]) -> str:
+    if not risk_model:
+        return "Replacement and diversification notes will attach once the portfolio risk-model layer runs."
+    return str(
+        risk_model.get("replacement_diversification_analysis")
+        or "Replacement and diversification analysis is unavailable."
+    )
+
+
+def _portfolio_stress_fragility_text(risk_model: Dict[str, Any]) -> str:
+    if not risk_model:
+        return "Portfolio stress and fragility overlays will attach once the portfolio risk-model layer runs."
+    return str(
+        risk_model.get("portfolio_stress_fragility_summary")
+        or "Portfolio stress and fragility analysis is unavailable."
+    )
+
+
 def _risks_invalidators_text(
     why_signal: Dict[str, Any],
     strategy: Dict[str, Any],
@@ -1076,6 +1130,10 @@ def build_active_analysis_reference(
             "ranked_opportunity_score": report.get("ranked_opportunity_score"),
             "portfolio_fit_quality": report.get("portfolio_fit_quality"),
             "size_band": report.get("size_band"),
+            "portfolio_risk_model_version": report.get("portfolio_risk_model_version"),
+            "hidden_overlap_score": report.get("hidden_overlap_score"),
+            "portfolio_stress_score": report.get("portfolio_stress_score"),
+            "replacement_candidate": report.get("replacement_candidate"),
             "setup_archetype": ((report.get("setup_archetype") or {}).get("archetype_name")),
             "research_version": report.get("research_version"),
             "learning_priority": report.get("learning_priority"),
@@ -1362,6 +1420,197 @@ def attach_portfolio_context(
         "portfolio_construction.current_candidate.execution_quality_score",
         "portfolio_construction.current_candidate.friction_penalty",
         "portfolio_construction.current_candidate.turnover_penalty",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_portfolio_risk_context(
+    report: Dict[str, Any],
+    portfolio_risk_model: Dict[str, Any],
+    *,
+    portfolio_risk_model_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    current = portfolio_risk_model.get("current_candidate") or {}
+    overlay = portfolio_risk_model.get("portfolio_overlay") or {}
+    risk_summary = _portfolio_risk_model_text(portfolio_risk_model)
+    overlap_text = _hidden_overlap_redundancy_text(portfolio_risk_model)
+    exposure_text = _factor_exposure_summary_text(portfolio_risk_model)
+    concentration_text = _concentration_cluster_risk_text(portfolio_risk_model)
+    replacement_text = _replacement_diversification_text(portfolio_risk_model)
+    stress_text = _portfolio_stress_fragility_text(portfolio_risk_model)
+
+    updated["report_version"] = "2.6"
+    updated["portfolio_risk_model_artifact_id"] = portfolio_risk_model_artifact_id
+    updated["portfolio_risk_model"] = portfolio_risk_model
+    updated["portfolio_risk_model_version"] = portfolio_risk_model.get(
+        "portfolio_risk_model_version"
+    )
+    updated["portfolio_fit_rank"] = current.get("portfolio_fit_rank")
+    updated["marginal_portfolio_utility"] = current.get("marginal_portfolio_utility")
+    updated["portfolio_contribution_score"] = current.get("portfolio_contribution_score")
+    updated["marginal_fragility_penalty"] = current.get("marginal_fragility_penalty")
+    updated["marginal_diversification_bonus"] = current.get(
+        "marginal_diversification_bonus"
+    )
+    updated["replacement_value_score"] = current.get("replacement_value_score")
+    updated["replacement_candidate"] = current.get("replacement_candidate")
+    updated["substitution_score"] = current.get("substitution_score")
+    updated["better_alternative_flag"] = current.get("better_alternative_flag")
+    updated["diversification_upgrade_flag"] = current.get(
+        "diversification_upgrade_flag"
+    )
+    updated["overlap_reduction_flag"] = current.get("overlap_reduction_flag")
+    updated["portfolio_quality_upgrade_reason"] = current.get(
+        "portfolio_quality_upgrade_reason"
+    )
+    updated["hidden_overlap_score"] = current.get("hidden_overlap_score")
+    updated["complementarity_score"] = current.get("complementarity_score")
+    updated["overlap_rationale"] = current.get("overlap_rationale")
+    updated["overlap_drivers"] = current.get("overlap_drivers") or []
+    updated["overlap_confidence"] = current.get("overlap_confidence")
+    updated["factor_exposure_vector"] = current.get("factor_exposure_vector") or {}
+    updated["factor_loading_summary"] = current.get("factor_loading_summary") or []
+    updated["style_affinity"] = current.get("style_affinity")
+    updated["macro_exposure_profile"] = current.get("macro_exposure_profile") or {}
+    updated["fragility_exposure_profile"] = current.get(
+        "fragility_exposure_profile"
+    ) or {}
+    updated["exposure_confidence"] = current.get("exposure_confidence")
+    updated["exposure_cluster"] = current.get("exposure_cluster")
+    updated["concentration_profile"] = overlay.get("concentration_profile") or {}
+    updated["hidden_concentration_score"] = overlay.get("hidden_concentration_score")
+    updated["cluster_risk_score"] = overlay.get("cluster_risk_score")
+    updated["fragility_cluster_risk"] = overlay.get("fragility_cluster_risk")
+    updated["event_cluster_risk"] = overlay.get("event_cluster_risk")
+    updated["macro_cluster_risk"] = overlay.get("macro_cluster_risk")
+    updated["narrative_cluster_risk"] = overlay.get("narrative_cluster_risk")
+    updated["diversification_health_score"] = overlay.get(
+        "diversification_health_score"
+    )
+    updated["portfolio_stress_score"] = overlay.get("portfolio_stress_score")
+    updated["portfolio_fragility_score"] = overlay.get("portfolio_fragility_score")
+    updated["correlation_breakdown_risk"] = overlay.get(
+        "correlation_breakdown_risk"
+    )
+    updated["stress_concentration_warning"] = overlay.get(
+        "stress_concentration_warning"
+    )
+    updated["clustered_gap_risk_warning"] = overlay.get(
+        "clustered_gap_risk_warning"
+    )
+    updated["unstable_portfolio_state_flag"] = overlay.get(
+        "unstable_portfolio_state_flag"
+    )
+    updated["portfolio_risk_warnings"] = overlay.get("portfolio_risk_warnings") or []
+    updated["candidate_classification"] = current.get("candidate_classification") or updated.get(
+        "candidate_classification"
+    )
+    updated["candidate_blockers"] = current.get("candidate_blockers") or updated.get(
+        "candidate_blockers"
+    ) or []
+    updated["portfolio_fit_quality"] = current.get("portfolio_fit_quality") or updated.get(
+        "portfolio_fit_quality"
+    )
+    updated["portfolio_rank"] = current.get("portfolio_fit_rank") or updated.get(
+        "portfolio_rank"
+    )
+    updated["overlap_score"] = current.get("overlap_score") or updated.get("overlap_score")
+    updated["redundancy_score"] = current.get("redundancy_score") or updated.get(
+        "redundancy_score"
+    )
+    updated["diversification_contribution_score"] = current.get(
+        "diversification_contribution_score"
+    ) or updated.get("diversification_contribution_score")
+    updated["most_redundant_symbol"] = current.get("most_redundant_symbol") or updated.get(
+        "most_redundant_symbol"
+    )
+    updated["cohort_ranking"] = portfolio_risk_model.get("cohort_portfolio_risk_ranking") or updated.get(
+        "cohort_ranking"
+    ) or []
+    updated["top_peer_overlaps"] = current.get("pairwise_relationships") or updated.get(
+        "top_peer_overlaps"
+    ) or []
+    updated["cohort_risk_ranking"] = (
+        portfolio_risk_model.get("cohort_portfolio_risk_ranking") or []
+    )
+    updated["portfolio_risk_model_summary"] = risk_summary
+    updated["hidden_overlap_redundancy_analysis"] = overlap_text
+    updated["factor_exposure_summary"] = exposure_text
+    updated["concentration_cluster_risk_analysis"] = concentration_text
+    updated["replacement_diversification_analysis"] = replacement_text
+    updated["portfolio_stress_fragility_summary"] = stress_text
+    updated["portfolio_context_summary"] = _join_sentences(
+        [
+            updated.get("portfolio_context_summary"),
+            risk_summary,
+        ]
+    )
+    updated["portfolio_fit_analysis"] = _join_sentences(
+        [
+            updated.get("portfolio_fit_analysis"),
+            overlap_text,
+            concentration_text,
+        ]
+    )
+    updated["execution_quality_analysis"] = _join_sentences(
+        [
+            updated.get("execution_quality_analysis"),
+            replacement_text,
+            stress_text,
+        ]
+    )
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Portfolio risk model: {risk_summary}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Hidden overlap: {overlap_text}",
+            f"Factor exposures: {exposure_text}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Concentration and cluster risk: {concentration_text}",
+            f"Portfolio stress and fragility: {stress_text}",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Phase 11 portfolio risk-model provenance uses point-in-time realized return histories where available, falls back to low-confidence synthetic proxies when history is thin, and combines covariance, factor exposure, overlap, substitution, and portfolio-stress overlays into the current portfolio-fit view.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["portfolio_risk_model_summary"] = [
+        "portfolio_risk_model.current_candidate",
+        "portfolio_risk_model.portfolio_overlay",
+    ]
+    evidence_map["hidden_overlap_redundancy_analysis"] = [
+        "portfolio_risk_model.top_pairwise_relationships",
+        "portfolio_risk_model.current_candidate.overlap_*",
+    ]
+    evidence_map["factor_exposure_summary"] = [
+        "portfolio_risk_model.current_candidate.factor_exposure_vector",
+        "portfolio_risk_model.current_candidate.macro_exposure_profile",
+    ]
+    evidence_map["concentration_cluster_risk_analysis"] = [
+        "portfolio_risk_model.portfolio_overlay.concentration_profile",
+        "portfolio_risk_model.portfolio_overlay.portfolio_risk_warnings",
+    ]
+    evidence_map["replacement_diversification_analysis"] = [
+        "portfolio_risk_model.current_candidate.replacement_candidate",
+        "portfolio_risk_model.cohort_portfolio_risk_ranking",
+    ]
+    evidence_map["portfolio_stress_fragility_summary"] = [
+        "portfolio_risk_model.portfolio_overlay.portfolio_stress_score",
+        "portfolio_risk_model.portfolio_overlay.correlation_breakdown_risk",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)
@@ -2084,6 +2333,67 @@ def build_analysis_report(
         ),
         "portfolio_workflow_summary": (
             "Watchlist, candidate-priority, and rotation workflow guidance will attach once the portfolio-construction layer is available."
+        ),
+        "portfolio_risk_model": {},
+        "portfolio_risk_model_artifact_id": None,
+        "portfolio_risk_model_version": None,
+        "portfolio_fit_rank": None,
+        "marginal_portfolio_utility": None,
+        "portfolio_contribution_score": None,
+        "marginal_fragility_penalty": None,
+        "marginal_diversification_bonus": None,
+        "replacement_value_score": None,
+        "replacement_candidate": None,
+        "substitution_score": None,
+        "better_alternative_flag": None,
+        "diversification_upgrade_flag": None,
+        "overlap_reduction_flag": None,
+        "portfolio_quality_upgrade_reason": None,
+        "hidden_overlap_score": None,
+        "complementarity_score": None,
+        "overlap_rationale": None,
+        "overlap_drivers": [],
+        "overlap_confidence": None,
+        "factor_exposure_vector": {},
+        "factor_loading_summary": [],
+        "style_affinity": None,
+        "macro_exposure_profile": {},
+        "fragility_exposure_profile": {},
+        "exposure_confidence": None,
+        "exposure_cluster": None,
+        "concentration_profile": {},
+        "hidden_concentration_score": None,
+        "cluster_risk_score": None,
+        "fragility_cluster_risk": None,
+        "event_cluster_risk": None,
+        "macro_cluster_risk": None,
+        "narrative_cluster_risk": None,
+        "diversification_health_score": None,
+        "portfolio_stress_score": None,
+        "portfolio_fragility_score": None,
+        "correlation_breakdown_risk": None,
+        "stress_concentration_warning": None,
+        "clustered_gap_risk_warning": None,
+        "unstable_portfolio_state_flag": None,
+        "portfolio_risk_warnings": [],
+        "cohort_risk_ranking": [],
+        "portfolio_risk_model_summary": (
+            "Phase 11 portfolio risk-model overlays will attach realized covariance, factor exposure, hidden overlap, concentration, and marginal utility context once the portfolio risk-model layer runs."
+        ),
+        "hidden_overlap_redundancy_analysis": (
+            "Hidden overlap and redundancy analysis will attach once the portfolio risk-model layer is available."
+        ),
+        "factor_exposure_summary": (
+            "Factor exposure summary will attach once the portfolio risk-model layer is available."
+        ),
+        "concentration_cluster_risk_analysis": (
+            "Concentration and cluster-risk analysis will attach once the portfolio risk-model layer is available."
+        ),
+        "replacement_diversification_analysis": (
+            "Replacement and diversification analysis will attach once the portfolio risk-model layer is available."
+        ),
+        "portfolio_stress_fragility_summary": (
+            "Portfolio stress and fragility overlays will attach once the portfolio risk-model layer is available."
         ),
         "top_peer_overlaps": [],
         "cohort_ranking": [],

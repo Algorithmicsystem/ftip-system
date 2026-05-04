@@ -161,6 +161,10 @@ const buildActiveAnalysisFromReport = (report) => ({
   candidate_classification: report?.candidate_classification || "watchlist_candidate",
   ranked_opportunity_score: report?.ranked_opportunity_score,
   portfolio_fit_quality: report?.portfolio_fit_quality,
+  portfolio_risk_model_version: report?.portfolio_risk_model_version || "n/a",
+  hidden_overlap_score: report?.hidden_overlap_score,
+  portfolio_stress_score: report?.portfolio_stress_score,
+  replacement_candidate: report?.replacement_candidate || null,
   size_band: report?.size_band || "watchlist only",
   setup_archetype: report?.setup_archetype?.archetype_name || "n/a",
   research_version: report?.research_version || "n/a",
@@ -225,6 +229,9 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
       portfolio_candidate_score: report?.portfolio_candidate_score,
       portfolio_fit_quality:
         report?.portfolio_fit_quality ?? analysis?.portfolio_fit_quality ?? null,
+      portfolio_fit_rank: report?.portfolio_fit_rank ?? null,
+      marginal_portfolio_utility: report?.marginal_portfolio_utility ?? null,
+      portfolio_contribution_score: report?.portfolio_contribution_score ?? null,
       watchlist_priority_score: report?.watchlist_priority_score,
       deployability_rank: report?.deployability_rank,
       size_band: report?.size_band || analysis?.size_band || "watchlist only",
@@ -232,10 +239,17 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
       risk_budget_band: report?.risk_budget_band || "n/a",
       overlap_score: report?.overlap_score,
       redundancy_score: report?.redundancy_score,
+      hidden_overlap_score: report?.hidden_overlap_score,
+      complementarity_score: report?.complementarity_score,
       diversification_contribution_score: report?.diversification_contribution_score,
       execution_quality_score: report?.execution_quality_score,
       friction_penalty: report?.friction_penalty,
       turnover_penalty: report?.turnover_penalty,
+      portfolio_stress_score: report?.portfolio_stress_score,
+      portfolio_fragility_score: report?.portfolio_fragility_score,
+      correlation_breakdown_risk: report?.correlation_breakdown_risk,
+      exposure_cluster: report?.exposure_cluster || "n/a",
+      replacement_candidate: report?.replacement_candidate || null,
       setup_archetype:
         report?.setup_archetype?.archetype_name || analysis?.setup_archetype || "n/a",
       learning_priority: report?.learning_priority || analysis?.learning_priority || "observe",
@@ -250,6 +264,8 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.canonical_validation?.net_return_summary?.average_edge_return ?? null,
       validation_cost_drag:
         report?.canonical_validation?.friction_cost_summary?.average_cost_drag ?? null,
+      portfolio_risk_model_version:
+        report?.portfolio_risk_model_version || analysis?.portfolio_risk_model_version || "n/a",
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
       strategy_summary: report?.strategy_view || "",
       portfolio_summary: report?.portfolio_context_summary || "",
@@ -1294,19 +1310,31 @@ const renderPortfolioMetrics = (report) => {
         report.portfolio_fit_quality == null
           ? "n/a"
           : Number(report.portfolio_fit_quality).toFixed(1),
-      note: `diversification ${formatScore(report.diversification_contribution_score)}`,
+      note: `diversification ${formatScore(report.diversification_contribution_score)} · fit rank ${report.portfolio_fit_rank || "n/a"}`,
     },
     {
-      label: "Overlap / Redundancy",
-      value: `${formatScore(report.overlap_score)} / ${formatScore(report.redundancy_score)}`,
+      label: "Marginal Utility",
+      value:
+        report.marginal_portfolio_utility == null
+          ? "n/a"
+          : Number(report.marginal_portfolio_utility).toFixed(1),
+      note: report.replacement_candidate
+        ? `replacement ${report.replacement_candidate}`
+        : `contribution ${formatScore(report.portfolio_contribution_score)}`,
+    },
+    {
+      label: "Hidden Overlap",
+      value: `${formatScore(report.overlap_score)} / ${formatScore(report.hidden_overlap_score)}`,
       note: report.most_redundant_symbol
-        ? `closest overlap ${report.most_redundant_symbol}`
-        : "no major redundancy peer",
+        ? `redundancy ${formatScore(report.redundancy_score)} · peer ${report.most_redundant_symbol}`
+        : `redundancy ${formatScore(report.redundancy_score)}`,
     },
     {
       label: "Size Band",
       value: report.size_band || "watchlist only",
-      note: report.weight_band || report.risk_budget_band || "band pending",
+      note: `${report.weight_band || report.risk_budget_band || "band pending"} · stress ${formatScore(
+        report.portfolio_stress_score
+      )}`,
     },
     {
       label: "Execution Quality",
@@ -1363,6 +1391,23 @@ const renderPortfolioControls = (report) => {
           ...warnings,
         ],
         "No portfolio-control warning surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Risk Model</h5>
+      ${renderBullets(
+        [
+          `Portfolio risk model: ${report.portfolio_risk_model_version || "n/a"}`,
+          `Hidden overlap score: ${formatScore(report.hidden_overlap_score)}`,
+          `Complementarity score: ${formatScore(report.complementarity_score)}`,
+          `Portfolio stress: ${formatScore(report.portfolio_stress_score)}`,
+          `Portfolio fragility: ${formatScore(report.portfolio_fragility_score)}`,
+          `Correlation breakdown risk: ${formatScore(report.correlation_breakdown_risk)}`,
+          `Exposure cluster: ${report.exposure_cluster || "n/a"}`,
+          `Style affinity: ${report.style_affinity || "n/a"}`,
+          `Top loadings: ${(report.factor_loading_summary || []).join(", ") || "none"}`,
+        ],
+        "No portfolio risk-model detail surfaced."
       )}
     </section>`,
     `<section class="drilldown-card">
@@ -1458,9 +1503,13 @@ const renderPortfolioWorkflow = (report) => {
       ${renderBullets(
         [
           report.portfolio_workflow_summary,
+          report.portfolio_risk_model_summary,
+          report.hidden_overlap_redundancy_analysis,
+          report.replacement_diversification_analysis,
           report.candidate_upgrade_reason,
           report.candidate_downgrade_reason,
           report.replacement_candidate_notes,
+          report.portfolio_quality_upgrade_reason,
           `Priority shift flag: ${report.priority_shift_flag ? "yes" : "no"}`,
           `Rebalance attention: ${report.rebalance_attention_flag ? "yes" : "no"}`,
           `Rotation pressure: ${formatScore(report.rotation_pressure_score)}`,

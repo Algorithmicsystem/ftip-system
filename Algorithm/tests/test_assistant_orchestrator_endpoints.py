@@ -484,6 +484,14 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "deployment_audit_artifact_id",
         "portfolio_construction",
         "portfolio_construction_artifact_id",
+        "portfolio_risk_model",
+        "portfolio_risk_model_artifact_id",
+        "portfolio_risk_model_summary",
+        "hidden_overlap_redundancy_analysis",
+        "factor_exposure_summary",
+        "concentration_cluster_risk_analysis",
+        "replacement_diversification_analysis",
+        "portfolio_stress_fragility_summary",
         "portfolio_context_summary",
         "portfolio_fit_analysis",
         "execution_quality_analysis",
@@ -532,6 +540,7 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["deployment_readiness"]["deployment_readiness_version"]
     assert data["active_analysis"]["deployment_permission"]
     assert data["active_analysis"]["candidate_classification"]
+    assert data["portfolio_risk_model"]["portfolio_risk_model_version"]
     assert data["active_analysis"]["setup_archetype"]
     assert data["canonical_validation"]["validation_version"]
     assert data["overall_analysis"]

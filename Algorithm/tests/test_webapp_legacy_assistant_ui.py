@@ -95,6 +95,8 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderPortfolioControls" in js
     assert "renderPortfolioRanking" in js
     assert "renderPortfolioWorkflow" in js
+    assert "portfolio_risk_model" in js
+    assert "Hidden Overlap" in js
     assert "renderLearningMetrics" in js
     assert "renderLearningRegimes" in js
     assert "renderLearningAdaptations" in js

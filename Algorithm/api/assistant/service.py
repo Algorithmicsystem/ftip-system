@@ -31,6 +31,10 @@ from api.assistant.phase10 import (
     CONTINUOUS_LEARNING_ARTIFACT_KIND,
     build_continuous_learning_artifact,
 )
+from api.assistant.phase11 import (
+    PORTFOLIO_RISK_MODEL_ARTIFACT_KIND,
+    build_portfolio_risk_model_artifact,
+)
 from api.research.backtest import (
     CANONICAL_VALIDATION_ARTIFACT_KIND,
     build_validation_artifact,
@@ -308,6 +312,21 @@ async def generate_analysis_report(
         portfolio_construction,
         portfolio_construction_artifact_id=portfolio_construction_artifact_id,
     )
+    portfolio_risk_model = build_portfolio_risk_model_artifact(
+        current_report=report,
+        session_id=sid,
+        store=store,
+    )
+    portfolio_risk_model_artifact_id = store.save_artifact(
+        sid,
+        PORTFOLIO_RISK_MODEL_ARTIFACT_KIND,
+        portfolio_risk_model,
+    )
+    report = reports.attach_portfolio_risk_context(
+        report,
+        portfolio_risk_model,
+        portfolio_risk_model_artifact_id=portfolio_risk_model_artifact_id,
+    )
     continuous_learning = build_continuous_learning_artifact(
         current_report=report,
         current_report_id=report_id,
@@ -377,6 +396,14 @@ async def generate_analysis_report(
                 "portfolio_fit_quality": report.get("portfolio_fit_quality"),
                 "size_band": report.get("size_band"),
             },
+            "portfolio_risk_model": {
+                "artifact_id": portfolio_risk_model_artifact_id,
+                "portfolio_risk_model_version": report.get("portfolio_risk_model_version"),
+                "hidden_overlap_score": report.get("hidden_overlap_score"),
+                "portfolio_stress_score": report.get("portfolio_stress_score"),
+                "portfolio_fit_rank": report.get("portfolio_fit_rank"),
+                "replacement_candidate": report.get("replacement_candidate"),
+            },
             "continuous_learning": {
                 "artifact_id": continuous_learning_artifact_id,
                 "research_version": report.get("research_version"),
@@ -407,6 +434,7 @@ async def generate_analysis_report(
             "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
             "deployment_audit_artifact_id": deployment_audit_artifact_id,
             "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
+            "portfolio_risk_model_artifact_id": portfolio_risk_model_artifact_id,
             "continuous_learning_artifact_id": continuous_learning_artifact_id,
             "canonical_validation_artifact_id": canonical_validation_artifact_id,
             "canonical_lineage": job_context.get("canonical_lineage") or {},
@@ -426,6 +454,7 @@ async def generate_analysis_report(
         "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
         "deployment_audit_artifact_id": deployment_audit_artifact_id,
         "portfolio_construction_artifact_id": portfolio_construction_artifact_id,
+        "portfolio_risk_model_artifact_id": portfolio_risk_model_artifact_id,
         "continuous_learning_artifact_id": continuous_learning_artifact_id,
         "canonical_validation_artifact_id": canonical_validation_artifact_id,
         "active_analysis": active_analysis,

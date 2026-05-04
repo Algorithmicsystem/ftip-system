@@ -118,6 +118,13 @@ def build_candidate_snapshot(
     relative = data_bundle.get("relative_context") or {}
     macro = data_bundle.get("macro_cross_asset") or {}
     symbol_meta = data_bundle.get("symbol_meta") or {}
+    event = data_bundle.get("event_catalyst_risk") or {}
+    liquidity = data_bundle.get("liquidity_execution_fragility") or {}
+    breadth = data_bundle.get("market_breadth_internals") or {}
+    cross_asset = data_bundle.get("cross_asset_confirmation") or {}
+    stress = data_bundle.get("stress_spillover_conditions") or {}
+    canonical_alpha = data_bundle.get("canonical_alpha_core") or {}
+    canonical_features = canonical_alpha.get("feature_vector") or {}
     proprietary_scores = report.get("proprietary_scores") or {}
     evaluation = report.get("evaluation") or {}
     execution = strategy.get("execution_posture") or {}
@@ -224,6 +231,50 @@ def build_candidate_snapshot(
         "gap_pct": safe_float(market.get("gap_pct")),
         "gap_instability_10d": safe_float(market.get("gap_instability_10d")),
         "volume_anomaly": safe_float(market.get("volume_anomaly")),
+        "event_risk_classification": event.get("event_risk_classification")
+        or canonical_features.get("event_risk_classification"),
+        "event_overhang_score": safe_float(
+            event.get("event_overhang_score") or canonical_features.get("event_overhang_score")
+        ),
+        "event_uncertainty_score": safe_float(
+            event.get("event_uncertainty_score")
+            or canonical_features.get("event_uncertainty_score")
+        ),
+        "days_to_next_event": safe_float(event.get("days_to_next_event")),
+        "implementation_fragility_score": safe_float(
+            liquidity.get("implementation_fragility_score")
+            or canonical_features.get("implementation_fragility_score")
+        ),
+        "liquidity_quality_score": safe_float(
+            liquidity.get("liquidity_quality_score")
+            or canonical_features.get("liquidity_quality_score")
+        ),
+        "tradability_state": liquidity.get("tradability_state")
+        or canonical_features.get("tradability_state"),
+        "breadth_state": breadth.get("breadth_state")
+        or canonical_features.get("breadth_state"),
+        "breadth_confirmation_score": safe_float(
+            breadth.get("breadth_confirmation_score")
+            or canonical_features.get("breadth_confirmation_score")
+        ),
+        "cross_asset_conflict_score": safe_float(
+            cross_asset.get("cross_asset_conflict_score")
+            or canonical_features.get("cross_asset_conflict_score")
+        ),
+        "benchmark_confirmation_score": safe_float(
+            cross_asset.get("benchmark_confirmation_score")
+            or canonical_features.get("benchmark_confirmation_score")
+        ),
+        "sector_confirmation_score": safe_float(
+            cross_asset.get("sector_confirmation_score")
+            or canonical_features.get("sector_confirmation_score")
+        ),
+        "market_stress_score": safe_float(
+            stress.get("market_stress_score") or canonical_features.get("market_stress_score")
+        ),
+        "spillover_risk_score": safe_float(
+            stress.get("spillover_risk_score") or canonical_features.get("spillover_risk_score")
+        ),
         "horizon_days": safe_float((report.get("signal") or {}).get("horizon_days")),
         "current_size_band": report.get("size_band"),
         "current_weight_band": report.get("weight_band"),

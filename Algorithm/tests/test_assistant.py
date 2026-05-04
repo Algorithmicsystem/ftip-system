@@ -313,9 +313,17 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["deployment_permission"]
     assert result["deployment_readiness_summary"]
     assert result["portfolio_construction"]["portfolio_construction_version"]
+    assert result["portfolio_risk_model_artifact_id"]
+    assert result["portfolio_risk_model"]["portfolio_risk_model_version"]
     assert result["portfolio_context_summary"]
     assert result["portfolio_fit_analysis"]
     assert result["execution_quality_analysis"]
+    assert result["portfolio_risk_model_summary"]
+    assert result["hidden_overlap_redundancy_analysis"]
+    assert result["factor_exposure_summary"]
+    assert result["concentration_cluster_risk_analysis"]
+    assert result["replacement_diversification_analysis"]
+    assert result["portfolio_stress_fragility_summary"]
     assert result["candidate_classification"]
     assert result["size_band"]
     assert result["learning_artifact_id"]
@@ -351,6 +359,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
         == result["portfolio_construction_artifact_id"]
     )
     assert (
+        session["metadata"]["portfolio_risk_model"]["artifact_id"]
+        == result["portfolio_risk_model_artifact_id"]
+    )
+    assert (
         session["metadata"]["continuous_learning"]["artifact_id"]
         == result["learning_artifact_id"]
     )
@@ -367,6 +379,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["evaluation"]
     assert report["deployment_readiness"]
     assert report["portfolio_construction"]
+    assert report["portfolio_risk_model"]
     assert report["continuous_learning"]
     assert report["canonical_validation"]
     assert report["live_use_audit_snapshot"]
