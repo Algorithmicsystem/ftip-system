@@ -292,6 +292,64 @@ def _prosperity_signal_action_column() -> str:
     return _PROSPERITY_SIGNAL_ACTION_COLUMN
 
 
+def _fetch_latest_prosperity_signal_row(
+    symbol: str,
+    as_of_date: dt.date,
+) -> Optional[Tuple[Any, Any, Any]]:
+    as_of_column = _prosperity_signal_asof_column()
+    action_column = _prosperity_signal_action_column()
+    prosperity_row = db.safe_fetchone(
+        f"""
+        SELECT {action_column}, score, confidence
+        FROM prosperity_signals_daily
+        WHERE symbol = %s AND {as_of_column} = %s
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        (symbol, as_of_date),
+    )
+    if prosperity_row:
+        return prosperity_row
+    return db.safe_fetchone(
+        f"""
+        SELECT {action_column}, score, confidence
+        FROM prosperity_signals_daily
+        WHERE symbol = %s AND {as_of_column} <= %s
+        ORDER BY {as_of_column} DESC, updated_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        (symbol, as_of_date),
+    )
+
+
+def _fetch_latest_prosperity_feature_row(
+    symbol: str,
+    as_of_date: dt.date,
+) -> Optional[Tuple[Any, Any]]:
+    prosperity_row = db.safe_fetchone(
+        """
+        SELECT features, meta
+        FROM prosperity_features_daily
+        WHERE symbol = %s AND as_of = %s
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        (symbol, as_of_date),
+    )
+    if prosperity_row:
+        return prosperity_row
+    return db.safe_fetchone(
+        """
+        SELECT features, meta
+        FROM prosperity_features_daily
+        WHERE symbol = %s AND as_of <= %s
+        ORDER BY as_of DESC, updated_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        (symbol, as_of_date),
+    )
+
+
 def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
     row = db.safe_fetchone(
         """
@@ -303,18 +361,7 @@ def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
         (symbol, as_of_date),
     )
     if not row:
-        as_of_column = _prosperity_signal_asof_column()
-        action_column = _prosperity_signal_action_column()
-        prosperity_row = db.safe_fetchone(
-            f"""
-            SELECT {action_column}, score, confidence
-            FROM prosperity_signals_daily
-            WHERE symbol = %s AND {as_of_column} = %s
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            (symbol, as_of_date),
-        )
+        prosperity_row = _fetch_latest_prosperity_signal_row(symbol, as_of_date)
         if not prosperity_row:
             return None
         return {
@@ -357,16 +404,7 @@ def fetch_key_features(symbol: str, as_of_date: dt.date) -> Dict[str, Any]:
         (symbol, as_of_date),
     )
     if not row:
-        prosperity_row = db.safe_fetchone(
-            """
-            SELECT features, meta
-            FROM prosperity_features_daily
-            WHERE symbol = %s AND as_of = %s
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            (symbol, as_of_date),
-        )
+        prosperity_row = _fetch_latest_prosperity_feature_row(symbol, as_of_date)
         if not prosperity_row:
             return {}
         features = dict(prosperity_row[0] or {})
@@ -449,16 +487,7 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
             }
         )
     else:
-        prosperity_feature = db.safe_fetchone(
-            """
-            SELECT features, meta
-            FROM prosperity_features_daily
-            WHERE symbol = %s AND as_of = %s
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            (symbol, as_of_date),
-        )
+        prosperity_feature = _fetch_latest_prosperity_feature_row(symbol, as_of_date)
         if prosperity_feature:
             feature_vector = dict(prosperity_feature[0] or {})
             feature_meta = dict(prosperity_feature[1] or {})
@@ -515,6 +544,17 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
             """,
             (symbol, as_of_date),
         )
+        if not prosperity_signal:
+            prosperity_signal = db.safe_fetchone(
+                f"""
+                SELECT signal, score, confidence, score_mode, base_score, stacked_score, regime, thresholds, meta
+                FROM prosperity_signals_daily
+                WHERE symbol = %s AND {as_of_column} <= %s
+                ORDER BY {as_of_column} DESC, updated_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                (symbol, as_of_date),
+            )
         if prosperity_signal:
             signal_meta = dict(prosperity_signal[8] or {})
             depth_adjustments = dict(signal_meta.get("depth_adjustments") or {})

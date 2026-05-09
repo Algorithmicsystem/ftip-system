@@ -930,3 +930,148 @@ def test_fetch_signal_falls_back_to_prosperity_row_with_as_of_date(monkeypatch):
     assert signal["action"] == "SELL"
     assert signal["score"] == -0.22
     assert signal["confidence"] == 0.51
+
+
+def test_fetch_signal_falls_back_to_latest_prosperity_row_before_as_of_date(monkeypatch):
+    from api.assistant import orchestrator
+
+    orchestrator._PROSPERITY_SIGNAL_ASOF_COLUMN = "as_of"
+    orchestrator._PROSPERITY_SIGNAL_ACTION_COLUMN = "signal"
+
+    def _fake_fetchone(query, params=None):
+        if "FROM signals_daily" in query:
+            return None
+        if "FROM prosperity_signals_daily" in query and " as_of = %s" in query:
+            assert params == ("AAPL", dt.date(2024, 1, 5))
+            return None
+        if "FROM prosperity_signals_daily" in query and " as_of <= %s" in query:
+            assert params == ("AAPL", dt.date(2024, 1, 5))
+            return ("BUY", 0.81, 0.64)
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(orchestrator.db, "safe_fetchone", _fake_fetchone)
+
+    signal = orchestrator.fetch_signal("AAPL", dt.date(2024, 1, 5))
+
+    assert signal is not None
+    assert signal["action"] == "BUY"
+    assert signal["score"] == 0.81
+    assert signal["confidence"] == 0.64
+
+
+def test_fetch_key_features_fall_back_to_latest_prosperity_row_before_as_of_date(monkeypatch):
+    from api.assistant import orchestrator
+
+    def _fake_fetchone(query, params=None):
+        if "FROM features_daily" in query:
+            return None
+        if "FROM prosperity_features_daily" in query and " as_of = %s" in query:
+            assert params == ("AAPL", dt.date(2024, 1, 5))
+            return None
+        if "FROM prosperity_features_daily" in query and " as_of <= %s" in query:
+            assert params == ("AAPL", dt.date(2024, 1, 5))
+            return (
+                {
+                    "ret_5d": 0.12,
+                    "vol_21d": 0.3,
+                    "regime_label": "trend",
+                },
+                {"feature_version": "canon-v1"},
+            )
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(orchestrator.db, "safe_fetchone", _fake_fetchone)
+
+    features = orchestrator.fetch_key_features("AAPL", dt.date(2024, 1, 5))
+
+    assert features["ret_5d"] == 0.12
+    assert features["vol_21d"] == 0.3
+    assert features["regime_label"] == "trend"
+
+
+def test_assistant_analyze_uses_latest_prosperity_fallback_when_exact_as_of_missing(monkeypatch):
+    from api.assistant import orchestrator
+
+    async def _fake_freshness(symbol: str, refresh: bool = True):
+        return {
+            "as_of_date": dt.date(2024, 1, 5),
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "bars_updated_at": "2024-01-05T00:00:00Z",
+            "news_updated_at": "2024-01-05T00:00:00Z",
+            "sentiment_updated_at": "2024-01-05T00:00:00Z",
+            "warnings": [],
+        }
+
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    orchestrator._PROSPERITY_SIGNAL_ASOF_COLUMN = "as_of"
+    orchestrator._PROSPERITY_SIGNAL_ACTION_COLUMN = "signal"
+
+    monkeypatch.setattr(orchestrator, "ensure_freshness", _fake_freshness)
+    monkeypatch.setattr(orchestrator, "run_features", _noop)
+    monkeypatch.setattr(orchestrator, "run_signals", _noop)
+    monkeypatch.setattr(
+        orchestrator,
+        "fetch_quality",
+        lambda *_args, **_kwargs: {
+            "bars_ok": True,
+            "news_ok": True,
+            "sentiment_ok": True,
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(orchestrator, "fetch_canonical_core_record", lambda *_args, **_kwargs: {})
+
+    def _fake_fetchone(query, params=None):
+        if "FROM signals_daily" in query:
+            return None
+        if "FROM features_daily" in query:
+            return None
+        if "FROM prosperity_signals_daily" in query and " as_of = %s" in query:
+            assert params == ("NVDA", dt.date(2024, 1, 5))
+            return None
+        if "FROM prosperity_signals_daily" in query and " as_of <= %s" in query:
+            assert params == ("NVDA", dt.date(2024, 1, 5))
+            return ("BUY", 0.81, 0.64)
+        if "FROM prosperity_features_daily" in query and " as_of = %s" in query:
+            assert params == ("NVDA", dt.date(2024, 1, 5))
+            return None
+        if "FROM prosperity_features_daily" in query and " as_of <= %s" in query:
+            assert params == ("NVDA", dt.date(2024, 1, 5))
+            return (
+                {
+                    "ret_1d": 0.01,
+                    "ret_5d": 0.08,
+                    "ret_21d": 0.14,
+                    "vol_21d": 0.24,
+                    "vol_63d": 0.21,
+                    "atr_pct": 0.04,
+                    "trend_slope_21d": 0.18,
+                    "trend_slope_63d": 0.11,
+                    "mom_vol_adj_21d": 0.77,
+                    "sentiment_score": 0.25,
+                    "sentiment_surprise": 0.08,
+                    "regime_label": "trend",
+                    "regime_strength": 0.61,
+                },
+                {"feature_version": "canon-v1"},
+            )
+        raise AssertionError(f"unexpected query: {query}")
+
+    monkeypatch.setattr(orchestrator.db, "safe_fetchone", _fake_fetchone)
+
+    with TestClient(app) as client:
+        resp = client.post(
+            "/assistant/analyze",
+            json={"symbol": "NVDA", "horizon": "swing", "risk_mode": "balanced"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["signal"]["action"] == "BUY"
+    assert data["signal"]["score"] == 0.81
+    assert data["key_features"]["ret_5d"] == 0.08
+    assert data["key_features"]["regime_label"] == "trend"
