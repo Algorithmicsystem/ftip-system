@@ -41,6 +41,10 @@ _MODE_DIRECTIVES = {
         "Frame the answer around continuous learning: what the platform is learning from its own outputs, where drift or failure modes are appearing, which experiments or reweighting ideas are under consideration, and how archetypes or motifs are evolving. "
         "Keep the answer grounded in the stored learning artifact rather than generic speculation."
     ),
+    "operations": (
+        "Frame the answer around operational discipline: current system health, provider and freshness degradation, shadow-mode state, drift and calibration controls, downgrade or pause logic, active alerts, and what would need to recover before trust rises. "
+        "Keep the answer grounded in the stored operational artifact and do not turn it into trading advice."
+    ),
 }
 
 

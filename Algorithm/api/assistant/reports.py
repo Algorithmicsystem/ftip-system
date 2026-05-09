@@ -1138,6 +1138,13 @@ def build_active_analysis_reference(
             "research_version": report.get("research_version"),
             "learning_priority": report.get("learning_priority"),
             "validation_version": report.get("validation_version"),
+            "operational_guardrails_version": report.get("operational_guardrails_version"),
+            "system_health_status": report.get("system_health_status"),
+            "shadow_mode_status": report.get("shadow_mode_status"),
+            "current_operating_mode": report.get("current_operating_mode"),
+            "pause_required": report.get("pause_required"),
+            "model_drift_score": report.get("model_drift_score"),
+            "data_reliability_score": report.get("data_reliability_score"),
         }
     )
 
@@ -1868,6 +1875,152 @@ def attach_canonical_validation_context(
     evidence_map["drawdown_invalidation_validation_summary"] = [
         "canonical_validation.mae_mfe_summary",
         "canonical_validation.failure_modes",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def _system_health_summary_text(operational: Dict[str, Any]) -> str:
+    return str(
+        operational.get("system_health_summary")
+        or "Operational system-health monitoring is not yet populated."
+    )
+
+
+def _shadow_mode_summary_text(operational: Dict[str, Any]) -> str:
+    return str(
+        operational.get("shadow_mode_summary")
+        or "Shadow-mode operating context is not yet populated."
+    )
+
+
+def _drift_control_summary_text(operational: Dict[str, Any]) -> str:
+    return str(
+        operational.get("drift_control_summary")
+        or "Operational drift and control context is not yet populated."
+    )
+
+
+def _incident_history_summary_text(operational: Dict[str, Any]) -> str:
+    return str(
+        operational.get("incident_history_summary")
+        or "Operational incident history is not yet populated."
+    )
+
+
+def attach_operational_context(
+    report: Dict[str, Any],
+    operational: Dict[str, Any],
+    *,
+    operational_guardrails_artifact_id: Optional[str] = None,
+    health_snapshot_artifact_id: Optional[str] = None,
+    shadow_decision_artifact_id: Optional[str] = None,
+    operational_incident_artifact_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    health = operational.get("system_health") or {}
+    shadow = operational.get("shadow_mode") or {}
+    drift = operational.get("drift_monitoring") or {}
+    controls = operational.get("control_state") or {}
+    system_health_summary = _system_health_summary_text(operational)
+    shadow_summary = _shadow_mode_summary_text(operational)
+    drift_summary = _drift_control_summary_text(operational)
+    incident_summary = _incident_history_summary_text(operational)
+
+    updated["report_version"] = "2.7"
+    updated["operational_guardrails_artifact_id"] = operational_guardrails_artifact_id
+    updated["health_snapshot_artifact_id"] = health_snapshot_artifact_id
+    updated["shadow_decision_artifact_id"] = shadow_decision_artifact_id
+    updated["operational_incident_artifact_ids"] = operational_incident_artifact_ids or []
+    updated["operational_guardrails"] = operational
+    updated["operational_guardrails_version"] = operational.get(
+        "operational_guardrails_version"
+    )
+    updated["system_health_status"] = health.get("system_health_status")
+    updated["provider_health_status"] = health.get("provider_health_status")
+    updated["provider_degradation_notes"] = health.get("provider_degradation_notes") or []
+    updated["data_pipeline_health"] = health.get("data_pipeline_health")
+    updated["artifact_pipeline_health"] = health.get("artifact_pipeline_health")
+    updated["failure_rate_summary"] = health.get("failure_rate_summary") or {}
+    updated["stale_domain_summary"] = health.get("stale_domain_summary") or []
+    updated["fallback_overuse_summary"] = health.get("fallback_overuse_summary") or {}
+    updated["degraded_domain_list"] = health.get("degraded_domain_list") or []
+    updated["critical_domain_missing_flag"] = health.get("critical_domain_missing_flag")
+    updated["data_reliability_score"] = health.get("data_reliability_score")
+    updated["shadow_mode_status"] = shadow.get("shadow_mode_status")
+    updated["shadow_vs_realized_summary"] = shadow.get("shadow_vs_realized_summary")
+    updated["shadow_reliability_summary"] = shadow.get("shadow_reliability_summary")
+    updated["shadow_promotion_candidate"] = shadow.get("shadow_promotion_candidate")
+    updated["shadow_demotion_reason"] = shadow.get("shadow_demotion_reason")
+    updated["shadow_cohort"] = shadow.get("shadow_cohort") or {}
+    updated["model_drift_score"] = drift.get("model_drift_score")
+    updated["environment_shift_score"] = drift.get("environment_shift_score")
+    updated["calibration_health_status"] = drift.get("calibration_health_status")
+    updated["confidence_reliability_alert"] = drift.get("confidence_reliability_alert")
+    updated["readiness_gate_reliability_alert"] = drift.get(
+        "readiness_gate_reliability_alert"
+    )
+    updated["monotonicity_break_alert"] = drift.get("monotonicity_break_alert")
+    updated["calibration_drift_summary"] = drift.get("calibration_drift_summary") or []
+    updated["confidence_overstatement_flag"] = drift.get("confidence_overstatement_flag")
+    updated["confidence_understatement_flag"] = drift.get("confidence_understatement_flag")
+    updated["current_operating_mode"] = controls.get("current_operating_mode")
+    updated["pause_required"] = controls.get("pause_required")
+    updated["downgrade_to_shadow_recommended"] = controls.get(
+        "downgrade_to_shadow_recommended"
+    )
+    updated["downgrade_reason"] = controls.get("downgrade_reason")
+    updated["subsystem_block_flags"] = controls.get("subsystem_block_flags") or []
+    updated["recovery_criteria"] = controls.get("recovery_criteria") or []
+    updated["operator_attention_required"] = controls.get("operator_attention_required")
+    updated["operational_risk_score"] = controls.get("operational_risk_score")
+    updated["operational_alerts"] = operational.get("operational_alerts") or []
+    updated["incident_history"] = operational.get("incident_history") or []
+    updated["system_health_summary"] = system_health_summary
+    updated["shadow_mode_summary"] = shadow_summary
+    updated["drift_control_summary"] = drift_summary
+    updated["incident_history_summary"] = incident_summary
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Operational guardrails: {system_health_summary}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Shadow mode: {shadow_summary}",
+            f"Operational controls: {drift_summary}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Operational incidents and alerts: {incident_summary}",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "Phase 12 operational provenance is audit-backed: health snapshots, shadow decisions, drift alerts, downgrade or pause controls, and operational incidents are stored at analysis time so later trust reviews can inspect what degraded, when, and why.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["system_health_summary"] = [
+        "operational_guardrails.system_health",
+        "operational_guardrails.health_snapshot",
+    ]
+    evidence_map["shadow_mode_summary"] = [
+        "operational_guardrails.shadow_mode",
+        "operational_guardrails.shadow_decision_record",
+    ]
+    evidence_map["drift_control_summary"] = [
+        "operational_guardrails.drift_monitoring",
+        "operational_guardrails.control_state",
+    ]
+    evidence_map["incident_history_summary"] = [
+        "operational_guardrails.operational_alerts",
+        "operational_guardrails.incident_history",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

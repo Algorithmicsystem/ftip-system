@@ -426,6 +426,51 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Which experiments deserve review next?",
         ),
     },
+    "operational_health": {
+        "keywords": (
+            "operational",
+            "operations",
+            "system health",
+            "healthy right now",
+            "provider",
+            "providers",
+            "provider stale",
+            "stale provider",
+            "fallback",
+            "freshness alert",
+            "shadow mode",
+            "shadow",
+            "downgraded",
+            "downgrade",
+            "kill switch",
+            "kill-switch",
+            "pause",
+            "paused",
+            "incident",
+            "incident history",
+            "degradation",
+            "drifting",
+            "drift",
+            "reliability concern",
+            "recover",
+            "recovery criteria",
+        ),
+        "mode": "operations",
+        "sections": (
+            "system_health_summary",
+            "shadow_mode_summary",
+            "drift_control_summary",
+            "incident_history_summary",
+            "deployment_readiness_summary",
+            "rollout_stage_summary",
+            "evidence_provenance",
+        ),
+        "followups": (
+            "Is the system healthy enough to trust right now?",
+            "Why is the platform in shadow mode or a downgraded state?",
+            "What would need to recover before trust rises again?",
+        ),
+    },
     "compare_clarify": {
         "keywords": (
             "difference",
@@ -523,6 +568,22 @@ def route_question(message: str) -> Dict[str, Any]:
             )
         ):
             if intent == "deployment_readiness":
+                score += 3
+        if any(
+            phrase in text
+            for phrase in (
+                "system health",
+                "shadow mode",
+                "provider stale",
+                "downgraded",
+                "downgrade",
+                "kill switch",
+                "kill-switch",
+                "incident history",
+                "reliability concern",
+            )
+        ):
+            if intent == "operational_health":
                 score += 3
         if any(
             phrase in text

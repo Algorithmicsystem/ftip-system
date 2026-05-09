@@ -35,6 +35,13 @@ from api.assistant.phase11 import (
     PORTFOLIO_RISK_MODEL_ARTIFACT_KIND,
     build_portfolio_risk_model_artifact,
 )
+from api.assistant.phase12 import (
+    HEALTH_SNAPSHOT_ARTIFACT_KIND,
+    OPERATIONAL_GUARDRAILS_ARTIFACT_KIND,
+    OPERATIONAL_INCIDENT_ARTIFACT_KIND,
+    SHADOW_DECISION_RECORD_KIND,
+    build_operational_guardrails_artifact,
+)
 from api.research.backtest import (
     CANONICAL_VALIDATION_ARTIFACT_KIND,
     build_validation_artifact,
@@ -366,6 +373,39 @@ async def generate_analysis_report(
         canonical_validation,
         canonical_validation_artifact_id=canonical_validation_artifact_id,
     )
+    operational_guardrails = build_operational_guardrails_artifact(
+        current_report=report,
+        current_report_id=report_id,
+        session_id=sid,
+        store=store,
+    )
+    operational_guardrails_artifact_id = store.save_artifact(
+        sid,
+        OPERATIONAL_GUARDRAILS_ARTIFACT_KIND,
+        operational_guardrails,
+    )
+    health_snapshot_artifact_id = store.save_artifact(
+        sid,
+        HEALTH_SNAPSHOT_ARTIFACT_KIND,
+        operational_guardrails.get("health_snapshot") or {},
+    )
+    shadow_decision_artifact_id = store.save_artifact(
+        sid,
+        SHADOW_DECISION_RECORD_KIND,
+        operational_guardrails.get("shadow_decision_record") or {},
+    )
+    operational_incident_artifact_ids = [
+        store.save_artifact(sid, OPERATIONAL_INCIDENT_ARTIFACT_KIND, incident)
+        for incident in (operational_guardrails.get("current_incidents") or [])
+    ]
+    report = reports.attach_operational_context(
+        report,
+        operational_guardrails,
+        operational_guardrails_artifact_id=operational_guardrails_artifact_id,
+        health_snapshot_artifact_id=health_snapshot_artifact_id,
+        shadow_decision_artifact_id=shadow_decision_artifact_id,
+        operational_incident_artifact_ids=operational_incident_artifact_ids,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -416,6 +456,17 @@ async def generate_analysis_report(
                 "status": (report.get("canonical_validation") or {}).get("status"),
                 "walkforward_windows": ((report.get("canonical_validation") or {}).get("walkforward_summary") or {}).get("window_count"),
             },
+            "operational_guardrails": {
+                "artifact_id": operational_guardrails_artifact_id,
+                "health_snapshot_artifact_id": health_snapshot_artifact_id,
+                "shadow_decision_artifact_id": shadow_decision_artifact_id,
+                "operational_incident_artifact_ids": operational_incident_artifact_ids,
+                "operational_guardrails_version": report.get("operational_guardrails_version"),
+                "system_health_status": report.get("system_health_status"),
+                "current_operating_mode": report.get("current_operating_mode"),
+                "shadow_mode_status": report.get("shadow_mode_status"),
+                "pause_required": report.get("pause_required"),
+            },
         },
     )
     store.add_message(
@@ -437,6 +488,10 @@ async def generate_analysis_report(
             "portfolio_risk_model_artifact_id": portfolio_risk_model_artifact_id,
             "continuous_learning_artifact_id": continuous_learning_artifact_id,
             "canonical_validation_artifact_id": canonical_validation_artifact_id,
+            "operational_guardrails_artifact_id": operational_guardrails_artifact_id,
+            "health_snapshot_artifact_id": health_snapshot_artifact_id,
+            "shadow_decision_artifact_id": shadow_decision_artifact_id,
+            "operational_incident_artifact_ids": operational_incident_artifact_ids,
             "canonical_lineage": job_context.get("canonical_lineage") or {},
             "active_analysis": active_analysis,
         },
@@ -457,6 +512,10 @@ async def generate_analysis_report(
         "portfolio_risk_model_artifact_id": portfolio_risk_model_artifact_id,
         "continuous_learning_artifact_id": continuous_learning_artifact_id,
         "canonical_validation_artifact_id": canonical_validation_artifact_id,
+        "operational_guardrails_artifact_id": operational_guardrails_artifact_id,
+        "health_snapshot_artifact_id": health_snapshot_artifact_id,
+        "shadow_decision_artifact_id": shadow_decision_artifact_id,
+        "operational_incident_artifact_ids": operational_incident_artifact_ids,
         "active_analysis": active_analysis,
     }
 

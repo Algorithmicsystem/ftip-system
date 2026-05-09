@@ -10,6 +10,12 @@ from api.assistant.phase8 import (
 )
 from api.assistant.phase9 import PORTFOLIO_CONSTRUCTION_ARTIFACT_KIND
 from api.assistant.phase10 import CONTINUOUS_LEARNING_ARTIFACT_KIND
+from api.assistant.phase12 import (
+    HEALTH_SNAPSHOT_ARTIFACT_KIND,
+    OPERATIONAL_GUARDRAILS_ARTIFACT_KIND,
+    OPERATIONAL_INCIDENT_ARTIFACT_KIND,
+    SHADOW_DECISION_RECORD_KIND,
+)
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -340,6 +346,15 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["net_of_friction_validation_summary"]
     assert result["suppression_readiness_validation_summary"]
     assert result["drawdown_invalidation_validation_summary"]
+    assert result["operational_guardrails_artifact_id"]
+    assert result["health_snapshot_artifact_id"]
+    assert result["shadow_decision_artifact_id"]
+    assert result["operational_guardrails"]["operational_guardrails_version"]
+    assert result["system_health_summary"]
+    assert result["shadow_mode_summary"]
+    assert result["drift_control_summary"]
+    assert result["incident_history_summary"]
+    assert result["current_operating_mode"]
     assert result["setup_archetype"]["archetype_name"]
     assert result["learning_priority"]
     assert result["actionability_score"] is not None
@@ -353,6 +368,8 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session["metadata"]["active_analysis"]["deployment_permission"]
     assert session["metadata"]["active_analysis"]["candidate_classification"]
     assert session["metadata"]["active_analysis"]["setup_archetype"]
+    assert session["metadata"]["active_analysis"]["system_health_status"]
+    assert session["metadata"]["active_analysis"]["current_operating_mode"]
     assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
     assert (
         session["metadata"]["portfolio_construction"]["artifact_id"]
@@ -370,6 +387,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
         session["metadata"]["canonical_validation"]["artifact_id"]
         == result["canonical_validation_artifact_id"]
     )
+    assert (
+        session["metadata"]["operational_guardrails"]["artifact_id"]
+        == result["operational_guardrails_artifact_id"]
+    )
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
@@ -382,6 +403,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["portfolio_risk_model"]
     assert report["continuous_learning"]
     assert report["canonical_validation"]
+    assert report["operational_guardrails"]
     assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(
@@ -444,6 +466,27 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
         )
         is not None
     )
+    assert (
+        store.get_latest_artifact(
+            kind=OPERATIONAL_GUARDRAILS_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=HEALTH_SNAPSHOT_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=SHADOW_DECISION_RECORD_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert store.list_artifacts(
+        kind=OPERATIONAL_INCIDENT_ARTIFACT_KIND, session_id=result["session_id"]
+    ) is not None
 
 
 def test_market_domain_computes_drawdown_windows_without_name_error(monkeypatch):
@@ -748,6 +791,255 @@ def test_chat_routes_deployment_readiness_questions_to_readiness_sections(monkey
     assert result["report_found"] is True
     assert result["active_analysis"]["deployment_permission"] == "paper_shadow_only"
     assert result["active_analysis"]["trust_tier"] == "paper_only"
+
+
+def test_chat_routes_operational_health_questions_to_operational_sections(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = reports.attach_operational_context(
+        reports.attach_deployment_context(
+            reports.attach_canonical_validation_context(
+                reports.build_analysis_report(
+                    symbol="NVDA",
+                    as_of_date="2024-01-02",
+                    horizon="swing",
+                    risk_mode="balanced",
+                    signal={
+                        "action": "BUY",
+                        "score": 0.8,
+                        "confidence": 0.7,
+                        "reason_codes": ["TREND_UP"],
+                        "reason_details": {"TREND_UP": "Trend is rising"},
+                    },
+                    key_features={
+                        "ret_21d": 0.08,
+                        "vol_21d": 0.25,
+                        "regime_label": "trend",
+                    },
+                    quality={
+                        "bars_ok": True,
+                        "news_ok": True,
+                        "sentiment_ok": True,
+                        "warnings": [],
+                    },
+                    evidence={
+                        "reason_codes": ["TREND_UP"],
+                        "reason_details": {},
+                        "sources": ["market_bars_daily"],
+                    },
+                    data_bundle={
+                        "quality_provenance": {
+                            "quality_score": 62,
+                            "freshness_summary": {
+                                "market": {"status": "fresh", "updated_at": "2024-01-02T00:00:00Z"},
+                                "macro": {
+                                    "status": "stale_but_usable",
+                                    "updated_at": "2023-12-22T00:00:00Z",
+                                },
+                            },
+                            "domain_availability": {
+                                "market": {
+                                    "coverage_status": "available",
+                                    "fallback_used": False,
+                                    "fallback_source": [],
+                                },
+                                "macro": {
+                                    "coverage_status": "partial",
+                                    "fallback_used": True,
+                                    "fallback_source": ["SPY"],
+                                },
+                            },
+                            "provider_notes": ["macro coverage is relying on fallback sources"],
+                        },
+                        "external_data_fabric": {"status": "mixed"},
+                    },
+                    strategy={
+                        "final_signal": "HOLD",
+                        "strategy_posture": "watchlist_positive",
+                        "confidence": 0.57,
+                        "confidence_score": 57.0,
+                        "conviction_tier": "moderate",
+                        "actionability_score": 44.0,
+                        "scenario_matrix": {"base": {"summary": "Constructive but not fully actionable."}},
+                    },
+                ),
+                {
+                    "validation_version": "phase10_research_truth_v1",
+                    "status": "available",
+                    "prediction_linkage_summary": {"matured_count": 12},
+                    "walkforward_summary": {"window_count": 2},
+                    "net_return_summary": {"average_edge_return": 0.011, "hit_rate": 0.58},
+                    "friction_cost_summary": {"average_cost_drag": 0.003},
+                    "readiness_scorecard": {
+                        "paper_vs_live_candidate_quality_summary": 0.02
+                    },
+                    "suppression_effect_summary": {
+                        "suppression_effect_edge_spread": 0.01
+                    },
+                    "validation_summary": "Canonical validation is available.",
+                    "walkforward_validation_summary": "Walk-forward remains available.",
+                    "net_of_friction_summary": "Net edge remains positive after friction.",
+                    "suppression_readiness_validation_summary": "Suppression and readiness remain helpful.",
+                    "drawdown_invalidation_summary": "Drawdown remains controlled.",
+                },
+                canonical_validation_artifact_id="validation-operational",
+            ),
+            {
+                "deployment_readiness_version": "phase8_capital_readiness_v1",
+                "deployment_mode": {
+                    "active_mode": "low_risk_live",
+                    "rollout_stage": "low_risk_live_pilot",
+                },
+                "model_readiness": {
+                    "model_readiness_status": "constrained",
+                    "live_readiness_score": 54.0,
+                    "live_readiness_blockers": ["confidence calibration quality is not strong enough for live escalation"],
+                },
+                "signal_admission_control": {
+                    "admitted_for_strategy": True,
+                    "admitted_for_paper": True,
+                    "admitted_for_live": False,
+                },
+                "deployment_permission": {
+                    "deployment_permission": "paper_shadow_only",
+                    "deployment_blockers": ["fragility remains too high for live admission"],
+                    "deployment_rationale": "The setup is paper-worthy, but it does not clear the live gate.",
+                    "trust_tier": "paper_only",
+                    "minimum_required_review": "senior_analyst_and_risk_review",
+                    "human_review_required": True,
+                },
+                "risk_budgeting": {
+                    "risk_budget_tier": "shadow_only",
+                    "exposure_caution_level": "high",
+                    "fragility_adjusted_size_band": "0.10x-0.25x pilot unit",
+                    "confidence_adjusted_size_band": "0.10x-0.25x pilot unit",
+                    "maximum_risk_mode_allowed": "paper_shadow",
+                },
+                "rollout_workflow": {
+                    "rollout_stage": "low_risk_live_pilot",
+                    "readiness_checkpoint": "watch",
+                    "promotion_criteria": ["confidence reliability remains above the stage threshold"],
+                    "demotion_criteria": ["fragility rises into the blocked zone"],
+                    "stage_transition_notes": ["Continue paper/shadow evidence collection before live escalation."],
+                },
+                "drift_monitor": {
+                    "pause_recommended": False,
+                    "degrade_to_paper_recommended": True,
+                    "drift_alerts": ["confidence reliability is below the live-support comfort zone"],
+                    "deployment_risk_alerts": ["live readiness has slipped below the controlled-live comfort zone"],
+                },
+                "audit_snapshot": {
+                    "rationale_summary": "Paper-shadow only until calibration and fragility improve.",
+                },
+            },
+            readiness_artifact_id="readiness-ops",
+            deployment_audit_artifact_id="audit-ops",
+        ),
+        {
+            "operational_guardrails_version": "phase12_operational_guardrails_v1",
+            "system_health": {
+                "system_health_status": "degraded",
+                "provider_health_status": "degraded",
+                "provider_degradation_notes": ["macro coverage is relying on fallback sources"],
+                "data_pipeline_health": "watch",
+                "artifact_pipeline_health": "healthy",
+                "failure_rate_summary": {"error_rate": 0.0},
+                "stale_domain_summary": ["macro"],
+                "fallback_overuse_summary": {"status": "degraded"},
+                "degraded_domain_list": ["macro"],
+                "critical_domain_missing_flag": False,
+                "data_reliability_score": 61.0,
+            },
+            "shadow_mode": {
+                "shadow_mode_status": "active_shadow",
+                "shadow_vs_realized_summary": "Shadow tracking remains active.",
+                "shadow_reliability_summary": "Shadow reliability is still building.",
+                "shadow_promotion_candidate": False,
+                "shadow_demotion_reason": "Deployment controls still require paper-shadow discipline.",
+                "shadow_cohort": {"tracked_shadow_decisions": 9},
+            },
+            "drift_monitoring": {
+                "model_drift_score": 58.0,
+                "environment_shift_score": 63.0,
+                "calibration_health_status": "degraded",
+                "confidence_reliability_alert": True,
+                "readiness_gate_reliability_alert": False,
+                "monotonicity_break_alert": False,
+                "calibration_drift_summary": ["confidence reliability 52.0"],
+            },
+            "control_state": {
+                "current_operating_mode": "shadow_only",
+                "pause_required": False,
+                "downgrade_to_shadow_recommended": True,
+                "downgrade_reason": "Provider and calibration conditions still require shadow discipline.",
+                "subsystem_block_flags": ["high_trust_deployment_modes"],
+                "recovery_criteria": ["Confidence calibration recovers into the watch or healthy range."],
+                "operator_attention_required": True,
+                "operational_risk_score": 61.0,
+            },
+            "operational_alerts": [
+                {
+                    "alert_id": "downgrade-shadow",
+                    "alert_severity": "serious_degradation",
+                    "alert_domain": "deployment_controls",
+                    "alert_summary": "Operational controls recommend downgrading to shadow or paper discipline.",
+                    "recommended_action": "Reduce deployment trust.",
+                    "operator_review_required": True,
+                    "escalation_path": "risk_committee_review",
+                }
+            ],
+            "incident_history": [
+                {
+                    "recorded_at": "2024-01-02T00:00:00Z",
+                    "alert_domain": "deployment_controls",
+                    "alert_severity": "serious_degradation",
+                    "summary": "Operational controls recommend downgrading to shadow or paper discipline.",
+                    "recommended_action": "Reduce deployment trust.",
+                }
+            ],
+            "system_health_summary": "System health is degraded and provider quality is weakened by macro fallback reliance.",
+            "shadow_mode_summary": "Shadow mode remains active while the platform collects cleaner forward evidence.",
+            "drift_control_summary": "Model drift and calibration weakness are keeping the platform in shadow-only mode.",
+            "incident_history_summary": "One serious operational downgrade alert is active.",
+        },
+        operational_guardrails_artifact_id="ops-1",
+        health_snapshot_artifact_id="health-1",
+        shadow_decision_artifact_id="shadow-1",
+        operational_incident_artifact_ids=["incident-1"],
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=session_id, report_id=report_id
+    )
+    store.upsert_session_metadata(session_id, {"active_analysis": active_analysis})
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert '"question_intent": "operational_health"' in combined
+        assert '"answer_mode": "operations"' in combined
+        assert report["system_health_summary"] in combined
+        assert report["shadow_mode_summary"] in combined
+        assert report["drift_control_summary"] in combined
+        return (
+            "The system is currently degraded enough that higher-trust deployment support should stay in shadow mode.",
+            "model",
+            {"prompt_tokens": 12, "completion_tokens": 16},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {
+            "session_id": session_id,
+            "message": "Is the system healthy right now and why was it downgraded into shadow mode?",
+        },
+        store=store,
+    )
+
+    assert result["report_found"] is True
+    assert result["active_analysis"]["system_health_status"] == "degraded"
+    assert result["active_analysis"]["current_operating_mode"] == "shadow_only"
 
 
 def test_chat_routes_portfolio_questions_to_portfolio_sections(monkeypatch):

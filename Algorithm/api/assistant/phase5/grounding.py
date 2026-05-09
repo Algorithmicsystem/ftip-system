@@ -66,6 +66,14 @@ _ACTIVE_ANALYSIS_KEYS = (
     "setup_archetype",
     "research_version",
     "learning_priority",
+    "validation_version",
+    "operational_guardrails_version",
+    "system_health_status",
+    "shadow_mode_status",
+    "current_operating_mode",
+    "pause_required",
+    "model_drift_score",
+    "data_reliability_score",
 )
 
 

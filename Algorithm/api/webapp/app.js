@@ -189,6 +189,13 @@ const buildActiveAnalysisFromReport = (report) => ({
   research_version: report?.research_version || "n/a",
   learning_priority: report?.learning_priority || "observe",
   validation_version: report?.validation_version || report?.canonical_validation?.validation_version || "n/a",
+  operational_guardrails_version: report?.operational_guardrails_version || "n/a",
+  system_health_status: report?.system_health_status || "unknown",
+  shadow_mode_status: report?.shadow_mode_status || "unknown",
+  current_operating_mode: report?.current_operating_mode || "normal",
+  pause_required: Boolean(report?.pause_required),
+  model_drift_score: report?.model_drift_score,
+  data_reliability_score: report?.data_reliability_score,
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -285,9 +292,27 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.canonical_validation?.friction_cost_summary?.average_cost_drag ?? null,
       portfolio_risk_model_version:
         report?.portfolio_risk_model_version || analysis?.portfolio_risk_model_version || "n/a",
+      operational_guardrails_version:
+        report?.operational_guardrails_version ||
+        analysis?.operational_guardrails_version ||
+        "phase12",
+      system_health_status:
+        report?.system_health_status || analysis?.system_health_status || "unknown",
+      shadow_mode_status:
+        report?.shadow_mode_status || analysis?.shadow_mode_status || "unknown",
+      current_operating_mode:
+        report?.current_operating_mode || analysis?.current_operating_mode || "normal",
+      pause_required:
+        report?.pause_required ?? analysis?.pause_required ?? false,
+      model_drift_score:
+        report?.model_drift_score ?? analysis?.model_drift_score ?? null,
+      data_reliability_score:
+        report?.data_reliability_score ?? analysis?.data_reliability_score ?? null,
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
       strategy_summary: report?.strategy_view || "",
       portfolio_summary: report?.portfolio_context_summary || "",
+      operational_summary:
+        report?.system_health_summary || report?.drift_control_summary || "",
       top_driver: topDriverLabel(report, "positive"),
       top_risk:
         report?.strategy?.invalidators?.top_invalidators?.[0] ||
@@ -468,6 +493,7 @@ const buildNarratorPromptSet = () => {
     `What does evaluation history say about setups like ${symbol}?`,
     `What is the platform learning lately about ${symbol}?`,
     `Where is the model drifting right now on ${symbol}?`,
+    `Is the system healthy enough to trust right now for ${symbol}?`,
     `What experiments should be run next for ${symbol}?`,
     `What setup archetype is ${symbol} right now?`,
   ];
@@ -2221,6 +2247,19 @@ const renderSystemAudit = (report) => {
   const domainNotes = Object.entries(domains)
     .slice(0, 6)
     .map(([name, payload]) => `${name}: ${payload?.status || "n/a"} / ${payload?.updated_at || "n/a"}`);
+  const operationalLines = [
+    `System health ${report.system_health_status || "unknown"} / provider ${
+      report.provider_health_status || "unknown"
+    }`,
+    `Operating mode ${report.current_operating_mode || "normal"} / shadow ${
+      report.shadow_mode_status || "unknown"
+    }`,
+    `Data reliability ${formatScore(report.data_reliability_score, 1)} / 100 / drift ${formatScore(
+      report.model_drift_score,
+      1
+    )} / 100`,
+    ...(report.degraded_domain_list || []).slice(0, 4).map((item) => `Degraded domain: ${item}`),
+  ];
   container.innerHTML = [
     `<section class="drilldown-card">
       <h5>Versioning</h5>
@@ -2230,6 +2269,7 @@ const renderSystemAudit = (report) => {
           `Strategy ${report.strategy?.strategy_version || "n/a"}`,
           `Evaluation ${report.evaluation?.evaluation_version || "phase6"}`,
           `Research ${report.research_version || "phase10"}`,
+          `Operational ${report.operational_guardrails_version || "phase12"}`,
         ],
         "No version data available."
       )}
@@ -2237,6 +2277,19 @@ const renderSystemAudit = (report) => {
     `<section class="drilldown-card">
       <h5>Freshness by Domain</h5>
       ${renderBullets(domainNotes, "No domain freshness breakdown available.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Operational Guardrails</h5>
+      ${renderBullets(
+        [
+          report.system_health_summary,
+          report.shadow_mode_summary,
+          report.drift_control_summary,
+          report.incident_history_summary,
+          ...operationalLines,
+        ].filter(Boolean),
+        "No operational guardrail data available."
+      )}
     </section>`,
     `<section class="drilldown-card">
       <h5>Deployment Trust Layer</h5>
@@ -2278,6 +2331,12 @@ const renderDeploymentAudit = (report) => {
     return;
   }
   const audit = report.live_use_audit_snapshot || {};
+  const operationalAlerts = (report.operational_alerts || [])
+    .slice(0, 5)
+    .map((item) => `${item.alert_domain || "alert"}: ${item.alert_summary || "No summary."}`);
+  const incidentNotes = (report.incident_history || [])
+    .slice(0, 4)
+    .map((item) => `${item.alert_severity || "info"} / ${item.alert_domain || "incident"}: ${item.summary || "No summary."}`);
   const html = [
     `<section class="drilldown-card">
       <h5>Audit Snapshot</h5>
@@ -2293,6 +2352,13 @@ const renderDeploymentAudit = (report) => {
             report.readiness_checkpoint || "watch"
           }`,
           `Human review required: ${report.human_review_required ? "yes" : "still advised"}`,
+          `Operating mode ${report.current_operating_mode || "normal"} / shadow ${
+            report.shadow_mode_status || "unknown"
+          }`,
+          `Data reliability ${formatScore(report.data_reliability_score, 1)} / 100 / model drift ${formatScore(
+            report.model_drift_score,
+            1
+          )} / 100`,
         ],
         "No audit snapshot available."
       )}
@@ -2303,12 +2369,27 @@ const renderDeploymentAudit = (report) => {
         [
           ...(report.drift_alerts || []),
           ...(report.deployment_risk_alerts || []),
+          ...(report.provider_degradation_notes || []),
+          ...(report.degraded_domain_list || []),
+          ...operationalAlerts,
           report.rollback_reason,
+          report.downgrade_reason,
           report.pause_recommended ? "Pause recommended." : null,
+          report.pause_required ? "Pause required." : null,
           report.degrade_to_paper_recommended ? "Degrade to paper/shadow recommended." : null,
+          report.downgrade_to_shadow_recommended
+            ? "Operational downgrade to shadow recommended."
+            : null,
           audit.rationale_summary,
         ].filter(Boolean),
         "No deployment alert or rollback note surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Incident History</h5>
+      ${renderBullets(
+        [report.incident_history_summary, ...incidentNotes].filter(Boolean),
+        "No operational incident history surfaced."
       )}
     </section>`,
   ].join("");
@@ -2969,6 +3050,7 @@ const renderAssistantReport = (report) => {
   renderLearningArchetypes(report);
   renderResearchDrilldown(report);
   renderSystemAudit(report);
+  renderSystemHealth(state.assistantHealth, report);
   renderDeploymentReadiness(report);
   renderDeploymentRiskBudget(report);
   renderDeploymentAudit(report);
@@ -2994,13 +3076,34 @@ const renderAssistantChatTranscript = () => {
   qs("#assistant-chat-response").textContent = blocks.join("\n\n");
 };
 
-const renderSystemHealth = (health) => {
+const renderSystemHealth = (health, report = state.assistantReport) => {
   const container = qs("#assistant-system-health");
-  if (!health) {
+  const operationalCards = report
+    ? [
+        {
+          label: "system",
+          value: report.system_health_status || "unknown",
+          note: `mode ${report.current_operating_mode || "normal"} / shadow ${
+            report.shadow_mode_status || "unknown"
+          }`,
+        },
+        {
+          label: "operational",
+          value:
+            report.data_reliability_score == null
+              ? "n/a"
+              : `${formatScore(report.data_reliability_score, 1)} / 100`,
+          note: `drift ${formatScore(report.model_drift_score, 1)} / 100 · ${
+            report.pause_required ? "pause required" : "no forced pause"
+          }`,
+        },
+      ]
+    : [];
+  if (!health && !report) {
     container.innerHTML = emptyStateCard("Assistant and provider health will render here.");
     return;
   }
-  const providerCards = Object.entries(health.providers || {}).map(
+  const providerCards = Object.entries((health || {}).providers || {}).map(
     ([name, provider]) => `
       <div class="summary-card">
         <div class="summary-card-label">${escapeHtml(name)}</div>
@@ -3009,15 +3112,17 @@ const renderSystemHealth = (health) => {
       </div>
     `
   );
-  const assistantCards = [
-    {
-      label: "assistant",
-      value: health.assistant?.status || "unknown",
-      note: `llm_enabled=${health.assistant?.llm_enabled} db_enabled=${health.assistant?.db_enabled}`,
-    },
-  ];
+  const assistantCards = health
+    ? [
+        {
+          label: "assistant",
+          value: health.assistant?.status || "unknown",
+          note: `llm_enabled=${health.assistant?.llm_enabled} db_enabled=${health.assistant?.db_enabled}`,
+        },
+      ]
+    : [];
   container.innerHTML = [
-    ...assistantCards.map(
+    ...[...assistantCards, ...operationalCards].map(
       (item) => `
         <div class="summary-card">
           <div class="summary-card-label">${escapeHtml(item.label)}</div>
@@ -3042,7 +3147,7 @@ const refreshAssistantSystemHealth = async () => {
       assistant: assistantHealth,
       providers: providersHealth.providers || {},
     };
-    renderSystemHealth(state.assistantHealth);
+    renderSystemHealth(state.assistantHealth, state.assistantReport);
     setLegacyStatus("#assistant-health-status", "System health refreshed.", "success");
   } catch (err) {
     renderSystemHealth(null);

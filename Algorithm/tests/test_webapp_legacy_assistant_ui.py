@@ -109,6 +109,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "portfolio_construction" in js
     assert "Which idea fits the portfolio better" in js
     assert "What is the platform learning lately" in js
+    assert "operational_guardrails" in js
+    assert "Operational Guardrails" in js
+    assert "shadow_mode_status" in js
+    assert "current_operating_mode" in js
+    assert "data_reliability_score" in js
+    assert "Is the system healthy enough to trust right now" in js
     assert "refreshAssistantSystemHealth" in js
 
 

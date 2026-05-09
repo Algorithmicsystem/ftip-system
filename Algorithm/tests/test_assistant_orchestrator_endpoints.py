@@ -530,6 +530,15 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "suppression_readiness_validation_summary",
         "drawdown_invalidation_validation_summary",
         "canonical_validation_artifact_id",
+        "operational_guardrails",
+        "operational_guardrails_artifact_id",
+        "health_snapshot_artifact_id",
+        "shadow_decision_artifact_id",
+        "system_health_summary",
+        "shadow_mode_summary",
+        "drift_control_summary",
+        "incident_history_summary",
+        "current_operating_mode",
         "active_analysis",
     }.issubset(data.keys())
     assert data["signal"]["action"] == "BUY"
@@ -543,6 +552,8 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["portfolio_risk_model"]["portfolio_risk_model_version"]
     assert data["active_analysis"]["setup_archetype"]
     assert data["canonical_validation"]["validation_version"]
+    assert data["operational_guardrails"]["operational_guardrails_version"]
+    assert data["active_analysis"]["system_health_status"]
     assert data["overall_analysis"]
 
 

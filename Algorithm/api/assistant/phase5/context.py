@@ -102,6 +102,10 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "adaptation_queue_summary": report.get("adaptation_queue_summary") or "",
         "experiment_registry_summary": report.get("experiment_registry_summary") or "",
         "archetype_motif_summary": report.get("archetype_motif_summary") or "",
+        "system_health_summary": report.get("system_health_summary") or "",
+        "shadow_mode_summary": report.get("shadow_mode_summary") or "",
+        "drift_control_summary": report.get("drift_control_summary") or "",
+        "incident_history_summary": report.get("incident_history_summary") or "",
     }
 
 
@@ -211,6 +215,23 @@ def build_narrator_context(
         or report.get("learning_priority"),
         "validation_version": active_analysis.get("validation_version")
         or report.get("validation_version"),
+        "operational_guardrails_version": active_analysis.get(
+            "operational_guardrails_version"
+        )
+        or report.get("operational_guardrails_version"),
+        "system_health_status": active_analysis.get("system_health_status")
+        or report.get("system_health_status"),
+        "shadow_mode_status": active_analysis.get("shadow_mode_status")
+        or report.get("shadow_mode_status"),
+        "current_operating_mode": active_analysis.get("current_operating_mode")
+        or report.get("current_operating_mode"),
+        "pause_required": active_analysis.get("pause_required")
+        if active_analysis.get("pause_required") is not None
+        else report.get("pause_required"),
+        "model_drift_score": active_analysis.get("model_drift_score")
+        or report.get("model_drift_score"),
+        "data_reliability_score": active_analysis.get("data_reliability_score")
+        or report.get("data_reliability_score"),
     }
 
     return {
@@ -266,6 +287,34 @@ def build_narrator_context(
             "net_edge_return": ((report.get("canonical_validation") or {}).get("net_return_summary") or {}).get("average_edge_return"),
             "average_cost_drag": ((report.get("canonical_validation") or {}).get("friction_cost_summary") or {}).get("average_cost_drag"),
         },
+        "operational_snapshot": {
+            "operational_guardrails_version": report.get("operational_guardrails_version"),
+            "system_health_status": report.get("system_health_status"),
+            "provider_health_status": report.get("provider_health_status"),
+            "data_pipeline_health": report.get("data_pipeline_health"),
+            "artifact_pipeline_health": report.get("artifact_pipeline_health"),
+            "data_reliability_score": report.get("data_reliability_score"),
+            "shadow_mode_status": report.get("shadow_mode_status"),
+            "shadow_reliability_summary": report.get("shadow_reliability_summary"),
+            "model_drift_score": report.get("model_drift_score"),
+            "environment_shift_score": report.get("environment_shift_score"),
+            "calibration_health_status": report.get("calibration_health_status"),
+            "current_operating_mode": report.get("current_operating_mode"),
+            "pause_required": report.get("pause_required"),
+            "downgrade_to_shadow_recommended": report.get(
+                "downgrade_to_shadow_recommended"
+            ),
+            "downgrade_reason": report.get("downgrade_reason"),
+            "operator_attention_required": report.get("operator_attention_required"),
+            "degraded_domains": _compact_list(report.get("degraded_domain_list") or []),
+            "active_alerts": _compact_list(
+                [
+                    item.get("alert_summary")
+                    for item in (report.get("operational_alerts") or [])
+                ],
+                limit=6,
+            ),
+        },
         "domain_agreement": {
             "domain_agreement_score": agreement.get("domain_agreement_score"),
             "domain_conflict_score": agreement.get("domain_conflict_score"),
@@ -311,6 +360,10 @@ def build_narrator_context(
             "adaptation_queue_summary": sections["adaptation_queue_summary"],
             "experiment_registry_summary": sections["experiment_registry_summary"],
             "archetype_motif_summary": sections["archetype_motif_summary"],
+            "system_health_summary": sections["system_health_summary"],
+            "shadow_mode_summary": sections["shadow_mode_summary"],
+            "drift_control_summary": sections["drift_control_summary"],
+            "incident_history_summary": sections["incident_history_summary"],
         },
         "evaluation_snapshot": report.get("evaluation") or {},
         "deployment_readiness_snapshot": {
