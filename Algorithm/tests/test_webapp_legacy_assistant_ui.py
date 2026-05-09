@@ -1,3 +1,7 @@
+import subprocess
+import textwrap
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from api.main import app
@@ -106,3 +110,154 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "Which idea fits the portfolio better" in js
     assert "What is the platform learning lately" in js
     assert "refreshAssistantSystemHealth" in js
+
+
+def test_recent_report_persistence_quota_failure_does_not_break_analyze_flow() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = textwrap.dedent(
+        """
+        const fs = require("fs");
+        const path = require("path");
+        const vm = require("vm");
+
+        const source = fs.readFileSync(
+          path.join(process.cwd(), "api/webapp/app.js"),
+          "utf8"
+        ) + "\\n;globalThis.__testExports = { upsertRecentReport, state };";
+
+        const elements = new Map();
+        const makeElement = () => ({
+          value: "",
+          textContent: "",
+          innerHTML: "",
+          disabled: false,
+          dataset: {},
+          style: {},
+          addEventListener() {},
+          removeEventListener() {},
+          focus() {},
+          closest() { return null; },
+          classList: { toggle() {}, add() {}, remove() {} },
+        });
+        const querySelector = (selector) => {
+          if (!elements.has(selector)) {
+            elements.set(selector, makeElement());
+          }
+          return elements.get(selector);
+        };
+
+        const localStorage = {
+          _values: new Map(),
+          getItem(key) {
+            return this._values.has(key) ? this._values.get(key) : null;
+          },
+          setItem(key, value) {
+            if (key === "ftip.assistant.recent_reports" && String(value).length > 5000) {
+              throw new Error("QuotaExceededError");
+            }
+            this._values.set(key, String(value));
+          },
+          removeItem(key) {
+            this._values.delete(key);
+          },
+        };
+
+        const context = {
+          console,
+          Date,
+          JSON,
+          Math,
+          Number,
+          String,
+          Boolean,
+          Array,
+          Object,
+          Promise,
+          Map,
+          Set,
+          window: {
+            localStorage,
+            crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000000" },
+          },
+          document: {
+            body: makeElement(),
+            querySelector,
+            querySelectorAll() { return []; },
+          },
+          fetch: async (url) => ({
+            ok: true,
+            async json() {
+              if (String(url).includes("/providers/health")) {
+                return { providers: {} };
+              }
+              return { status: "ok", llm_enabled: true, db_enabled: true };
+            },
+          }),
+          setTimeout,
+          clearTimeout,
+        };
+        context.document.body.addEventListener = () => {};
+        context.globalThis = context;
+
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const bigText = "x".repeat(12000);
+        const report = {
+          symbol: "NVDA",
+          as_of_date: "2026-05-09",
+          horizon: "swing",
+          risk_mode: "balanced",
+          signal: { action: "BUY" },
+          strategy: {
+            final_signal: "BUY",
+            conviction_tier: "high",
+            strategy_posture: "actionable_long",
+            confidence: 0.81,
+            actionability_score: 72,
+          },
+          freshness_summary: { overall_status: "fresh", domains: {} },
+          deployment_permission: "paper_shadow_only",
+          trust_tier: "paper_only",
+          candidate_classification: "watchlist_candidate",
+          size_band: "paper / shadow band",
+          report_version: "phase-test",
+          overall_analysis: bigText,
+          signal_summary: bigText,
+          technical_analysis: bigText,
+          fundamental_analysis: bigText,
+          statistical_analysis: bigText,
+          sentiment_analysis: bigText,
+          macro_geopolitical_analysis: bigText,
+          strategy_view: bigText,
+          risks_weaknesses_invalidators: bigText,
+          evidence_provenance: bigText,
+          deployment_readiness_summary: bigText,
+          portfolio_context_summary: bigText,
+          portfolio_fit_analysis: bigText,
+          execution_quality_analysis: bigText,
+          learning_summary: bigText,
+        };
+
+        context.__testExports.upsertRecentReport(report, null);
+
+        if (context.__testExports.state.assistantRecentReports.length !== 1) {
+          throw new Error("recent report was not retained in memory");
+        }
+        if (context.__testExports.state.assistantRecentReports[0].symbol !== "NVDA") {
+          throw new Error("recent report symbol was not retained");
+        }
+        console.log("ok");
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "-e", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "ok" in result.stdout

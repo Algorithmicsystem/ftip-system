@@ -48,8 +48,27 @@ const readStorageJson = (key, fallback) => {
     return fallback;
   }
 };
-const writeStorageJson = (key, value) =>
-  window.localStorage.setItem(key, JSON.stringify(value));
+const writeStorageJson = (key, value) => {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+};
+const writeStorageValue = (key, value) => {
+  try {
+    window.localStorage.setItem(key, String(value));
+    return true;
+  } catch {
+    return false;
+  }
+};
+const removeStorageValue = (key) => {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {}
+};
 
 const setDefaults = () => {
   const now = new Date();
@@ -305,7 +324,7 @@ const persistWatchlist = (symbols) => {
 
 const persistCompareSymbol = (symbol) => {
   state.assistantCompareSymbol = normalizeSymbol(symbol);
-  window.localStorage.setItem(
+  writeStorageValue(
     ASSISTANT_COMPARE_SYMBOL_STORAGE_KEY,
     state.assistantCompareSymbol
   );
@@ -375,7 +394,7 @@ const generateUuid = () => {
 const persistAssistantSessionId = (sessionId) => {
   state.assistantChatSessionId = sessionId;
   qs("#assistant-chat-session-id").value = sessionId;
-  window.localStorage.setItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY, sessionId);
+  writeStorageValue(ASSISTANT_CHAT_SESSION_STORAGE_KEY, sessionId);
 };
 
 const applyDemoMode = (enabled) => {
@@ -383,7 +402,7 @@ const applyDemoMode = (enabled) => {
   document.body.classList.toggle("demo-mode", state.demoMode);
   qs("#demo-mode-status").textContent = state.demoMode ? "Demo mode on" : "Demo mode off";
   qs("#demo-mode-toggle").textContent = state.demoMode ? "Disable Demo Mode" : "Enable Demo Mode";
-  window.localStorage.setItem(FTIP_DEMO_MODE_STORAGE_KEY, state.demoMode ? "1" : "0");
+  writeStorageValue(FTIP_DEMO_MODE_STORAGE_KEY, state.demoMode ? "1" : "0");
 };
 
 const activeSignalLabel = () =>
@@ -527,12 +546,12 @@ const renderActiveAnalysisLabels = () => {
 const persistActiveAnalysis = (analysis) => {
   state.assistantActiveAnalysis = analysis || null;
   if (analysis) {
-    window.localStorage.setItem(
+    writeStorageJson(
       ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY,
-      JSON.stringify(analysis)
+      analysis
     );
   } else {
-    window.localStorage.removeItem(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY);
+    removeStorageValue(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY);
   }
   renderActiveAnalysisLabels();
 };
