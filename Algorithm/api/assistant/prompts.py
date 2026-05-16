@@ -43,6 +43,7 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Learning archetype: {(report.get('setup_archetype') or {}).get('archetype_name', 'n/a')} with research priority {report.get('learning_priority', 'n/a')}.",
             f"Canonical validation: {report.get('canonical_validation_summary', 'n/a')}.",
             f"Operational guardrails: {report.get('system_health_summary', 'n/a')}.",
+            f"Commercial readiness: {report.get('commercialization_readiness_summary', 'n/a')}.",
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
     )
@@ -71,6 +72,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "portfolio_risk_model": report.get("portfolio_risk_model"),
         "continuous_learning": report.get("continuous_learning"),
         "operational_guardrails": report.get("operational_guardrails"),
+        "source_governance": report.get("source_governance"),
     }
     section_context = {
         "signal_summary": report.get("signal_summary"),
@@ -112,6 +114,11 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "shadow_mode_summary": report.get("shadow_mode_summary"),
         "drift_control_summary": report.get("drift_control_summary"),
         "incident_history_summary": report.get("incident_history_summary"),
+        "commercialization_readiness_summary": report.get(
+            "commercialization_readiness_summary"
+        ),
+        "source_governance_summary": report.get("source_governance_summary"),
+        "buyer_diligence_summary": report.get("buyer_diligence_summary"),
     }
     blocks = [
         "Grounding report metadata and machine-readable fields:",

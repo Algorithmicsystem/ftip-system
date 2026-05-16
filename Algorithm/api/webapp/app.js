@@ -196,6 +196,10 @@ const buildActiveAnalysisFromReport = (report) => ({
   pause_required: Boolean(report?.pause_required),
   model_drift_score: report?.model_drift_score,
   data_reliability_score: report?.data_reliability_score,
+  source_governance_version: report?.source_governance_version || "n/a",
+  source_profile: report?.source_profile || "internal_research",
+  buyer_demo_suitability: report?.buyer_demo_suitability || "unknown",
+  commercialization_risk_score: report?.commercialization_risk_score,
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -494,6 +498,7 @@ const buildNarratorPromptSet = () => {
     `What is the platform learning lately about ${symbol}?`,
     `Where is the model drifting right now on ${symbol}?`,
     `Is the system healthy enough to trust right now for ${symbol}?`,
+    `Is the current source stack buyer-demo safe for ${symbol}?`,
     `What experiments should be run next for ${symbol}?`,
     `What setup archetype is ${symbol} right now?`,
   ];
@@ -2270,6 +2275,7 @@ const renderSystemAudit = (report) => {
           `Evaluation ${report.evaluation?.evaluation_version || "phase6"}`,
           `Research ${report.research_version || "phase10"}`,
           `Operational ${report.operational_guardrails_version || "phase12"}`,
+          `Source governance ${report.source_governance_version || "phase13"}`,
         ],
         "No version data available."
       )}
@@ -2310,6 +2316,68 @@ const renderSystemAudit = (report) => {
           ...(report.deployment_risk_alerts || []),
         ].filter(Boolean),
         "No deployment trust layer data available."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderCommercialReadiness = (report) => {
+  const container = qs("#assistant-commercial-readiness");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Source profile, commercialization blockers, and clean-stack guidance render here."
+    );
+    return;
+  }
+  const cleanupQueue = (report.commercial_cleanup_queue || [])
+    .slice(0, 5)
+    .map(
+      (item) =>
+        `${item.source_name || "source"} (${item.priority || "review"}): ${
+          item.cleanup_reason || "cleanup required"
+        }`
+    );
+  const gatedDomains = (report.degraded_due_to_profile || []).map(
+    (item) => `Profile-gated domain: ${item}`
+  );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Profile</h5>
+      ${renderBullets(
+        [
+          `Source profile ${report.source_profile || "internal_research"}`,
+          `Buyer-demo suitability ${report.buyer_demo_suitability || "unknown"}`,
+          `Buyer-safe status ${report.buyer_safe_profile_status || "unknown"}`,
+          `Commercialization risk ${formatScore(report.commercialization_risk_score, 1)} / 100`,
+          `Licensing risk tier ${report.licensing_risk_tier || "unknown"}`,
+        ],
+        "No source-profile data available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Governance</h5>
+      ${renderBullets(
+        [
+          report.commercialization_readiness_summary,
+          report.source_governance_summary,
+          ...(report.commercial_blockers || []),
+          ...(report.disallowed_sources || []).map((item) => `Disallowed source: ${item}`),
+          ...gatedDomains,
+        ].filter(Boolean),
+        "No commercialization blocker surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Clean Stack Path</h5>
+      ${renderBullets(
+        [
+          report.buyer_diligence_summary,
+          ...cleanupQueue,
+        ].filter(Boolean),
+        "No cleanup queue surfaced."
       )}
     </section>`,
   ].join("");
@@ -3050,6 +3118,7 @@ const renderAssistantReport = (report) => {
   renderLearningArchetypes(report);
   renderResearchDrilldown(report);
   renderSystemAudit(report);
+  renderCommercialReadiness(report);
   renderSystemHealth(state.assistantHealth, report);
   renderDeploymentReadiness(report);
   renderDeploymentRiskBudget(report);

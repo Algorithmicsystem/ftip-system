@@ -327,7 +327,7 @@ def _sample_report(symbol: str) -> dict:
         },
         portfolio_construction_artifact_id="portfolio-1",
     )
-    return reports.attach_learning_context(
+    report = reports.attach_learning_context(
         report,
         {
             "continuous_learning_version": "phase10_alpha_acceleration_v1",
@@ -437,6 +437,60 @@ def _sample_report(symbol: str) -> dict:
         },
         learning_artifact_id="learning-1",
     )
+    return reports.attach_source_governance_context(
+        report,
+        {
+            "source_governance_version": "phase13_source_governance_v1",
+            "source_profile": "buyer_demo",
+            "feature_source_map": {
+                "sentiment_narrative_flow": {
+                    "domains": ["sentiment_narrative_flow"],
+                    "sources": ["gnews", "finnhub", "google_news_rss"],
+                }
+            },
+            "domain_dependency_map": {
+                "sentiment_narrative_flow": {
+                    "sources": ["gnews", "finnhub", "google_news_rss"],
+                    "impact_if_removed": "Narrative breadth thins materially.",
+                }
+            },
+            "critical_source_dependencies": [
+                {
+                    "domain": "fundamental_filing",
+                    "sources": ["sec_edgar", "finnhub"],
+                    "impact": "Filing-backed coverage weakens first.",
+                }
+            ],
+            "commercialization_readiness": {
+                "buyer_safe_profile_status": "conditional_review_required",
+                "buyer_demo_suitability": "conditional_review_required",
+                "commercialization_risk_score": 58.0,
+                "licensing_risk_tier": "elevated",
+                "commercial_blockers": [
+                    "gnews remains usable only with explicit commercial or legal review."
+                ],
+                "commercial_cleanup_queue": [
+                    {
+                        "source_name": "google_news_rss",
+                        "priority": "high",
+                        "cleanup_reason": "google_news_rss is internal_research_only.",
+                    }
+                ],
+                "disallowed_sources": ["google_news_rss", "yfinance"],
+                "gated_domains": [
+                    {
+                        "domain": "sentiment_narrative_flow",
+                        "blocked_sources": ["google_news_rss"],
+                    }
+                ],
+                "degraded_due_to_profile": ["sentiment_narrative_flow"],
+            },
+            "commercialization_readiness_summary": "Source profile is buyer_demo and commercialization risk is 58.0 / 100, with review-required news dependencies still active.",
+            "source_governance_summary": "Buyer-demo profile blocks internal-only feeds like google_news_rss while keeping review-required feeds visible.",
+            "buyer_diligence_summary": "The clean-stack path is to replace internal-only news fallbacks before external buyer deployment.",
+        },
+        source_governance_artifact_id="source-governance-1",
+    )
 
 
 def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
@@ -467,6 +521,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     learning_route = route_question("What is the platform learning lately about this setup?")
     assert learning_route["intent"] == "learning_research"
     assert learning_route["answer_mode"] == "learning"
+
+    governance_route = route_question("Is the current source stack buyer-demo safe or still mixed-risk?")
+    assert governance_route["intent"] == "source_governance"
+    assert governance_route["answer_mode"] == "commercialization"
 
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
@@ -503,6 +561,8 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["learning_snapshot"]["setup_archetype"] == "Watchlist Only Thesis"
     assert narrator_context["learning_snapshot"]["top_drift_alert"]
     assert narrator_context["learning_snapshot"]["top_reweighting_candidate"]
+    assert narrator_context["source_governance_snapshot"]["source_profile"] == "buyer_demo"
+    assert narrator_context["source_governance_snapshot"]["commercial_blockers"]
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
@@ -551,6 +611,23 @@ def test_phase5_selects_learning_sections_for_learning_questions() -> None:
     assert "regime_learning_summary" in narrator_context["selected_sections"]
     assert "experiment_registry_summary" in narrator_context["selected_sections"]
     assert narrator_context["learning_snapshot"]["active_motifs"]
+
+
+def test_phase5_selects_source_governance_sections_for_commercial_questions() -> None:
+    report = _sample_report("NVDA")
+    route = route_question("What is the clean commercial stack path for this buyer demo?")
+    narrator_context = build_narrator_context(
+        report,
+        active_analysis=reports.build_active_analysis_reference(report),
+        route=route,
+        user_message="What is the clean commercial stack path for this buyer demo?",
+        caller_context=None,
+    )
+
+    assert narrator_context["question_intent"] == "source_governance"
+    assert "commercialization_readiness_summary" in narrator_context["selected_sections"]
+    assert "source_governance_summary" in narrator_context["selected_sections"]
+    assert narrator_context["source_governance_snapshot"]["buyer_demo_suitability"] == "conditional_review_required"
 
 
 def test_phase5_preserves_session_symbol_continuity_for_chat_followups() -> None:

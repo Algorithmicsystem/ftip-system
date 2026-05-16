@@ -42,6 +42,10 @@ from api.assistant.phase12 import (
     SHADOW_DECISION_RECORD_KIND,
     build_operational_guardrails_artifact,
 )
+from api.assistant.phase13 import (
+    SOURCE_GOVERNANCE_ARTIFACT_KIND,
+    build_source_governance_artifact,
+)
 from api.research.backtest import (
     CANONICAL_VALIDATION_ARTIFACT_KIND,
     build_validation_artifact,
@@ -205,9 +209,11 @@ async def generate_analysis_report(
         job_context["canonical_feature_vector"] = (
             canonical_core.get("feature_vector") or {}
         )
+        job_context["canonical_feature_meta"] = canonical_core.get("feature_meta") or {}
         job_context["canonical_signal_payload"] = (
             canonical_core.get("signal_payload") or {}
         )
+        job_context["canonical_signal_meta"] = canonical_core.get("signal_meta") or {}
     evidence = {
         "reason_codes": signal.get("reason_codes") or [],
         "reason_details": signal.get("reason_details") or {},
@@ -406,6 +412,19 @@ async def generate_analysis_report(
         shadow_decision_artifact_id=shadow_decision_artifact_id,
         operational_incident_artifact_ids=operational_incident_artifact_ids,
     )
+    source_governance = build_source_governance_artifact(
+        current_report=report,
+    )
+    source_governance_artifact_id = store.save_artifact(
+        sid,
+        SOURCE_GOVERNANCE_ARTIFACT_KIND,
+        source_governance,
+    )
+    report = reports.attach_source_governance_context(
+        report,
+        source_governance,
+        source_governance_artifact_id=source_governance_artifact_id,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -467,6 +486,18 @@ async def generate_analysis_report(
                 "shadow_mode_status": report.get("shadow_mode_status"),
                 "pause_required": report.get("pause_required"),
             },
+            "source_governance": {
+                "artifact_id": source_governance_artifact_id,
+                "source_governance_version": report.get("source_governance_version"),
+                "source_profile": report.get("source_profile"),
+                "buyer_demo_suitability": report.get("buyer_demo_suitability"),
+                "commercialization_risk_score": report.get(
+                    "commercialization_risk_score"
+                ),
+                "buyer_safe_profile_status": report.get(
+                    "buyer_safe_profile_status"
+                ),
+            },
         },
     )
     store.add_message(
@@ -492,6 +523,7 @@ async def generate_analysis_report(
             "health_snapshot_artifact_id": health_snapshot_artifact_id,
             "shadow_decision_artifact_id": shadow_decision_artifact_id,
             "operational_incident_artifact_ids": operational_incident_artifact_ids,
+            "source_governance_artifact_id": source_governance_artifact_id,
             "canonical_lineage": job_context.get("canonical_lineage") or {},
             "active_analysis": active_analysis,
         },
@@ -516,6 +548,7 @@ async def generate_analysis_report(
         "health_snapshot_artifact_id": health_snapshot_artifact_id,
         "shadow_decision_artifact_id": shadow_decision_artifact_id,
         "operational_incident_artifact_ids": operational_incident_artifact_ids,
+        "source_governance_artifact_id": source_governance_artifact_id,
         "active_analysis": active_analysis,
     }
 

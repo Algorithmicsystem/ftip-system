@@ -1145,6 +1145,12 @@ def build_active_analysis_reference(
             "pause_required": report.get("pause_required"),
             "model_drift_score": report.get("model_drift_score"),
             "data_reliability_score": report.get("data_reliability_score"),
+            "source_governance_version": report.get("source_governance_version"),
+            "source_profile": report.get("source_profile"),
+            "buyer_demo_suitability": report.get("buyer_demo_suitability"),
+            "commercialization_risk_score": report.get(
+                "commercialization_risk_score"
+            ),
         }
     )
 
@@ -1908,6 +1914,27 @@ def _incident_history_summary_text(operational: Dict[str, Any]) -> str:
     )
 
 
+def _commercialization_readiness_summary_text(source_governance: Dict[str, Any]) -> str:
+    return str(
+        source_governance.get("commercialization_readiness_summary")
+        or "Commercialization readiness is not yet populated."
+    )
+
+
+def _source_governance_summary_text(source_governance: Dict[str, Any]) -> str:
+    return str(
+        source_governance.get("source_governance_summary")
+        or "Source governance is not yet populated."
+    )
+
+
+def _buyer_diligence_summary_text(source_governance: Dict[str, Any]) -> str:
+    return str(
+        source_governance.get("buyer_diligence_summary")
+        or "Buyer diligence summary is not yet populated."
+    )
+
+
 def attach_operational_context(
     report: Dict[str, Any],
     operational: Dict[str, Any],
@@ -2021,6 +2048,95 @@ def attach_operational_context(
     evidence_map["incident_history_summary"] = [
         "operational_guardrails.operational_alerts",
         "operational_guardrails.incident_history",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_source_governance_context(
+    report: Dict[str, Any],
+    source_governance: Dict[str, Any],
+    *,
+    source_governance_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    readiness = source_governance.get("commercialization_readiness") or {}
+    commercialization_summary = _commercialization_readiness_summary_text(
+        source_governance
+    )
+    governance_summary = _source_governance_summary_text(source_governance)
+    diligence_summary = _buyer_diligence_summary_text(source_governance)
+
+    updated["report_version"] = "2.8"
+    updated["source_governance_artifact_id"] = source_governance_artifact_id
+    updated["source_governance"] = source_governance
+    updated["source_governance_version"] = source_governance.get(
+        "source_governance_version"
+    )
+    updated["source_profile"] = source_governance.get("source_profile")
+    updated["buyer_safe_profile_status"] = readiness.get("buyer_safe_profile_status")
+    updated["buyer_demo_suitability"] = readiness.get("buyer_demo_suitability")
+    updated["commercialization_risk_score"] = readiness.get(
+        "commercialization_risk_score"
+    )
+    updated["licensing_risk_tier"] = readiness.get("licensing_risk_tier")
+    updated["commercial_blockers"] = readiness.get("commercial_blockers") or []
+    updated["commercial_cleanup_queue"] = (
+        readiness.get("commercial_cleanup_queue") or []
+    )
+    updated["disallowed_sources"] = readiness.get("disallowed_sources") or []
+    updated["gated_domains"] = readiness.get("gated_domains") or []
+    updated["degraded_due_to_profile"] = (
+        readiness.get("degraded_due_to_profile") or []
+    )
+    updated["feature_source_map"] = source_governance.get("feature_source_map") or {}
+    updated["domain_dependency_map"] = (
+        source_governance.get("domain_dependency_map") or {}
+    )
+    updated["critical_source_dependencies"] = (
+        source_governance.get("critical_source_dependencies") or []
+    )
+    updated["source_inventory_export"] = (
+        source_governance.get("source_inventory_export") or {}
+    )
+    updated["source_governance_export"] = (
+        source_governance.get("source_governance_export") or {}
+    )
+    updated["commercialization_readiness_summary"] = commercialization_summary
+    updated["source_governance_summary"] = governance_summary
+    updated["buyer_diligence_summary"] = diligence_summary
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Commercial stack note: {commercialization_summary}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Commercial blockers are {_fmt_list(updated.get('commercial_blockers') or [])}.",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            f"Source governance: {governance_summary}",
+            f"Buyer diligence: {diligence_summary}",
+            "This commercialization layer is engineering and product governance guidance, not legal advice.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["commercialization_readiness_summary"] = [
+        "source_governance.commercialization_readiness",
+        "source_governance.source_inventory_export",
+    ]
+    evidence_map["source_governance_summary"] = [
+        "source_governance.domain_dependency_map",
+        "source_governance.source_governance_export",
+    ]
+    evidence_map["buyer_diligence_summary"] = [
+        "source_governance.critical_source_dependencies",
+        "source_governance.removable_source_impact",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

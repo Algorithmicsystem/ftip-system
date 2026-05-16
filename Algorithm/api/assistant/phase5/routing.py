@@ -256,6 +256,44 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Which domains agree and which conflict?",
         ),
     },
+    "source_governance": {
+        "keywords": (
+            "commercial",
+            "commercialization",
+            "commercially safe",
+            "buyer demo",
+            "buyer-demo",
+            "buyer-safe",
+            "buyer safe",
+            "mixed-risk",
+            "mixed risk",
+            "source governance",
+            "source profile",
+            "source stack",
+            "clean stack",
+            "commercial stack",
+            "licensing",
+            "license",
+            "data rights",
+            "data source",
+            "data sources",
+            "which feeds",
+            "production profile",
+            "restricted cleanroom",
+        ),
+        "mode": "commercialization",
+        "sections": (
+            "commercialization_readiness_summary",
+            "source_governance_summary",
+            "buyer_diligence_summary",
+            "evidence_provenance",
+        ),
+        "followups": (
+            "Which sources are safe only for internal research versus buyer-facing use?",
+            "What breaks if the cleaner commercial profile is enforced?",
+            "What is the current clean-stack path for commercialization?",
+        ),
+    },
     "evaluation_performance": {
         "keywords": (
             "historical",
@@ -530,6 +568,21 @@ def route_question(message: str) -> Dict[str, Any]:
         if "invalid" in text or "fragile" in text:
             if intent == "risk_invalidation":
                 score += 2
+        if any(
+            phrase in text
+            for phrase in (
+                "buyer demo",
+                "buyer safe",
+                "source profile",
+                "source governance",
+                "commercial stack",
+                "clean stack",
+                "licensing",
+                "data rights",
+            )
+        ):
+            if intent == "source_governance":
+                score += 3
         if any(
             phrase in text
             for phrase in (

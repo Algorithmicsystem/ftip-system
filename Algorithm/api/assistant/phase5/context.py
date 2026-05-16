@@ -106,6 +106,12 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "shadow_mode_summary": report.get("shadow_mode_summary") or "",
         "drift_control_summary": report.get("drift_control_summary") or "",
         "incident_history_summary": report.get("incident_history_summary") or "",
+        "commercialization_readiness_summary": report.get(
+            "commercialization_readiness_summary"
+        )
+        or "",
+        "source_governance_summary": report.get("source_governance_summary") or "",
+        "buyer_diligence_summary": report.get("buyer_diligence_summary") or "",
     }
 
 
@@ -232,6 +238,16 @@ def build_narrator_context(
         or report.get("model_drift_score"),
         "data_reliability_score": active_analysis.get("data_reliability_score")
         or report.get("data_reliability_score"),
+        "source_governance_version": active_analysis.get("source_governance_version")
+        or report.get("source_governance_version"),
+        "source_profile": active_analysis.get("source_profile")
+        or report.get("source_profile"),
+        "buyer_demo_suitability": active_analysis.get("buyer_demo_suitability")
+        or report.get("buyer_demo_suitability"),
+        "commercialization_risk_score": active_analysis.get(
+            "commercialization_risk_score"
+        )
+        or report.get("commercialization_risk_score"),
     }
 
     return {
@@ -315,6 +331,19 @@ def build_narrator_context(
                 limit=6,
             ),
         },
+        "source_governance_snapshot": {
+            "source_governance_version": report.get("source_governance_version"),
+            "source_profile": report.get("source_profile"),
+            "buyer_safe_profile_status": report.get("buyer_safe_profile_status"),
+            "buyer_demo_suitability": report.get("buyer_demo_suitability"),
+            "commercialization_risk_score": report.get(
+                "commercialization_risk_score"
+            ),
+            "licensing_risk_tier": report.get("licensing_risk_tier"),
+            "commercial_blockers": _compact_list(report.get("commercial_blockers") or []),
+            "gated_domains": _compact_list(report.get("degraded_due_to_profile") or []),
+            "disallowed_sources": _compact_list(report.get("disallowed_sources") or []),
+        },
         "domain_agreement": {
             "domain_agreement_score": agreement.get("domain_agreement_score"),
             "domain_conflict_score": agreement.get("domain_conflict_score"),
@@ -364,6 +393,11 @@ def build_narrator_context(
             "shadow_mode_summary": sections["shadow_mode_summary"],
             "drift_control_summary": sections["drift_control_summary"],
             "incident_history_summary": sections["incident_history_summary"],
+            "commercialization_readiness_summary": sections[
+                "commercialization_readiness_summary"
+            ],
+            "source_governance_summary": sections["source_governance_summary"],
+            "buyer_diligence_summary": sections["buyer_diligence_summary"],
         },
         "evaluation_snapshot": report.get("evaluation") or {},
         "deployment_readiness_snapshot": {

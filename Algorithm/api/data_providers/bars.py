@@ -10,6 +10,7 @@ import importlib.util
 import requests
 
 from api import config
+from api.source_governance import active_source_profile, source_allowed
 
 from .alphavantage import fetch_daily_adjusted_bars
 from .errors import ProviderError, ProviderUnavailable, SymbolNoData
@@ -164,12 +165,18 @@ def _fetch_daily_yfinance(
 def fetch_daily_bars(
     symbol: str, start_date: dt.date, end_date: dt.date
 ) -> List[Dict[str, object]]:
-    attempts = [
-        ("massive_polygon", _fetch_daily_massive),
-        ("alphavantage", fetch_daily_adjusted_bars),
-    ]
-    if config.stooq_enabled():
+    attempts = []
+    if source_allowed("massive_polygon"):
+        attempts.append(("massive_polygon", _fetch_daily_massive))
+    if source_allowed("alphavantage"):
+        attempts.append(("alphavantage", fetch_daily_adjusted_bars))
+    if config.stooq_enabled() and source_allowed("stooq"):
         attempts.append(("stooq", _fetch_daily_stooq))
+    if not attempts and not source_allowed("yfinance"):
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            f"no daily-bar providers are allowed under source profile {active_source_profile()}",
+        )
     for provider_name, fetcher in attempts:
         try:
             return fetcher(symbol, start_date, end_date)
@@ -187,6 +194,11 @@ def fetch_daily_bars(
                 provider_name,
                 extra={"symbol": symbol, "error": str(exc)},
             )
+    if not source_allowed("yfinance"):
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            f"yfinance fallback is blocked by source profile {active_source_profile()}",
+        )
     return _fetch_daily_yfinance(symbol, start_date, end_date)
 
 
@@ -196,7 +208,19 @@ def fetch_reference_bars(
     end_date: dt.date,
 ) -> List[Dict[str, object]]:
     errors: List[str] = []
-    for fetcher in (_fetch_daily_stooq, fetch_daily_adjusted_bars, _fetch_daily_yfinance):
+    attempts = []
+    if source_allowed("stooq"):
+        attempts.append(_fetch_daily_stooq)
+    if source_allowed("alphavantage"):
+        attempts.append(fetch_daily_adjusted_bars)
+    if source_allowed("yfinance"):
+        attempts.append(_fetch_daily_yfinance)
+    if not attempts:
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            f"no reference-bar providers are allowed under source profile {active_source_profile()}",
+        )
+    for fetcher in attempts:
         try:
             return fetcher(symbol, start_date, end_date)
         except Exception as exc:

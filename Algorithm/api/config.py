@@ -172,9 +172,14 @@ def stooq_enabled() -> bool:
     return env_bool("STOOQ_ENABLED", True)
 
 
+def source_profile() -> str:
+    return env("FTIP_SOURCE_PROFILE", "internal_research") or "internal_research"
+
+
 def safe_dict() -> dict[str, Any]:
     return {
         "llm_enabled": llm_enabled(),
         "db_enabled": db_enabled(),
         "data_fabric_enabled": data_fabric_enabled(),
+        "source_profile": source_profile(),
     }

@@ -57,6 +57,7 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-watchlist-grid"' in html
     assert 'id="assistant-system-health"' in html
     assert 'id="assistant-system-audit"' in html
+    assert 'id="assistant-commercial-readiness"' in html
     assert 'id="assistant-deployment-governance"' in html
     assert 'id="assistant-learning-metrics"' in html
     assert 'id="assistant-learning-regimes"' in html
@@ -114,6 +115,11 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "shadow_mode_status" in js
     assert "current_operating_mode" in js
     assert "data_reliability_score" in js
+    assert "renderCommercialReadiness" in js
+    assert "commercialization_readiness_summary" in js
+    assert "source_governance_summary" in js
+    assert "buyer_diligence_summary" in js
+    assert "Is the current source stack buyer-demo safe" in js
     assert "Is the system healthy enough to trust right now" in js
     assert "refreshAssistantSystemHealth" in js
 

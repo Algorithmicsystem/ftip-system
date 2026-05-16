@@ -24,6 +24,7 @@ from api.data_providers.gnews import search_news as search_gnews
 from api.data_providers.newsapi import search_news as search_newsapi
 from api.data_providers.sec_edgar import fetch_company_filing_profile
 from api.data_providers.world_bank import fetch_indicator as fetch_world_bank_indicator
+from api.source_governance import active_source_profile, source_allowed
 
 _SECTOR_PROXY_MAP = {
     "technology": "XLK",
@@ -293,14 +294,20 @@ def _build_fundamental_overlay(
     provider_payloads: Dict[str, Any] = {}
     provider_status: Dict[str, Any] = {}
     notes: List[str] = []
-    finnhub_profile, finnhub_profile_status = _safe_call(lambda: fetch_company_profile(symbol))
+    finnhub_profile, finnhub_profile_status = _safe_call(
+        lambda: fetch_company_profile(symbol),
+        source_name="finnhub",
+    )
     provider_status["finnhub_profile"] = finnhub_profile_status
     if finnhub_profile is not None:
         provider_payloads["finnhub_profile"] = finnhub_profile
     elif finnhub_profile_status.get("note"):
         notes.append(f"finnhub_profile: {finnhub_profile_status['note']}")
 
-    alpha_overview, alpha_status = _safe_call(lambda: fetch_company_overview(symbol))
+    alpha_overview, alpha_status = _safe_call(
+        lambda: fetch_company_overview(symbol),
+        source_name="alphavantage",
+    )
     provider_status["alphavantage_overview"] = alpha_status
     if alpha_overview is not None:
         provider_payloads["alphavantage_overview"] = alpha_overview
@@ -316,7 +323,8 @@ def _build_fundamental_overlay(
                 or (alpha_overview or {}).get("name")
             ),
             as_of_date=as_of_date,
-        )
+        ),
+        source_name="sec_edgar",
     )
     provider_status["sec_edgar"] = sec_status
     if sec_profile is not None:
@@ -324,7 +332,10 @@ def _build_fundamental_overlay(
     elif sec_status.get("note"):
         notes.append(f"sec_edgar: {sec_status['note']}")
 
-    finnhub_metrics, finnhub_metrics_status = _safe_call(lambda: fetch_basic_financials(symbol))
+    finnhub_metrics, finnhub_metrics_status = _safe_call(
+        lambda: fetch_basic_financials(symbol),
+        source_name="finnhub",
+    )
     provider_status["finnhub_basic_financials"] = finnhub_metrics_status
     if finnhub_metrics is not None:
         provider_payloads["finnhub_basic_financials"] = finnhub_metrics
@@ -646,7 +657,7 @@ def _build_news_overlay(
         ("finnhub_news", lambda: fetch_company_news(symbol, from_ts.date(), to_ts.date())),
         ("gdelt", lambda: search_gdelt_articles(query, from_ts=from_ts, to_ts=to_ts, max_records=config.data_fabric_news_limit())),
     ):
-        payload, status = _safe_call(fetcher)
+        payload, status = _safe_call(fetcher, source_name=provider_name)
         provider_status[provider_name] = status
         provider_payloads[provider_name] = payload or []
 
@@ -781,7 +792,10 @@ def _build_macro_overlay(
     provider_status: Dict[str, Dict[str, Any]] = {}
     fred_payloads: Dict[str, Any] = {}
     for label, series_id in _FRED_SERIES.items():
-        payload, status = _safe_call(lambda series_id=series_id: fetch_fred_series(series_id, limit=12))
+        payload, status = _safe_call(
+            lambda series_id=series_id: fetch_fred_series(series_id, limit=12),
+            source_name="fred",
+        )
         provider_status[f"fred:{label}"] = status
         if payload is not None:
             fred_payloads[label] = payload
@@ -790,7 +804,8 @@ def _build_macro_overlay(
     world_bank_payloads: Dict[str, Any] = {}
     for label, indicator in _WORLD_BANK_INDICATORS.items():
         payload, status = _safe_call(
-            lambda indicator=indicator: fetch_world_bank_indicator(country=country, indicator=indicator, per_page=8)
+            lambda indicator=indicator: fetch_world_bank_indicator(country=country, indicator=indicator, per_page=8),
+            source_name="world_bank",
         )
         provider_status[f"world_bank:{label}"] = status
         if payload is not None:
@@ -1267,7 +1282,22 @@ def _build_quality_overlay(
     }
 
 
-def _safe_call(fetcher: Callable[[], Any]) -> Tuple[Any, Dict[str, Any]]:
+def _safe_call(
+    fetcher: Callable[[], Any],
+    *,
+    source_name: Optional[str] = None,
+) -> Tuple[Any, Dict[str, Any]]:
+    if source_name and not source_allowed(source_name):
+        return (
+            None,
+            {
+                "status": "gated",
+                "note": (
+                    f"{source_name} is blocked by source profile "
+                    f"{active_source_profile()}"
+                ),
+            },
+        )
     try:
         payload = fetcher()
         size = len(payload) if isinstance(payload, (list, dict)) else None

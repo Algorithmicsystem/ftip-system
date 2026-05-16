@@ -16,6 +16,7 @@ from api.assistant.phase12 import (
     OPERATIONAL_INCIDENT_ARTIFACT_KIND,
     SHADOW_DECISION_RECORD_KIND,
 )
+from api.assistant.phase13 import SOURCE_GOVERNANCE_ARTIFACT_KIND
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -150,6 +151,63 @@ def _attach_learning_test_context(report: dict[str, Any]) -> dict[str, Any]:
             "archetype_motif_summary": "This setup clusters into the watchlist-only thesis family with a crowding-divergence motif.",
         },
         learning_artifact_id="learning-test",
+    )
+
+
+def _attach_source_governance_test_context(report: dict[str, Any]) -> dict[str, Any]:
+    return reports.attach_source_governance_context(
+        report,
+        {
+            "source_governance_version": "phase13_source_governance_v1",
+            "source_profile": "buyer_demo",
+            "feature_source_map": {
+                "sentiment_narrative_flow": {
+                    "domains": ["sentiment_narrative_flow"],
+                    "sources": ["gnews", "google_news_rss", "finnhub"],
+                }
+            },
+            "domain_dependency_map": {
+                "sentiment_narrative_flow": {
+                    "sources": ["gnews", "google_news_rss", "finnhub"],
+                    "impact_if_removed": "Narrative breadth and event coverage thin materially.",
+                }
+            },
+            "critical_source_dependencies": [
+                {
+                    "domain": "fundamental_filing",
+                    "sources": ["sec_edgar", "finnhub"],
+                    "impact": "Filing-aware context weakens first.",
+                }
+            ],
+            "commercialization_readiness": {
+                "buyer_safe_profile_status": "conditional_review_required",
+                "buyer_demo_suitability": "conditional_review_required",
+                "commercialization_risk_score": 58.0,
+                "licensing_risk_tier": "elevated",
+                "commercial_blockers": [
+                    "gnews remains usable only with explicit commercial or legal review."
+                ],
+                "commercial_cleanup_queue": [
+                    {
+                        "source_name": "google_news_rss",
+                        "priority": "high",
+                        "cleanup_reason": "google_news_rss is internal_research_only.",
+                    }
+                ],
+                "disallowed_sources": ["google_news_rss", "yfinance"],
+                "gated_domains": [
+                    {
+                        "domain": "sentiment_narrative_flow",
+                        "blocked_sources": ["google_news_rss"],
+                    }
+                ],
+                "degraded_due_to_profile": ["sentiment_narrative_flow"],
+            },
+            "commercialization_readiness_summary": "Source profile is buyer_demo and commercialization risk is 58.0 / 100, with review-required news dependencies still active.",
+            "source_governance_summary": "Buyer-demo profile blocks internal-only feeds like google_news_rss while keeping review-required feeds visible.",
+            "buyer_diligence_summary": "The clean-stack path is to replace internal-only news fallbacks before external buyer deployment.",
+        },
+        source_governance_artifact_id="source-governance-test",
     )
 
 
@@ -355,6 +413,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["drift_control_summary"]
     assert result["incident_history_summary"]
     assert result["current_operating_mode"]
+    assert result["source_governance_artifact_id"]
+    assert result["source_governance"]["source_governance_version"]
+    assert result["commercialization_readiness_summary"]
+    assert result["source_governance_summary"]
+    assert result["buyer_diligence_summary"]
+    assert result["source_profile"]
     assert result["setup_archetype"]["archetype_name"]
     assert result["learning_priority"]
     assert result["actionability_score"] is not None
@@ -391,6 +455,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
         session["metadata"]["operational_guardrails"]["artifact_id"]
         == result["operational_guardrails_artifact_id"]
     )
+    assert (
+        session["metadata"]["source_governance"]["artifact_id"]
+        == result["source_governance_artifact_id"]
+    )
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
@@ -404,6 +472,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["continuous_learning"]
     assert report["canonical_validation"]
     assert report["operational_guardrails"]
+    assert report["source_governance"]
     assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(
@@ -487,6 +556,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert store.list_artifacts(
         kind=OPERATIONAL_INCIDENT_ARTIFACT_KIND, session_id=result["session_id"]
     ) is not None
+    assert (
+        store.get_latest_artifact(
+            kind=SOURCE_GOVERNANCE_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
 
 
 def test_market_domain_computes_drawdown_windows_without_name_error(monkeypatch):
@@ -1040,6 +1115,72 @@ def test_chat_routes_operational_health_questions_to_operational_sections(monkey
     assert result["report_found"] is True
     assert result["active_analysis"]["system_health_status"] == "degraded"
     assert result["active_analysis"]["current_operating_mode"] == "shadow_only"
+
+
+def test_chat_routes_source_governance_questions_to_commercial_sections(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = _attach_source_governance_test_context(
+        reports.build_analysis_report(
+            symbol="NVDA",
+            as_of_date="2024-01-02",
+            horizon="swing",
+            risk_mode="balanced",
+            signal={
+                "action": "BUY",
+                "score": 0.8,
+                "confidence": 0.7,
+                "reason_codes": ["TREND_UP"],
+                "reason_details": {"TREND_UP": "Trend is rising"},
+                "horizon_days": 21,
+            },
+            key_features={"ret_21d": 0.08, "vol_21d": 0.25, "regime_label": "trend"},
+            quality={"bars_ok": True, "news_ok": True, "sentiment_ok": True, "warnings": []},
+            evidence={"reason_codes": ["TREND_UP"], "reason_details": {}, "sources": ["market_bars_daily"]},
+            strategy={
+                "final_signal": "HOLD",
+                "strategy_posture": "watchlist_positive",
+                "confidence": 0.57,
+                "confidence_score": 57.0,
+                "conviction_tier": "moderate",
+                "actionability_score": 44.0,
+                "primary_participant_fit": "swing trader",
+                "participant_fit": ["swing trader", "wait / observe"],
+                "scenario_matrix": {"base": {"summary": "Constructive but not fully actionable."}},
+            },
+        )
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=session_id, report_id=report_id
+    )
+    store.upsert_session_metadata(session_id, {"active_analysis": active_analysis})
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert '"question_intent": "source_governance"' in combined
+        assert '"answer_mode": "commercialization"' in combined
+        assert report["commercialization_readiness_summary"] in combined
+        assert report["source_governance_summary"] in combined
+        return (
+            "The stack is still conditional for buyer-demo use because review-required news feeds remain in the path and internal-only fallbacks still need cleanup.",
+            "model",
+            {"prompt_tokens": 14, "completion_tokens": 17},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {
+            "session_id": session_id,
+            "message": "Is this source stack buyer-demo safe or still mixed-risk?",
+        },
+        store=store,
+    )
+
+    assert result["report_found"] is True
+    assert result["active_analysis"]["source_profile"] == "buyer_demo"
 
 
 def test_chat_routes_portfolio_questions_to_portfolio_sections(monkeypatch):

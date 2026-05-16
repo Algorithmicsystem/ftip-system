@@ -11,6 +11,7 @@ from typing import Dict, List
 import requests
 
 from api import config
+from api.source_governance import source_allowed
 
 from .errors import ProviderError
 from .finnhub import fetch_company_news
@@ -90,6 +91,9 @@ def fetch_news_items(
             ),
         ),
     ):
+        if not source_allowed(provider_name):
+            errors.append(f"{provider_name}:blocked_by_source_profile")
+            continue
         try:
             candidates.extend(fetcher())
         except ProviderError as exc:

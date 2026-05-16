@@ -74,6 +74,10 @@ _ACTIVE_ANALYSIS_KEYS = (
     "pause_required",
     "model_drift_score",
     "data_reliability_score",
+    "source_governance_version",
+    "source_profile",
+    "buyer_demo_suitability",
+    "commercialization_risk_score",
 )
 
 

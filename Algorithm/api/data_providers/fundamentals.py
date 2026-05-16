@@ -5,6 +5,8 @@ from typing import Dict, List
 
 import importlib.util
 
+from api.source_governance import active_source_profile, source_allowed
+
 from .alphavantage import fetch_quarterly_fundamentals as fetch_alphavantage_quarterly
 from .errors import ProviderUnavailable, SymbolNoData
 from .symbols import canonical_symbol
@@ -17,13 +19,19 @@ else:  # pragma: no cover - optional dependency
 
 
 def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
-    try:
-        return fetch_alphavantage_quarterly(symbol)
-    except ProviderUnavailable:
-        pass
-    except SymbolNoData:
-        raise
+    if source_allowed("alphavantage"):
+        try:
+            return fetch_alphavantage_quarterly(symbol)
+        except ProviderUnavailable:
+            pass
+        except SymbolNoData:
+            raise
 
+    if not source_allowed("yfinance"):
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            f"no fundamentals providers are allowed under source profile {active_source_profile()}",
+        )
     if yf is None:
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "yfinance not installed")
     symbol = canonical_symbol(symbol)

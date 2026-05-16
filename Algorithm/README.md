@@ -158,6 +158,20 @@ No-key sources are integrated directly and can be disabled only if needed:
 - `WORLD_BANK_ENABLED=1`
 - `STOOQ_ENABLED=1`
 
+### Source governance and commercialization profiles
+
+The platform now supports a source-governance profile via `FTIP_SOURCE_PROFILE`:
+
+- `dev_experimental`
+- `internal_research`
+- `buyer_demo`
+- `commercial_candidate`
+- `restricted_cleanroom`
+
+This profile is engineering governance, not legal advice. It classifies and optionally gates external sources based on internal commercialization policy so the app can distinguish dev-heavy runs from cleaner buyer or commercial configurations. The default is `internal_research`.
+
+See [docs/source_governance_profiles.md](docs/source_governance_profiles.md) for the current profile intent, cleanup guidance, and buyer-demo notes.
+
 ## CHANGELOG
 
 ### Unreleased

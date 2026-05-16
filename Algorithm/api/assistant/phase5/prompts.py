@@ -45,6 +45,10 @@ _MODE_DIRECTIVES = {
         "Frame the answer around operational discipline: current system health, provider and freshness degradation, shadow-mode state, drift and calibration controls, downgrade or pause logic, active alerts, and what would need to recover before trust rises. "
         "Keep the answer grounded in the stored operational artifact and do not turn it into trading advice."
     ),
+    "commercialization": (
+        "Frame the answer around source governance and commercialization readiness: active source profile, buyer-demo suitability, licensing and review blockers, gated or degraded domains, dependency mapping, and the clean-stack path. "
+        "Keep the answer factual and governance-oriented, and state clearly that it is engineering guidance rather than legal advice."
+    ),
 }
 
 
