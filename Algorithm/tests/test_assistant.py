@@ -17,6 +17,7 @@ from api.assistant.phase12 import (
     SHADOW_DECISION_RECORD_KIND,
 )
 from api.assistant.phase13 import SOURCE_GOVERNANCE_ARTIFACT_KIND
+from api.assistant.phase14 import OPERATING_WORKFLOW_ARTIFACT_KIND
 from api.assistant.storage import AssistantStorage
 from api.main import app
 
@@ -208,6 +209,105 @@ def _attach_source_governance_test_context(report: dict[str, Any]) -> dict[str, 
             "buyer_diligence_summary": "The clean-stack path is to replace internal-only news fallbacks before external buyer deployment.",
         },
         source_governance_artifact_id="source-governance-test",
+    )
+
+
+def _attach_operating_workflow_test_context(report: dict[str, Any]) -> dict[str, Any]:
+    return reports.attach_operating_workflow_context(
+        report,
+        {
+            "operating_workflow_version": "phase14_operating_workflow_v1",
+            "todays_candidate_triage": [
+                {
+                    "symbol": "NVDA",
+                    "signal": "HOLD",
+                    "deployment_permission": "paper_shadow_only",
+                    "candidate_classification": "watchlist_candidate",
+                },
+                {
+                    "symbol": "AAPL",
+                    "signal": "BUY",
+                    "deployment_permission": "limited_live_eligible",
+                    "candidate_classification": "top_priority_candidate",
+                },
+            ],
+            "changed_signals": [
+                "Deployment permission moved from limited_live_eligible to paper_shadow_only."
+            ],
+            "priority_watchlist": ["AAPL", "NVDA"],
+            "new_warnings_downgrades": ["event distortion is still suppressing cleaner deployment support"],
+            "what_changed_panel": "Deployment permission tightened and the setup remains watchlist-positive rather than actionable.",
+            "daily_operating_summary": "Today’s operator triage has 2 tracked candidates, 1 live-like name, 1 shadow-only name, and no blocked names.",
+            "weekly_operating_review": {"review_window_days": 7},
+            "weekly_quality_summary": {"average_net_edge_return": 0.011},
+            "weekly_signal_review": {"strongest_conditions": ["trend / supportive breadth"]},
+            "weekly_risk_review": {"failure_modes": ["event_distorted setups remain weakest"]},
+            "weekly_refinement_notes": [
+                "Suppression and readiness remain directionally helpful, but event pressure still needs tighter discipline."
+            ],
+            "weekly_operator_attention_items": [
+                "Confidence reliability still needs weekly review attention."
+            ],
+            "weekly_operating_summary": "This week the platform tracked 6 cohort decisions with 6 matured outcomes and positive net edge.",
+            "monthly_refinement_review": {"review_window_days": 30},
+            "research_priority_queue": [
+                {
+                    "title": "Tighten event-distortion penalty",
+                    "priority": "high",
+                    "reason": "Event-driven false positives remain the weakest cohort.",
+                }
+            ],
+            "improvement_candidate_summary": "Monthly refinement is centered on tightening event and confidence discipline.",
+            "monthly_operating_summary": "Monthly refinement is centered on the watchlist-only thesis family and one high-priority improvement candidate.",
+            "shadow_decision_journal": {"shadow_decision_count": 5},
+            "operator_review_entry": {"review_required": True},
+            "realized_followup": {
+                "shadow_vs_realized_summary": "Shadow tracking is active with mixed but improving results."
+            },
+            "decision_quality_note": "The trust gate helped keep the setup in shadow mode while event risk stayed elevated.",
+            "trust_gate_feedback": "The trust gate helped keep the setup in shadow mode while event risk stayed elevated.",
+            "candidate_outcome_review": "Outcome review is still building.",
+            "shadow_journal_summary": "Shadow journal now tracks 5 decisions.",
+            "postmortem_report": {"failure_mode_classification": "event_distortion"},
+            "failure_mode_classification": "event_distortion",
+            "misclassification_summary": "Active post-mortem lens is event_distortion.",
+            "confidence_error_analysis": "Suppression and readiness still look directionally helpful.",
+            "fragility_miss_summary": "Drawdown and invalidation behavior remain watchable.",
+            "lesson_extracted": "Event windows deserve stricter watchlist treatment.",
+            "postmortem_queue": ["Event-distorted setups remain weakest."],
+            "postmortem_summary": "Current post-mortem focus is event_distortion.",
+            "promotion_candidate": None,
+            "demotion_candidate": {
+                "symbol": "NVDA",
+                "reason": "Event distortion and calibration noise remain too high for stronger trust.",
+            },
+            "rollback_recommendation": "Rollback to shadow-only use if calibration or event conditions worsen.",
+            "trust_recovery_checklist": ["event distortion fades", "confidence reliability recovers"],
+            "required_evidence_for_promotion": [
+                "Sustain positive walk-forward behavior across additional windows."
+            ],
+            "trust_promotion_candidates": [],
+            "trust_demotion_candidates": [
+                {
+                    "symbol": "NVDA",
+                    "reason": "Event distortion and calibration noise remain too high for stronger trust.",
+                }
+            ],
+            "trust_maintenance_summary": "Trust maintenance currently has 0 promotion candidates and 1 demotion candidate.",
+            "operator_runbook": {
+                "daily_workflow": ["Review today’s candidate triage first."],
+                "weekly_workflow": ["Review weekly signal quality and drift."],
+                "monthly_workflow": ["Review strongest and weakest setup families."],
+                "incident_response": ["Move the system to shadow-first interpretation if downgrade conditions are active."],
+            },
+            "operator_runbook_summary": "Daily review starts with candidate triage and changed signals.",
+            "runbook_attention_notes": ["No active pause condition is blocking the standard review sequence."],
+            "operator_attention_items": [
+                "event distortion is still suppressing cleaner deployment support"
+            ],
+            "operating_workflow_summary": "Daily triage, weekly review, monthly refinement, shadow journaling, and trust maintenance are all active.",
+        },
+        operating_workflow_artifact_id="operating-workflow-test",
     )
 
 
@@ -419,6 +519,15 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["source_governance_summary"]
     assert result["buyer_diligence_summary"]
     assert result["source_profile"]
+    assert result["operating_workflow_artifact_id"]
+    assert result["operating_workflow"]["operating_workflow_version"]
+    assert result["daily_operating_summary"]
+    assert result["weekly_operating_summary"]
+    assert result["monthly_operating_summary"]
+    assert result["shadow_journal_summary"]
+    assert result["postmortem_summary"]
+    assert result["trust_maintenance_summary"]
+    assert result["operator_runbook_summary"]
     assert result["setup_archetype"]["archetype_name"]
     assert result["learning_priority"]
     assert result["actionability_score"] is not None
@@ -434,6 +543,8 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session["metadata"]["active_analysis"]["setup_archetype"]
     assert session["metadata"]["active_analysis"]["system_health_status"]
     assert session["metadata"]["active_analysis"]["current_operating_mode"]
+    assert session["metadata"]["active_analysis"]["daily_operating_summary"]
+    assert session["metadata"]["active_analysis"]["weekly_operating_summary"]
     assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
     assert (
         session["metadata"]["portfolio_construction"]["artifact_id"]
@@ -459,6 +570,10 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
         session["metadata"]["source_governance"]["artifact_id"]
         == result["source_governance_artifact_id"]
     )
+    assert (
+        session["metadata"]["operating_workflow"]["artifact_id"]
+        == result["operating_workflow_artifact_id"]
+    )
 
     report = store.get_latest_analysis_report(session_id=result["session_id"], symbol="NVDA")
     assert report is not None
@@ -473,6 +588,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["canonical_validation"]
     assert report["operational_guardrails"]
     assert report["source_governance"]
+    assert report["operating_workflow"]
     assert report["live_use_audit_snapshot"]
     assert (
         store.get_latest_artifact(
@@ -559,6 +675,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert (
         store.get_latest_artifact(
             kind=SOURCE_GOVERNANCE_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=OPERATING_WORKFLOW_ARTIFACT_KIND, session_id=result["session_id"]
         )
         is not None
     )
@@ -1181,6 +1303,76 @@ def test_chat_routes_source_governance_questions_to_commercial_sections(monkeypa
 
     assert result["report_found"] is True
     assert result["active_analysis"]["source_profile"] == "buyer_demo"
+
+
+def test_chat_routes_operator_workflow_questions_to_operating_sections(monkeypatch):
+    monkeypatch.setenv("FTIP_LLM_ENABLED", "1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    store = AssistantStorage(use_memory=True)
+    session_id = store.create_session()
+    report = _attach_operating_workflow_test_context(
+        _attach_source_governance_test_context(
+            reports.build_analysis_report(
+                symbol="NVDA",
+                as_of_date="2024-01-02",
+                horizon="swing",
+                risk_mode="balanced",
+                signal={
+                    "action": "BUY",
+                    "score": 0.8,
+                    "confidence": 0.7,
+                    "reason_codes": ["TREND_UP"],
+                    "reason_details": {"TREND_UP": "Trend is rising"},
+                    "horizon_days": 21,
+                },
+                key_features={"ret_21d": 0.08, "vol_21d": 0.25, "regime_label": "trend"},
+                quality={"bars_ok": True, "news_ok": True, "sentiment_ok": True, "warnings": []},
+                evidence={"reason_codes": ["TREND_UP"], "reason_details": {}, "sources": ["market_bars_daily"]},
+                strategy={
+                    "final_signal": "HOLD",
+                    "strategy_posture": "watchlist_positive",
+                    "confidence": 0.57,
+                    "confidence_score": 57.0,
+                    "conviction_tier": "moderate",
+                    "actionability_score": 44.0,
+                    "primary_participant_fit": "swing trader",
+                    "participant_fit": ["swing trader", "wait / observe"],
+                    "scenario_matrix": {"base": {"summary": "Constructive but not fully actionable."}},
+                },
+            )
+        )
+    )
+    report_id = store.save_artifact(session_id, reports.ANALYSIS_REPORT_KIND, report)
+    active_analysis = reports.build_active_analysis_reference(
+        report, session_id=session_id, report_id=report_id
+    )
+    store.upsert_session_metadata(session_id, {"active_analysis": active_analysis})
+
+    def _fake_completion(messages):
+        combined = "\n".join(message["content"] for message in messages)
+        assert '"question_intent": "operator_workflow"' in combined
+        assert '"answer_mode": "operator"' in combined
+        assert report["daily_operating_summary"] in combined
+        assert report["weekly_operating_summary"] in combined
+        assert report["trust_maintenance_summary"] in combined
+        assert report["operator_runbook_summary"] in combined
+        return (
+            "Today’s review should start with the deployment downgrade and event-distortion warning, then move into the weekly validation and trust-maintenance checklist.",
+            "model",
+            {"prompt_tokens": 15, "completion_tokens": 19},
+        )
+
+    monkeypatch.setattr(service, "_safe_completion", _fake_completion)
+    result = service.chat_with_assistant(
+        {
+            "session_id": session_id,
+            "message": "What changed today and what should I review first this week?",
+        },
+        store=store,
+    )
+
+    assert result["report_found"] is True
+    assert result["active_analysis"]["operating_workflow_version"] == "phase14_operating_workflow_v1"
 
 
 def test_chat_routes_portfolio_questions_to_portfolio_sections(monkeypatch):

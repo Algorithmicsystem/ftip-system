@@ -49,6 +49,10 @@ _MODE_DIRECTIVES = {
         "Frame the answer around source governance and commercialization readiness: active source profile, buyer-demo suitability, licensing and review blockers, gated or degraded domains, dependency mapping, and the clean-stack path. "
         "Keep the answer factual and governance-oriented, and state clearly that it is engineering guidance rather than legal advice."
     ),
+    "operator": (
+        "Frame the answer around disciplined operating workflow: what changed today, what needs review first, what belongs in the weekly and monthly loop, what recently failed or degraded, how shadow decisions should be reviewed, and what would justify trust promotion or demotion. "
+        "Keep the answer grounded in the stored workflow artifact and speak like an operator assistant rather than a generic chatbot."
+    ),
 }
 
 
@@ -66,7 +70,13 @@ def build_grounded_narrator_messages(
             "role": "system",
             "content": (
                 "Narrator context:\n"
-                + json.dumps(narrator_context, indent=2, sort_keys=True, default=str)
+                + json.dumps(
+                    narrator_context,
+                    indent=2,
+                    sort_keys=True,
+                    default=str,
+                    ensure_ascii=False,
+                )
             ),
         },
     ]

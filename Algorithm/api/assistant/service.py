@@ -46,6 +46,10 @@ from api.assistant.phase13 import (
     SOURCE_GOVERNANCE_ARTIFACT_KIND,
     build_source_governance_artifact,
 )
+from api.assistant.phase14 import (
+    OPERATING_WORKFLOW_ARTIFACT_KIND,
+    build_operating_workflow_artifact,
+)
 from api.research.backtest import (
     CANONICAL_VALIDATION_ARTIFACT_KIND,
     build_validation_artifact,
@@ -425,6 +429,22 @@ async def generate_analysis_report(
         source_governance,
         source_governance_artifact_id=source_governance_artifact_id,
     )
+    operating_workflow = build_operating_workflow_artifact(
+        current_report=report,
+        current_report_id=report_id,
+        session_id=sid,
+        store=store,
+    )
+    operating_workflow_artifact_id = store.save_artifact(
+        sid,
+        OPERATING_WORKFLOW_ARTIFACT_KIND,
+        operating_workflow,
+    )
+    report = reports.attach_operating_workflow_context(
+        report,
+        operating_workflow,
+        operating_workflow_artifact_id=operating_workflow_artifact_id,
+    )
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -498,6 +518,16 @@ async def generate_analysis_report(
                     "buyer_safe_profile_status"
                 ),
             },
+            "operating_workflow": {
+                "artifact_id": operating_workflow_artifact_id,
+                "operating_workflow_version": report.get("operating_workflow_version"),
+                "daily_operating_summary": report.get("daily_operating_summary"),
+                "weekly_operating_summary": report.get("weekly_operating_summary"),
+                "monthly_operating_summary": report.get("monthly_operating_summary"),
+                "trust_maintenance_summary": report.get("trust_maintenance_summary"),
+                "postmortem_summary": report.get("postmortem_summary"),
+                "operator_attention_items": report.get("operator_attention_items") or [],
+            },
         },
     )
     store.add_message(
@@ -524,6 +554,7 @@ async def generate_analysis_report(
             "shadow_decision_artifact_id": shadow_decision_artifact_id,
             "operational_incident_artifact_ids": operational_incident_artifact_ids,
             "source_governance_artifact_id": source_governance_artifact_id,
+            "operating_workflow_artifact_id": operating_workflow_artifact_id,
             "canonical_lineage": job_context.get("canonical_lineage") or {},
             "active_analysis": active_analysis,
         },
@@ -549,6 +580,7 @@ async def generate_analysis_report(
         "shadow_decision_artifact_id": shadow_decision_artifact_id,
         "operational_incident_artifact_ids": operational_incident_artifact_ids,
         "source_governance_artifact_id": source_governance_artifact_id,
+        "operating_workflow_artifact_id": operating_workflow_artifact_id,
         "active_analysis": active_analysis,
     }
 

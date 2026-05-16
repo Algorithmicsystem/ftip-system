@@ -437,7 +437,7 @@ def _sample_report(symbol: str) -> dict:
         },
         learning_artifact_id="learning-1",
     )
-    return reports.attach_source_governance_context(
+    report = reports.attach_source_governance_context(
         report,
         {
             "source_governance_version": "phase13_source_governance_v1",
@@ -491,6 +491,31 @@ def _sample_report(symbol: str) -> dict:
         },
         source_governance_artifact_id="source-governance-1",
     )
+    return reports.attach_operating_workflow_context(
+        report,
+        {
+            "operating_workflow_version": "phase14_operating_workflow_v1",
+            "daily_operating_summary": "Today’s operator triage has 2 tracked candidates and the active setup remains shadow-only.",
+            "weekly_operating_summary": "This week the platform tracked 6 matured decisions with positive but still mixed net edge.",
+            "monthly_operating_summary": "Monthly refinement is centered on the watchlist-only thesis family and tighter crowding discipline.",
+            "shadow_journal_summary": "Shadow journal now tracks 6 decisions.",
+            "postmortem_summary": "Current post-mortem focus is event_distortion.",
+            "trust_maintenance_summary": "Trust maintenance currently has 0 promotion candidates and 1 demotion candidate.",
+            "operator_runbook_summary": "Daily review starts with candidate triage and changed signals.",
+            "operator_attention_items": [
+                "event distortion is still suppressing cleaner deployment support"
+            ],
+            "what_changed_panel": "Deployment permission stayed paper-shadow only because event pressure remains elevated.",
+            "todays_candidate_triage": [{"symbol": symbol, "signal": "HOLD"}],
+            "priority_watchlist": ["AAPL", symbol],
+            "weekly_operating_review": {"review_window_days": 7},
+            "monthly_refinement_review": {"review_window_days": 30},
+            "shadow_decision_journal": {"shadow_decision_count": 6},
+            "postmortem_report": {"failure_mode_classification": "event_distortion"},
+            "operator_runbook": {"daily_workflow": ["Review today’s candidate triage first."]},
+        },
+        operating_workflow_artifact_id="operating-workflow-1",
+    )
 
 
 def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
@@ -525,6 +550,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     governance_route = route_question("Is the current source stack buyer-demo safe or still mixed-risk?")
     assert governance_route["intent"] == "source_governance"
     assert governance_route["answer_mode"] == "commercialization"
+
+    operator_route = route_question("What changed today and what should I review first this week?")
+    assert operator_route["intent"] == "operator_workflow"
+    assert operator_route["answer_mode"] == "operator"
 
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
@@ -563,6 +592,8 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["learning_snapshot"]["top_reweighting_candidate"]
     assert narrator_context["source_governance_snapshot"]["source_profile"] == "buyer_demo"
     assert narrator_context["source_governance_snapshot"]["commercial_blockers"]
+    assert narrator_context["operating_workflow_snapshot"]["daily_operating_summary"]
+    assert narrator_context["operating_workflow_snapshot"]["postmortem_summary"]
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
@@ -628,6 +659,23 @@ def test_phase5_selects_source_governance_sections_for_commercial_questions() ->
     assert "commercialization_readiness_summary" in narrator_context["selected_sections"]
     assert "source_governance_summary" in narrator_context["selected_sections"]
     assert narrator_context["source_governance_snapshot"]["buyer_demo_suitability"] == "conditional_review_required"
+
+
+def test_phase5_selects_operator_workflow_sections_for_workflow_questions() -> None:
+    report = _sample_report("NVDA")
+    route = route_question("What changed today and what should I review first this week?")
+    narrator_context = build_narrator_context(
+        report,
+        active_analysis=reports.build_active_analysis_reference(report),
+        route=route,
+        user_message="What changed today and what should I review first this week?",
+        caller_context=None,
+    )
+
+    assert narrator_context["question_intent"] == "operator_workflow"
+    assert "daily_operating_summary" in narrator_context["selected_sections"]
+    assert "trust_maintenance_summary" in narrator_context["selected_sections"]
+    assert narrator_context["operating_workflow_snapshot"]["runbook_summary"]
 
 
 def test_phase5_preserves_session_symbol_continuity_for_chat_followups() -> None:

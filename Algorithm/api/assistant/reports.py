@@ -1151,6 +1151,12 @@ def build_active_analysis_reference(
             "commercialization_risk_score": report.get(
                 "commercialization_risk_score"
             ),
+            "operating_workflow_version": report.get("operating_workflow_version"),
+            "daily_operating_summary": report.get("daily_operating_summary"),
+            "weekly_operating_summary": report.get("weekly_operating_summary"),
+            "monthly_operating_summary": report.get("monthly_operating_summary"),
+            "trust_maintenance_summary": report.get("trust_maintenance_summary"),
+            "postmortem_summary": report.get("postmortem_summary"),
         }
     )
 
@@ -1935,6 +1941,55 @@ def _buyer_diligence_summary_text(source_governance: Dict[str, Any]) -> str:
     )
 
 
+def _daily_operating_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("daily_operating_summary")
+        or "Daily operating workflow summary is not yet populated."
+    )
+
+
+def _weekly_operating_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("weekly_operating_summary")
+        or "Weekly operating review summary is not yet populated."
+    )
+
+
+def _monthly_operating_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("monthly_operating_summary")
+        or "Monthly operating refinement summary is not yet populated."
+    )
+
+
+def _shadow_journal_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("shadow_journal_summary")
+        or "Shadow decision journal summary is not yet populated."
+    )
+
+
+def _postmortem_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("postmortem_summary")
+        or "Post-mortem workflow summary is not yet populated."
+    )
+
+
+def _trust_maintenance_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("trust_maintenance_summary")
+        or "Trust maintenance summary is not yet populated."
+    )
+
+
+def _operator_runbook_summary_text(operating_workflow: Dict[str, Any]) -> str:
+    return str(
+        operating_workflow.get("operator_runbook_summary")
+        or "Operator runbook summary is not yet populated."
+    )
+
+
 def attach_operational_context(
     report: Dict[str, Any],
     operational: Dict[str, Any],
@@ -2137,6 +2192,183 @@ def attach_source_governance_context(
     evidence_map["buyer_diligence_summary"] = [
         "source_governance.critical_source_dependencies",
         "source_governance.removable_source_impact",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_operating_workflow_context(
+    report: Dict[str, Any],
+    operating_workflow: Dict[str, Any],
+    *,
+    operating_workflow_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    daily_summary = _daily_operating_summary_text(operating_workflow)
+    weekly_summary = _weekly_operating_summary_text(operating_workflow)
+    monthly_summary = _monthly_operating_summary_text(operating_workflow)
+    shadow_summary = _shadow_journal_summary_text(operating_workflow)
+    postmortem_summary = _postmortem_summary_text(operating_workflow)
+    trust_summary = _trust_maintenance_summary_text(operating_workflow)
+    runbook_summary = _operator_runbook_summary_text(operating_workflow)
+
+    updated["report_version"] = "2.9"
+    updated["operating_workflow_artifact_id"] = operating_workflow_artifact_id
+    updated["operating_workflow"] = operating_workflow
+    updated["operating_workflow_version"] = operating_workflow.get(
+        "operating_workflow_version"
+    )
+    updated["todays_candidate_triage"] = (
+        operating_workflow.get("todays_candidate_triage") or []
+    )
+    updated["changed_signals"] = operating_workflow.get("changed_signals") or []
+    updated["priority_watchlist"] = operating_workflow.get("priority_watchlist") or []
+    updated["new_warnings_downgrades"] = (
+        operating_workflow.get("new_warnings_downgrades") or []
+    )
+    updated["what_changed_panel"] = operating_workflow.get("what_changed_panel")
+    updated["daily_operating_summary"] = daily_summary
+    updated["weekly_operating_review"] = (
+        operating_workflow.get("weekly_operating_review") or {}
+    )
+    updated["weekly_quality_summary"] = (
+        operating_workflow.get("weekly_quality_summary") or {}
+    )
+    updated["weekly_signal_review"] = (
+        operating_workflow.get("weekly_signal_review") or {}
+    )
+    updated["weekly_risk_review"] = (
+        operating_workflow.get("weekly_risk_review") or {}
+    )
+    updated["weekly_refinement_notes"] = (
+        operating_workflow.get("weekly_refinement_notes") or []
+    )
+    updated["weekly_operator_attention_items"] = (
+        operating_workflow.get("weekly_operator_attention_items") or []
+    )
+    updated["weekly_operating_summary"] = weekly_summary
+    updated["monthly_refinement_review"] = (
+        operating_workflow.get("monthly_refinement_review") or {}
+    )
+    updated["research_priority_queue"] = (
+        operating_workflow.get("research_priority_queue") or []
+    )
+    updated["improvement_candidate_summary"] = operating_workflow.get(
+        "improvement_candidate_summary"
+    )
+    updated["monthly_operating_summary"] = monthly_summary
+    updated["shadow_decision_journal"] = (
+        operating_workflow.get("shadow_decision_journal") or {}
+    )
+    updated["operator_review_entry"] = (
+        operating_workflow.get("operator_review_entry") or {}
+    )
+    updated["realized_followup"] = operating_workflow.get("realized_followup") or {}
+    updated["decision_quality_note"] = operating_workflow.get("decision_quality_note")
+    updated["trust_gate_feedback"] = operating_workflow.get("trust_gate_feedback")
+    updated["candidate_outcome_review"] = operating_workflow.get(
+        "candidate_outcome_review"
+    )
+    updated["shadow_journal_summary"] = shadow_summary
+    updated["postmortem_report"] = operating_workflow.get("postmortem_report") or {}
+    updated["failure_mode_classification"] = operating_workflow.get(
+        "failure_mode_classification"
+    )
+    updated["misclassification_summary"] = operating_workflow.get(
+        "misclassification_summary"
+    )
+    updated["confidence_error_analysis"] = operating_workflow.get(
+        "confidence_error_analysis"
+    )
+    updated["fragility_miss_summary"] = operating_workflow.get(
+        "fragility_miss_summary"
+    )
+    updated["lesson_extracted"] = operating_workflow.get("lesson_extracted")
+    updated["postmortem_queue"] = operating_workflow.get("postmortem_queue") or []
+    updated["postmortem_summary"] = postmortem_summary
+    updated["promotion_candidate"] = operating_workflow.get("promotion_candidate")
+    updated["demotion_candidate"] = operating_workflow.get("demotion_candidate")
+    updated["rollback_recommendation"] = operating_workflow.get(
+        "rollback_recommendation"
+    )
+    updated["trust_recovery_checklist"] = (
+        operating_workflow.get("trust_recovery_checklist") or []
+    )
+    updated["required_evidence_for_promotion"] = (
+        operating_workflow.get("required_evidence_for_promotion") or []
+    )
+    updated["trust_promotion_candidates"] = (
+        operating_workflow.get("trust_promotion_candidates") or []
+    )
+    updated["trust_demotion_candidates"] = (
+        operating_workflow.get("trust_demotion_candidates") or []
+    )
+    updated["trust_maintenance_summary"] = trust_summary
+    updated["operator_runbook"] = operating_workflow.get("operator_runbook") or {}
+    updated["operator_runbook_summary"] = runbook_summary
+    updated["runbook_attention_notes"] = (
+        operating_workflow.get("runbook_attention_notes") or []
+    )
+    updated["operator_attention_items"] = (
+        operating_workflow.get("operator_attention_items") or []
+    )
+    updated["operating_workflow_summary"] = operating_workflow.get(
+        "operating_workflow_summary"
+    )
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            f"Operating workflow: {daily_summary}",
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"Weekly review: {weekly_summary}",
+            f"Trust maintenance: {trust_summary}",
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"Post-mortem focus: {postmortem_summary}",
+            f"Monthly refinement: {monthly_summary}",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            f"Operator runbook: {runbook_summary}",
+            "Phase 14 stores daily triage, weekly review, monthly refinement, shadow journaling, post-mortem focus, and trust-maintenance guidance alongside the analysis so the platform can be operated as a disciplined process rather than a one-off report.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["daily_operating_summary"] = [
+        "operating_workflow.daily_workflow",
+        "operating_workflow.todays_candidate_triage",
+    ]
+    evidence_map["weekly_operating_summary"] = [
+        "operating_workflow.weekly_operating_review",
+        "operating_workflow.weekly_validation",
+    ]
+    evidence_map["monthly_operating_summary"] = [
+        "operating_workflow.monthly_refinement_review",
+        "operating_workflow.research_priority_queue",
+    ]
+    evidence_map["shadow_journal_summary"] = [
+        "operating_workflow.shadow_decision_journal",
+        "operating_workflow.operator_review_entry",
+    ]
+    evidence_map["postmortem_summary"] = [
+        "operating_workflow.postmortem_report",
+        "operating_workflow.postmortem_queue",
+    ]
+    evidence_map["trust_maintenance_summary"] = [
+        "operating_workflow.trust_promotion_candidates",
+        "operating_workflow.trust_demotion_candidates",
+    ]
+    evidence_map["operator_runbook_summary"] = [
+        "operating_workflow.operator_runbook",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

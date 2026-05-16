@@ -200,6 +200,12 @@ const buildActiveAnalysisFromReport = (report) => ({
   source_profile: report?.source_profile || "internal_research",
   buyer_demo_suitability: report?.buyer_demo_suitability || "unknown",
   commercialization_risk_score: report?.commercialization_risk_score,
+  operating_workflow_version: report?.operating_workflow_version || "n/a",
+  daily_operating_summary: report?.daily_operating_summary || "",
+  weekly_operating_summary: report?.weekly_operating_summary || "",
+  monthly_operating_summary: report?.monthly_operating_summary || "",
+  trust_maintenance_summary: report?.trust_maintenance_summary || "",
+  postmortem_summary: report?.postmortem_summary || "",
 });
 
 const buildStoredReportEntry = (report, activeAnalysis) => {
@@ -312,11 +318,20 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.model_drift_score ?? analysis?.model_drift_score ?? null,
       data_reliability_score:
         report?.data_reliability_score ?? analysis?.data_reliability_score ?? null,
+      operating_workflow_version:
+        report?.operating_workflow_version ||
+        analysis?.operating_workflow_version ||
+        "phase14",
       executive_summary: report?.overall_analysis || report?.signal_summary || "",
       strategy_summary: report?.strategy_view || "",
       portfolio_summary: report?.portfolio_context_summary || "",
       operational_summary:
         report?.system_health_summary || report?.drift_control_summary || "",
+      workflow_summary:
+        report?.daily_operating_summary ||
+        report?.weekly_operating_summary ||
+        report?.monthly_operating_summary ||
+        "",
       top_driver: topDriverLabel(report, "positive"),
       top_risk:
         report?.strategy?.invalidators?.top_invalidators?.[0] ||
@@ -499,6 +514,10 @@ const buildNarratorPromptSet = () => {
     `Where is the model drifting right now on ${symbol}?`,
     `Is the system healthy enough to trust right now for ${symbol}?`,
     `Is the current source stack buyer-demo safe for ${symbol}?`,
+    `What changed today for ${symbol} that deserves review first?`,
+    `What should be in this week's review for ${symbol}?`,
+    `What failed recently around ${symbol} and why?`,
+    `What should be prioritized next month for ${symbol}?`,
     `What experiments should be run next for ${symbol}?`,
     `What setup archetype is ${symbol} right now?`,
   ];
@@ -845,11 +864,12 @@ const renderDashboardWorkflow = (report) => {
   const container = qs("#assistant-dashboard-workflow");
   if (!report) {
     const placeholders = [
-      ["Executive Read", "Start with the dashboard for signal, posture, conviction, and top risks.", "dashboard"],
+      ["Daily Triage", "Start with the dashboard for changed signals, active trust state, and priority candidates.", "dashboard"],
       ["Decision Layer", "Open strategy to inspect actionability, scenarios, invalidators, and execution posture.", "strategy"],
       ["Portfolio Fit", "Use the portfolio workspace to inspect ranking, overlap, size-band logic, and rotation pressure.", "portfolio"],
-      ["Trust Layer", "Use evaluation and evidence to show scorecards, calibration, provenance, and freshness.", "evaluation"],
-      ["Learning Loop", "Open the learning lab for drift alerts, regime learnings, and governed improvement candidates.", "research"],
+      ["Weekly Review", "Use evaluation and trust surfaces to inspect scorecards, calibration, provenance, and operational warnings.", "evaluation"],
+      ["Monthly Refinement", "Open the learning lab for drift alerts, governed improvement candidates, and research priorities.", "research"],
+      ["Runbook", "Use the health workspace for operator workflow, post-mortems, trust maintenance, and runbook guidance.", "health"],
     ];
     container.innerHTML = placeholders
       .map(
@@ -870,7 +890,7 @@ const renderDashboardWorkflow = (report) => {
   }
 
   const steps = [
-    ["Signal and Thesis", report.signal_summary, "analyze"],
+    ["Daily Triage", report.daily_operating_summary || report.what_changed_panel, "dashboard"],
     ["Strategy Console", report.strategy_view, "strategy"],
     ["Portfolio Construction", report.portfolio_context_summary || report.portfolio_fit_analysis, "portfolio"],
     [
@@ -878,8 +898,9 @@ const renderDashboardWorkflow = (report) => {
       report.deployment_readiness_summary || report.deployment_permission_analysis,
       "strategy",
     ],
-    ["Proof and Trust", report.evaluation_research_analysis || report.evidence_provenance, "evaluation"],
-    ["Learning and Improvement", report.learning_summary || report.adaptation_queue_summary, "research"],
+    ["Weekly Review", report.weekly_operating_summary || report.evaluation_research_analysis, "evaluation"],
+    ["Monthly Refinement", report.monthly_operating_summary || report.learning_summary, "research"],
+    ["Trust Maintenance", report.trust_maintenance_summary || report.deployment_readiness_summary, "health"],
   ];
   container.innerHTML = steps
     .map(
@@ -966,6 +987,14 @@ const renderDashboardTrustStrip = (report) => {
       value: report.setup_archetype?.archetype_name || "n/a",
       note: `${report.learning_priority || "observe"} / ${report.research_version || "phase10"}`,
     },
+    {
+      label: "Workflow",
+      value: report.current_operating_mode || "normal",
+      note:
+        (report.operator_attention_items || [])[0] ||
+        report.daily_operating_summary ||
+        "operator loop",
+    },
   ]);
 };
 
@@ -1023,6 +1052,7 @@ const renderRecentAnalyses = () => {
                 )}</span>
               </div>
               <div class="table-note">${escapeHtml(
+                snapshot.workflow_summary ||
                 snapshot.portfolio_summary ||
                   snapshot.executive_summary ||
                   snapshot.top_driver ||
@@ -2276,6 +2306,7 @@ const renderSystemAudit = (report) => {
           `Research ${report.research_version || "phase10"}`,
           `Operational ${report.operational_guardrails_version || "phase12"}`,
           `Source governance ${report.source_governance_version || "phase13"}`,
+          `Operator workflow ${report.operating_workflow_version || "phase14"}`,
         ],
         "No version data available."
       )}
@@ -2378,6 +2409,107 @@ const renderCommercialReadiness = (report) => {
           ...cleanupQueue,
         ].filter(Boolean),
         "No cleanup queue surfaced."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderOperatingWorkflow = (report) => {
+  const container = qs("#assistant-operating-workflow");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Daily triage, weekly review, monthly refinement, post-mortem focus, and trust maintenance render here."
+    );
+    return;
+  }
+  const triage = (report.todays_candidate_triage || [])
+    .slice(0, 4)
+    .map(
+      (item) =>
+        `${item.symbol || "symbol"}: ${item.signal || "n/a"} / ${
+          item.deployment_permission || "analysis_only"
+        } / ${item.candidate_classification || "watchlist_candidate"}`
+    );
+  const weeklyItems = (report.weekly_operator_attention_items || []).slice(0, 4);
+  const monthlyItems = (report.research_priority_queue || [])
+    .slice(0, 4)
+    .map(
+      (item) =>
+        `${item.title || "priority"}: ${item.priority || "review"} / ${
+          item.reason || "follow-up review required"
+        }`
+    );
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Daily Workflow</h5>
+      <p>${escapeHtml(report.daily_operating_summary || "No daily workflow summary available.")}</p>
+      ${renderBullets(
+        [
+          report.what_changed_panel,
+          ...(report.new_warnings_downgrades || []),
+          ...triage,
+        ].filter(Boolean),
+        "No daily triage items surfaced."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Weekly Review</h5>
+      <p>${escapeHtml(report.weekly_operating_summary || "No weekly review summary available.")}</p>
+      ${renderBullets(weeklyItems, "No weekly operator attention item surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Monthly Refinement</h5>
+      <p>${escapeHtml(report.monthly_operating_summary || "No monthly refinement summary available.")}</p>
+      ${renderBullets(monthlyItems, "No monthly research priority surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Post-Mortem / Trust</h5>
+      ${renderBullets(
+        [
+          report.postmortem_summary,
+          report.trust_maintenance_summary,
+          ...(report.postmortem_queue || []).slice(0, 3),
+          ...(report.required_evidence_for_promotion || []).slice(0, 3),
+        ].filter(Boolean),
+        "No post-mortem or trust item surfaced."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderOperatorRunbook = (report) => {
+  const container = qs("#assistant-operator-runbook");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Daily, weekly, monthly, and incident-response runbook guidance renders here."
+    );
+    return;
+  }
+  const runbook = report.operator_runbook || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Runbook Summary</h5>
+      <p>${escapeHtml(report.operator_runbook_summary || "No operator runbook summary available.")}</p>
+      ${renderBullets(report.runbook_attention_notes || [], "No runbook attention note surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Daily / Weekly</h5>
+      ${renderBullets(
+        [...(runbook.daily_workflow || []), ...(runbook.weekly_workflow || [])],
+        "No daily or weekly workflow guidance available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Monthly / Incident Response</h5>
+      ${renderBullets(
+        [...(runbook.monthly_workflow || []), ...(runbook.incident_response || [])],
+        "No monthly or incident-response guidance available."
       )}
     </section>`,
   ].join("");
@@ -2855,6 +2987,8 @@ const renderAssistantReport = (report) => {
     renderLearningArchetypes(null);
     renderResearchDrilldown(null);
     renderSystemAudit(null);
+    renderOperatingWorkflow(null);
+    renderOperatorRunbook(null);
     renderDeploymentReadiness(null);
     renderDeploymentRiskBudget(null);
     renderDeploymentAudit(null);
@@ -3119,6 +3253,8 @@ const renderAssistantReport = (report) => {
   renderResearchDrilldown(report);
   renderSystemAudit(report);
   renderCommercialReadiness(report);
+  renderOperatingWorkflow(report);
+  renderOperatorRunbook(report);
   renderSystemHealth(state.assistantHealth, report);
   renderDeploymentReadiness(report);
   renderDeploymentRiskBudget(report);

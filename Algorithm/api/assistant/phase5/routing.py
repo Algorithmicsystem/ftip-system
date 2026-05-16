@@ -509,6 +509,53 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "What would need to recover before trust rises again?",
         ),
     },
+    "operator_workflow": {
+        "keywords": (
+            "what changed today",
+            "changed today",
+            "what changed",
+            "review first",
+            "review now",
+            "daily review",
+            "weekly review",
+            "monthly review",
+            "monthly refinement",
+            "operator workflow",
+            "operator runbook",
+            "runbook",
+            "shadow journal",
+            "shadow decision",
+            "postmortem",
+            "post-mortem",
+            "what failed recently",
+            "upgraded",
+            "downgraded",
+            "promotion candidate",
+            "demotion candidate",
+            "trust maintenance",
+            "improvement work",
+            "attention items",
+            "priority candidates today",
+            "what should i review first",
+        ),
+        "mode": "operator",
+        "sections": (
+            "daily_operating_summary",
+            "weekly_operating_summary",
+            "monthly_operating_summary",
+            "shadow_journal_summary",
+            "postmortem_summary",
+            "trust_maintenance_summary",
+            "operator_runbook_summary",
+            "system_health_summary",
+            "portfolio_workflow_summary",
+        ),
+        "followups": (
+            "What changed today that deserves review first?",
+            "What belongs in this week’s operating review?",
+            "What should be prioritized for the next monthly refinement cycle?",
+        ),
+    },
     "compare_clarify": {
         "keywords": (
             "difference",
@@ -637,6 +684,31 @@ def route_question(message: str) -> Dict[str, Any]:
             )
         ):
             if intent == "operational_health":
+                score += 3
+        if any(
+            phrase in text
+            for phrase in (
+                "what changed today",
+                "what changed",
+                "review first",
+                "daily review",
+                "weekly review",
+                "monthly review",
+                "monthly refinement",
+                "operator runbook",
+                "runbook",
+                "shadow journal",
+                "postmortem",
+                "post-mortem",
+                "what failed recently",
+                "trust maintenance",
+                "promotion candidate",
+                "demotion candidate",
+                "improvement work",
+                "attention items",
+            )
+        ):
+            if intent == "operator_workflow":
                 score += 3
         if any(
             phrase in text

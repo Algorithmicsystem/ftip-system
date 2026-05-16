@@ -112,6 +112,13 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         or "",
         "source_governance_summary": report.get("source_governance_summary") or "",
         "buyer_diligence_summary": report.get("buyer_diligence_summary") or "",
+        "daily_operating_summary": report.get("daily_operating_summary") or "",
+        "weekly_operating_summary": report.get("weekly_operating_summary") or "",
+        "monthly_operating_summary": report.get("monthly_operating_summary") or "",
+        "shadow_journal_summary": report.get("shadow_journal_summary") or "",
+        "postmortem_summary": report.get("postmortem_summary") or "",
+        "trust_maintenance_summary": report.get("trust_maintenance_summary") or "",
+        "operator_runbook_summary": report.get("operator_runbook_summary") or "",
     }
 
 
@@ -248,6 +255,18 @@ def build_narrator_context(
             "commercialization_risk_score"
         )
         or report.get("commercialization_risk_score"),
+        "operating_workflow_version": active_analysis.get("operating_workflow_version")
+        or report.get("operating_workflow_version"),
+        "daily_operating_summary": active_analysis.get("daily_operating_summary")
+        or report.get("daily_operating_summary"),
+        "weekly_operating_summary": active_analysis.get("weekly_operating_summary")
+        or report.get("weekly_operating_summary"),
+        "monthly_operating_summary": active_analysis.get("monthly_operating_summary")
+        or report.get("monthly_operating_summary"),
+        "trust_maintenance_summary": active_analysis.get("trust_maintenance_summary")
+        or report.get("trust_maintenance_summary"),
+        "postmortem_summary": active_analysis.get("postmortem_summary")
+        or report.get("postmortem_summary"),
     }
 
     return {
@@ -344,6 +363,19 @@ def build_narrator_context(
             "gated_domains": _compact_list(report.get("degraded_due_to_profile") or []),
             "disallowed_sources": _compact_list(report.get("disallowed_sources") or []),
         },
+        "operating_workflow_snapshot": {
+            "operating_workflow_version": report.get("operating_workflow_version"),
+            "daily_operating_summary": report.get("daily_operating_summary"),
+            "weekly_operating_summary": report.get("weekly_operating_summary"),
+            "monthly_operating_summary": report.get("monthly_operating_summary"),
+            "what_changed_panel": report.get("what_changed_panel"),
+            "operator_attention_items": _compact_list(
+                report.get("operator_attention_items") or []
+            ),
+            "postmortem_summary": report.get("postmortem_summary"),
+            "trust_maintenance_summary": report.get("trust_maintenance_summary"),
+            "runbook_summary": report.get("operator_runbook_summary"),
+        },
         "domain_agreement": {
             "domain_agreement_score": agreement.get("domain_agreement_score"),
             "domain_conflict_score": agreement.get("domain_conflict_score"),
@@ -398,6 +430,13 @@ def build_narrator_context(
             ],
             "source_governance_summary": sections["source_governance_summary"],
             "buyer_diligence_summary": sections["buyer_diligence_summary"],
+            "daily_operating_summary": sections["daily_operating_summary"],
+            "weekly_operating_summary": sections["weekly_operating_summary"],
+            "monthly_operating_summary": sections["monthly_operating_summary"],
+            "shadow_journal_summary": sections["shadow_journal_summary"],
+            "postmortem_summary": sections["postmortem_summary"],
+            "trust_maintenance_summary": sections["trust_maintenance_summary"],
+            "operator_runbook_summary": sections["operator_runbook_summary"],
         },
         "evaluation_snapshot": report.get("evaluation") or {},
         "deployment_readiness_snapshot": {

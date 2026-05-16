@@ -172,6 +172,19 @@ This profile is engineering governance, not legal advice. It classifies and opti
 
 See [docs/source_governance_profiles.md](docs/source_governance_profiles.md) for the current profile intent, cleanup guidance, and buyer-demo notes.
 
+### Operator workflow and runbook
+
+The platform now includes a disciplined operating layer for:
+
+- daily candidate triage
+- weekly operating review
+- monthly refinement review
+- shadow decision journaling
+- post-mortem review
+- trust promotion and demotion maintenance
+
+See [docs/operator_runbook.md](docs/operator_runbook.md) for the guided operator workflow.
+
 ## CHANGELOG
 
 ### Unreleased

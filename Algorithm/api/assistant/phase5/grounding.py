@@ -78,6 +78,12 @@ _ACTIVE_ANALYSIS_KEYS = (
     "source_profile",
     "buyer_demo_suitability",
     "commercialization_risk_score",
+    "operating_workflow_version",
+    "daily_operating_summary",
+    "weekly_operating_summary",
+    "monthly_operating_summary",
+    "trust_maintenance_summary",
+    "postmortem_summary",
 )
 
 

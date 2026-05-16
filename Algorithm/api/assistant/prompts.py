@@ -19,7 +19,13 @@ def build_chat_messages(
     messages.extend(history[-12:])
 
     if context:
-        context_line = "Context:\n" + json.dumps(context, indent=2, default=str, sort_keys=True)
+        context_line = "Context:\n" + json.dumps(
+            context,
+            indent=2,
+            default=str,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
         user_payload = f"{user_message}\n\n{context_line}"
     else:
         user_payload = user_message
@@ -44,6 +50,7 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Canonical validation: {report.get('canonical_validation_summary', 'n/a')}.",
             f"Operational guardrails: {report.get('system_health_summary', 'n/a')}.",
             f"Commercial readiness: {report.get('commercialization_readiness_summary', 'n/a')}.",
+            f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
     )
@@ -73,6 +80,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "continuous_learning": report.get("continuous_learning"),
         "operational_guardrails": report.get("operational_guardrails"),
         "source_governance": report.get("source_governance"),
+        "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
         "signal_summary": report.get("signal_summary"),
@@ -119,18 +127,43 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         ),
         "source_governance_summary": report.get("source_governance_summary"),
         "buyer_diligence_summary": report.get("buyer_diligence_summary"),
+        "daily_operating_summary": report.get("daily_operating_summary"),
+        "weekly_operating_summary": report.get("weekly_operating_summary"),
+        "monthly_operating_summary": report.get("monthly_operating_summary"),
+        "shadow_journal_summary": report.get("shadow_journal_summary"),
+        "postmortem_summary": report.get("postmortem_summary"),
+        "trust_maintenance_summary": report.get("trust_maintenance_summary"),
+        "operator_runbook_summary": report.get("operator_runbook_summary"),
     }
     blocks = [
         "Grounding report metadata and machine-readable fields:",
-        json.dumps(machine_context, indent=2, default=str, sort_keys=True),
+        json.dumps(
+            machine_context,
+            indent=2,
+            default=str,
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
         "Presentation-ready report sections:",
-        json.dumps(section_context, indent=2, default=str, sort_keys=True),
+        json.dumps(
+            section_context,
+            indent=2,
+            default=str,
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
     ]
     if context:
         blocks.extend(
             [
                 "Caller context:",
-                json.dumps(context, indent=2, default=str, sort_keys=True),
+                json.dumps(
+                    context,
+                    indent=2,
+                    default=str,
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ),
             ]
         )
     return "\n\n".join(blocks)
