@@ -115,6 +115,13 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "axiom_summary": report.get("axiom_summary") or "",
         "axiom_deployability_analysis": report.get("deployment_permission_analysis")
         or "",
+        "axiom_historical_evidence_summary": report.get("axiom_evidence_summary") or "",
+        "axiom_calibration_summary_text": report.get("axiom_calibration_summary_text")
+        or "",
+        "axiom_portfolio_governance_summary": report.get(
+            "axiom_portfolio_governance_summary"
+        )
+        or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",
@@ -272,6 +279,16 @@ def build_narrator_context(
             "axiom_deployable_alpha_utility"
         )
         or report.get("axiom_deployable_alpha_utility"),
+        "axiom_evidence_backed_deployability_tier": active_analysis.get(
+            "axiom_evidence_backed_deployability_tier"
+        )
+        or report.get("axiom_evidence_backed_deployability_tier"),
+        "axiom_portfolio_fit_label": active_analysis.get("axiom_portfolio_fit_label")
+        or report.get("axiom_portfolio_fit_label"),
+        "axiom_portfolio_rank_score": active_analysis.get("axiom_portfolio_rank_score")
+        or report.get("axiom_portfolio_rank_score"),
+        "axiom_calibration_status": active_analysis.get("axiom_calibration_status")
+        or report.get("axiom_calibration_status"),
         "operating_workflow_version": active_analysis.get("operating_workflow_version")
         or report.get("operating_workflow_version"),
         "daily_operating_summary": active_analysis.get("daily_operating_summary")
@@ -385,10 +402,16 @@ def build_narrator_context(
             "regime_label": report.get("axiom_regime_label"),
             "trade_family": report.get("axiom_trade_family"),
             "deployability_tier": report.get("axiom_deployability_tier"),
+            "evidence_backed_deployability_tier": report.get(
+                "axiom_evidence_backed_deployability_tier"
+            ),
             "validated_edge": report.get("axiom_validated_edge"),
             "deployable_alpha_utility": report.get("axiom_deployable_alpha_utility"),
             "gross_opportunity": report.get("axiom_gross_opportunity"),
             "friction_burden": report.get("axiom_friction_burden"),
+            "calibration_status": report.get("axiom_calibration_status"),
+            "portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
+            "portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
             "strongest_engine": ((report.get("axiom_explanation") or {}).get("strongest_engine")),
             "weakest_engine": ((report.get("axiom_explanation") or {}).get("weakest_engine")),
             "size_band_recommendation": report.get("axiom_size_band_recommendation"),

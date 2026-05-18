@@ -3,7 +3,12 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from api.axiom import AXIOM_ARTIFACT_KIND
+from api.axiom import (
+    AXIOM_ARTIFACT_KIND,
+    AXIOM_CALIBRATION_ARTIFACT_KIND,
+    AXIOM_PORTFOLIO_GOVERNANCE_ARTIFACT_KIND,
+    AXIOM_SCORE_HISTORY_ARTIFACT_KIND,
+)
 from api.assistant import intelligence, reports, service, strategy
 from api.assistant.phase8 import (
     DEPLOYMENT_AUDIT_RECORD_KIND,
@@ -466,11 +471,20 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["strategy"]["final_signal"]
     assert result["strategy"]["strategy_posture"]
     assert result["axiom_artifact_id"]
+    assert result["axiom_history_artifact_id"]
+    assert result["axiom_calibration_artifact_id"]
+    assert result["axiom_portfolio_governance_artifact_id"]
     assert result["axiom"]["framework_version"]
     assert result["axiom_summary"]
     assert result["axiom_deployability_tier"]
     assert result["axiom_validated_edge"] is not None
     assert result["axiom_deployable_alpha_utility"] is not None
+    assert result["axiom_historical_evidence"]["history_horizon_label"] == "21d"
+    assert result["axiom_calibration_summary"]["horizon_label"] == "21d"
+    assert result["axiom_portfolio_governance"]["symbol"] == "NVDA"
+    assert result["axiom_evidence_backed_deployability_tier"]
+    assert result["axiom_portfolio_fit_label"]
+    assert result["axiom_portfolio_rank_score"] is not None
     assert result["axiom"]["engine_scores"]["state_pricing"]["score"] is not None
     assert result["axiom"]["engine_scores"]["behavioral_distortion"]["score"] is not None
     assert result["axiom"]["engine_scores"]["flow_transmission"]["score"] is not None
@@ -560,9 +574,15 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session["metadata"]["active_analysis"]["current_operating_mode"]
     assert session["metadata"]["active_analysis"]["axiom_deployability_tier"]
     assert session["metadata"]["active_analysis"]["axiom_deployable_alpha_utility"] is not None
+    assert session["metadata"]["active_analysis"]["axiom_evidence_backed_deployability_tier"]
+    assert session["metadata"]["active_analysis"]["axiom_portfolio_fit_label"]
+    assert session["metadata"]["active_analysis"]["axiom_portfolio_rank_score"] is not None
     assert session["metadata"]["active_analysis"]["daily_operating_summary"]
     assert session["metadata"]["active_analysis"]["weekly_operating_summary"]
     assert session["metadata"]["axiom"]["artifact_id"] == result["axiom_artifact_id"]
+    assert session["metadata"]["axiom"]["history_artifact_id"] == result["axiom_history_artifact_id"]
+    assert session["metadata"]["axiom"]["calibration_artifact_id"] == result["axiom_calibration_artifact_id"]
+    assert session["metadata"]["axiom"]["portfolio_governance_artifact_id"] == result["axiom_portfolio_governance_artifact_id"]
     assert session["metadata"]["axiom"]["deployable_alpha_utility"] == result["axiom_deployable_alpha_utility"]
     assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
     assert (
@@ -600,6 +620,9 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["signal_summary"] == result["signal_summary"]
     assert report["overall_analysis"] == result["overall_analysis"]
     assert report["axiom"]
+    assert report["axiom_historical_evidence"]
+    assert report["axiom_calibration_summary"]
+    assert report["axiom_portfolio_governance"]
     assert report["evaluation"]
     assert report["deployment_readiness"]
     assert report["portfolio_construction"]
@@ -613,6 +636,25 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert (
         store.get_latest_artifact(
             kind=AXIOM_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=AXIOM_SCORE_HISTORY_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=AXIOM_CALIBRATION_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
+    assert (
+        store.get_latest_artifact(
+            kind=AXIOM_PORTFOLIO_GOVERNANCE_ARTIFACT_KIND,
+            session_id=result["session_id"],
         )
         is not None
     )

@@ -5,10 +5,10 @@ from typing import Iterable, Mapping, Optional, Sequence
 from api.assistant.phase3.common import clamp
 
 
-def rounded(value: Optional[float]) -> Optional[float]:
+def rounded(value: Optional[float], *, digits: int = 2) -> Optional[float]:
     if value is None:
         return None
-    return round(float(value), 2)
+    return round(float(value), digits)
 
 
 def weighted_average(items: Sequence[tuple[Optional[float], float]]) -> Optional[float]:

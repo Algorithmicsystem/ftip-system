@@ -573,6 +573,11 @@ def _migration_backtest_artifacts(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_axiom_phase3_history(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("026_axiom_phase3_history.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -612,6 +617,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "025_backtest_artifacts",
         _migration_backtest_artifacts,
+    ),
+    (
+        "026_axiom_phase3_history",
+        _migration_axiom_phase3_history,
     ),
 ]
 

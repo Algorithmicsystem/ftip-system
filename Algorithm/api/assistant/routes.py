@@ -10,6 +10,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from api import config
 from api.assistant import narration, orchestrator, service
 from api.assistant.models import (
+    AxiomCalibrationRequest,
+    AxiomRankedCandidatesRequest,
+    AxiomReplayRequest,
     AnalyzeRequest,
     ChatRequest,
     ChatResponse,
@@ -155,6 +158,39 @@ async def analyze_endpoint(
         {**payload.model_dump(), "trace_id": request_id}
     )
     logger.info("assistant.analyze", extra={"request_id": request_id})
+    return sanitize_payload(result)
+
+
+@router.post("/axiom/replay")
+async def axiom_replay_endpoint(
+    payload: AxiomReplayRequest,
+    request_id: str = Depends(request_id_dependency),
+    __: None = Depends(rate_limit),
+):
+    result = service.run_axiom_replay_service(payload.model_dump())
+    logger.info("assistant.axiom_replay", extra={"request_id": request_id})
+    return sanitize_payload(result)
+
+
+@router.post("/axiom/calibration")
+async def axiom_calibration_endpoint(
+    payload: AxiomCalibrationRequest,
+    request_id: str = Depends(request_id_dependency),
+    __: None = Depends(rate_limit),
+):
+    result = service.axiom_calibration_summary_service(payload.model_dump())
+    logger.info("assistant.axiom_calibration", extra={"request_id": request_id})
+    return sanitize_payload(result)
+
+
+@router.post("/axiom/ranked-candidates")
+async def axiom_ranked_candidates_endpoint(
+    payload: AxiomRankedCandidatesRequest,
+    request_id: str = Depends(request_id_dependency),
+    __: None = Depends(rate_limit),
+):
+    result = service.axiom_ranked_candidates_service(payload.model_dump())
+    logger.info("assistant.axiom_ranked_candidates", extra={"request_id": request_id})
     return sanitize_payload(result)
 
 

@@ -9,7 +9,25 @@ from openai import APIError, APIStatusError, OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from api import config
-from api.axiom import AXIOM_ARTIFACT_KIND, build_axiom_artifact
+from api.axiom import (
+    AXIOM_ARTIFACT_KIND,
+    AXIOM_CALIBRATION_ARTIFACT_KIND,
+    AXIOM_PORTFOLIO_GOVERNANCE_ARTIFACT_KIND,
+    AXIOM_SCORE_HISTORY_ARTIFACT_KIND,
+    build_axiom_artifact,
+    build_axiom_calibration_artifact,
+    build_axiom_history_record,
+    build_evidence_backed_deployability,
+    build_axiom_portfolio_governance,
+    load_or_build_axiom_calibration,
+    rank_axiom_history_records,
+    run_axiom_replay,
+)
+from api.axiom.persistence import (
+    load_axiom_history_records,
+    persist_axiom_calibration_snapshot,
+    persist_axiom_score_record,
+)
 from api.assistant import intelligence, orchestrator, prompts, reports, strategy
 from api.assistant.phase5 import engine as narrator_engine
 from api.assistant.phase5 import grounding as narrator_grounding
@@ -58,6 +76,13 @@ from api.research.backtest import (
 from api.assistant.storage import AssistantStorage, storage
 
 logger = logging.getLogger(__name__)
+
+_AXIOM_HORIZON_LABEL_MAP = {
+    "short": "5d",
+    "swing": "21d",
+    "intermediate": "63d",
+    "long": "63d",
+}
 
 
 def _build_client() -> OpenAI:
@@ -466,12 +491,121 @@ async def generate_analysis_report(
         strategy_bundle=strategy_bundle,
         report_context=report,
     )
+    history_horizon_label = _AXIOM_HORIZON_LABEL_MAP.get(horizon, "21d")
+    provisional_history_record = build_axiom_history_record(
+        report=report,
+        axiom_artifact=axiom_artifact,
+        build_metadata={
+            "session_id": sid,
+            "report_id": report_id,
+            "trace_id": trace_id,
+            "horizon": horizon,
+            "risk_mode": risk_mode,
+            "history_horizon_label": history_horizon_label,
+        },
+    )
+    historical_records = load_axiom_history_records(
+        symbols=[symbol],
+        end_date=as_of_date,
+        store=store,
+        session_id=sid,
+        limit=5000,
+    )
+    deduped_history: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+    for item in historical_records + [provisional_history_record]:
+        key = (
+            str(item.get("symbol") or ""),
+            str(item.get("as_of_date") or ""),
+            str(item.get("framework_version") or ""),
+        )
+        deduped_history[key] = item
+    calibration_snapshot = build_axiom_calibration_artifact(
+        list(deduped_history.values()),
+        as_of_date=as_of_date,
+        horizon_label=history_horizon_label,
+    )
+    portfolio_governance = build_axiom_portfolio_governance(
+        current_report=report,
+        axiom_artifact=axiom_artifact,
+        calibration_summary=calibration_snapshot,
+    )
+    evidence_backed_deployability = build_evidence_backed_deployability(
+        current_axiom=axiom_artifact,
+        calibration_summary=calibration_snapshot,
+    )
+    history_record = build_axiom_history_record(
+        report=report,
+        axiom_artifact=axiom_artifact,
+        build_metadata={
+            "session_id": sid,
+            "report_id": report_id,
+            "trace_id": trace_id,
+            "horizon": horizon,
+            "risk_mode": risk_mode,
+            "history_horizon_label": history_horizon_label,
+        },
+        evidence_backed_deployability=evidence_backed_deployability,
+    )
+    persist_axiom_score_record(history_record)
+    axiom_history_artifact_id = store.save_artifact(
+        sid,
+        AXIOM_SCORE_HISTORY_ARTIFACT_KIND,
+        history_record,
+    )
+    calibration_payload = {
+        **calibration_snapshot,
+        "symbol": symbol,
+        "session_id": sid,
+        "report_id": report_id,
+        "trace_id": trace_id,
+        "horizon": horizon,
+        "risk_mode": risk_mode,
+    }
+    persist_axiom_calibration_snapshot(
+        calibration_payload,
+        snapshot_key=f"{symbol}:{history_horizon_label}:{as_of_date}:{axiom_artifact.get('framework_version')}",
+    )
+    axiom_calibration_artifact_id = store.save_artifact(
+        sid,
+        AXIOM_CALIBRATION_ARTIFACT_KIND,
+        calibration_payload,
+    )
+    axiom_portfolio_governance_artifact_id = store.save_artifact(
+        sid,
+        AXIOM_PORTFOLIO_GOVERNANCE_ARTIFACT_KIND,
+        portfolio_governance,
+    )
+    axiom_artifact = {
+        **axiom_artifact,
+        "historical_evidence": {
+            "history_version": history_record.get("history_version"),
+            "history_horizon_label": history_horizon_label,
+            "matured_count": calibration_snapshot.get("matured_count"),
+            "sample_size": calibration_snapshot.get("sample_size"),
+            "status": calibration_snapshot.get("status"),
+            "forward_outcomes": history_record.get("forward_outcomes") or {},
+            "record_build_metadata": history_record.get("build_metadata") or {},
+        },
+        "calibration_summary": calibration_snapshot,
+        "portfolio_governance": portfolio_governance,
+        "evidence_backed_deployability": evidence_backed_deployability,
+    }
     axiom_artifact_id = store.save_artifact(sid, AXIOM_ARTIFACT_KIND, axiom_artifact)
     report = reports.attach_axiom_context(
         report,
         axiom_artifact,
         axiom_artifact_id=axiom_artifact_id,
         prominent=True,
+    )
+    report = reports.attach_axiom_phase3_context(
+        report,
+        axiom_artifact,
+        history_record=history_record,
+        calibration_summary=calibration_payload,
+        portfolio_governance=portfolio_governance,
+        axiom_history_artifact_id=axiom_history_artifact_id,
+        axiom_calibration_artifact_id=axiom_calibration_artifact_id,
+        axiom_portfolio_governance_artifact_id=axiom_portfolio_governance_artifact_id,
     )
     final_prediction_record = build_prediction_record(
         report,
@@ -494,6 +628,9 @@ async def generate_analysis_report(
             },
             "axiom": {
                 "artifact_id": axiom_artifact_id,
+                "history_artifact_id": axiom_history_artifact_id,
+                "calibration_artifact_id": axiom_calibration_artifact_id,
+                "portfolio_governance_artifact_id": axiom_portfolio_governance_artifact_id,
                 "framework_version": report.get("axiom_framework_version"),
                 "regime_label": report.get("axiom_regime_label"),
                 "trade_family": report.get("axiom_trade_family"),
@@ -502,6 +639,11 @@ async def generate_analysis_report(
                 "deployable_alpha_utility": report.get(
                     "axiom_deployable_alpha_utility"
                 ),
+                "evidence_backed_deployability_tier": report.get(
+                    "axiom_evidence_backed_deployability_tier"
+                ),
+                "portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
+                "portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
             },
             "deployment_readiness": {
                 "artifact_id": deployment_readiness_artifact_id,
@@ -587,6 +729,9 @@ async def generate_analysis_report(
             "feature_factor_artifact_id": factor_bundle_id,
             "strategy_artifact_id": strategy_id,
             "axiom_artifact_id": axiom_artifact_id,
+            "axiom_history_artifact_id": axiom_history_artifact_id,
+            "axiom_calibration_artifact_id": axiom_calibration_artifact_id,
+            "axiom_portfolio_governance_artifact_id": axiom_portfolio_governance_artifact_id,
             "prediction_record_artifact_id": prediction_record_id,
             "evaluation_artifact_id": evaluation_artifact_id,
             "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
@@ -614,6 +759,9 @@ async def generate_analysis_report(
         "feature_factor_artifact_id": factor_bundle_id,
         "strategy_artifact_id": strategy_id,
         "axiom_artifact_id": axiom_artifact_id,
+        "axiom_history_artifact_id": axiom_history_artifact_id,
+        "axiom_calibration_artifact_id": axiom_calibration_artifact_id,
+        "axiom_portfolio_governance_artifact_id": axiom_portfolio_governance_artifact_id,
         "prediction_record_artifact_id": prediction_record_id,
         "evaluation_artifact_id": evaluation_artifact_id,
         "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
@@ -629,6 +777,102 @@ async def generate_analysis_report(
         "source_governance_artifact_id": source_governance_artifact_id,
         "operating_workflow_artifact_id": operating_workflow_artifact_id,
         "active_analysis": active_analysis,
+    }
+
+
+def run_axiom_replay_service(
+    request: Dict[str, Any],
+    *,
+    store: AssistantStorage = storage,
+) -> Dict[str, Any]:
+    symbols = [orchestrator.normalize_symbol(symbol or "") for symbol in request.get("symbols") or []]
+    symbols = [symbol for symbol in symbols if symbol]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="symbols are required")
+    start_date = str(request.get("start_date") or "").strip()
+    end_date = str(request.get("end_date") or "").strip()
+    if not start_date or not end_date:
+        raise HTTPException(status_code=400, detail="start_date and end_date are required")
+    replay = run_axiom_replay(
+        symbols=symbols,
+        start_date=start_date,
+        end_date=end_date,
+        lookback=int(request.get("lookback") or 252),
+        persist=bool(request.get("persist", True)),
+        session_id=request.get("session_id"),
+        store=store,
+    )
+    return replay
+
+
+def axiom_calibration_summary_service(
+    request: Dict[str, Any],
+    *,
+    store: AssistantStorage = storage,
+) -> Dict[str, Any]:
+    symbols = [orchestrator.normalize_symbol(symbol or "") for symbol in request.get("symbols") or []]
+    symbols = [symbol for symbol in symbols if symbol]
+    if not symbols:
+        raise HTTPException(status_code=400, detail="symbols are required")
+    as_of_date = str(request.get("as_of_date") or "").strip()
+    if not as_of_date:
+        raise HTTPException(status_code=400, detail="as_of_date is required")
+    calibration = load_or_build_axiom_calibration(
+        symbols=symbols,
+        as_of_date=as_of_date,
+        store=store,
+        session_id=request.get("session_id"),
+    )
+    return {
+        **calibration,
+        "symbols": symbols,
+    }
+
+
+def axiom_ranked_candidates_service(
+    request: Dict[str, Any],
+    *,
+    store: AssistantStorage = storage,
+) -> Dict[str, Any]:
+    symbols = [orchestrator.normalize_symbol(symbol or "") for symbol in request.get("symbols") or []]
+    symbols = [symbol for symbol in symbols if symbol]
+    as_of_date = str(request.get("as_of_date") or "").strip() or None
+    start_date = str(request.get("start_date") or "").strip() or None
+    end_date = str(request.get("end_date") or "").strip() or as_of_date
+    records = load_axiom_history_records(
+        symbols=symbols or None,
+        start_date=start_date,
+        end_date=end_date,
+        store=store,
+        session_id=request.get("session_id"),
+        limit=5000,
+    )
+    if as_of_date:
+        filtered: Dict[str, Dict[str, Any]] = {}
+        for record in records:
+            if str(record.get("as_of_date") or "") > as_of_date:
+                continue
+            symbol = str(record.get("symbol") or "")
+            if not symbol:
+                continue
+            previous = filtered.get(symbol)
+            if previous is None or str(previous.get("as_of_date") or "") <= str(record.get("as_of_date") or ""):
+                filtered[symbol] = record
+        records = list(filtered.values())
+    if not records:
+        return {
+            "as_of_date": as_of_date,
+            "records_found": 0,
+            "ranked_candidates": [],
+        }
+    ranked = rank_axiom_history_records(
+        records,
+        current_holdings=request.get("current_holdings") or [],
+    )
+    return {
+        "as_of_date": as_of_date or end_date,
+        "records_found": len(records),
+        "ranked_candidates": ranked,
     }
 
 

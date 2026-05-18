@@ -572,6 +572,11 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     assert axiom_route["intent"] == "axiom_primary"
     assert axiom_route["answer_mode"] == "strategist"
 
+    axiom_evidence_route = route_question(
+        "What historical evidence and calibration support this AXIOM tier and size band?"
+    )
+    assert axiom_evidence_route["intent"] == "axiom_primary"
+
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     report = _sample_report("NVDA")

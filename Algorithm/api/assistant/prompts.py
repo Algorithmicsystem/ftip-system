@@ -51,6 +51,9 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Canonical validation: {report.get('canonical_validation_summary', 'n/a')}.",
             f"Operational guardrails: {report.get('system_health_summary', 'n/a')}.",
             f"Commercial readiness: {report.get('commercialization_readiness_summary', 'n/a')}.",
+            f"AXIOM historical evidence: {report.get('axiom_evidence_summary', 'n/a')}.",
+            f"AXIOM calibration: {report.get('axiom_calibration_summary_text', 'n/a')}.",
+            f"AXIOM portfolio governance: {report.get('axiom_portfolio_governance_summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -82,6 +85,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "operational_guardrails": report.get("operational_guardrails"),
         "source_governance": report.get("source_governance"),
         "axiom": report.get("axiom"),
+        "axiom_history_record": report.get("axiom_history_record"),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -130,6 +134,11 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "source_governance_summary": report.get("source_governance_summary"),
         "buyer_diligence_summary": report.get("buyer_diligence_summary"),
         "axiom_summary": report.get("axiom_summary"),
+        "axiom_historical_evidence_summary": report.get("axiom_evidence_summary"),
+        "axiom_calibration_summary_text": report.get("axiom_calibration_summary_text"),
+        "axiom_portfolio_governance_summary": report.get(
+            "axiom_portfolio_governance_summary"
+        ),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
         "monthly_operating_summary": report.get("monthly_operating_summary"),

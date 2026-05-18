@@ -266,3 +266,108 @@ class AxiomArtifact(BaseModel):
     explanation: Dict[str, Any] = Field(default_factory=dict)
     coverage_summary: Dict[str, Any] = Field(default_factory=dict)
     diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    historical_evidence: Dict[str, Any] = Field(default_factory=dict)
+    calibration_summary: Dict[str, Any] = Field(default_factory=dict)
+    portfolio_governance: Dict[str, Any] = Field(default_factory=dict)
+    evidence_backed_deployability: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AxiomHistoricalOutcome(BaseModel):
+    horizon_label: str
+    horizon_days: int
+    matured: bool = False
+    outcome_status: Optional[str] = None
+    entry_date: Optional[str] = None
+    exit_date: Optional[str] = None
+    gross_edge_return: Optional[float] = None
+    net_edge_return: Optional[float] = None
+    gross_trade_return: Optional[float] = None
+    net_trade_return: Optional[float] = None
+    final_signal_correct: Optional[bool] = None
+    estimated_cost_bps: Optional[float] = None
+    mae: Optional[float] = None
+    mfe: Optional[float] = None
+    invalidation_triggered: Optional[bool] = None
+    signal_half_life_days: Optional[int] = None
+    continuation_decay_score: Optional[float] = None
+
+
+class AxiomHistoryRecord(BaseModel):
+    history_version: str
+    framework_version: str
+    symbol: str
+    as_of_date: str
+    signal_action: str
+    signal_score: Optional[float] = None
+    signal_confidence: Optional[float] = None
+    strategy_posture: Optional[str] = None
+    deployment_permission: Optional[str] = None
+    trust_tier: Optional[str] = None
+    snapshot_id: Optional[str] = None
+    snapshot_version: Optional[str] = None
+    feature_version: Optional[str] = None
+    signal_version: Optional[str] = None
+    regime_label: str
+    trade_family: str
+    deployability_tier: str
+    size_band_recommendation: Optional[str] = None
+    gross_opportunity: float
+    friction_burden: float
+    validated_edge: float
+    deployable_alpha_utility: float
+    overall_coverage: float
+    overall_confidence: float
+    sector: Optional[str] = None
+    benchmark_proxy: Optional[str] = None
+    theme_tag: Optional[str] = None
+    engine_scores: Dict[str, EngineScore] = Field(default_factory=dict)
+    invalidation_flags: List[str] = Field(default_factory=list)
+    top_positive_drivers: List[Dict[str, Any]] = Field(default_factory=list)
+    top_negative_drivers: List[Dict[str, Any]] = Field(default_factory=list)
+    explanation_summary: Optional[str] = None
+    coverage_summary: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+    source_context: Dict[str, Any] = Field(default_factory=dict)
+    build_metadata: Dict[str, Any] = Field(default_factory=dict)
+    forward_outcomes: Dict[str, AxiomHistoricalOutcome] = Field(default_factory=dict)
+    evidence_backed_deployability: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AxiomCalibrationArtifact(BaseModel):
+    calibration_version: str
+    framework_version: str
+    as_of_date: Optional[str] = None
+    horizon_label: str
+    status: str
+    sample_count: int = 0
+    matured_count: int = 0
+    dau_bucket_summary: Dict[str, Any] = Field(default_factory=dict)
+    validated_edge_curve: Dict[str, Any] = Field(default_factory=dict)
+    regime_outcome_summary: List[Dict[str, Any]] = Field(default_factory=list)
+    trade_family_outcome_summary: List[Dict[str, Any]] = Field(default_factory=list)
+    deployability_tier_outcome_summary: List[Dict[str, Any]] = Field(default_factory=list)
+    engine_conditioned_outcome_summary: List[Dict[str, Any]] = Field(default_factory=list)
+    evidence_supportive_for_live: bool = False
+    evidence_supportive_for_paper: bool = False
+    summary: str
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AxiomPortfolioGovernanceArtifact(BaseModel):
+    governance_version: str
+    symbol: str
+    as_of_date: str
+    status: str
+    base_deployability_tier: str
+    evidence_backed_deployability_tier: str
+    portfolio_rank_score: float
+    overlap_penalty: float
+    fragility_penalty: float
+    liquidity_penalty: float
+    research_penalty: float
+    final_size_band: str
+    portfolio_fit_label: str
+    monitoring_triggers: List[str] = Field(default_factory=list)
+    downgrade_triggers: List[str] = Field(default_factory=list)
+    evidence_summary: str
+    rationale: str

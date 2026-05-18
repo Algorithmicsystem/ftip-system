@@ -426,8 +426,17 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "axiom",
         "axiom_summary",
         "axiom_artifact_id",
+        "axiom_history_artifact_id",
+        "axiom_calibration_artifact_id",
+        "axiom_portfolio_governance_artifact_id",
         "axiom_deployability_tier",
         "axiom_validated_edge",
+        "axiom_historical_evidence",
+        "axiom_calibration_summary",
+        "axiom_portfolio_governance",
+        "axiom_evidence_backed_deployability_tier",
+        "axiom_portfolio_fit_label",
+        "axiom_portfolio_rank_score",
         "proprietary_scores",
         "factor_groups",
         "regime_intelligence",
@@ -552,6 +561,12 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["axiom"]["framework_version"] == "axiom50_phase2_v1"
     assert data["axiom_deployability_tier"]
     assert data["axiom_deployable_alpha_utility"] is not None
+    assert data["axiom_historical_evidence"]["history_horizon_label"] == "21d"
+    assert data["axiom_calibration_summary"]["horizon_label"] == "21d"
+    assert data["axiom_portfolio_governance"]["symbol"] == "NVDA"
+    assert data["axiom_evidence_backed_deployability_tier"]
+    assert data["axiom_portfolio_fit_label"]
+    assert data["axiom_portfolio_rank_score"] is not None
     assert data["axiom"]["engine_scores"]["research_integrity"]["score"] is not None
     assert data["axiom"]["engine_scores"]["liquidity_convexity"]["score"] is not None
     assert set(data["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
@@ -565,6 +580,64 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["operational_guardrails"]["operational_guardrails_version"]
     assert data["active_analysis"]["system_health_status"]
     assert data["overall_analysis"]
+
+
+def test_assistant_axiom_phase3_routes(monkeypatch):
+    from api.assistant import service
+
+    monkeypatch.setattr(
+        service,
+        "run_axiom_replay_service",
+        lambda *_args, **_kwargs: {
+            "record_count": 1,
+            "records": [{"symbol": "NVDA", "as_of_date": "2024-02-01"}],
+            "calibration": {"status": "available"},
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "axiom_calibration_summary_service",
+        lambda *_args, **_kwargs: {
+            "status": "available",
+            "matured_count": 12,
+            "symbols": ["NVDA"],
+        },
+    )
+    monkeypatch.setattr(
+        service,
+        "axiom_ranked_candidates_service",
+        lambda *_args, **_kwargs: {
+            "records_found": 1,
+            "ranked_candidates": [
+                {"symbol": "NVDA", "portfolio_rank_score": 68.2, "final_size_band": "medium"}
+            ],
+        },
+    )
+
+    with TestClient(app) as client:
+        replay = client.post(
+            "/assistant/axiom/replay",
+            json={
+                "symbols": ["NVDA"],
+                "start_date": "2024-02-01",
+                "end_date": "2024-02-10",
+            },
+        )
+        calibration = client.post(
+            "/assistant/axiom/calibration",
+            json={"symbols": ["NVDA"], "as_of_date": "2024-03-01"},
+        )
+        ranked = client.post(
+            "/assistant/axiom/ranked-candidates",
+            json={"symbols": ["NVDA"], "as_of_date": "2024-03-01"},
+        )
+
+    assert replay.status_code == 200
+    assert replay.json()["record_count"] == 1
+    assert calibration.status_code == 200
+    assert calibration.json()["matured_count"] == 12
+    assert ranked.status_code == 200
+    assert ranked.json()["ranked_candidates"][0]["final_size_band"] == "medium"
 
 
 def test_assistant_analyze_surfaces_enriched_data_fabric(monkeypatch):

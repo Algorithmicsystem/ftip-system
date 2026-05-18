@@ -52,6 +52,10 @@ class AnalysisReference(BaseModel):
     axiom_deployability_tier: Optional[str] = None
     axiom_validated_edge: Optional[float] = None
     axiom_deployable_alpha_utility: Optional[float] = None
+    axiom_evidence_backed_deployability_tier: Optional[str] = None
+    axiom_portfolio_fit_label: Optional[str] = None
+    axiom_portfolio_rank_score: Optional[float] = None
+    axiom_calibration_status: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -115,6 +119,32 @@ class TopPicksRequest(BaseModel):
     horizon: str
     risk_mode: str
     limit: int = 10
+
+
+class AxiomReplayRequest(BaseModel):
+    symbols: List[str]
+    start_date: str
+    end_date: str
+    lookback: int = 252
+    persist: bool = True
+    session_id: Optional[str] = None
+
+
+class AxiomCalibrationRequest(BaseModel):
+    symbols: List[str]
+    as_of_date: str
+    horizon_label: str = "21d"
+    start_date: Optional[str] = None
+    session_id: Optional[str] = None
+
+
+class AxiomRankedCandidatesRequest(BaseModel):
+    symbols: Optional[List[str]] = None
+    as_of_date: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    current_holdings: List[str] = Field(default_factory=list)
+    session_id: Optional[str] = None
 
 
 class NarrateRequest(BaseModel):

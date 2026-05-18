@@ -1159,6 +1159,12 @@ def build_active_analysis_reference(
             "axiom_deployable_alpha_utility": report.get(
                 "axiom_deployable_alpha_utility"
             ),
+            "axiom_evidence_backed_deployability_tier": report.get(
+                "axiom_evidence_backed_deployability_tier"
+            ),
+            "axiom_portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
+            "axiom_portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
+            "axiom_calibration_status": report.get("axiom_calibration_status"),
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
             "weekly_operating_summary": report.get("weekly_operating_summary"),
@@ -2322,6 +2328,128 @@ def attach_axiom_context(
             "AXIOM-50 Phase 2 is mapped directly from the normalized bundle, the canonical core lineage, current feature-factor intelligence, strategy posture, validation context, and governance layers without creating a parallel data path.",
         ]
     )
+    return sanitize_payload(updated)
+
+
+def attach_axiom_phase3_context(
+    report: Dict[str, Any],
+    axiom: Dict[str, Any],
+    *,
+    history_record: Dict[str, Any],
+    calibration_summary: Dict[str, Any],
+    portfolio_governance: Dict[str, Any],
+    axiom_history_artifact_id: Optional[str] = None,
+    axiom_calibration_artifact_id: Optional[str] = None,
+    axiom_portfolio_governance_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    historical_evidence = sanitize_payload(axiom.get("historical_evidence") or {})
+    evidence_backed = sanitize_payload(axiom.get("evidence_backed_deployability") or {})
+    calibration = sanitize_payload(calibration_summary or {})
+    governance = sanitize_payload(portfolio_governance or {})
+    forward_outcomes = history_record.get("forward_outcomes") or {}
+    dau_bucket_summary = calibration.get("dau_bucket_summary") or {}
+    buckets = list(dau_bucket_summary.get("buckets") or [])
+    top_bucket = buckets[0] if buckets else {}
+    weakest_bucket = buckets[-1] if buckets else {}
+
+    evidence_status = str(calibration.get("status") or historical_evidence.get("status") or "insufficient_sample")
+    evidence_summary = (
+        f"AXIOM historical evidence is {evidence_status.replace('_', ' ')} with "
+        f"{calibration.get('matured_count', 0)} matured records on the {calibration.get('horizon_label', historical_evidence.get('history_horizon_label', '21d'))} horizon."
+    )
+    calibration_summary_text = (
+        f"Deployable alpha utility buckets range from {_fmt_pct(weakest_bucket.get('average_net_edge_return'), digits=2)} average net edge in the weakest matured bucket "
+        f"to {_fmt_pct(top_bucket.get('average_net_edge_return'), digits=2)} in the strongest matured bucket."
+        if buckets
+        else "Calibration evidence is still sample-constrained, so utility-bucket reliability remains provisional."
+    )
+    governance_summary = (
+        f"AXIOM portfolio governance assigns {governance.get('portfolio_fit_label', 'watchlist only').replace('_', ' ')} "
+        f"with portfolio rank { _fmt_num(governance.get('portfolio_rank_score'), digits=1, signed=False)} and final size band {str(governance.get('final_size_band') or 'none').replace('_', ' ')}."
+    )
+
+    updated["report_version"] = "2.12"
+    updated["axiom_history_artifact_id"] = axiom_history_artifact_id
+    updated["axiom_calibration_artifact_id"] = axiom_calibration_artifact_id
+    updated["axiom_portfolio_governance_artifact_id"] = (
+        axiom_portfolio_governance_artifact_id
+    )
+    updated["axiom_historical_evidence"] = historical_evidence
+    updated["axiom_history_record"] = sanitize_payload(history_record)
+    updated["axiom_calibration_summary"] = calibration
+    updated["axiom_calibration_status"] = evidence_status
+    updated["axiom_evidence_backed_deployability"] = evidence_backed
+    updated["axiom_evidence_backed_deployability_tier"] = evidence_backed.get(
+        "deployability_tier"
+    )
+    updated["axiom_portfolio_governance"] = governance
+    updated["axiom_portfolio_rank_score"] = governance.get("portfolio_rank_score")
+    updated["axiom_overlap_penalty"] = governance.get("overlap_penalty")
+    updated["axiom_fragility_penalty"] = governance.get("fragility_penalty")
+    updated["axiom_liquidity_penalty"] = governance.get("liquidity_penalty")
+    updated["axiom_research_penalty"] = governance.get("research_penalty")
+    updated["axiom_portfolio_fit_label"] = governance.get("portfolio_fit_label")
+    updated["axiom_final_size_band"] = governance.get("final_size_band")
+    updated["axiom_evidence_summary"] = evidence_summary
+    updated["axiom_calibration_summary_text"] = calibration_summary_text
+    updated["axiom_portfolio_governance_summary"] = governance_summary
+    updated["axiom_forward_outcomes"] = forward_outcomes
+
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            evidence_summary,
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            calibration_summary_text,
+            evidence_backed.get("evidence_summary"),
+        ]
+    )
+    updated["deployment_permission_analysis"] = _join_sentences(
+        [
+            updated.get("deployment_permission_analysis"),
+            evidence_backed.get("evidence_summary"),
+            f"Evidence-backed deployability tier is {str(evidence_backed.get('deployability_tier') or 'unknown').replace('_', ' ')} with size band {str(evidence_backed.get('size_band') or 'none').replace('_', ' ')}.",
+        ]
+    )
+    updated["portfolio_fit_analysis"] = _join_sentences(
+        [
+            updated.get("portfolio_fit_analysis"),
+            governance_summary,
+            governance.get("rationale"),
+        ]
+    )
+    updated["evaluation_research_analysis"] = _join_sentences(
+        [
+            updated.get("evaluation_research_analysis"),
+            evidence_summary,
+            calibration_summary_text,
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "AXIOM Phase 3 stores daily score history, calibration snapshots, and portfolio-governance evidence trails using point-in-time replay discipline without silently substituting present-day overlays for historical dates.",
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["axiom_historical_evidence_summary"] = [
+        "axiom.historical_evidence",
+        "axiom_history_record.forward_outcomes",
+    ]
+    evidence_map["axiom_calibration_summary_text"] = [
+        "axiom.calibration_summary",
+        "axiom.calibration_summary.deployable_alpha_utility_bucket_summary",
+    ]
+    evidence_map["axiom_portfolio_governance_summary"] = [
+        "axiom.portfolio_governance",
+        "axiom.evidence_backed_deployability",
+    ]
+    updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)
 
 
