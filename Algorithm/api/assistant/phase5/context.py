@@ -112,6 +112,9 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         or "",
         "source_governance_summary": report.get("source_governance_summary") or "",
         "buyer_diligence_summary": report.get("buyer_diligence_summary") or "",
+        "axiom_summary": report.get("axiom_summary") or "",
+        "axiom_deployability_analysis": report.get("deployment_permission_analysis")
+        or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",
@@ -255,6 +258,20 @@ def build_narrator_context(
             "commercialization_risk_score"
         )
         or report.get("commercialization_risk_score"),
+        "axiom_framework_version": active_analysis.get("axiom_framework_version")
+        or report.get("axiom_framework_version"),
+        "axiom_regime_label": active_analysis.get("axiom_regime_label")
+        or report.get("axiom_regime_label"),
+        "axiom_trade_family": active_analysis.get("axiom_trade_family")
+        or report.get("axiom_trade_family"),
+        "axiom_deployability_tier": active_analysis.get("axiom_deployability_tier")
+        or report.get("axiom_deployability_tier"),
+        "axiom_validated_edge": active_analysis.get("axiom_validated_edge")
+        or report.get("axiom_validated_edge"),
+        "axiom_deployable_alpha_utility": active_analysis.get(
+            "axiom_deployable_alpha_utility"
+        )
+        or report.get("axiom_deployable_alpha_utility"),
         "operating_workflow_version": active_analysis.get("operating_workflow_version")
         or report.get("operating_workflow_version"),
         "daily_operating_summary": active_analysis.get("daily_operating_summary")
@@ -363,6 +380,20 @@ def build_narrator_context(
             "gated_domains": _compact_list(report.get("degraded_due_to_profile") or []),
             "disallowed_sources": _compact_list(report.get("disallowed_sources") or []),
         },
+        "axiom_snapshot": {
+            "framework_version": report.get("axiom_framework_version"),
+            "regime_label": report.get("axiom_regime_label"),
+            "trade_family": report.get("axiom_trade_family"),
+            "deployability_tier": report.get("axiom_deployability_tier"),
+            "validated_edge": report.get("axiom_validated_edge"),
+            "deployable_alpha_utility": report.get("axiom_deployable_alpha_utility"),
+            "gross_opportunity": report.get("axiom_gross_opportunity"),
+            "friction_burden": report.get("axiom_friction_burden"),
+            "strongest_engine": ((report.get("axiom_explanation") or {}).get("strongest_engine")),
+            "weakest_engine": ((report.get("axiom_explanation") or {}).get("weakest_engine")),
+            "size_band_recommendation": report.get("axiom_size_band_recommendation"),
+            "summary": report.get("axiom_summary"),
+        },
         "operating_workflow_snapshot": {
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
@@ -430,6 +461,7 @@ def build_narrator_context(
             ],
             "source_governance_summary": sections["source_governance_summary"],
             "buyer_diligence_summary": sections["buyer_diligence_summary"],
+            "axiom_summary": sections["axiom_summary"],
             "daily_operating_summary": sections["daily_operating_summary"],
             "weekly_operating_summary": sections["weekly_operating_summary"],
             "monthly_operating_summary": sections["monthly_operating_summary"],

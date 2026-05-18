@@ -39,6 +39,7 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
     return " ".join(
         [
             f"Analysis report for {report.get('symbol', '?')} as of {report.get('as_of_date', '?')}.",
+            f"AXIOM: {report.get('axiom_summary', 'n/a')}.",
             f"Signal: {(report.get('signal') or {}).get('action', 'n/a')} -> {strategy.get('final_signal', 'n/a')}.",
             f"Score: {(report.get('signal') or {}).get('score', 'n/a')}.",
             f"Confidence: {strategy.get('confidence', (report.get('signal') or {}).get('confidence', 'n/a'))}.",
@@ -80,6 +81,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "continuous_learning": report.get("continuous_learning"),
         "operational_guardrails": report.get("operational_guardrails"),
         "source_governance": report.get("source_governance"),
+        "axiom": report.get("axiom"),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -127,6 +129,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         ),
         "source_governance_summary": report.get("source_governance_summary"),
         "buyer_diligence_summary": report.get("buyer_diligence_summary"),
+        "axiom_summary": report.get("axiom_summary"),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
         "monthly_operating_summary": report.get("monthly_operating_summary"),
@@ -183,7 +186,8 @@ def build_grounded_chat_messages(
                 "You are answering from a stored FTIP analysis report. Explain the system signal, drivers, strengths, weaknesses, "
                 "risk/quality caveats, and strategy logic implied by that report. If asked whether the user should buy or sell, "
                 "translate the report into the system's stance while clearly stating that this is not personalized financial advice. "
-                "Prefer referencing the report's signal summary, overall analysis, strategy view, risks/weaknesses/invalidators, and evidence provenance sections."
+                "Prefer referencing AXIOM first when it is present, then use the report's signal summary, overall analysis, strategy view, "
+                "risks/weaknesses/invalidators, and evidence provenance sections to explain the same decision."
             ),
         },
         {"role": "system", "content": _grounding_block(report, context)},

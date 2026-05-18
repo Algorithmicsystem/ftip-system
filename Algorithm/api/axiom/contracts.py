@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseModel, Field
+
+
+ENGINE_KEYS = (
+    "fundamental_reality",
+    "state_pricing",
+    "behavioral_distortion",
+    "flow_transmission",
+    "liquidity_convexity",
+    "critical_fragility",
+    "research_integrity",
+)
+
+
+class FundamentalCandidateInputs(BaseModel):
+    latest_close: Optional[float] = None
+    analyst_target_price: Optional[float] = None
+    pe_ratio: Optional[float] = None
+    peg_ratio: Optional[float] = None
+    market_cap: Optional[float] = None
+    revenue_growth_yoy: Optional[float] = None
+    gross_margin: Optional[float] = None
+    operating_margin: Optional[float] = None
+    net_margin: Optional[float] = None
+    return_on_assets: Optional[float] = None
+    return_on_equity: Optional[float] = None
+    positive_fcf_ratio: Optional[float] = None
+    free_cash_flow: Optional[float] = None
+    free_cash_flow_margin: Optional[float] = None
+    current_ratio: Optional[float] = None
+    cash_ratio: Optional[float] = None
+    debt_to_equity: Optional[float] = None
+    liabilities_to_assets: Optional[float] = None
+    profitability_strength: Optional[float] = None
+    balance_sheet_resilience: Optional[float] = None
+    cash_flow_durability: Optional[float] = None
+    filing_recency_days: Optional[float] = None
+    reporting_completeness_score: Optional[float] = None
+    reporting_quality_proxy: Optional[float] = None
+    coverage_score: float = 0.0
+    provider_confidence: float = 0.0
+    statement_coverage_flags: Dict[str, bool] = Field(default_factory=dict)
+    strengths: List[str] = Field(default_factory=list)
+    weaknesses: List[str] = Field(default_factory=list)
+    coverage_caveats: List[str] = Field(default_factory=list)
+    fundamental_durability_score: Optional[float] = None
+
+
+class FragilityCandidateInputs(BaseModel):
+    realized_vol_21d: Optional[float] = None
+    realized_vol_63d: Optional[float] = None
+    vol_of_vol_proxy: Optional[float] = None
+    gap_pct: Optional[float] = None
+    gap_instability_10d: Optional[float] = None
+    abs_gap_mean_10d: Optional[float] = None
+    return_dispersion_21d: Optional[float] = None
+    return_dispersion_63d: Optional[float] = None
+    downside_asymmetry_21d: Optional[float] = None
+    downside_asymmetry_63d: Optional[float] = None
+    maxdd_21d: Optional[float] = None
+    maxdd_63d: Optional[float] = None
+    maxdd_126d: Optional[float] = None
+    event_overhang_score: Optional[float] = None
+    event_uncertainty_score: Optional[float] = None
+    event_risk_classification: Optional[str] = None
+    implementation_fragility_score: Optional[float] = None
+    liquidity_quality_score: Optional[float] = None
+    tradability_caution_score: Optional[float] = None
+    overnight_gap_risk_score: Optional[float] = None
+    friction_proxy_score: Optional[float] = None
+    execution_cleanliness_score: Optional[float] = None
+    breadth_confirmation_score: Optional[float] = None
+    cross_asset_conflict_score: Optional[float] = None
+    market_stress_score: Optional[float] = None
+    instability_score: Optional[float] = None
+    volatility_stress_score: Optional[float] = None
+    drawdown_sensitivity_score: Optional[float] = None
+    anomaly_pressure_score: Optional[float] = None
+    clean_setup_score: Optional[float] = None
+    noisy_setup_score: Optional[float] = None
+    narrative_crowding_score: Optional[float] = None
+    signal_fragility_score: Optional[float] = None
+    regime_transition_score: Optional[float] = None
+    regime_instability_score: Optional[float] = None
+    coverage_score: float = 0.0
+    provider_confidence: float = 0.0
+    suppression_flags: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
+class AxiomSupportContext(BaseModel):
+    signal_action: Optional[str] = None
+    signal_score: Optional[float] = None
+    signal_confidence: Optional[float] = None
+    confidence_score: Optional[float] = None
+    actionability_score: Optional[float] = None
+    ret_21d: Optional[float] = None
+    mom_vol_adj_21d: Optional[float] = None
+    regime_label: Optional[str] = None
+    opportunity_quality_score: Optional[float] = None
+    cross_domain_conviction_score: Optional[float] = None
+    market_structure_integrity_score: Optional[float] = None
+    macro_alignment_score: Optional[float] = None
+    regime_stability_score: Optional[float] = None
+    fundamental_durability_score: Optional[float] = None
+    narrative_crowding_index: Optional[float] = None
+    signal_fragility_index: Optional[float] = None
+    domain_agreement_score: Optional[float] = None
+    domain_conflict_score: Optional[float] = None
+    trend_quality_score: Optional[float] = None
+    momentum_consistency_score: Optional[float] = None
+    breakout_follow_through_score: Optional[float] = None
+    price_volume_alignment_score: Optional[float] = None
+    directional_persistence_score: Optional[float] = None
+    reversal_pressure_score: Optional[float] = None
+    trend_exhaustion_score: Optional[float] = None
+    benchmark_relative_strength_score: Optional[float] = None
+    sector_relative_strength_score: Optional[float] = None
+    sector_confirmation_score: Optional[float] = None
+    relative_context_quality_score: Optional[float] = None
+    idiosyncratic_strength_score: Optional[float] = None
+    idiosyncratic_weakness_score: Optional[float] = None
+    macro_growth_alignment_score: Optional[float] = None
+    risk_on_alignment_score: Optional[float] = None
+    macro_regime_consistency_score: Optional[float] = None
+    macro_conflict_score: Optional[float] = None
+    macro_fragility_score: Optional[float] = None
+    rates_sensitivity_proxy: Optional[float] = None
+    inflation_stress_proxy: Optional[float] = None
+    sentiment_direction_score: Optional[float] = None
+    sentiment_level_score: Optional[float] = None
+    sentiment_trend_score: Optional[float] = None
+    attention_intensity_score: Optional[float] = None
+    novelty_score: Optional[float] = None
+    repetition_score: Optional[float] = None
+    narrative_concentration_score: Optional[float] = None
+    contradiction_score: Optional[float] = None
+    hype_to_price_divergence_score: Optional[float] = None
+    positive_news_weak_price_divergence: Optional[float] = None
+    negative_news_resilient_price_divergence: Optional[float] = None
+    event_pressure_score: Optional[float] = None
+    strategy_posture: Optional[str] = None
+    conviction_tier: Optional[str] = None
+    fragility_tier: Optional[str] = None
+    preferred_posture: Optional[str] = None
+    signal_cleanliness: Optional[str] = None
+    urgency_level: Optional[str] = None
+    patience_level: Optional[str] = None
+    deployment_permission: Optional[str] = None
+    trust_tier: Optional[str] = None
+    live_readiness_score: Optional[float] = None
+    model_readiness_status: Optional[str] = None
+    evaluation_consistency_score: Optional[float] = None
+    confidence_reliability_score: Optional[float] = None
+    ranking_monotonicity: Optional[str] = None
+    calibration_health_status: Optional[str] = None
+    matured_prediction_count: Optional[float] = None
+    hit_rate: Optional[float] = None
+    actionable_vs_watchlist_return_spread: Optional[float] = None
+    validation_net_edge: Optional[float] = None
+    walkforward_window_count: Optional[float] = None
+    readiness_bucket_quality: Optional[float] = None
+    suppression_effect_edge_spread: Optional[float] = None
+    model_drift_score: Optional[float] = None
+    system_health_status: Optional[str] = None
+    current_operating_mode: Optional[str] = None
+    pause_required: Optional[bool] = None
+    source_profile: Optional[str] = None
+    buyer_demo_suitability: Optional[str] = None
+    commercialization_risk_score: Optional[float] = None
+    portfolio_candidate_score: Optional[float] = None
+    portfolio_fit_quality: Optional[float] = None
+    execution_quality_score: Optional[float] = None
+    size_band: Optional[str] = None
+    weight_band: Optional[str] = None
+    risk_budget_band: Optional[str] = None
+    quality_score: Optional[float] = None
+    warnings: List[str] = Field(default_factory=list)
+    uncertainty_notes: List[str] = Field(default_factory=list)
+    confirmation_triggers: List[str] = Field(default_factory=list)
+    deterioration_triggers: List[str] = Field(default_factory=list)
+    invalidators: List[str] = Field(default_factory=list)
+    fragility_vetoes: List[str] = Field(default_factory=list)
+    deployment_blockers: List[str] = Field(default_factory=list)
+    monitoring_triggers: List[str] = Field(default_factory=list)
+
+
+class AxiomEngineInput(BaseModel):
+    framework_version: str
+    symbol: str
+    as_of: str
+    source_context: Dict[str, Any] = Field(default_factory=dict)
+    fundamental: FundamentalCandidateInputs = Field(
+        default_factory=FundamentalCandidateInputs
+    )
+    fragility: FragilityCandidateInputs = Field(
+        default_factory=FragilityCandidateInputs
+    )
+    support: AxiomSupportContext = Field(default_factory=AxiomSupportContext)
+    domain_coverage: Dict[str, float] = Field(default_factory=dict)
+    partial_engine_hints: Dict[str, float] = Field(default_factory=dict)
+    warnings: List[str] = Field(default_factory=list)
+
+
+class EngineScore(BaseModel):
+    score: Optional[float] = None
+    confidence: float = 0.0
+    coverage: float = 0.0
+    status: str
+    components: Dict[str, float] = Field(default_factory=dict)
+    flags: List[str] = Field(default_factory=list)
+    summary: str
+
+
+class AxiomScorecard(BaseModel):
+    gross_opportunity: float
+    friction_burden: float
+    validated_edge: float
+    deployable_alpha_utility: float
+    overall_coverage: float
+    overall_confidence: float
+    component_support: Dict[str, float] = Field(default_factory=dict)
+    summary: str
+
+
+class AxiomRegimeDecision(BaseModel):
+    regime_label: str
+    trade_family: str
+    confidence: float
+    rationale: str
+    flags: List[str] = Field(default_factory=list)
+
+
+class AxiomDeployabilityDecision(BaseModel):
+    deployability_tier: str
+    confidence: float
+    rationale: str
+    flags: List[str] = Field(default_factory=list)
+    review_required: bool = True
+    invalidation_flags: List[str] = Field(default_factory=list)
+    size_band_recommendation: str = "none"
+    monitoring_triggers: List[str] = Field(default_factory=list)
+
+
+class AxiomArtifact(BaseModel):
+    framework_version: str
+    symbol: str
+    as_of: str
+    source_context: Dict[str, Any] = Field(default_factory=dict)
+    engine_scores: Dict[str, EngineScore] = Field(default_factory=dict)
+    scorecard: AxiomScorecard
+    regime_decision: AxiomRegimeDecision
+    deployability_decision: AxiomDeployabilityDecision
+    gross_opportunity: float
+    friction_burden: float
+    validated_edge: float
+    deployable_alpha_utility: float
+    regime_label: str
+    trade_family: str
+    deployability_tier: str
+    invalidation_flags: List[str] = Field(default_factory=list)
+    explanation: Dict[str, Any] = Field(default_factory=dict)
+    coverage_summary: Dict[str, Any] = Field(default_factory=dict)
+    diagnostics: Dict[str, Any] = Field(default_factory=dict)

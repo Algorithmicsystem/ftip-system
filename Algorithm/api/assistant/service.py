@@ -9,6 +9,7 @@ from openai import APIError, APIStatusError, OpenAI
 from openai.types.chat import ChatCompletionMessageParam
 
 from api import config
+from api.axiom import AXIOM_ARTIFACT_KIND, build_axiom_artifact
 from api.assistant import intelligence, orchestrator, prompts, reports, strategy
 from api.assistant.phase5 import engine as narrator_engine
 from api.assistant.phase5 import grounding as narrator_grounding
@@ -313,6 +314,25 @@ async def generate_analysis_report(
         readiness_artifact_id=deployment_readiness_artifact_id,
         deployment_audit_artifact_id=deployment_audit_artifact_id,
     )
+    preliminary_axiom_artifact = build_axiom_artifact(
+        normalized_bundle=data_bundle,
+        job_context=job_context,
+        feature_factor_bundle=feature_factor_bundle,
+        strategy_bundle=strategy_bundle,
+        report_context=report,
+    )
+    report = reports.attach_axiom_context(
+        report,
+        preliminary_axiom_artifact,
+        prominent=False,
+    )
+    store.update_artifact(report_id, report)
+    enriched_prediction_record = build_prediction_record(
+        report,
+        report_id=report_id,
+        session_id=sid,
+    )
+    store.update_artifact(prediction_record_id, enriched_prediction_record)
     portfolio_construction = build_portfolio_construction_artifact(
         current_report=report,
         current_report_id=report_id,
@@ -360,12 +380,6 @@ async def generate_analysis_report(
         continuous_learning,
         learning_artifact_id=continuous_learning_artifact_id,
     )
-    enriched_prediction_record = build_prediction_record(
-        report,
-        report_id=report_id,
-        session_id=sid,
-    )
-    store.update_artifact(prediction_record_id, enriched_prediction_record)
     prediction_artifacts = store.list_artifacts(kind=PREDICTION_RECORD_KIND, limit=750)
     canonical_validation = build_validation_artifact(
         records=[artifact.get("payload") or {} for artifact in prediction_artifacts],
@@ -445,6 +459,26 @@ async def generate_analysis_report(
         operating_workflow,
         operating_workflow_artifact_id=operating_workflow_artifact_id,
     )
+    axiom_artifact = build_axiom_artifact(
+        normalized_bundle=data_bundle,
+        job_context=job_context,
+        feature_factor_bundle=feature_factor_bundle,
+        strategy_bundle=strategy_bundle,
+        report_context=report,
+    )
+    axiom_artifact_id = store.save_artifact(sid, AXIOM_ARTIFACT_KIND, axiom_artifact)
+    report = reports.attach_axiom_context(
+        report,
+        axiom_artifact,
+        axiom_artifact_id=axiom_artifact_id,
+        prominent=True,
+    )
+    final_prediction_record = build_prediction_record(
+        report,
+        report_id=report_id,
+        session_id=sid,
+    )
+    store.update_artifact(prediction_record_id, final_prediction_record)
     store.update_artifact(report_id, report)
     active_analysis = reports.build_active_analysis_reference(
         report, session_id=sid, report_id=report_id
@@ -457,6 +491,17 @@ async def generate_analysis_report(
                 "job_id": job_context.get("job_id"),
                 "trace_id": job_context.get("trace_id"),
                 "artifact_id": job_context_id,
+            },
+            "axiom": {
+                "artifact_id": axiom_artifact_id,
+                "framework_version": report.get("axiom_framework_version"),
+                "regime_label": report.get("axiom_regime_label"),
+                "trade_family": report.get("axiom_trade_family"),
+                "deployability_tier": report.get("axiom_deployability_tier"),
+                "validated_edge": report.get("axiom_validated_edge"),
+                "deployable_alpha_utility": report.get(
+                    "axiom_deployable_alpha_utility"
+                ),
             },
             "deployment_readiness": {
                 "artifact_id": deployment_readiness_artifact_id,
@@ -541,6 +586,7 @@ async def generate_analysis_report(
             "data_bundle_artifact_id": data_bundle_id,
             "feature_factor_artifact_id": factor_bundle_id,
             "strategy_artifact_id": strategy_id,
+            "axiom_artifact_id": axiom_artifact_id,
             "prediction_record_artifact_id": prediction_record_id,
             "evaluation_artifact_id": evaluation_artifact_id,
             "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
@@ -567,6 +613,7 @@ async def generate_analysis_report(
         "data_bundle_artifact_id": data_bundle_id,
         "feature_factor_artifact_id": factor_bundle_id,
         "strategy_artifact_id": strategy_id,
+        "axiom_artifact_id": axiom_artifact_id,
         "prediction_record_artifact_id": prediction_record_id,
         "evaluation_artifact_id": evaluation_artifact_id,
         "deployment_readiness_artifact_id": deployment_readiness_artifact_id,

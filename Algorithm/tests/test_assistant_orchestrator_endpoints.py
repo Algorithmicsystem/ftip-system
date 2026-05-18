@@ -423,6 +423,11 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "data_bundle",
         "domain_availability",
         "feature_factor_bundle",
+        "axiom",
+        "axiom_summary",
+        "axiom_artifact_id",
+        "axiom_deployability_tier",
+        "axiom_validated_edge",
         "proprietary_scores",
         "factor_groups",
         "regime_intelligence",
@@ -544,6 +549,11 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["signal"]["action"] == "BUY"
     assert data["active_analysis"]["symbol"] == "NVDA"
     assert data["strategy"]["final_signal"] in {"BUY", "HOLD", "SELL"}
+    assert data["axiom"]["framework_version"] == "axiom50_phase2_v1"
+    assert data["axiom_deployability_tier"]
+    assert data["axiom_deployable_alpha_utility"] is not None
+    assert data["axiom"]["engine_scores"]["research_integrity"]["score"] is not None
+    assert data["axiom"]["engine_scores"]["liquidity_convexity"]["score"] is not None
     assert set(data["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
     assert data["strategy"]["execution_posture"]["preferred_posture"]
     assert data["deployment_readiness"]["deployment_readiness_version"]

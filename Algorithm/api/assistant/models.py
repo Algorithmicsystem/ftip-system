@@ -46,6 +46,12 @@ class AnalysisReference(BaseModel):
     setup_archetype: Optional[str] = None
     research_version: Optional[str] = None
     learning_priority: Optional[str] = None
+    axiom_framework_version: Optional[str] = None
+    axiom_regime_label: Optional[str] = None
+    axiom_trade_family: Optional[str] = None
+    axiom_deployability_tier: Optional[str] = None
+    axiom_validated_edge: Optional[float] = None
+    axiom_deployable_alpha_utility: Optional[float] = None
 
 
 class ChatResponse(BaseModel):

@@ -1,3 +1,4 @@
+from api.axiom import build_axiom_artifact
 from api.assistant import reports
 from api.assistant.phase5.context import build_narrator_context
 from api.assistant.phase5.grounding import resolve_active_report
@@ -491,7 +492,7 @@ def _sample_report(symbol: str) -> dict:
         },
         source_governance_artifact_id="source-governance-1",
     )
-    return reports.attach_operating_workflow_context(
+    report = reports.attach_operating_workflow_context(
         report,
         {
             "operating_workflow_version": "phase14_operating_workflow_v1",
@@ -515,6 +516,18 @@ def _sample_report(symbol: str) -> dict:
             "operator_runbook": {"daily_workflow": ["Review today’s candidate triage first."]},
         },
         operating_workflow_artifact_id="operating-workflow-1",
+    )
+    axiom = build_axiom_artifact(
+        normalized_bundle=report.get("data_bundle") or {},
+        job_context={"symbol": symbol, "as_of_date": "2024-01-02"},
+        feature_factor_bundle=report.get("feature_factor_bundle") or {},
+        strategy_bundle=report.get("strategy") or {},
+        report_context=report,
+    )
+    return reports.attach_axiom_context(
+        report,
+        axiom,
+        axiom_artifact_id="axiom-1",
     )
 
 
@@ -555,6 +568,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     assert operator_route["intent"] == "operator_workflow"
     assert operator_route["answer_mode"] == "operator"
 
+    axiom_route = route_question("Why is the deployability tier only paper trade only and which engine is weakest?")
+    assert axiom_route["intent"] == "axiom_primary"
+    assert axiom_route["answer_mode"] == "strategist"
+
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     report = _sample_report("NVDA")
@@ -594,6 +611,8 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["source_governance_snapshot"]["commercial_blockers"]
     assert narrator_context["operating_workflow_snapshot"]["daily_operating_summary"]
     assert narrator_context["operating_workflow_snapshot"]["postmortem_summary"]
+    assert narrator_context["axiom_snapshot"]["deployability_tier"]
+    assert narrator_context["axiom_snapshot"]["strongest_engine"]
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
@@ -676,6 +695,26 @@ def test_phase5_selects_operator_workflow_sections_for_workflow_questions() -> N
     assert "daily_operating_summary" in narrator_context["selected_sections"]
     assert "trust_maintenance_summary" in narrator_context["selected_sections"]
     assert narrator_context["operating_workflow_snapshot"]["runbook_summary"]
+
+
+def test_phase5_selects_axiom_sections_for_axiom_questions() -> None:
+    report = _sample_report("NVDA")
+    route = route_question(
+        "Why is the deployability tier only paper trade only and which AXIOM engine is weakest?"
+    )
+    narrator_context = build_narrator_context(
+        report,
+        active_analysis=reports.build_active_analysis_reference(report),
+        route=route,
+        user_message="Why is the deployability tier only paper trade only and which AXIOM engine is weakest?",
+        caller_context=None,
+    )
+
+    assert narrator_context["question_intent"] == "axiom_primary"
+    assert "axiom_summary" in narrator_context["selected_sections"]
+    assert "strategy_view" in narrator_context["selected_sections"]
+    assert narrator_context["axiom_snapshot"]["deployability_tier"]
+    assert narrator_context["axiom_snapshot"]["weakest_engine"]
 
 
 def test_phase5_preserves_session_symbol_continuity_for_chat_followups() -> None:

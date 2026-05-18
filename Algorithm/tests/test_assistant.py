@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
+from api.axiom import AXIOM_ARTIFACT_KIND
 from api.assistant import intelligence, reports, service, strategy
 from api.assistant.phase8 import (
     DEPLOYMENT_AUDIT_RECORD_KIND,
@@ -464,6 +465,20 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["feature_factor_bundle"]["composite_intelligence"]
     assert result["strategy"]["final_signal"]
     assert result["strategy"]["strategy_posture"]
+    assert result["axiom_artifact_id"]
+    assert result["axiom"]["framework_version"]
+    assert result["axiom_summary"]
+    assert result["axiom_deployability_tier"]
+    assert result["axiom_validated_edge"] is not None
+    assert result["axiom_deployable_alpha_utility"] is not None
+    assert result["axiom"]["engine_scores"]["state_pricing"]["score"] is not None
+    assert result["axiom"]["engine_scores"]["behavioral_distortion"]["score"] is not None
+    assert result["axiom"]["engine_scores"]["flow_transmission"]["score"] is not None
+    assert result["axiom"]["engine_scores"]["liquidity_convexity"]["score"] is not None
+    assert result["axiom"]["engine_scores"]["research_integrity"]["score"] is not None
+    assert result["axiom_explanation"]["strongest_engine"]
+    assert result["axiom_explanation"]["weakest_engine"]
+    assert result["axiom_size_band_recommendation"] in {"large", "medium", "small", "none"}
     assert set(result["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
     assert result["strategy"]["execution_posture"]["preferred_posture"]
     assert result["prediction_record_artifact_id"]
@@ -543,8 +558,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert session["metadata"]["active_analysis"]["setup_archetype"]
     assert session["metadata"]["active_analysis"]["system_health_status"]
     assert session["metadata"]["active_analysis"]["current_operating_mode"]
+    assert session["metadata"]["active_analysis"]["axiom_deployability_tier"]
+    assert session["metadata"]["active_analysis"]["axiom_deployable_alpha_utility"] is not None
     assert session["metadata"]["active_analysis"]["daily_operating_summary"]
     assert session["metadata"]["active_analysis"]["weekly_operating_summary"]
+    assert session["metadata"]["axiom"]["artifact_id"] == result["axiom_artifact_id"]
+    assert session["metadata"]["axiom"]["deployable_alpha_utility"] == result["axiom_deployable_alpha_utility"]
     assert session["metadata"]["deployment_readiness"]["artifact_id"] == result["deployment_readiness_artifact_id"]
     assert (
         session["metadata"]["portfolio_construction"]["artifact_id"]
@@ -580,6 +599,7 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["report_id"] == result["report_id"]
     assert report["signal_summary"] == result["signal_summary"]
     assert report["overall_analysis"] == result["overall_analysis"]
+    assert report["axiom"]
     assert report["evaluation"]
     assert report["deployment_readiness"]
     assert report["portfolio_construction"]
@@ -590,6 +610,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert report["source_governance"]
     assert report["operating_workflow"]
     assert report["live_use_audit_snapshot"]
+    assert (
+        store.get_latest_artifact(
+            kind=AXIOM_ARTIFACT_KIND, session_id=result["session_id"]
+        )
+        is not None
+    )
     assert (
         store.get_latest_artifact(
             kind=intelligence.ANALYSIS_JOB_KIND, session_id=result["session_id"]

@@ -157,6 +157,41 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
             "Do breadth and cross-asset context actually support the move?",
         ),
     },
+    "axiom_primary": {
+        "keywords": (
+            "axiom",
+            "deployability tier",
+            "trade family",
+            "behavioral continuation",
+            "fundamental convergence",
+            "compensation capture",
+            "convexity opportunity",
+            "weakest engine",
+            "strongest engine",
+            "liquidity integrity",
+            "research integrity",
+            "behavioral distortion",
+            "state pricing",
+            "flow transmission",
+            "critical fragility",
+            "why is deployability",
+            "why only paper",
+        ),
+        "mode": "strategist",
+        "sections": (
+            "axiom_summary",
+            "signal_summary",
+            "strategy_view",
+            "fundamental_analysis",
+            "risk_quality_analysis",
+            "deployment_permission_analysis",
+        ),
+        "followups": (
+            "Which AXIOM engine is strongest right now?",
+            "Which AXIOM engine is weakest and why?",
+            "What is stopping this from being a live candidate?",
+        ),
+    },
     "strategy": {
         "keywords": (
             "strategy",
@@ -651,6 +686,31 @@ def route_question(message: str) -> Dict[str, Any]:
         ):
             if intent == "market_depth":
                 score += 3
+        if any(
+            phrase in text
+            for phrase in (
+                "axiom",
+                "deployability tier",
+                "trade family",
+                "weakest engine",
+                "strongest engine",
+                "paper trade only",
+                "behavioral continuation",
+                "fundamental convergence",
+                "compensation capture",
+                "convexity opportunity",
+                "state pricing",
+                "behavioral distortion",
+                "flow transmission",
+                "liquidity integrity",
+                "research integrity",
+                "critical fragility",
+                "why is deployability",
+                "why only paper",
+            )
+        ):
+            if intent == "axiom_primary":
+                score += 4
         if any(
             phrase in text
             for phrase in (

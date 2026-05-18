@@ -1151,6 +1151,14 @@ def build_active_analysis_reference(
             "commercialization_risk_score": report.get(
                 "commercialization_risk_score"
             ),
+            "axiom_framework_version": report.get("axiom_framework_version"),
+            "axiom_regime_label": report.get("axiom_regime_label"),
+            "axiom_trade_family": report.get("axiom_trade_family"),
+            "axiom_deployability_tier": report.get("axiom_deployability_tier"),
+            "axiom_validated_edge": report.get("axiom_validated_edge"),
+            "axiom_deployable_alpha_utility": report.get(
+                "axiom_deployable_alpha_utility"
+            ),
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
             "weekly_operating_summary": report.get("weekly_operating_summary"),
@@ -1941,6 +1949,26 @@ def _buyer_diligence_summary_text(source_governance: Dict[str, Any]) -> str:
     )
 
 
+def _axiom_summary_text(axiom: Dict[str, Any]) -> str:
+    explanation = axiom.get("explanation") or {}
+    summary = explanation.get("summary")
+    if summary:
+        return str(summary)
+    deployability_tier = axiom.get("deployability_tier") or "unknown"
+    regime_label = axiom.get("regime_label") or "indeterminate"
+    validated_edge = axiom.get("validated_edge")
+    gross_opportunity = axiom.get("gross_opportunity")
+    fragility = ((axiom.get("engine_scores") or {}).get("critical_fragility") or {}).get(
+        "score"
+    )
+    return _join_sentences(
+        [
+            f"AXIOM-50 sees regime {str(regime_label).replace('_', ' ')} with deployability {str(deployability_tier).replace('_', ' ')}.",
+            f"Gross opportunity is {_fmt_num(gross_opportunity, digits=1, signed=False)} / 100, critical fragility is {_fmt_num(fragility, digits=1, signed=False)} / 100, and validated edge is {_fmt_num(validated_edge, digits=1, signed=False)} / 100.",
+        ]
+    )
+
+
 def _daily_operating_summary_text(operating_workflow: Dict[str, Any]) -> str:
     return str(
         operating_workflow.get("daily_operating_summary")
@@ -2194,6 +2222,106 @@ def attach_source_governance_context(
         "source_governance.removable_source_impact",
     ]
     updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_axiom_context(
+    report: Dict[str, Any],
+    axiom: Dict[str, Any],
+    *,
+    axiom_artifact_id: Optional[str] = None,
+    prominent: bool = True,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    axiom_summary = _axiom_summary_text(axiom)
+    engine_scores = axiom.get("engine_scores") or {}
+    explanation = axiom.get("explanation") or {}
+    updated["report_version"] = "2.11"
+    updated["axiom_artifact_id"] = axiom_artifact_id
+    updated["axiom"] = axiom
+    updated["axiom_framework_version"] = axiom.get("framework_version")
+    updated["axiom_engine_scores"] = engine_scores
+    updated["axiom_scorecard"] = axiom.get("scorecard") or {}
+    updated["axiom_regime_decision"] = axiom.get("regime_decision") or {}
+    updated["axiom_deployability_decision"] = axiom.get("deployability_decision") or {}
+    updated["axiom_gross_opportunity"] = axiom.get("gross_opportunity")
+    updated["axiom_friction_burden"] = axiom.get("friction_burden")
+    updated["axiom_validated_edge"] = axiom.get("validated_edge")
+    updated["axiom_deployable_alpha_utility"] = axiom.get("deployable_alpha_utility")
+    updated["axiom_regime_label"] = axiom.get("regime_label")
+    updated["axiom_trade_family"] = axiom.get("trade_family")
+    updated["axiom_deployability_tier"] = axiom.get("deployability_tier")
+    updated["axiom_invalidation_flags"] = axiom.get("invalidation_flags") or []
+    updated["axiom_explanation"] = explanation
+    updated["axiom_coverage_summary"] = axiom.get("coverage_summary") or {}
+    updated["axiom_diagnostics"] = axiom.get("diagnostics") or {}
+    updated["axiom_strongest_engine"] = explanation.get("strongest_engine") or {}
+    updated["axiom_weakest_engine"] = explanation.get("weakest_engine") or {}
+    updated["axiom_size_band_recommendation"] = (
+        (axiom.get("deployability_decision") or {}).get("size_band_recommendation")
+    )
+    updated["axiom_monitoring_triggers"] = (
+        (axiom.get("deployability_decision") or {}).get("monitoring_triggers") or []
+    )
+    updated["axiom_summary"] = axiom_summary
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["axiom_summary"] = [
+        "axiom.engine_scores",
+        "axiom.scorecard",
+        "axiom.regime_decision",
+        "axiom.deployability_decision",
+    ]
+    updated["evidence_map"] = evidence_map
+    if not prominent:
+        return sanitize_payload(updated)
+
+    updated["signal_summary"] = _join_sentences(
+        [
+            updated.get("signal_summary"),
+            f"AXIOM regime is {str(axiom.get('regime_label') or 'indeterminate').replace('_', ' ')}, trade family is {str(axiom.get('trade_family') or 'none').replace('_', ' ')}, and deployability is {str(axiom.get('deployability_tier') or 'unknown').replace('_', ' ')}.",
+        ]
+    )
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            axiom_summary,
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            f"AXIOM deployable alpha utility is {_fmt_num(axiom.get('deployable_alpha_utility'), digits=1, signed=False)} / 100 with size guidance {str(updated.get('axiom_size_band_recommendation') or 'none').replace('_', ' ')}.",
+            explanation.get("deployability_rationale"),
+        ]
+    )
+    updated["fundamental_analysis"] = _join_sentences(
+        [
+            updated.get("fundamental_analysis"),
+            f"AXIOM Fundamental Reality is {_fmt_num(((engine_scores.get('fundamental_reality') or {}).get('score')), digits=1, signed=False)} / 100, and State Pricing is {_fmt_num(((engine_scores.get('state_pricing') or {}).get('score')), digits=1, signed=False)} / 100."
+            if engine_scores.get("fundamental_reality")
+            else None,
+        ]
+    )
+    updated["risk_quality_analysis"] = _join_sentences(
+        [
+            updated.get("risk_quality_analysis"),
+            f"AXIOM Critical Fragility is {_fmt_num(((engine_scores.get('critical_fragility') or {}).get('score')), digits=1, signed=False)} / 100, Liquidity and Convexity is {_fmt_num(((engine_scores.get('liquidity_convexity') or {}).get('score')), digits=1, signed=False)} / 100, and Research Integrity is {_fmt_num(((engine_scores.get('research_integrity') or {}).get('score')), digits=1, signed=False)} / 100."
+            if engine_scores.get("critical_fragility")
+            else None,
+        ]
+    )
+    updated["deployment_permission_analysis"] = _join_sentences(
+        [
+            updated.get("deployment_permission_analysis"),
+            explanation.get("deployability_rationale"),
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            "AXIOM-50 Phase 2 is mapped directly from the normalized bundle, the canonical core lineage, current feature-factor intelligence, strategy posture, validation context, and governance layers without creating a parallel data path.",
+        ]
+    )
     return sanitize_payload(updated)
 
 

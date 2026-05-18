@@ -137,7 +137,9 @@ def build_candidate_snapshot(
         or "unknown"
     )
     regime_label = (
-        (report.get("regime_intelligence") or {}).get("regime_label")
+        report.get("axiom_regime_label")
+        or (report.get("axiom_regime_decision") or {}).get("regime_label")
+        or (report.get("regime_intelligence") or {}).get("regime_label")
         or report.get("market_regime")
         or (report.get("key_features") or {}).get("regime_label")
         or "unknown"
@@ -154,6 +156,8 @@ def build_candidate_snapshot(
         if isinstance(primary_fit, str)
         else "unknown"
     )
+    axiom = report.get("axiom") or {}
+    axiom_engines = axiom.get("engine_scores") or {}
 
     return {
         "report_id": report_id or report.get("report_id"),
@@ -205,6 +209,35 @@ def build_candidate_snapshot(
             proprietary_scores.get("Narrative Crowding Index")
         )
         or 0.0,
+        "axiom_framework_version": report.get("axiom_framework_version")
+        or axiom.get("framework_version"),
+        "axiom_regime_label": report.get("axiom_regime_label") or axiom.get("regime_label"),
+        "axiom_trade_family": report.get("axiom_trade_family") or axiom.get("trade_family"),
+        "axiom_deployability_tier": report.get("axiom_deployability_tier")
+        or axiom.get("deployability_tier"),
+        "axiom_gross_opportunity": safe_float(report.get("axiom_gross_opportunity"))
+        or safe_float(axiom.get("gross_opportunity"))
+        or 0.0,
+        "axiom_friction_burden": safe_float(report.get("axiom_friction_burden"))
+        or safe_float(axiom.get("friction_burden"))
+        or 0.0,
+        "axiom_validated_edge": safe_float(report.get("axiom_validated_edge"))
+        or safe_float(axiom.get("validated_edge"))
+        or 0.0,
+        "axiom_deployable_alpha_utility": safe_float(
+            report.get("axiom_deployable_alpha_utility")
+        )
+        or safe_float(axiom.get("deployable_alpha_utility"))
+        or 0.0,
+        "axiom_critical_fragility_score": safe_float(
+            ((axiom_engines.get("critical_fragility") or {}).get("score"))
+        ),
+        "axiom_liquidity_convexity_score": safe_float(
+            ((axiom_engines.get("liquidity_convexity") or {}).get("score"))
+        ),
+        "axiom_research_integrity_score": safe_float(
+            ((axiom_engines.get("research_integrity") or {}).get("score"))
+        ),
         "evaluation_reliability_score": safe_float(
             ((evaluation.get("calibration_summary") or {}).get("confidence_reliability_score"))
         )
