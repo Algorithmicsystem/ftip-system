@@ -605,7 +605,7 @@ def _sample_report(symbol: str) -> dict:
         workspace_profile=workspace_profile,
         lineage=lineage,
     )
-    return reports.attach_axiom_phase4_context(
+    report = reports.attach_axiom_phase4_context(
         report,
         axiom,
         workspace_profile=workspace_profile,
@@ -613,6 +613,102 @@ def _sample_report(symbol: str) -> dict:
         institutional_reports=report_pack,
         axiom_lineage_artifact_id="axiom-lineage-1",
         axiom_report_pack_artifact_id="axiom-report-pack-1",
+    )
+    return reports.attach_platform_context(
+        report,
+        {
+            "platform_foundation_version": "platform_phase5_foundation_v1",
+            "platform_profile": {
+                "profile_id": "hf_core",
+                "audience_type": "hedge_fund",
+                "default_workflow_template": "hedge_fund_research",
+                "default_report_profile": "ic_memo",
+                "preferred_axiom_sections": [
+                    "axiom_scorecard",
+                    "historical_evidence",
+                    "portfolio_fit",
+                ],
+                "preferred_dossier_sections": [
+                    "executive_summary",
+                    "historical_evidence",
+                    "decision_status",
+                ],
+            },
+            "workspace": {
+                "workspace_id": "workspace-1",
+                "name": "HF Core Workspace",
+                "audience_type": "hedge_fund",
+                "report_profile": "ic_memo",
+                "default_workflow_template": "hedge_fund_research",
+            },
+            "workflow": {
+                "workflow_id": "workflow-1",
+                "workflow_template_id": "hedge_fund_research",
+                "title": "NVDA Hedge Fund Research",
+                "stage": "evidence_review",
+                "status": "active",
+            },
+            "workflow_template": {
+                "template_id": "hedge_fund_research",
+                "title": "Hedge Fund Research",
+                "orientation": "trading_research",
+                "stage_sequence": [
+                    "intake",
+                    "analysis",
+                    "evidence_review",
+                    "portfolio_fit",
+                    "decision",
+                    "monitoring",
+                ],
+            },
+            "dossier": {
+                "dossier_id": "dossier-1",
+                "title": f"{symbol} Institutional Dossier",
+                "dossier_type": "coverage",
+                "latest_deployability_tier": "paper_trade_only",
+                "latest_regime_label": "fundamental_convergence",
+                "latest_trade_family": "convergence",
+                "latest_size_band": "small",
+                "evidence_status": "limited",
+                "monitoring_state": {
+                    "monitoring_triggers": [
+                        "Macro alignment deteriorates materially.",
+                        "Price confirms with stronger volume.",
+                    ],
+                    "downgrade_triggers": ["Research integrity weakens materially."],
+                    "invalidation_flags": ["event_window", "fragility_cluster"],
+                    "current_operating_mode": "shadow_only",
+                },
+                "sections": [
+                    {"section_key": "executive_summary", "title": "Executive Summary", "status": "available"},
+                    {"section_key": "historical_evidence", "title": "Historical Evidence", "status": "available"},
+                    {"section_key": "decision_status", "title": "Decision Status", "status": "available"},
+                ],
+            },
+            "analysis_link": {
+                "report_id": "report-1",
+                "session_id": "session-1",
+                "axiom_artifact_id": "axiom-1",
+                "axiom_history_artifact_id": "axiom-history-1",
+                "axiom_calibration_artifact_id": "axiom-calibration-1",
+            },
+            "summary_view": {
+                "workspace_count": 1,
+                "workflow_count": 1,
+                "dossier_count": 1,
+                "latest_axiom_linked_dossiers": [
+                    {
+                        "dossier_id": "dossier-1",
+                        "title": f"{symbol} Institutional Dossier",
+                        "symbol": symbol,
+                        "latest_deployability_tier": "paper_trade_only",
+                    }
+                ],
+                "dossiers_by_deployability_tier": {"paper_trade_only": 1},
+                "dossiers_by_regime": {"fundamental_convergence": 1},
+                "dossiers_by_workflow_stage": {"evidence_review": 1},
+            },
+        },
     )
 
 
@@ -652,6 +748,10 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     operator_route = route_question("What changed today and what should I review first this week?")
     assert operator_route["intent"] == "operator_workflow"
     assert operator_route["answer_mode"] == "operator"
+
+    platform_route = route_question("Summarize the dossier and workflow stage for this name.")
+    assert platform_route["intent"] == "operator_workflow"
+    assert platform_route["answer_mode"] == "operator"
 
     axiom_route = route_question("Why is the deployability tier only paper trade only and which engine is weakest?")
     assert axiom_route["intent"] == "axiom_primary"
@@ -706,6 +806,10 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["source_governance_snapshot"]["commercial_blockers"]
     assert narrator_context["operating_workflow_snapshot"]["daily_operating_summary"]
     assert narrator_context["operating_workflow_snapshot"]["postmortem_summary"]
+    assert narrator_context["platform_snapshot"]["workflow_title"] == "NVDA Hedge Fund Research"
+    assert narrator_context["platform_snapshot"]["dossier_title"] == "NVDA Institutional Dossier"
+    assert narrator_context["platform_snapshot"]["workflow_stage"] == "evidence_review"
+    assert narrator_context["active_context"]["platform_dossier_id"] == "dossier-1"
     assert narrator_context["axiom_snapshot"]["deployability_tier"]
     assert narrator_context["axiom_snapshot"]["strongest_engine"]
     assert narrator_context["axiom_snapshot"]["audience_type"] == "hedge_fund"
@@ -792,7 +896,10 @@ def test_phase5_selects_operator_workflow_sections_for_workflow_questions() -> N
     assert narrator_context["question_intent"] == "operator_workflow"
     assert "daily_operating_summary" in narrator_context["selected_sections"]
     assert "trust_maintenance_summary" in narrator_context["selected_sections"]
+    assert "platform_overview_summary" in narrator_context["selected_sections"]
+    assert "platform_dossier_summary" in narrator_context["selected_sections"]
     assert narrator_context["operating_workflow_snapshot"]["runbook_summary"]
+    assert narrator_context["platform_snapshot"]["overview_summary"]
 
 
 def test_phase5_selects_axiom_sections_for_axiom_questions() -> None:

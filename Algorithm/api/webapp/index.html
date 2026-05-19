@@ -165,6 +165,23 @@
             <option value="risk_committee"></option>
           </datalist>
 
+          <datalist id="assistant-platform-profile-options">
+            <option value="hf_core"></option>
+            <option value="pe_core"></option>
+            <option value="ib_core"></option>
+            <option value="fo_core"></option>
+            <option value="research_core"></option>
+          </datalist>
+
+          <datalist id="assistant-workflow-template-options">
+            <option value="hedge_fund_research"></option>
+            <option value="hedge_fund_portfolio_review"></option>
+            <option value="private_equity_diligence"></option>
+            <option value="investment_bank_advisory"></option>
+            <option value="family_office_review"></option>
+            <option value="research_watchlist"></option>
+          </datalist>
+
           <datalist id="assistant-compare-options"></datalist>
 
           <div class="research-shell">
@@ -176,6 +193,7 @@
               <button class="research-tab" data-research-tab="analyze">Analyze</button>
               <button class="research-tab" data-research-tab="strategy">Strategy</button>
               <button class="research-tab" data-research-tab="portfolio">Portfolio</button>
+              <button class="research-tab" data-research-tab="platform">Platform</button>
               <button class="research-tab" data-research-tab="evaluation">Evaluation</button>
               <button class="research-tab" data-research-tab="evidence">Evidence</button>
               <button class="research-tab" data-research-tab="compare">Compare</button>
@@ -314,6 +332,28 @@
                       placeholder="Report profile"
                       value="trading_focused"
                     />
+                    <input
+                      id="assistant-analyze-platform-profile"
+                      list="assistant-platform-profile-options"
+                      placeholder="Platform profile"
+                    />
+                    <input
+                      id="assistant-analyze-workspace-id"
+                      placeholder="Workspace id (optional)"
+                    />
+                    <input
+                      id="assistant-analyze-workflow-template"
+                      list="assistant-workflow-template-options"
+                      placeholder="Workflow template"
+                    />
+                    <input
+                      id="assistant-analyze-dossier-id"
+                      placeholder="Dossier id (optional)"
+                    />
+                    <label class="toggle-inline" for="assistant-analyze-create-dossier">
+                      <input id="assistant-analyze-create-dossier" type="checkbox" />
+                      <span>Create dossier</span>
+                    </label>
                     <button id="assistant-analyze-btn" class="secondary">Run Analyze</button>
                   </div>
                   <p class="muted legacy-status" id="assistant-analyze-status">Ready.</p>
@@ -537,6 +577,64 @@
                     </div>
                     <div id="assistant-portfolio-workflow" class="drilldown-grid empty-state-card">
                       Watchlist, blocked reasons, stale review needs, and rotation pressure will render here.
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="platform">
+                <div class="workspace-grid">
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Workspace / Workflow Overview</h4>
+                      <span class="legacy-badge">Platform foundation</span>
+                    </div>
+                    <div id="assistant-platform-overview" class="summary-grid empty-state-card">
+                      Run Analyze with dossier creation enabled, or attach analysis to an
+                      existing dossier, to populate the workspace and workflow overview.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Workflow Template &amp; Profile</h4>
+                      <span class="legacy-badge">Audience-aware defaults</span>
+                    </div>
+                    <div id="assistant-platform-template-profile" class="drilldown-grid empty-state-card">
+                      Workflow-template, platform-profile, and AXIOM emphasis details will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Dossier List</h4>
+                      <span class="legacy-badge">Institutional objects</span>
+                    </div>
+                    <div id="assistant-platform-dossiers" class="drilldown-grid empty-state-card">
+                      Dossiers linked to the current workspace will render here once the platform
+                      layer is active.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Dossier Detail</h4>
+                      <span class="legacy-badge">AXIOM-linked case file</span>
+                    </div>
+                    <div id="assistant-platform-dossier-detail" class="drilldown-grid empty-state-card">
+                      The current dossier summary, section stack, and linked AXIOM view will
+                      render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Dossier Monitoring &amp; Status</h4>
+                      <span class="legacy-badge">Stage + triggers</span>
+                    </div>
+                    <div id="assistant-platform-monitoring" class="drilldown-grid empty-state-card">
+                      Monitoring triggers, evidence status, and workflow-stage details will
+                      render here.
                     </div>
                   </section>
                 </div>

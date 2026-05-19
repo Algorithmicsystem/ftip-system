@@ -458,6 +458,23 @@ textarea {
   flex: 1 1 160px;
 }
 
+.toggle-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 42px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: rgba(8, 18, 30, 0.95);
+  color: var(--text-soft);
+}
+
+.toggle-inline input {
+  min-height: auto;
+  margin: 0;
+}
+
 .advanced-input-row button {
   min-width: 160px;
 }

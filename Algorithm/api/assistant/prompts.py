@@ -56,6 +56,8 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"AXIOM portfolio governance: {report.get('axiom_portfolio_governance_summary', 'n/a')}.",
             f"AXIOM institutional memo: {report.get('axiom_ic_memo_summary', 'n/a')}.",
             f"AXIOM lineage: {report.get('axiom_lineage_summary', 'n/a')}.",
+            f"Platform workflow: {report.get('platform_overview_summary', 'n/a')}.",
+            f"Platform dossier: {report.get('platform_dossier_summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -90,6 +92,11 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "axiom_history_record": report.get("axiom_history_record"),
         "axiom_lineage": report.get("axiom_lineage"),
         "axiom_institutional_reports": report.get("axiom_institutional_reports"),
+        "platform_workspace": report.get("platform_workspace"),
+        "platform_workflow": report.get("platform_workflow"),
+        "platform_workflow_template": report.get("platform_workflow_template"),
+        "platform_dossier": report.get("platform_dossier"),
+        "platform_summary_view": report.get("platform_summary_view"),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -152,6 +159,9 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
             "axiom_risk_deployability_memo_summary"
         ),
         "axiom_lineage_summary": report.get("axiom_lineage_summary"),
+        "platform_overview_summary": report.get("platform_overview_summary"),
+        "platform_dossier_summary": report.get("platform_dossier_summary"),
+        "platform_monitoring_summary": report.get("platform_monitoring_summary"),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
         "monthly_operating_summary": report.get("monthly_operating_summary"),
@@ -211,6 +221,7 @@ def build_grounded_chat_messages(
                 "Prefer referencing AXIOM first when it is present, then use the report's signal summary, overall analysis, strategy view, "
                 "risks/weaknesses/invalidators, and evidence provenance sections to explain the same decision."
                 " When the user asks for an IC memo, one-pager, lineage, direct versus derived evidence, audience-specific framing, or why evidence is weak, use the AXIOM institutional reports and lineage sections first."
+                " When the user asks about dossiers, workflows, workspace context, or institutional review stages, use the platform workflow and dossier sections directly."
             ),
         },
         {"role": "system", "content": _grounding_block(report, context)},

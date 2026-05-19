@@ -58,6 +58,13 @@ class AnalysisReference(BaseModel):
     axiom_calibration_status: Optional[str] = None
     axiom_audience_type: Optional[str] = None
     axiom_report_profile: Optional[str] = None
+    platform_profile: Optional[str] = None
+    platform_workspace_id: Optional[str] = None
+    platform_workflow_id: Optional[str] = None
+    platform_workflow_stage: Optional[str] = None
+    platform_dossier_id: Optional[str] = None
+    platform_dossier_type: Optional[str] = None
+    platform_dossier_status: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -116,6 +123,13 @@ class AnalyzeRequest(BaseModel):
     market_regime: str = "auto"
     audience_type: str = "general"
     report_profile: str = "trading_focused"
+    platform_profile: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: Optional[str] = None
+    workflow_template_id: Optional[str] = None
+    dossier_id: Optional[str] = None
+    create_dossier: bool = False
+    dossier_type: str = "coverage"
 
 
 class TopPicksRequest(BaseModel):

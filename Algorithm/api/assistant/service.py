@@ -75,6 +75,8 @@ from api.assistant.phase14 import (
     OPERATING_WORKFLOW_ARTIFACT_KIND,
     build_operating_workflow_artifact,
 )
+from api.platform import sync_analysis_into_platform
+from api.platform.persistence import platform_store
 from api.research.backtest import (
     CANONICAL_VALIDATION_ARTIFACT_KIND,
     build_validation_artifact,
@@ -215,6 +217,18 @@ async def generate_analysis_report(
 ) -> Dict[str, Any]:
     session_id = request.get("session_id")
     sid, _history = _prepare_history(session_id, store)
+
+    if request.get("workspace_id"):
+        workspace = platform_store.get_workspace(str(request.get("workspace_id")))
+        if workspace is not None:
+            if str(request.get("audience_type") or "general") == "general":
+                request["audience_type"] = workspace.get("audience_type") or "general"
+            if str(request.get("report_profile") or "trading_focused") == "trading_focused":
+                request["report_profile"] = (
+                    workspace.get("report_profile") or "trading_focused"
+                )
+            if not request.get("platform_profile"):
+                request["platform_profile"] = workspace.get("platform_profile")
 
     symbol = orchestrator.normalize_symbol(request.get("symbol") or "")
     horizon = str(request.get("horizon") or "").strip()
@@ -657,6 +671,19 @@ async def generate_analysis_report(
         axiom_lineage_artifact_id=axiom_lineage_artifact_id,
         axiom_report_pack_artifact_id=axiom_report_pack_artifact_id,
     )
+    platform_context = sync_analysis_into_platform(
+        request=request,
+        report=report,
+        report_id=report_id,
+        session_id=sid,
+        axiom_artifact_id=axiom_artifact_id,
+        axiom_report_pack_artifact_id=axiom_report_pack_artifact_id,
+        axiom_lineage_artifact_id=axiom_lineage_artifact_id,
+        axiom_history_artifact_id=axiom_history_artifact_id,
+        axiom_calibration_artifact_id=axiom_calibration_artifact_id,
+    )
+    if platform_context is not None:
+        report = reports.attach_platform_context(report, platform_context)
     final_prediction_record = build_prediction_record(
         report,
         report_id=report_id,
@@ -698,6 +725,26 @@ async def generate_analysis_report(
                 "report_pack_artifact_id": axiom_report_pack_artifact_id,
                 "audience_type": report.get("axiom_audience_type"),
                 "report_profile": report.get("axiom_report_profile"),
+            },
+            "platform": {
+                "foundation_version": report.get("platform_foundation_version"),
+                "platform_profile": report.get("platform_profile"),
+                "workspace_id": (report.get("platform_workspace") or {}).get(
+                    "workspace_id"
+                ),
+                "workflow_id": (report.get("platform_workflow") or {}).get(
+                    "workflow_id"
+                ),
+                "workflow_stage": (report.get("platform_workflow") or {}).get(
+                    "stage"
+                ),
+                "dossier_id": (report.get("platform_dossier") or {}).get("dossier_id"),
+                "dossier_type": (report.get("platform_dossier") or {}).get(
+                    "dossier_type"
+                ),
+                "dossier_status": (report.get("platform_dossier") or {}).get(
+                    "evidence_status"
+                ),
             },
             "deployment_readiness": {
                 "artifact_id": deployment_readiness_artifact_id,

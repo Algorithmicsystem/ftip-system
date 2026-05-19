@@ -133,6 +133,9 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         )
         or "",
         "axiom_lineage_summary": report.get("axiom_lineage_summary") or "",
+        "platform_overview_summary": report.get("platform_overview_summary") or "",
+        "platform_dossier_summary": report.get("platform_dossier_summary") or "",
+        "platform_monitoring_summary": report.get("platform_monitoring_summary") or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",
@@ -304,6 +307,20 @@ def build_narrator_context(
         or report.get("axiom_audience_type"),
         "axiom_report_profile": active_analysis.get("axiom_report_profile")
         or report.get("axiom_report_profile"),
+        "platform_profile": active_analysis.get("platform_profile")
+        or report.get("platform_profile"),
+        "platform_workspace_id": active_analysis.get("platform_workspace_id")
+        or ((report.get("platform_workspace") or {}).get("workspace_id")),
+        "platform_workflow_id": active_analysis.get("platform_workflow_id")
+        or ((report.get("platform_workflow") or {}).get("workflow_id")),
+        "platform_workflow_stage": active_analysis.get("platform_workflow_stage")
+        or ((report.get("platform_workflow") or {}).get("stage")),
+        "platform_dossier_id": active_analysis.get("platform_dossier_id")
+        or ((report.get("platform_dossier") or {}).get("dossier_id")),
+        "platform_dossier_type": active_analysis.get("platform_dossier_type")
+        or ((report.get("platform_dossier") or {}).get("dossier_type")),
+        "platform_dossier_status": active_analysis.get("platform_dossier_status")
+        or ((report.get("platform_dossier") or {}).get("evidence_status")),
         "operating_workflow_version": active_analysis.get("operating_workflow_version")
         or report.get("operating_workflow_version"),
         "daily_operating_summary": active_analysis.get("daily_operating_summary")
@@ -436,6 +453,20 @@ def build_narrator_context(
             "weakest_evidence_areas": report.get("axiom_weakest_evidence_areas") or [],
             "summary": report.get("axiom_summary"),
         },
+        "platform_snapshot": {
+            "foundation_version": report.get("platform_foundation_version"),
+            "platform_profile": report.get("platform_profile"),
+            "workspace_name": (report.get("platform_workspace") or {}).get("name"),
+            "workflow_title": (report.get("platform_workflow") or {}).get("title"),
+            "workflow_stage": (report.get("platform_workflow") or {}).get("stage"),
+            "workflow_template": (report.get("platform_workflow_template") or {}).get("title"),
+            "dossier_title": (report.get("platform_dossier") or {}).get("title"),
+            "dossier_type": (report.get("platform_dossier") or {}).get("dossier_type"),
+            "dossier_evidence_status": (report.get("platform_dossier") or {}).get("evidence_status"),
+            "overview_summary": report.get("platform_overview_summary"),
+            "dossier_summary": report.get("platform_dossier_summary"),
+            "monitoring_summary": report.get("platform_monitoring_summary"),
+        },
         "operating_workflow_snapshot": {
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
@@ -513,6 +544,9 @@ def build_narrator_context(
                 "axiom_risk_deployability_memo_summary"
             ],
             "axiom_lineage_summary": sections["axiom_lineage_summary"],
+            "platform_overview_summary": sections["platform_overview_summary"],
+            "platform_dossier_summary": sections["platform_dossier_summary"],
+            "platform_monitoring_summary": sections["platform_monitoring_summary"],
             "daily_operating_summary": sections["daily_operating_summary"],
             "weekly_operating_summary": sections["weekly_operating_summary"],
             "monthly_operating_summary": sections["monthly_operating_summary"],

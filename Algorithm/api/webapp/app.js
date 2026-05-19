@@ -214,6 +214,13 @@ const buildActiveAnalysisFromReport = (report) => ({
   axiom_audience_type: report?.axiom_audience_type || "general",
   axiom_report_profile: report?.axiom_report_profile || "trading_focused",
   axiom_lineage_summary: report?.axiom_lineage_summary || "",
+  platform_profile: report?.platform_profile || null,
+  platform_workspace_id: report?.platform_workspace?.workspace_id || null,
+  platform_workflow_id: report?.platform_workflow?.workflow_id || null,
+  platform_workflow_stage: report?.platform_workflow?.stage || null,
+  platform_dossier_id: report?.platform_dossier?.dossier_id || null,
+  platform_dossier_type: report?.platform_dossier?.dossier_type || null,
+  platform_dossier_status: report?.platform_dossier?.evidence_status || null,
   operating_workflow_version: report?.operating_workflow_version || "n/a",
   daily_operating_summary: report?.daily_operating_summary || "",
   weekly_operating_summary: report?.weekly_operating_summary || "",
@@ -346,6 +353,23 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.axiom_report_profile || analysis?.axiom_report_profile || "trading_focused",
       axiom_lineage_summary:
         report?.axiom_lineage_summary || analysis?.axiom_lineage_summary || "",
+      platform_profile:
+        report?.platform_profile || analysis?.platform_profile || null,
+      platform_workspace_id:
+        report?.platform_workspace?.workspace_id || analysis?.platform_workspace_id || null,
+      platform_workflow_id:
+        report?.platform_workflow?.workflow_id || analysis?.platform_workflow_id || null,
+      platform_workflow_stage:
+        report?.platform_workflow?.stage || analysis?.platform_workflow_stage || null,
+      platform_dossier_id:
+        report?.platform_dossier?.dossier_id || analysis?.platform_dossier_id || null,
+      platform_dossier_type:
+        report?.platform_dossier?.dossier_type || analysis?.platform_dossier_type || null,
+      platform_dossier_status:
+        report?.platform_dossier?.evidence_status || analysis?.platform_dossier_status || null,
+      platform_overview_summary: report?.platform_overview_summary || "",
+      platform_dossier_summary: report?.platform_dossier_summary || "",
+      platform_monitoring_summary: report?.platform_monitoring_summary || "",
       portfolio_risk_model_version:
         report?.portfolio_risk_model_version || analysis?.portfolio_risk_model_version || "n/a",
       operational_guardrails_version:
@@ -564,6 +588,7 @@ const buildNarratorPromptSet = () => {
     `What direct sources support the AXIOM fragility score for ${symbol}?`,
     `What is the weakest evidence in the AXIOM stack for ${symbol}?`,
     `How would ${symbol} look for a family office versus a hedge fund?`,
+    `Summarize the workflow stage and dossier status for ${symbol}.`,
     `What would improve conviction on ${symbol}?`,
     `What does evaluation history say about setups like ${symbol}?`,
     `What is the platform learning lately about ${symbol}?`,
@@ -618,6 +643,8 @@ const renderActiveAnalysisLabels = () => {
     `Permission: ${activeDeploymentPermissionLabel()}`,
     `AXIOM: ${analysis?.axiom_evidence_backed_deployability_tier || analysis?.axiom_deployability_tier || "unknown"}`,
     `Size: ${analysis?.size_band || "watchlist only"}`,
+    `Workflow: ${analysis?.platform_workflow_stage || "n/a"}`,
+    `Dossier: ${analysis?.platform_dossier_status || "n/a"}`,
     `Trust: ${activeTrustTierLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
   ];
@@ -633,6 +660,8 @@ const renderActiveAnalysisLabels = () => {
     `Learning: ${analysis?.learning_priority || "observe"}`,
     `Permission: ${activeDeploymentPermissionLabel()}`,
     `Size: ${analysis?.size_band || "watchlist only"}`,
+    `Workflow: ${analysis?.platform_workflow_stage || "n/a"}`,
+    `Dossier: ${analysis?.platform_dossier_status || "n/a"}`,
     `Readiness: ${activeReadinessLabel()}`,
     `Freshness: ${activeFreshnessLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
@@ -1318,6 +1347,12 @@ const renderRecentAnalyses = () => {
                 )}</span>
                 <span class="micro-chip">regime ${escapeHtml(
                   snapshot.axiom_regime_label || "indeterminate"
+                )}</span>
+                <span class="micro-chip">workflow ${escapeHtml(
+                  snapshot.platform_workflow_stage || "n/a"
+                )}</span>
+                <span class="micro-chip">dossier ${escapeHtml(
+                  snapshot.platform_dossier_status || "n/a"
                 )}</span>
                 <span class="micro-chip">size ${escapeHtml(
                   snapshot.size_band || "watchlist only"
@@ -2704,6 +2739,274 @@ const renderCommercialReadiness = (report) => {
   ].join("");
 };
 
+const renderPlatformOverview = (report) => {
+  const container = qs("#assistant-platform-overview");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Workspace, workflow, dossier counts, and institutional profile context render here."
+    );
+    return;
+  }
+  const summary = report.platform_summary_view || {};
+  const workspace = report.platform_workspace || {};
+  const workflow = report.platform_workflow || {};
+  const dossier = report.platform_dossier || {};
+  const metrics = [
+    {
+      label: "Platform Profile",
+      value: report.platform_profile || "none",
+      note: `${workspace.audience_type || report.axiom_audience_type || "general"} / ${
+        workspace.report_profile || report.axiom_report_profile || "trading_focused"
+      }`,
+    },
+    {
+      label: "Workspace",
+      value: workspace.name || "none",
+      note: workspace.workspace_id || "workspace not attached",
+    },
+    {
+      label: "Workflow",
+      value: workflow.title || "none",
+      note: `${workflow.stage || "n/a"} / ${workflow.status || "n/a"}`,
+    },
+    {
+      label: "Dossier",
+      value: dossier.title || "none",
+      note: `${dossier.dossier_type || "n/a"} / ${dossier.evidence_status || "n/a"}`,
+    },
+    {
+      label: "Dossier Count",
+      value: String(summary.dossier_count ?? 0),
+      note: `${summary.workflow_count ?? 0} workflow(s) / ${summary.workspace_count ?? 0} workspace(s)`,
+    },
+    {
+      label: "Latest Tier",
+      value: dossier.latest_deployability_tier || "n/a",
+      note: `${dossier.latest_regime_label || "n/a"} / ${dossier.latest_size_band || "n/a"}`,
+    },
+  ];
+  container.innerHTML = `
+    <div class="summary-grid">
+      ${metrics
+        .map(
+          (metric) => `
+            <div class="summary-card">
+              <div class="summary-card-label">${escapeHtml(metric.label)}</div>
+              <div class="summary-card-value">${escapeHtml(metric.value || "n/a")}</div>
+              <div class="summary-card-note">${escapeHtml(metric.note || "n/a")}</div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
+const renderPlatformTemplateProfile = (report) => {
+  const container = qs("#assistant-platform-template-profile");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Workflow template, platform profile, and preferred dossier/report emphasis render here."
+    );
+    return;
+  }
+  const profile = report.platform_profile_details || {};
+  const template = report.platform_workflow_template || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Workflow Template</h5>
+      ${renderBullets(
+        [
+          template.title,
+          template.description,
+          `Orientation: ${template.orientation || "research"}`,
+          `Stages: ${(template.stage_sequence || []).join(" -> ") || "n/a"}`,
+          `Report emphasis: ${(template.preferred_report_pack_emphasis || []).join(", ") || "n/a"}`,
+          `AXIOM emphasis: ${(template.expected_axiom_emphasis || []).join(", ") || "n/a"}`,
+        ].filter(Boolean),
+        "No workflow template is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Platform Profile</h5>
+      ${renderBullets(
+        [
+          `Profile ${profile.profile_id || report.platform_profile || "n/a"}`,
+          `Audience ${profile.audience_type || report.axiom_audience_type || "general"}`,
+          `Default workflow ${(profile.default_workflow_template || "n/a").replaceAll("_", " ")}`,
+          `Report profile ${profile.default_report_profile || report.axiom_report_profile || "trading_focused"}`,
+          `Preferred AXIOM sections: ${(profile.preferred_axiom_sections || []).join(", ") || "n/a"}`,
+          `Preferred dossier sections: ${(profile.preferred_dossier_sections || []).join(", ") || "n/a"}`,
+        ],
+        "No platform profile is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformDossiers = (report) => {
+  const container = qs("#assistant-platform-dossiers");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Dossier cards with stage, deployability, regime, and evidence state render here."
+    );
+    return;
+  }
+  const dossiers = report.platform_recent_dossiers || [];
+  if (!dossiers.length) {
+    container.innerHTML = emptyStateCard(
+      "No dossier is attached yet. Run Analyze with dossier creation enabled or attach to an existing dossier."
+    );
+    return;
+  }
+  container.innerHTML = dossiers
+    .slice(0, 8)
+    .map(
+      (item) => `
+        <section class="recent-analysis-card">
+          <div class="recent-analysis-head">
+            <div>
+              <div class="recent-analysis-title">${escapeHtml(item.title || item.symbol || "Dossier")}</div>
+              <div class="table-subtitle">${escapeHtml(
+                `${item.symbol || "n/a"} · ${item.dossier_type || "coverage"} · ${
+                  item.as_of_date || "n/a"
+                }`
+              )}</div>
+            </div>
+            <span class="legacy-badge">${escapeHtml(item.latest_deployability_tier || "n/a")}</span>
+          </div>
+          <div class="recent-analysis-meta">
+            <span class="micro-chip">stage ${escapeHtml(item.stage || "n/a")}</span>
+            <span class="micro-chip">status ${escapeHtml(item.status || "n/a")}</span>
+            <span class="micro-chip">regime ${escapeHtml(item.latest_regime_label || "n/a")}</span>
+            <span class="micro-chip">family ${escapeHtml(item.latest_trade_family || "n/a")}</span>
+            <span class="micro-chip">size ${escapeHtml(item.latest_size_band || "n/a")}</span>
+            <span class="micro-chip">evidence ${escapeHtml(item.evidence_status || "partial")}</span>
+          </div>
+          <div class="table-note">${escapeHtml(
+            item.dossier_id || "No dossier identifier available."
+          )}</div>
+        </section>
+      `
+    )
+    .join("");
+};
+
+const renderPlatformDossierDetail = (report) => {
+  const container = qs("#assistant-platform-dossier-detail");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "A dossier-linked AXIOM summary, section families, and analysis linkage render here."
+    );
+    return;
+  }
+  const dossier = report.platform_dossier || {};
+  const sections = dossier.sections || [];
+  const analysisLink = report.platform_analysis_link || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Dossier Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_dossier_summary,
+          `Latest deployability ${dossier.latest_deployability_tier || "n/a"} / regime ${
+            dossier.latest_regime_label || "n/a"
+          } / family ${dossier.latest_trade_family || "n/a"}`,
+          `Latest size ${dossier.latest_size_band || "n/a"} / evidence ${
+            dossier.evidence_status || "partial"
+          }`,
+          `Linked AXIOM artifact ${
+            dossier.latest_axiom_analysis_id || analysisLink.axiom_artifact_id || "n/a"
+          }`,
+        ].filter(Boolean),
+        "No dossier summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Dossier Sections</h5>
+      ${renderBullets(
+        sections.map(
+          (item) => `${item.title || item.section_key || "section"}: ${item.status || "available"}`
+        ),
+        "No dossier sections are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Analysis Link</h5>
+      ${renderBullets(
+        [
+          `Report ${analysisLink.report_id || "n/a"} / session ${analysisLink.session_id || "n/a"}`,
+          `History artifact ${analysisLink.axiom_history_artifact_id || "n/a"}`,
+          `Calibration artifact ${analysisLink.axiom_calibration_artifact_id || "n/a"}`,
+          report.axiom_summary_card_text,
+        ].filter(Boolean),
+        "No dossier-linked analysis reference is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformMonitoring = (report) => {
+  const container = qs("#assistant-platform-monitoring");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Monitoring triggers, invalidation flags, and workflow-stage watch items render here."
+    );
+    return;
+  }
+  const dossier = report.platform_dossier || {};
+  const monitoring = dossier.monitoring_state || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Monitoring State</h5>
+      ${renderBullets(
+        [
+          report.platform_monitoring_summary,
+          `Operating mode ${monitoring.current_operating_mode || report.current_operating_mode || "normal"}`,
+          ...((monitoring.monitoring_triggers || []).slice(0, 5)),
+        ].filter(Boolean),
+        "No dossier monitoring state is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Invalidation / Downgrade</h5>
+      ${renderBullets(
+        [
+          ...((monitoring.invalidation_flags || []).slice(0, 5)),
+          ...((monitoring.downgrade_triggers || []).slice(0, 5)),
+        ],
+        "No invalidation or downgrade trigger is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Platform Overview</h5>
+      ${renderBullets(
+        [
+          report.platform_overview_summary,
+          `Dossiers by tier: ${formatJson((report.platform_summary_view || {}).dossiers_by_deployability_tier || {})}`,
+          `Dossiers by regime: ${formatJson((report.platform_summary_view || {}).dossiers_by_regime || {})}`,
+        ],
+        "No platform summary aggregation is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderOperatingWorkflow = (report) => {
   const container = qs("#assistant-operating-workflow");
   if (!container) {
@@ -3280,6 +3583,12 @@ const renderAssistantReport = (report) => {
     renderLearningArchetypes(null);
     renderResearchDrilldown(null);
     renderSystemAudit(null);
+    renderCommercialReadiness(null);
+    renderPlatformOverview(null);
+    renderPlatformTemplateProfile(null);
+    renderPlatformDossiers(null);
+    renderPlatformDossierDetail(null);
+    renderPlatformMonitoring(null);
     renderOperatingWorkflow(null);
     renderOperatorRunbook(null);
     renderDeploymentReadiness(null);
@@ -3567,6 +3876,11 @@ const renderAssistantReport = (report) => {
   renderResearchDrilldown(report);
   renderSystemAudit(report);
   renderCommercialReadiness(report);
+  renderPlatformOverview(report);
+  renderPlatformTemplateProfile(report);
+  renderPlatformDossiers(report);
+  renderPlatformDossierDetail(report);
+  renderPlatformMonitoring(report);
   renderOperatingWorkflow(report);
   renderOperatorRunbook(report);
   renderSystemHealth(state.assistantHealth, report);
@@ -3699,6 +4013,11 @@ const getAnalyzeInputs = () => ({
   audience_type: qs("#assistant-analyze-audience").value.trim() || "general",
   report_profile:
     qs("#assistant-analyze-report-profile").value.trim() || "trading_focused",
+  platform_profile: qs("#assistant-analyze-platform-profile").value.trim() || null,
+  workspace_id: qs("#assistant-analyze-workspace-id").value.trim() || null,
+  workflow_template_id: qs("#assistant-analyze-workflow-template").value.trim() || null,
+  dossier_id: qs("#assistant-analyze-dossier-id").value.trim() || null,
+  create_dossier: Boolean(qs("#assistant-analyze-create-dossier")?.checked),
 });
 
 const getAssistantChatMessage = () => qs("#assistant-chat-message").value.trim();
@@ -3714,6 +4033,11 @@ const runAssistantAnalyze = async () => {
     scenario_mode,
     audience_type,
     report_profile,
+    platform_profile,
+    workspace_id,
+    workflow_template_id,
+    dossier_id,
+    create_dossier,
   } =
     getAnalyzeInputs();
   if (!symbol || !horizon || !risk_mode) {
@@ -3744,6 +4068,11 @@ const runAssistantAnalyze = async () => {
         scenario_mode,
         audience_type,
         report_profile,
+        platform_profile,
+        workspace_id,
+        workflow_template_id,
+        dossier_id,
+        create_dossier,
       }),
     });
     if (data.session_id) {
@@ -3773,6 +4102,11 @@ const runAssistantAnalyze = async () => {
       scenario_mode,
       audience_type,
       report_profile,
+      platform_profile,
+      workspace_id,
+      workflow_template_id,
+      dossier_id,
+      create_dossier,
     });
     setLegacyStatus("#assistant-analyze-status", `Analyze failed: ${err.message}`, "error");
   } finally {

@@ -1167,6 +1167,25 @@ def build_active_analysis_reference(
             "axiom_calibration_status": report.get("axiom_calibration_status"),
             "axiom_audience_type": report.get("axiom_audience_type"),
             "axiom_report_profile": report.get("axiom_report_profile"),
+            "platform_profile": report.get("platform_profile"),
+            "platform_workspace_id": (report.get("platform_workspace") or {}).get(
+                "workspace_id"
+            ),
+            "platform_workflow_id": (report.get("platform_workflow") or {}).get(
+                "workflow_id"
+            ),
+            "platform_workflow_stage": (report.get("platform_workflow") or {}).get(
+                "stage"
+            ),
+            "platform_dossier_id": (report.get("platform_dossier") or {}).get(
+                "dossier_id"
+            ),
+            "platform_dossier_type": (report.get("platform_dossier") or {}).get(
+                "dossier_type"
+            ),
+            "platform_dossier_status": (report.get("platform_dossier") or {}).get(
+                "evidence_status"
+            ),
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
             "weekly_operating_summary": report.get("weekly_operating_summary"),
@@ -2599,6 +2618,93 @@ def attach_axiom_phase4_context(
         "axiom.lineage.engine_lineage",
         "axiom.lineage.historical_evidence_provenance",
         "axiom.lineage.coverage_confidence_provenance",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_platform_context(
+    report: Dict[str, Any],
+    platform_context: Dict[str, Any],
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    platform_profile = dict(platform_context.get("platform_profile") or {})
+    workspace = dict(platform_context.get("workspace") or {})
+    workflow = dict(platform_context.get("workflow") or {})
+    dossier = dict(platform_context.get("dossier") or {})
+    summary_view = dict(platform_context.get("summary_view") or {})
+    template = dict(platform_context.get("workflow_template") or {})
+
+    overview_summary = (
+        f"Workspace {workspace.get('name') or 'n/a'} is running "
+        f"{template.get('title') or workflow.get('workflow_template_id') or 'no template'} "
+        f"at stage {workflow.get('stage') or 'n/a'} with {summary_view.get('dossier_count', 0)} dossier(s)."
+        if workspace or workflow
+        else "No platform workflow context is attached to this analysis."
+    )
+    dossier_summary = (
+        f"Dossier {dossier.get('title') or 'n/a'} currently reads "
+        f"{dossier.get('latest_deployability_tier') or 'n/a'} in regime "
+        f"{dossier.get('latest_regime_label') or 'n/a'} with size "
+        f"{dossier.get('latest_size_band') or 'n/a'}."
+        if dossier
+        else "No dossier is currently attached to this analysis."
+    )
+    monitoring_summary = (
+        f"Monitoring state is driven by {_fmt_list((dossier.get('monitoring_state') or {}).get('monitoring_triggers') or [])} "
+        f"with evidence status {dossier.get('evidence_status') or 'partial'}."
+        if dossier
+        else "No dossier monitoring state is attached."
+    )
+
+    updated["report_version"] = "2.15"
+    updated["platform_foundation_version"] = platform_context.get(
+        "platform_foundation_version"
+    )
+    updated["platform_profile"] = platform_profile.get("profile_id")
+    updated["platform_profile_details"] = sanitize_payload(platform_profile)
+    updated["platform_workspace"] = sanitize_payload(workspace)
+    updated["platform_workflow"] = sanitize_payload(workflow)
+    updated["platform_workflow_template"] = sanitize_payload(template)
+    updated["platform_dossier"] = sanitize_payload(dossier)
+    updated["platform_analysis_link"] = sanitize_payload(
+        platform_context.get("analysis_link") or {}
+    )
+    updated["platform_summary_view"] = sanitize_payload(summary_view)
+    updated["platform_recent_dossiers"] = sanitize_payload(
+        summary_view.get("latest_axiom_linked_dossiers") or []
+    )
+    updated["platform_overview_summary"] = overview_summary
+    updated["platform_dossier_summary"] = dossier_summary
+    updated["platform_monitoring_summary"] = monitoring_summary
+    updated["overall_analysis"] = _join_sentences(
+        [updated.get("overall_analysis"), overview_summary, dossier_summary]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [updated.get("strategy_view"), monitoring_summary]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            f"Platform profile is {platform_profile.get('profile_id')} with preferred dossier sections {_fmt_list(platform_profile.get('preferred_dossier_sections') or [])}."
+            if platform_profile
+            else None,
+        ]
+    )
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["platform_overview_summary"] = [
+        "platform.workspace",
+        "platform.workflow",
+        "platform.summary_view",
+    ]
+    evidence_map["platform_dossier_summary"] = [
+        "platform.dossier",
+        "platform.analysis_link",
+        "axiom.summary_card",
+    ]
+    evidence_map["platform_monitoring_summary"] = [
+        "platform.dossier.monitoring_state",
+        "axiom.risk_deployability_memo",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

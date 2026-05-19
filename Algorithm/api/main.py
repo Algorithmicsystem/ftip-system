@@ -25,6 +25,7 @@ from api.assistant.routes import router as assistant_router
 from api.backtest.routes import router as backtest_router
 from api.friction.routes import router as friction_router
 from api.llm.routes import router as llm_router
+from api.platform.routes import router as platform_router
 from api.prosperity.routes import router as prosperity_router
 from api.narrator.routes import router as narrator_router
 from api.ops import metrics_tracker, router as ops_router
@@ -1921,6 +1922,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(assistant_router, prefix="/assistant")
+app.include_router(platform_router)
 app.include_router(llm_router)
 app.include_router(narrator_router, prefix="/narrator")
 app.include_router(prosperity_router, prefix="/prosperity")

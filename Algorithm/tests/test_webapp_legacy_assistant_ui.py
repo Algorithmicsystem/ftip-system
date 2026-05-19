@@ -56,6 +56,11 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-axiom-report-pack"' in html
     assert 'id="assistant-analyze-audience"' in html
     assert 'id="assistant-analyze-report-profile"' in html
+    assert 'id="assistant-analyze-platform-profile"' in html
+    assert 'id="assistant-analyze-workspace-id"' in html
+    assert 'id="assistant-analyze-workflow-template"' in html
+    assert 'id="assistant-analyze-dossier-id"' in html
+    assert 'id="assistant-analyze-create-dossier"' in html
     assert 'id="assistant-deployment-audit"' in html
     assert 'id="assistant-compare-summary"' in html
     assert 'id="assistant-compare-details"' in html
@@ -66,6 +71,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-deployment-governance"' in html
     assert 'id="assistant-operating-workflow"' in html
     assert 'id="assistant-operator-runbook"' in html
+    assert 'data-research-tab="platform"' in html
+    assert 'id="assistant-platform-overview"' in html
+    assert 'id="assistant-platform-template-profile"' in html
+    assert 'id="assistant-platform-dossiers"' in html
+    assert 'id="assistant-platform-dossier-detail"' in html
+    assert 'id="assistant-platform-monitoring"' in html
     assert 'id="assistant-learning-metrics"' in html
     assert 'id="assistant-learning-regimes"' in html
     assert 'id="assistant-learning-adaptations"' in html
@@ -126,6 +137,11 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "current_operating_mode" in js
     assert "data_reliability_score" in js
     assert "renderCommercialReadiness" in js
+    assert "renderPlatformOverview" in js
+    assert "renderPlatformTemplateProfile" in js
+    assert "renderPlatformDossiers" in js
+    assert "renderPlatformDossierDetail" in js
+    assert "renderPlatformMonitoring" in js
     assert "renderOperatingWorkflow" in js
     assert "renderOperatorRunbook" in js
     assert "commercialization_readiness_summary" in js
@@ -143,8 +159,11 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "AXIOM Evidence & Lineage" in html
     assert "Is the current source stack buyer-demo safe" in js
     assert "What changed today for" in js
+    assert "Summarize the workflow stage and dossier status for" in js
     assert "Is the system healthy enough to trust right now" in js
     assert "refreshAssistantSystemHealth" in js
+    assert "platform_profile" in js
+    assert "create_dossier" in js
 
 
 def test_recent_report_persistence_quota_failure_does_not_break_analyze_flow() -> None:
