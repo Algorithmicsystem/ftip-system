@@ -88,6 +88,8 @@ _ACTIVE_ANALYSIS_KEYS = (
     "axiom_portfolio_fit_label",
     "axiom_portfolio_rank_score",
     "axiom_calibration_status",
+    "axiom_audience_type",
+    "axiom_report_profile",
     "operating_workflow_version",
     "daily_operating_summary",
     "weekly_operating_summary",

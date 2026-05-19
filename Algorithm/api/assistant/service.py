@@ -12,17 +12,23 @@ from api import config
 from api.axiom import (
     AXIOM_ARTIFACT_KIND,
     AXIOM_CALIBRATION_ARTIFACT_KIND,
+    AXIOM_LINEAGE_ARTIFACT_KIND,
     AXIOM_PORTFOLIO_GOVERNANCE_ARTIFACT_KIND,
+    AXIOM_REPORT_PACK_ARTIFACT_KIND,
     AXIOM_SCORE_HISTORY_ARTIFACT_KIND,
     build_axiom_artifact,
     build_axiom_calibration_artifact,
     build_axiom_history_record,
+    build_axiom_institutional_report_pack,
+    build_axiom_lineage,
     build_evidence_backed_deployability,
     build_axiom_portfolio_governance,
+    build_axiom_workspace_profile,
     load_or_build_axiom_calibration,
     rank_axiom_history_records,
     run_axiom_replay,
 )
+from api.axiom.mappers import build_axiom_engine_input
 from api.axiom.persistence import (
     load_axiom_history_records,
     persist_axiom_calibration_snapshot,
@@ -590,7 +596,42 @@ async def generate_analysis_report(
         "portfolio_governance": portfolio_governance,
         "evidence_backed_deployability": evidence_backed_deployability,
     }
+    workspace_profile = build_axiom_workspace_profile(request)
+    axiom_engine_input = build_axiom_engine_input(
+        data_bundle,
+        job_context=job_context,
+        feature_factor_bundle=feature_factor_bundle,
+        strategy_bundle=strategy_bundle,
+        report_context=report,
+    ).model_dump(mode="python")
+    axiom_lineage = build_axiom_lineage(
+        engine_input=axiom_engine_input,
+        axiom_artifact=axiom_artifact,
+        workspace_profile=workspace_profile,
+    )
+    axiom_report_pack = build_axiom_institutional_report_pack(
+        axiom_artifact=axiom_artifact,
+        report_context=report,
+        workspace_profile=workspace_profile,
+        lineage=axiom_lineage,
+    )
+    axiom_artifact = {
+        **axiom_artifact,
+        "workspace_profile": workspace_profile,
+        "lineage": axiom_lineage,
+        "institutional_reports": axiom_report_pack,
+    }
     axiom_artifact_id = store.save_artifact(sid, AXIOM_ARTIFACT_KIND, axiom_artifact)
+    axiom_lineage_artifact_id = store.save_artifact(
+        sid,
+        AXIOM_LINEAGE_ARTIFACT_KIND,
+        axiom_lineage,
+    )
+    axiom_report_pack_artifact_id = store.save_artifact(
+        sid,
+        AXIOM_REPORT_PACK_ARTIFACT_KIND,
+        axiom_report_pack,
+    )
     report = reports.attach_axiom_context(
         report,
         axiom_artifact,
@@ -606,6 +647,15 @@ async def generate_analysis_report(
         axiom_history_artifact_id=axiom_history_artifact_id,
         axiom_calibration_artifact_id=axiom_calibration_artifact_id,
         axiom_portfolio_governance_artifact_id=axiom_portfolio_governance_artifact_id,
+    )
+    report = reports.attach_axiom_phase4_context(
+        report,
+        axiom_artifact,
+        workspace_profile=workspace_profile,
+        lineage=axiom_lineage,
+        institutional_reports=axiom_report_pack,
+        axiom_lineage_artifact_id=axiom_lineage_artifact_id,
+        axiom_report_pack_artifact_id=axiom_report_pack_artifact_id,
     )
     final_prediction_record = build_prediction_record(
         report,
@@ -644,6 +694,10 @@ async def generate_analysis_report(
                 ),
                 "portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
                 "portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
+                "lineage_artifact_id": axiom_lineage_artifact_id,
+                "report_pack_artifact_id": axiom_report_pack_artifact_id,
+                "audience_type": report.get("axiom_audience_type"),
+                "report_profile": report.get("axiom_report_profile"),
             },
             "deployment_readiness": {
                 "artifact_id": deployment_readiness_artifact_id,
@@ -732,6 +786,8 @@ async def generate_analysis_report(
             "axiom_history_artifact_id": axiom_history_artifact_id,
             "axiom_calibration_artifact_id": axiom_calibration_artifact_id,
             "axiom_portfolio_governance_artifact_id": axiom_portfolio_governance_artifact_id,
+            "axiom_lineage_artifact_id": axiom_lineage_artifact_id,
+            "axiom_report_pack_artifact_id": axiom_report_pack_artifact_id,
             "prediction_record_artifact_id": prediction_record_id,
             "evaluation_artifact_id": evaluation_artifact_id,
             "deployment_readiness_artifact_id": deployment_readiness_artifact_id,
@@ -762,6 +818,8 @@ async def generate_analysis_report(
         "axiom_history_artifact_id": axiom_history_artifact_id,
         "axiom_calibration_artifact_id": axiom_calibration_artifact_id,
         "axiom_portfolio_governance_artifact_id": axiom_portfolio_governance_artifact_id,
+        "axiom_lineage_artifact_id": axiom_lineage_artifact_id,
+        "axiom_report_pack_artifact_id": axiom_report_pack_artifact_id,
         "prediction_record_artifact_id": prediction_record_id,
         "evaluation_artifact_id": evaluation_artifact_id,
         "deployment_readiness_artifact_id": deployment_readiness_artifact_id,

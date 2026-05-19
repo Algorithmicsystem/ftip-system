@@ -1,4 +1,10 @@
-from api.axiom import build_axiom_artifact
+from api.axiom import (
+    build_axiom_artifact,
+    build_axiom_institutional_report_pack,
+    build_axiom_lineage,
+    build_axiom_workspace_profile,
+)
+from api.axiom.mappers import build_axiom_engine_input
 from api.assistant import reports
 from api.assistant.phase5.context import build_narrator_context
 from api.assistant.phase5.grounding import resolve_active_report
@@ -524,10 +530,89 @@ def _sample_report(symbol: str) -> dict:
         strategy_bundle=report.get("strategy") or {},
         report_context=report,
     )
-    return reports.attach_axiom_context(
+    axiom = {
+        **axiom,
+        "historical_evidence": {
+            "status": "limited",
+            "history_horizon_label": "21d",
+        },
+        "calibration_summary": {
+            "status": "limited",
+            "horizon_label": "21d",
+            "matured_count": 6,
+            "dau_bucket_summary": {
+                "buckets": [
+                    {"bucket_label": "80-100", "average_net_edge_return": 0.021},
+                    {"bucket_label": "0-20", "average_net_edge_return": -0.012},
+                ]
+            },
+        },
+        "portfolio_governance": {
+            "symbol": symbol,
+            "portfolio_rank_score": 54.0,
+            "portfolio_fit_label": "watchlist_only",
+            "final_size_band": "small",
+            "rationale": "Portfolio fit remains modest because redundancy is still elevated.",
+        },
+        "evidence_backed_deployability": {
+            "deployability_tier": "paper_trade_only",
+            "size_band": "small",
+            "evidence_summary": "Evidence is constructive but still sample-constrained, so paper-trade-only remains appropriate.",
+        },
+    }
+    report = reports.attach_axiom_context(
         report,
         axiom,
         axiom_artifact_id="axiom-1",
+    )
+    report = reports.attach_axiom_phase3_context(
+        report,
+        axiom,
+        history_record={
+            "forward_outcomes": {
+                "21d": {
+                    "matured": True,
+                    "net_edge_return": 0.021,
+                    "mae": 0.018,
+                    "mfe": 0.061,
+                }
+            }
+        },
+        calibration_summary=axiom["calibration_summary"],
+        portfolio_governance=axiom["portfolio_governance"],
+        axiom_history_artifact_id="axiom-history-1",
+        axiom_calibration_artifact_id="axiom-calibration-1",
+        axiom_portfolio_governance_artifact_id="axiom-portfolio-1",
+    )
+    workspace_profile = build_axiom_workspace_profile(
+        {"audience_type": "hedge_fund", "report_profile": "ic_memo"}
+    )
+    engine_input = build_axiom_engine_input(
+        report.get("data_bundle") or {},
+        job_context={"symbol": symbol, "as_of_date": "2024-01-02"},
+        feature_factor_bundle=report.get("feature_factor_bundle") or {},
+        strategy_bundle=report.get("strategy") or {},
+        report_context=report,
+    ).model_dump(mode="python")
+    lineage = build_axiom_lineage(
+        engine_input=engine_input,
+        axiom_artifact=axiom,
+        workspace_profile=workspace_profile,
+    )
+    report_pack = build_axiom_institutional_report_pack(
+        axiom_artifact=axiom,
+        report_context=report,
+        workspace_profile=workspace_profile,
+        lineage=lineage,
+    )
+    return reports.attach_axiom_phase4_context(
+        report,
+        axiom,
+        workspace_profile=workspace_profile,
+        lineage=lineage,
+        institutional_reports=report_pack,
+        axiom_lineage_artifact_id="axiom-lineage-1",
+        axiom_report_pack_artifact_id="axiom-report-pack-1",
     )
 
 
@@ -577,6 +662,11 @@ def test_phase5_routes_questions_into_grounded_answer_modes() -> None:
     )
     assert axiom_evidence_route["intent"] == "axiom_primary"
 
+    axiom_memo_route = route_question(
+        "Show me the IC memo version of this analysis and explain the weakest evidence."
+    )
+    assert axiom_memo_route["intent"] == "axiom_primary"
+
 
 def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     report = _sample_report("NVDA")
@@ -618,6 +708,9 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["operating_workflow_snapshot"]["postmortem_summary"]
     assert narrator_context["axiom_snapshot"]["deployability_tier"]
     assert narrator_context["axiom_snapshot"]["strongest_engine"]
+    assert narrator_context["axiom_snapshot"]["audience_type"] == "hedge_fund"
+    assert narrator_context["axiom_snapshot"]["report_profile"] == "ic_memo"
+    assert narrator_context["axiom_snapshot"]["lineage_summary"]
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:
@@ -717,6 +810,9 @@ def test_phase5_selects_axiom_sections_for_axiom_questions() -> None:
 
     assert narrator_context["question_intent"] == "axiom_primary"
     assert "axiom_summary" in narrator_context["selected_sections"]
+    assert "axiom_summary_card" in narrator_context["selected_sections"]
+    assert "axiom_ic_memo_summary" in narrator_context["selected_sections"]
+    assert "axiom_lineage_summary" in narrator_context["selected_sections"]
     assert "strategy_view" in narrator_context["selected_sections"]
     assert narrator_context["axiom_snapshot"]["deployability_tier"]
     assert narrator_context["axiom_snapshot"]["weakest_engine"]

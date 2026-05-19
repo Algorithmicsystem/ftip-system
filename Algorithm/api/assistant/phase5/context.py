@@ -113,15 +113,26 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "source_governance_summary": report.get("source_governance_summary") or "",
         "buyer_diligence_summary": report.get("buyer_diligence_summary") or "",
         "axiom_summary": report.get("axiom_summary") or "",
+        "axiom_summary_card": report.get("axiom_summary_card_text") or "",
         "axiom_deployability_analysis": report.get("deployment_permission_analysis")
         or "",
         "axiom_historical_evidence_summary": report.get("axiom_evidence_summary") or "",
+        "axiom_historical_evidence_summary_text": report.get(
+            "axiom_historical_evidence_summary_text"
+        )
+        or "",
         "axiom_calibration_summary_text": report.get("axiom_calibration_summary_text")
         or "",
         "axiom_portfolio_governance_summary": report.get(
             "axiom_portfolio_governance_summary"
         )
         or "",
+        "axiom_ic_memo_summary": report.get("axiom_ic_memo_summary") or "",
+        "axiom_risk_deployability_memo_summary": report.get(
+            "axiom_risk_deployability_memo_summary"
+        )
+        or "",
+        "axiom_lineage_summary": report.get("axiom_lineage_summary") or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",
@@ -289,6 +300,10 @@ def build_narrator_context(
         or report.get("axiom_portfolio_rank_score"),
         "axiom_calibration_status": active_analysis.get("axiom_calibration_status")
         or report.get("axiom_calibration_status"),
+        "axiom_audience_type": active_analysis.get("axiom_audience_type")
+        or report.get("axiom_audience_type"),
+        "axiom_report_profile": active_analysis.get("axiom_report_profile")
+        or report.get("axiom_report_profile"),
         "operating_workflow_version": active_analysis.get("operating_workflow_version")
         or report.get("operating_workflow_version"),
         "daily_operating_summary": active_analysis.get("daily_operating_summary")
@@ -415,6 +430,10 @@ def build_narrator_context(
             "strongest_engine": ((report.get("axiom_explanation") or {}).get("strongest_engine")),
             "weakest_engine": ((report.get("axiom_explanation") or {}).get("weakest_engine")),
             "size_band_recommendation": report.get("axiom_size_band_recommendation"),
+            "audience_type": report.get("axiom_audience_type"),
+            "report_profile": report.get("axiom_report_profile"),
+            "lineage_summary": report.get("axiom_lineage_summary"),
+            "weakest_evidence_areas": report.get("axiom_weakest_evidence_areas") or [],
             "summary": report.get("axiom_summary"),
         },
         "operating_workflow_snapshot": {
@@ -485,6 +504,15 @@ def build_narrator_context(
             "source_governance_summary": sections["source_governance_summary"],
             "buyer_diligence_summary": sections["buyer_diligence_summary"],
             "axiom_summary": sections["axiom_summary"],
+            "axiom_summary_card": sections["axiom_summary_card"],
+            "axiom_historical_evidence_summary_text": sections[
+                "axiom_historical_evidence_summary_text"
+            ],
+            "axiom_ic_memo_summary": sections["axiom_ic_memo_summary"],
+            "axiom_risk_deployability_memo_summary": sections[
+                "axiom_risk_deployability_memo_summary"
+            ],
+            "axiom_lineage_summary": sections["axiom_lineage_summary"],
             "daily_operating_summary": sections["daily_operating_summary"],
             "weekly_operating_summary": sections["weekly_operating_summary"],
             "monthly_operating_summary": sections["monthly_operating_summary"],

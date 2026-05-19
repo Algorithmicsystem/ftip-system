@@ -21,6 +21,7 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-dashboard-workflow"' in html
     assert 'id="assistant-dashboard-trust-strip"' in html
     assert 'id="assistant-dashboard-recent"' in html
+    assert 'id="assistant-axiom-overview"' in html
     assert 'id="assistant-strategy-metrics"' in html
     assert 'id="assistant-strategy-scenarios"' in html
     assert 'id="assistant-strategy-playbook"' in html
@@ -50,7 +51,11 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-signal-drilldown"' in html
     assert 'id="assistant-evidence-supporting"' in html
     assert 'id="assistant-evidence-conflicts"' in html
+    assert 'id="assistant-axiom-lineage"' in html
     assert 'id="assistant-artifact-ledger"' in html
+    assert 'id="assistant-axiom-report-pack"' in html
+    assert 'id="assistant-analyze-audience"' in html
+    assert 'id="assistant-analyze-report-profile"' in html
     assert 'id="assistant-deployment-audit"' in html
     assert 'id="assistant-compare-summary"' in html
     assert 'id="assistant-compare-details"' in html
@@ -81,6 +86,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderDashboardWorkflow" in js
     assert "renderDashboardTrustStrip" in js
     assert "renderRecentAnalyses" in js
+    assert "renderAxiomOverview" in js
+    assert "renderAxiomReportPack" in js
+    assert "renderAxiomLineage" in js
     assert "renderEvaluationMetrics" in js
     assert "renderEvaluationRegimeGrid" in js
     assert "renderEvaluationFailureModes" in js
@@ -129,6 +137,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "postmortem_summary" in js
     assert "trust_maintenance_summary" in js
     assert "operator_runbook_summary" in js
+    assert "Show me the IC memo version of" in js
+    assert "What direct sources support the AXIOM fragility score" in js
+    assert "AXIOM Summary Card" in js
+    assert "AXIOM Evidence & Lineage" in html
     assert "Is the current source stack buyer-demo safe" in js
     assert "What changed today for" in js
     assert "Is the system healthy enough to trust right now" in js

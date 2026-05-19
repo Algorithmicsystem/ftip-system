@@ -404,7 +404,13 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     with TestClient(app) as client:
         resp = client.post(
             "/assistant/analyze",
-            json={"symbol": "NVDA", "horizon": "swing", "risk_mode": "balanced"},
+            json={
+                "symbol": "NVDA",
+                "horizon": "swing",
+                "risk_mode": "balanced",
+                "audience_type": "hedge_fund",
+                "report_profile": "ic_memo",
+            },
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -429,11 +435,19 @@ def test_assistant_analyze_returns_schema(monkeypatch):
         "axiom_history_artifact_id",
         "axiom_calibration_artifact_id",
         "axiom_portfolio_governance_artifact_id",
+        "axiom_lineage_artifact_id",
+        "axiom_report_pack_artifact_id",
         "axiom_deployability_tier",
         "axiom_validated_edge",
         "axiom_historical_evidence",
         "axiom_calibration_summary",
         "axiom_portfolio_governance",
+        "axiom_summary_card",
+        "axiom_ic_memo",
+        "axiom_risk_deployability_memo",
+        "axiom_lineage",
+        "axiom_audience_type",
+        "axiom_report_profile",
         "axiom_evidence_backed_deployability_tier",
         "axiom_portfolio_fit_label",
         "axiom_portfolio_rank_score",
@@ -564,6 +578,12 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["axiom_historical_evidence"]["history_horizon_label"] == "21d"
     assert data["axiom_calibration_summary"]["horizon_label"] == "21d"
     assert data["axiom_portfolio_governance"]["symbol"] == "NVDA"
+    assert data["axiom_summary_card"]["symbol"] == "NVDA"
+    assert data["axiom_ic_memo"]["recommended_action"]["tier"]
+    assert data["axiom_risk_deployability_memo"]["memo_summary"]
+    assert data["axiom_lineage"]["engine_lineage"]["critical_fragility"]["blocks"]
+    assert data["axiom_audience_type"] == "hedge_fund"
+    assert data["axiom_report_profile"] == "ic_memo"
     assert data["axiom_evidence_backed_deployability_tier"]
     assert data["axiom_portfolio_fit_label"]
     assert data["axiom_portfolio_rank_score"] is not None
@@ -573,6 +593,8 @@ def test_assistant_analyze_returns_schema(monkeypatch):
     assert data["strategy"]["execution_posture"]["preferred_posture"]
     assert data["deployment_readiness"]["deployment_readiness_version"]
     assert data["active_analysis"]["deployment_permission"]
+    assert data["active_analysis"]["axiom_audience_type"] == "hedge_fund"
+    assert data["active_analysis"]["axiom_report_profile"] == "ic_memo"
     assert data["active_analysis"]["candidate_classification"]
     assert data["portfolio_risk_model"]["portfolio_risk_model_version"]
     assert data["active_analysis"]["setup_archetype"]

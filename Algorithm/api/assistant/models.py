@@ -56,6 +56,8 @@ class AnalysisReference(BaseModel):
     axiom_portfolio_fit_label: Optional[str] = None
     axiom_portfolio_rank_score: Optional[float] = None
     axiom_calibration_status: Optional[str] = None
+    axiom_audience_type: Optional[str] = None
+    axiom_report_profile: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -112,6 +114,8 @@ class AnalyzeRequest(BaseModel):
     analysis_depth: str = "standard"
     refresh_mode: str = "refresh_stale"
     market_regime: str = "auto"
+    audience_type: str = "general"
+    report_profile: str = "trading_focused"
 
 
 class TopPicksRequest(BaseModel):

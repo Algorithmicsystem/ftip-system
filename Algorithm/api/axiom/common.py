@@ -57,3 +57,14 @@ def label_score(
     if not key:
         return default
     return mapping.get(key, default)
+
+
+def confidence_band(value: Optional[float]) -> str:
+    if value is None:
+        return "low"
+    numeric = float(value)
+    if numeric >= 75.0:
+        return "high"
+    if numeric >= 50.0:
+        return "medium"
+    return "low"

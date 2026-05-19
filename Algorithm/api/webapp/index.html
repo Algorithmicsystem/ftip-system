@@ -148,6 +148,23 @@
             <option value="neutral"></option>
           </datalist>
 
+          <datalist id="assistant-audience-options">
+            <option value="general"></option>
+            <option value="hedge_fund"></option>
+            <option value="private_equity"></option>
+            <option value="investment_bank"></option>
+            <option value="family_office"></option>
+            <option value="research_team"></option>
+          </datalist>
+
+          <datalist id="assistant-report-profile-options">
+            <option value="trading_focused"></option>
+            <option value="ic_memo"></option>
+            <option value="diligence_focused"></option>
+            <option value="portfolio_review"></option>
+            <option value="risk_committee"></option>
+          </datalist>
+
           <datalist id="assistant-compare-options"></datalist>
 
           <div class="research-shell">
@@ -181,6 +198,17 @@
                     <div id="assistant-dashboard-summary" class="dashboard-summary empty-state-card">
                       Run Assistant Analyze to populate the executive summary, conviction stack,
                       and report freshness.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>AXIOM Overview</h4>
+                      <span class="legacy-badge">Institutional core</span>
+                    </div>
+                    <div id="assistant-axiom-overview" class="summary-grid empty-state-card">
+                      AXIOM regime, deployability, evidence status, and engine scorecard will
+                      render here.
                     </div>
                   </section>
 
@@ -274,6 +302,18 @@
                       placeholder="Scenario"
                       value="base"
                     />
+                    <input
+                      id="assistant-analyze-audience"
+                      list="assistant-audience-options"
+                      placeholder="Audience"
+                      value="general"
+                    />
+                    <input
+                      id="assistant-analyze-report-profile"
+                      list="assistant-report-profile-options"
+                      placeholder="Report profile"
+                      value="trading_focused"
+                    />
                     <button id="assistant-analyze-btn" class="secondary">Run Analyze</button>
                   </div>
                   <p class="muted legacy-status" id="assistant-analyze-status">Ready.</p>
@@ -348,6 +388,9 @@
                     <div class="legacy-card-head">
                       <h4>Deep Drilldown</h4>
                       <span class="legacy-badge">Raw artifact</span>
+                    </div>
+                    <div id="assistant-axiom-report-pack" class="drilldown-grid empty-state-card">
+                      AXIOM summary card, IC memo, and risk/deployability memo will render here.
                     </div>
                     <details class="report-raw">
                       <summary>Open raw analysis JSON</summary>
@@ -511,6 +554,17 @@
                     </div>
                     <div id="assistant-evidence-supporting" class="drilldown-grid empty-state-card">
                       Key supporting evidence will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>AXIOM Evidence & Lineage</h4>
+                      <span class="legacy-badge">Direct vs derived</span>
+                    </div>
+                    <div id="assistant-axiom-lineage" class="drilldown-grid empty-state-card">
+                      AXIOM evidence lineage, weakest coverage areas, and source-confidence notes
+                      will render here.
                     </div>
                   </section>
 

@@ -200,6 +200,20 @@ const buildActiveAnalysisFromReport = (report) => ({
   source_profile: report?.source_profile || "internal_research",
   buyer_demo_suitability: report?.buyer_demo_suitability || "unknown",
   commercialization_risk_score: report?.commercialization_risk_score,
+  axiom_framework_version: report?.axiom_framework_version || "n/a",
+  axiom_regime_label: report?.axiom_regime_label || "indeterminate",
+  axiom_trade_family: report?.axiom_trade_family || "none",
+  axiom_deployability_tier: report?.axiom_deployability_tier || "unknown",
+  axiom_evidence_backed_deployability_tier:
+    report?.axiom_evidence_backed_deployability_tier || "unknown",
+  axiom_deployable_alpha_utility: report?.axiom_deployable_alpha_utility,
+  axiom_validated_edge: report?.axiom_validated_edge,
+  axiom_portfolio_fit_label: report?.axiom_portfolio_fit_label || "watchlist_only",
+  axiom_portfolio_rank_score: report?.axiom_portfolio_rank_score,
+  axiom_calibration_status: report?.axiom_calibration_status || "partial",
+  axiom_audience_type: report?.axiom_audience_type || "general",
+  axiom_report_profile: report?.axiom_report_profile || "trading_focused",
+  axiom_lineage_summary: report?.axiom_lineage_summary || "",
   operating_workflow_version: report?.operating_workflow_version || "n/a",
   daily_operating_summary: report?.daily_operating_summary || "",
   weekly_operating_summary: report?.weekly_operating_summary || "",
@@ -300,6 +314,38 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.canonical_validation?.net_return_summary?.average_edge_return ?? null,
       validation_cost_drag:
         report?.canonical_validation?.friction_cost_summary?.average_cost_drag ?? null,
+      axiom_framework_version:
+        report?.axiom_framework_version || analysis?.axiom_framework_version || "n/a",
+      axiom_regime_label:
+        report?.axiom_regime_label || analysis?.axiom_regime_label || "indeterminate",
+      axiom_trade_family:
+        report?.axiom_trade_family || analysis?.axiom_trade_family || "none",
+      axiom_deployability_tier:
+        report?.axiom_deployability_tier || analysis?.axiom_deployability_tier || "unknown",
+      axiom_evidence_backed_deployability_tier:
+        report?.axiom_evidence_backed_deployability_tier ||
+        analysis?.axiom_evidence_backed_deployability_tier ||
+        "unknown",
+      axiom_deployable_alpha_utility:
+        report?.axiom_deployable_alpha_utility ??
+        analysis?.axiom_deployable_alpha_utility ??
+        null,
+      axiom_validated_edge:
+        report?.axiom_validated_edge ?? analysis?.axiom_validated_edge ?? null,
+      axiom_portfolio_fit_label:
+        report?.axiom_portfolio_fit_label ||
+        analysis?.axiom_portfolio_fit_label ||
+        "watchlist_only",
+      axiom_portfolio_rank_score:
+        report?.axiom_portfolio_rank_score ?? analysis?.axiom_portfolio_rank_score ?? null,
+      axiom_calibration_status:
+        report?.axiom_calibration_status || analysis?.axiom_calibration_status || "partial",
+      axiom_audience_type:
+        report?.axiom_audience_type || analysis?.axiom_audience_type || "general",
+      axiom_report_profile:
+        report?.axiom_report_profile || analysis?.axiom_report_profile || "trading_focused",
+      axiom_lineage_summary:
+        report?.axiom_lineage_summary || analysis?.axiom_lineage_summary || "",
       portfolio_risk_model_version:
         report?.portfolio_risk_model_version || analysis?.portfolio_risk_model_version || "n/a",
       operational_guardrails_version:
@@ -327,6 +373,12 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
       portfolio_summary: report?.portfolio_context_summary || "",
       operational_summary:
         report?.system_health_summary || report?.drift_control_summary || "",
+      axiom_summary: report?.axiom_summary || "",
+      axiom_summary_card_text: report?.axiom_summary_card_text || "",
+      axiom_ic_memo_summary: report?.axiom_ic_memo_summary || "",
+      axiom_risk_deployability_memo_summary:
+        report?.axiom_risk_deployability_memo_summary || "",
+      axiom_lineage_summary: report?.axiom_lineage_summary || "",
       workflow_summary:
         report?.daily_operating_summary ||
         report?.weekly_operating_summary ||
@@ -508,6 +560,10 @@ const buildNarratorPromptSet = () => {
     `Is ${symbol} ready for live capital or only paper/shadow mode?`,
     `Why is ${symbol} watchlist-only or blocked in portfolio terms?`,
     `What is weakest in the setup for ${symbol}?`,
+    `Show me the IC memo version of ${symbol}.`,
+    `What direct sources support the AXIOM fragility score for ${symbol}?`,
+    `What is the weakest evidence in the AXIOM stack for ${symbol}?`,
+    `How would ${symbol} look for a family office versus a hedge fund?`,
     `What would improve conviction on ${symbol}?`,
     `What does evaluation history say about setups like ${symbol}?`,
     `What is the platform learning lately about ${symbol}?`,
@@ -560,6 +616,7 @@ const renderActiveAnalysisLabels = () => {
     `Archetype: ${analysis?.setup_archetype || "n/a"}`,
     `Learning: ${analysis?.learning_priority || "observe"}`,
     `Permission: ${activeDeploymentPermissionLabel()}`,
+    `AXIOM: ${analysis?.axiom_evidence_backed_deployability_tier || analysis?.axiom_deployability_tier || "unknown"}`,
     `Size: ${analysis?.size_band || "watchlist only"}`,
     `Trust: ${activeTrustTierLabel()}`,
     `Report: ${activeReportVersionLabel()}`,
@@ -820,8 +877,104 @@ const renderDashboardSummary = (report) => {
     </div>
     <div class="section-copy">
       <div class="section-heading">Executive Summary</div>
-      <p>${escapeHtml(report.overall_analysis || report.signal_summary || "")}</p>
+      <p>${escapeHtml(
+        report.axiom_summary_card_text ||
+          report.axiom_summary ||
+          report.overall_analysis ||
+          report.signal_summary ||
+          ""
+      )}</p>
     </div>
+  `;
+};
+
+const renderAxiomOverview = (report) => {
+  const container = qs("#assistant-axiom-overview");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "AXIOM regime, deployability, evidence status, and engine scorecard will render here."
+    );
+    return;
+  }
+  const explanation = report.axiom_explanation || {};
+  const engineScores = report.axiom_engine_scores || {};
+  const metrics = [
+    {
+      label: "DAU",
+      value: formatScore(report.axiom_deployable_alpha_utility),
+      note: `validated edge ${formatScore(report.axiom_validated_edge)}`,
+    },
+    {
+      label: "Regime",
+      value: report.axiom_regime_label || "indeterminate",
+      note: `family ${report.axiom_trade_family || "none"}`,
+    },
+    {
+      label: "Deployability",
+      value:
+        report.axiom_evidence_backed_deployability_tier ||
+        report.axiom_deployability_tier ||
+        "unknown",
+      note: `size ${report.axiom_final_size_band || report.axiom_size_band_recommendation || "none"}`,
+    },
+    {
+      label: "Calibration",
+      value: report.axiom_calibration_status || "partial",
+      note: `${(report.axiom_historical_evidence_report || {}).matured_count || 0} matured`,
+    },
+    {
+      label: "Strongest Engine",
+      value: explanation.strongest_engine?.engine || "n/a",
+      note: formatScore(explanation.strongest_engine?.score),
+    },
+    {
+      label: "Weakest Engine",
+      value: explanation.weakest_engine?.engine || "n/a",
+      note: formatScore(explanation.weakest_engine?.score),
+    },
+    {
+      label: "Audience",
+      value: report.axiom_audience_type || "general",
+      note: report.axiom_report_profile || "trading_focused",
+    },
+    {
+      label: "Evidence",
+      value: (report.axiom_summary_card || {}).evidence_status || "partial",
+      note: report.axiom_lineage_summary || "lineage pending",
+    },
+  ];
+  const engineLines = Object.entries(engineScores)
+    .map(([name, payload]) => {
+      const score = payload?.score == null ? "n/a" : Number(payload.score).toFixed(1);
+      return `${name.replaceAll("_", " ")}: ${score} / cov ${formatScore(
+        payload?.coverage
+      )} / conf ${formatScore(payload?.confidence)}`;
+    })
+    .slice(0, 7);
+  container.innerHTML = `
+    <section class="drilldown-card">
+      <h5>AXIOM Overview</h5>
+      <div class="summary-grid">
+        ${metrics
+          .map(
+            (metric) => `
+              <div class="summary-card">
+                <div class="summary-card-label">${escapeHtml(metric.label)}</div>
+                <div class="summary-card-value">${escapeHtml(metric.value || "n/a")}</div>
+                <div class="summary-card-note">${escapeHtml(metric.note || "n/a")}</div>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+    <section class="drilldown-card">
+      <h5>Engine Scorecard</h5>
+      ${renderBullets(engineLines, "No AXIOM engine scores available.")}
+    </section>
   `;
 };
 
@@ -856,6 +1009,122 @@ const renderWhySignal = (report) => {
     `<section class="drilldown-card">
       <h5>Freshness Warnings</h5>
       ${renderBullets(why.freshness_warnings, "No freshness warnings.")}
+    </section>`,
+  ].join("");
+};
+
+const renderAxiomReportPack = (report) => {
+  const container = qs("#assistant-axiom-report-pack");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "AXIOM summary card, IC memo, and risk/deployability memo will render here."
+    );
+    return;
+  }
+  const summaryCard = report.axiom_summary_card || {};
+  const icMemo = report.axiom_ic_memo || {};
+  const riskMemo = report.axiom_risk_deployability_memo || {};
+  const historical = report.axiom_historical_evidence_report || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>AXIOM Summary Card</h5>
+      ${renderBullets(
+        [
+          summaryCard.summary,
+          `Regime ${summaryCard.regime_label || "indeterminate"} / family ${summaryCard.trade_family || "none"}`,
+          `Deployability ${summaryCard.deployability_tier || "unknown"} / size ${summaryCard.size_band || "none"}`,
+          `Strongest ${summaryCard.strongest_engine?.engine || "n/a"} / weakest ${summaryCard.weakest_engine?.engine || "n/a"}`,
+        ],
+        "No AXIOM summary card is available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>IC Memo</h5>
+      ${renderBullets(
+        [
+          report.axiom_ic_memo_summary,
+          icMemo.thesis,
+          icMemo.market_pricing_view,
+          (icMemo.recommended_action || {}).rationale,
+        ].filter(Boolean),
+        "No IC memo is available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Risk & Deployability Memo</h5>
+      ${renderBullets(
+        [
+          report.axiom_risk_deployability_memo_summary,
+          riskMemo.memo_summary,
+          ...(riskMemo.downgrade_triggers || []).slice(0, 3),
+        ].filter(Boolean),
+        "No risk and deployability memo is available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Historical Evidence Summary</h5>
+      ${renderBullets(
+        [
+          report.axiom_historical_evidence_summary_text,
+          ...(historical.evidence_notes || []),
+          ...(historical.recent_symbol_evidence || []).slice(0, 2),
+        ].filter(Boolean),
+        "No historical evidence summary is available."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderAxiomLineage = (report) => {
+  const container = qs("#assistant-axiom-lineage");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "AXIOM evidence lineage, weakest coverage areas, and source-confidence notes will render here."
+    );
+    return;
+  }
+  const lineage = report.axiom_lineage || {};
+  const weakest = (lineage.weakest_evidence_areas || []).slice(0, 5).map(
+    (item) =>
+      `${(item.engine || "unknown").replaceAll("_", " ")} / ${(item.component || "unknown").replaceAll(
+        "_",
+        " "
+      )}: ${item.coverage_status || "partial"} via ${item.evidence_type || "unknown"}`
+  );
+  const engineBlocks = Object.values(lineage.engine_lineage || {})
+    .slice(0, 4)
+    .map((item) => {
+      const block = (item.blocks || [])[0] || {};
+      return `${(item.engine || "unknown").replaceAll("_", " ")}: ${item.engine_status || "unknown"} / ${
+        block.evidence_type || "unknown"
+      } / conf ${formatScore(item.confidence)}`;
+    });
+  const profile = report.axiom_workspace_profile || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Lineage Summary</h5>
+      ${renderBullets(
+        [
+          report.axiom_lineage_summary,
+          `Audience ${profile.audience_type || "general"} / report profile ${profile.report_profile || "trading_focused"}`,
+          `Framework ${report.axiom_framework_version || "n/a"} / report ${report.report_version || "n/a"}`,
+        ].filter(Boolean),
+        "No AXIOM lineage summary is available."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Weakest Evidence Areas</h5>
+      ${renderBullets(weakest, "No weak evidence area is currently surfaced.")}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Engine Provenance Mix</h5>
+      ${renderBullets(engineBlocks, "No engine provenance snapshot is available.")}
     </section>`,
   ].join("");
 };
@@ -1043,6 +1312,12 @@ const renderRecentAnalyses = () => {
                 )}</span>
                 <span class="micro-chip">permission ${escapeHtml(
                   snapshot.deployment_permission || "analysis_only"
+                )}</span>
+                <span class="micro-chip">axiom ${escapeHtml(
+                  snapshot.axiom_deployability_tier || "unknown"
+                )}</span>
+                <span class="micro-chip">regime ${escapeHtml(
+                  snapshot.axiom_regime_label || "indeterminate"
                 )}</span>
                 <span class="micro-chip">size ${escapeHtml(
                   snapshot.size_band || "watchlist only"
@@ -1898,6 +2173,9 @@ const renderEvidenceSupport = (report) => {
       <h5>Provenance Notes</h5>
       ${renderBullets(
         [
+          report.axiom_lineage_summary,
+          report.axiom_ic_memo_summary,
+          report.axiom_risk_deployability_memo_summary,
           report.evidence_provenance,
           report.evaluation_summary,
           report.regime_usefulness_summary,
@@ -1959,6 +2237,12 @@ const renderArtifactLedger = (report) => {
     `Trust tier: ${report.trust_tier || "blocked"}`,
     `Deployment readiness artifact: ${report.deployment_readiness_artifact_id || "n/a"}`,
     `Deployment audit artifact: ${report.deployment_audit_artifact_id || "n/a"}`,
+    `AXIOM artifact: ${report.axiom_artifact_id || "n/a"}`,
+    `AXIOM history artifact: ${report.axiom_history_artifact_id || "n/a"}`,
+    `AXIOM calibration artifact: ${report.axiom_calibration_artifact_id || "n/a"}`,
+    `AXIOM portfolio governance artifact: ${report.axiom_portfolio_governance_artifact_id || "n/a"}`,
+    `AXIOM lineage artifact: ${report.axiom_lineage_artifact_id || "n/a"}`,
+    `AXIOM report pack artifact: ${report.axiom_report_pack_artifact_id || "n/a"}`,
     `Portfolio artifact: ${report.portfolio_construction_artifact_id || "n/a"}`,
     `Prediction artifact: ${
       report.prediction_record_id || report.prediction_record_artifact_id || "n/a"
@@ -1972,6 +2256,9 @@ const renderArtifactLedger = (report) => {
     `Portfolio rank: ${report.portfolio_rank || "n/a"} / class ${
       report.candidate_classification || "watchlist_candidate"
     } / size ${report.size_band || "watchlist only"}`,
+    `AXIOM audience/profile: ${report.axiom_audience_type || "general"} / ${
+      report.axiom_report_profile || "trading_focused"
+    }`,
     `Freshness status: ${report.freshness_summary?.overall_status || "unknown"}`,
     `Scenario: ${report.scenario || "base"} / depth ${report.analysis_depth || "standard"}`,
   ];
@@ -1984,6 +2271,8 @@ const renderArtifactLedger = (report) => {
       <h5>Traceability</h5>
       ${renderBullets(
         [
+          report.axiom_summary_card_text,
+          report.axiom_lineage_summary,
           report.signal_summary,
           report.strategy_view,
           report.evaluation_research_analysis,
@@ -2302,6 +2591,7 @@ const renderSystemAudit = (report) => {
         [
           `Report ${report.report_version || "n/a"}`,
           `Strategy ${report.strategy?.strategy_version || "n/a"}`,
+          `AXIOM ${report.axiom_framework_version || "n/a"} / ${report.axiom_report_profile || "trading_focused"}`,
           `Evaluation ${report.evaluation?.evaluation_version || "phase6"}`,
           `Research ${report.research_version || "phase10"}`,
           `Operational ${report.operational_guardrails_version || "phase12"}`,
@@ -2940,6 +3230,7 @@ const renderAssistantReport = (report) => {
     `;
     qs("#assistant-analyze-response").textContent = formatJson({});
     renderDashboardSummary(null);
+    renderAxiomOverview(null);
     renderWhySignal(null);
     renderDashboardWorkflow(null);
     renderDashboardTrustStrip(null);
@@ -2976,7 +3267,9 @@ const renderAssistantReport = (report) => {
     renderPortfolioControls(null);
     renderPortfolioRanking(null);
     renderPortfolioWorkflow(null);
+    renderAxiomReportPack(null);
     renderEvidenceSupport(null);
+    renderAxiomLineage(null);
     renderArtifactLedger(null);
     renderDomainStatusGrid(null);
     renderFactorGrid(null);
@@ -3022,6 +3315,21 @@ const renderAssistantReport = (report) => {
     { label: "Fragility", value: report.strategy?.fragility_tier || "N/A" },
     { label: "Participant", value: report.strategy?.primary_participant_fit || "N/A" },
     { label: "Deployment", value: report.deployment_permission || "N/A" },
+    {
+      label: "AXIOM DAU",
+      value:
+        report.axiom_deployable_alpha_utility == null
+          ? "N/A"
+          : Number(report.axiom_deployable_alpha_utility).toFixed(1),
+    },
+    { label: "AXIOM Regime", value: report.axiom_regime_label || "N/A" },
+    {
+      label: "AXIOM Tier",
+      value:
+        report.axiom_evidence_backed_deployability_tier ||
+        report.axiom_deployability_tier ||
+        "N/A",
+    },
     { label: "Trust Tier", value: report.trust_tier || "N/A" },
     {
       label: "Readiness",
@@ -3044,6 +3352,9 @@ const renderAssistantReport = (report) => {
     { label: "Scenario", value: report.scenario || "N/A" },
   ];
   const sections = [
+    ["AXIOM Summary", report.axiom_summary],
+    ["AXIOM Institutional Memo", report.axiom_ic_memo_summary],
+    ["AXIOM Evidence Lineage", report.axiom_lineage_summary],
     ["Signal Summary", report.signal_summary],
     ["Technical Analysis", report.technical_analysis],
     ["Fundamental Analysis", report.fundamental_analysis],
@@ -3157,6 +3468,7 @@ const renderAssistantReport = (report) => {
   ];
   qs("#assistant-analyze-response").textContent = formatJson(report);
   renderDashboardSummary(report);
+  renderAxiomOverview(report);
   renderWhySignal(report);
   renderDashboardWorkflow(report);
   renderDashboardTrustStrip(report);
@@ -3241,7 +3553,9 @@ const renderAssistantReport = (report) => {
   renderPortfolioControls(report);
   renderPortfolioRanking(report);
   renderPortfolioWorkflow(report);
+  renderAxiomReportPack(report);
   renderEvidenceSupport(report);
+  renderAxiomLineage(report);
   renderArtifactLedger(report);
   renderDomainStatusGrid(report);
   renderFactorGrid(report);
@@ -3382,12 +3696,25 @@ const getAnalyzeInputs = () => ({
   analysis_depth: qs("#assistant-analyze-depth").value.trim(),
   refresh_mode: qs("#assistant-analyze-refresh-mode").value.trim(),
   scenario_mode: qs("#assistant-analyze-scenario-mode").value.trim(),
+  audience_type: qs("#assistant-analyze-audience").value.trim() || "general",
+  report_profile:
+    qs("#assistant-analyze-report-profile").value.trim() || "trading_focused",
 });
 
 const getAssistantChatMessage = () => qs("#assistant-chat-message").value.trim();
 
 const runAssistantAnalyze = async () => {
-  const { symbol, horizon, risk_mode, market_regime, analysis_depth, refresh_mode, scenario_mode } =
+  const {
+    symbol,
+    horizon,
+    risk_mode,
+    market_regime,
+    analysis_depth,
+    refresh_mode,
+    scenario_mode,
+    audience_type,
+    report_profile,
+  } =
     getAnalyzeInputs();
   if (!symbol || !horizon || !risk_mode) {
     setLegacyStatus(
@@ -3415,6 +3742,8 @@ const runAssistantAnalyze = async () => {
         analysis_depth,
         refresh_mode,
         scenario_mode,
+        audience_type,
+        report_profile,
       }),
     });
     if (data.session_id) {
@@ -3442,6 +3771,8 @@ const runAssistantAnalyze = async () => {
       analysis_depth,
       refresh_mode,
       scenario_mode,
+      audience_type,
+      report_profile,
     });
     setLegacyStatus("#assistant-analyze-status", `Analyze failed: ${err.message}`, "error");
   } finally {

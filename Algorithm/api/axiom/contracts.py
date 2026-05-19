@@ -246,6 +246,42 @@ class AxiomDeployabilityDecision(BaseModel):
     monitoring_triggers: List[str] = Field(default_factory=list)
 
 
+class AxiomWorkspaceProfile(BaseModel):
+    workspace_id: str = "default"
+    workspace_name: str = "FTIP Default Workspace"
+    workspace_status: str = "default"
+    audience_type: str = "general"
+    report_profile: str = "trading_focused"
+    workflow_profile: str = "default"
+    emphasis_domains: List[str] = Field(default_factory=list)
+    preferred_sections: List[str] = Field(default_factory=list)
+    profile_notes: List[str] = Field(default_factory=list)
+
+
+class AxiomLineageBlock(BaseModel):
+    engine: str
+    component: str
+    derived_from: List[str] = Field(default_factory=list)
+    evidence_type: str = "unavailable"
+    confidence_lineage: str = "low"
+    coverage_status: str = "unavailable"
+    notes: List[str] = Field(default_factory=list)
+
+
+class AxiomInstitutionalReportPack(BaseModel):
+    reporting_version: str
+    framework_version: str
+    symbol: str
+    as_of: str
+    workspace_profile: AxiomWorkspaceProfile
+    summary_card: Dict[str, Any] = Field(default_factory=dict)
+    institutional_one_pager: Dict[str, Any] = Field(default_factory=dict)
+    ic_memo: Dict[str, Any] = Field(default_factory=dict)
+    risk_deployability_memo: Dict[str, Any] = Field(default_factory=dict)
+    historical_evidence_summary: Dict[str, Any] = Field(default_factory=dict)
+    lineage_summary: Dict[str, Any] = Field(default_factory=dict)
+
+
 class AxiomArtifact(BaseModel):
     framework_version: str
     symbol: str
@@ -270,6 +306,9 @@ class AxiomArtifact(BaseModel):
     calibration_summary: Dict[str, Any] = Field(default_factory=dict)
     portfolio_governance: Dict[str, Any] = Field(default_factory=dict)
     evidence_backed_deployability: Dict[str, Any] = Field(default_factory=dict)
+    workspace_profile: Dict[str, Any] = Field(default_factory=dict)
+    lineage: Dict[str, Any] = Field(default_factory=dict)
+    institutional_reports: Dict[str, Any] = Field(default_factory=dict)
 
 
 class AxiomHistoricalOutcome(BaseModel):

@@ -1165,6 +1165,8 @@ def build_active_analysis_reference(
             "axiom_portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
             "axiom_portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
             "axiom_calibration_status": report.get("axiom_calibration_status"),
+            "axiom_audience_type": report.get("axiom_audience_type"),
+            "axiom_report_profile": report.get("axiom_report_profile"),
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
             "weekly_operating_summary": report.get("weekly_operating_summary"),
@@ -2443,11 +2445,160 @@ def attach_axiom_phase3_context(
     ]
     evidence_map["axiom_calibration_summary_text"] = [
         "axiom.calibration_summary",
-        "axiom.calibration_summary.deployable_alpha_utility_bucket_summary",
+        "axiom.calibration_summary.dau_bucket_summary",
     ]
     evidence_map["axiom_portfolio_governance_summary"] = [
         "axiom.portfolio_governance",
         "axiom.evidence_backed_deployability",
+    ]
+    updated["evidence_map"] = evidence_map
+    return sanitize_payload(updated)
+
+
+def attach_axiom_phase4_context(
+    report: Dict[str, Any],
+    axiom: Dict[str, Any],
+    *,
+    workspace_profile: Dict[str, Any],
+    lineage: Dict[str, Any],
+    institutional_reports: Dict[str, Any],
+    axiom_lineage_artifact_id: Optional[str] = None,
+    axiom_report_pack_artifact_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    updated = sanitize_payload({**report})
+    updated["report_version"] = "2.13"
+    updated["axiom"] = sanitize_payload(
+        {
+            **dict(updated.get("axiom") or {}),
+            "workspace_profile": workspace_profile,
+            "lineage": lineage,
+            "institutional_reports": institutional_reports,
+        }
+    )
+    updated["axiom_lineage_artifact_id"] = axiom_lineage_artifact_id
+    updated["axiom_report_pack_artifact_id"] = axiom_report_pack_artifact_id
+    updated["axiom_workspace_profile"] = sanitize_payload(workspace_profile)
+    updated["axiom_audience_type"] = workspace_profile.get("audience_type")
+    updated["axiom_report_profile"] = workspace_profile.get("report_profile")
+    updated["axiom_lineage"] = sanitize_payload(lineage)
+    updated["axiom_lineage_summary"] = lineage.get("lineage_summary")
+    updated["axiom_weakest_evidence_areas"] = (
+        lineage.get("weakest_evidence_areas") or []
+    )
+    updated["axiom_institutional_reports"] = sanitize_payload(institutional_reports)
+    updated["axiom_summary_card"] = institutional_reports.get("summary_card") or {}
+    updated["axiom_institutional_one_pager"] = (
+        institutional_reports.get("institutional_one_pager") or {}
+    )
+    updated["axiom_ic_memo"] = institutional_reports.get("ic_memo") or {}
+    updated["axiom_risk_deployability_memo"] = (
+        institutional_reports.get("risk_deployability_memo") or {}
+    )
+    updated["axiom_historical_evidence_report"] = (
+        institutional_reports.get("historical_evidence_summary") or {}
+    )
+
+    summary_card = updated["axiom_summary_card"]
+    ic_memo = updated["axiom_ic_memo"]
+    risk_memo = updated["axiom_risk_deployability_memo"]
+    historical_report = updated["axiom_historical_evidence_report"]
+
+    summary_card_text = (
+        f"AXIOM Summary Card: regime {str(summary_card.get('regime_label') or 'indeterminate').replace('_', ' ')}, "
+        f"trade family {str(summary_card.get('trade_family') or 'none').replace('_', ' ')}, "
+        f"deployability {str(summary_card.get('deployability_tier') or 'unknown').replace('_', ' ')}, "
+        f"size band {str(summary_card.get('size_band') or 'none').replace('_', ' ')}, "
+        f"and deployable alpha utility {_fmt_num(summary_card.get('deployable_alpha_utility'), digits=1, signed=False)} / 100."
+    )
+    ic_memo_summary = (
+        f"IC memo frames the thesis around {str(updated.get('axiom_trade_family') or 'none').replace('_', ' ')} logic, "
+        f"with recommended action {str((ic_memo.get('recommended_action') or {}).get('tier') or updated.get('axiom_deployability_tier') or 'unknown').replace('_', ' ')} "
+        f"and evidence profile {str(updated.get('axiom_calibration_status') or 'partial').replace('_', ' ')}."
+    )
+    risk_memo_summary = (
+        f"Risk and deployability memo keeps size at {str(risk_memo.get('size_band') or updated.get('axiom_final_size_band') or 'none').replace('_', ' ')} "
+        f"because fragility, liquidity, and research-integrity constraints still govern escalation."
+    )
+    historical_evidence_summary_text = (
+        f"Historical evidence summary tracks {historical_report.get('matured_count', 0)} matured records on the "
+        f"{historical_report.get('horizon_label', '21d')} horizon with status {str(historical_report.get('status') or 'partial').replace('_', ' ')}."
+    )
+
+    updated["axiom_summary_card_text"] = summary_card_text
+    updated["axiom_ic_memo_summary"] = ic_memo_summary
+    updated["axiom_risk_deployability_memo_summary"] = risk_memo_summary
+    updated["axiom_historical_evidence_summary_text"] = (
+        historical_evidence_summary_text
+    )
+
+    updated["overall_analysis"] = _join_sentences(
+        [
+            updated.get("overall_analysis"),
+            summary_card_text,
+            (updated.get("axiom_institutional_one_pager") or {}).get(
+                "executive_summary"
+            ),
+        ]
+    )
+    updated["strategy_view"] = _join_sentences(
+        [
+            updated.get("strategy_view"),
+            ic_memo_summary,
+            risk_memo_summary,
+        ]
+    )
+    updated["deployment_permission_analysis"] = _join_sentences(
+        [
+            updated.get("deployment_permission_analysis"),
+            risk_memo_summary,
+            (risk_memo.get("memo_summary") or None),
+        ]
+    )
+    updated["evaluation_research_analysis"] = _join_sentences(
+        [
+            updated.get("evaluation_research_analysis"),
+            historical_evidence_summary_text,
+            "AXIOM historical and calibration evidence is now exposed in institutional memo form for committee-style review.",
+        ]
+    )
+    updated["evidence_provenance"] = _join_sentences(
+        [
+            updated.get("evidence_provenance"),
+            str(lineage.get("lineage_summary") or ""),
+            (
+                "Weakest evidence areas: "
+                + ", ".join(
+                    f"{item.get('engine', 'unknown').replace('_', ' ')} / {item.get('component', 'unknown').replace('_', ' ')}"
+                    for item in (lineage.get("weakest_evidence_areas") or [])[:4]
+                )
+                + "."
+            )
+            if lineage.get("weakest_evidence_areas")
+            else None,
+        ]
+    )
+
+    evidence_map = dict(updated.get("evidence_map") or {})
+    evidence_map["axiom_summary_card"] = [
+        "axiom.institutional_reports.summary_card",
+        "axiom.explanation",
+        "axiom.scorecard",
+    ]
+    evidence_map["axiom_ic_memo_summary"] = [
+        "axiom.institutional_reports.ic_memo",
+        "axiom.calibration_summary",
+        "axiom.portfolio_governance",
+    ]
+    evidence_map["axiom_risk_deployability_memo_summary"] = [
+        "axiom.institutional_reports.risk_deployability_memo",
+        "axiom.engine_scores.critical_fragility",
+        "axiom.engine_scores.liquidity_convexity",
+        "axiom.engine_scores.research_integrity",
+    ]
+    evidence_map["axiom_lineage_summary"] = [
+        "axiom.lineage.engine_lineage",
+        "axiom.lineage.historical_evidence_provenance",
+        "axiom.lineage.coverage_confidence_provenance",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)
