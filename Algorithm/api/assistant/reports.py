@@ -1186,6 +1186,20 @@ def build_active_analysis_reference(
             "platform_dossier_status": (report.get("platform_dossier") or {}).get(
                 "evidence_status"
             ),
+            "platform_access_role": (
+                (report.get("platform_access_summary") or {}).get("effective_role")
+            ),
+            "platform_pending_approval_count": (
+                (report.get("platform_summary_view") or {}).get("pending_approval_count")
+            ),
+            "platform_export_count": (
+                (report.get("platform_summary_view") or {}).get("export_count")
+            ),
+            "platform_recommendation_locked": (
+                ((report.get("platform_dossier") or {}).get("metadata") or {}).get(
+                    "recommendation_locked"
+                )
+            ),
             "operating_workflow_version": report.get("operating_workflow_version"),
             "daily_operating_summary": report.get("daily_operating_summary"),
             "weekly_operating_summary": report.get("weekly_operating_summary"),
@@ -2634,6 +2648,14 @@ def attach_platform_context(
     dossier = dict(platform_context.get("dossier") or {})
     summary_view = dict(platform_context.get("summary_view") or {})
     template = dict(platform_context.get("workflow_template") or {})
+    access_summary = dict(platform_context.get("access_summary") or {})
+    integration_summary = dict(platform_context.get("integration_summary") or {})
+    health_summary = dict(platform_context.get("health_summary") or {})
+    approvals = list(platform_context.get("approvals") or [])
+    timeline = list(platform_context.get("timeline") or [])
+    exports = list(platform_context.get("exports") or [])
+    allowed_actions = list(platform_context.get("allowed_actions") or [])
+    bindings = list(platform_context.get("integration_bindings") or [])
 
     overview_summary = (
         f"Workspace {workspace.get('name') or 'n/a'} is running "
@@ -2656,8 +2678,39 @@ def attach_platform_context(
         if dossier
         else "No dossier monitoring state is attached."
     )
+    access_control_summary = (
+        f"Platform access is running as role {access_summary.get('effective_role') or 'service_account'} "
+        f"with {len(access_summary.get('effective_permissions') or [])} effective permission(s)."
+        if access_summary
+        else "No platform access summary is attached."
+    )
+    workflow_actions_summary = (
+        f"Workflow has {len(allowed_actions)} visible action(s), "
+        f"{sum(1 for item in allowed_actions if item.get('allowed'))} currently allowed, and "
+        f"{summary_view.get('pending_approval_count', 0)} pending approval request(s)."
+        if workflow or allowed_actions
+        else "No workflow actions are currently attached."
+    )
+    audit_timeline_summary = (
+        f"Platform timeline contains {len(timeline)} audit event(s) and the latest event is "
+        f"{(timeline[0] or {}).get('title') if timeline else 'n/a'}."
+        if timeline
+        else "No platform audit timeline is attached."
+    )
+    export_summary = (
+        f"Dossier has {len(exports)} export pack(s) with {summary_view.get('export_count', 0)} total pack(s) in the workspace. "
+        f"Supported packs include {_fmt_list(platform_context.get('supported_export_packs') or [])}."
+        if dossier or exports
+        else "No platform export pack context is attached."
+    )
+    integration_health_summary = (
+        f"Integration layer has {integration_summary.get('binding_count', 0)} binding(s) with warnings "
+        f"{_fmt_list(integration_summary.get('warnings') or [])}."
+        if integration_summary
+        else "No platform integration summary is attached."
+    )
 
-    updated["report_version"] = "2.15"
+    updated["report_version"] = "2.16"
     updated["platform_foundation_version"] = platform_context.get(
         "platform_foundation_version"
     )
@@ -2674,14 +2727,30 @@ def attach_platform_context(
     updated["platform_recent_dossiers"] = sanitize_payload(
         summary_view.get("latest_axiom_linked_dossiers") or []
     )
+    updated["platform_access_summary"] = sanitize_payload(access_summary)
+    updated["platform_allowed_actions"] = sanitize_payload(allowed_actions)
+    updated["platform_approvals"] = sanitize_payload(approvals)
+    updated["platform_timeline"] = sanitize_payload(timeline)
+    updated["platform_exports"] = sanitize_payload(exports)
+    updated["platform_supported_export_packs"] = sanitize_payload(
+        platform_context.get("supported_export_packs") or []
+    )
+    updated["platform_integration_summary"] = sanitize_payload(integration_summary)
+    updated["platform_integration_bindings"] = sanitize_payload(bindings)
+    updated["platform_health_summary"] = sanitize_payload(health_summary)
     updated["platform_overview_summary"] = overview_summary
     updated["platform_dossier_summary"] = dossier_summary
     updated["platform_monitoring_summary"] = monitoring_summary
+    updated["platform_access_control_summary"] = access_control_summary
+    updated["platform_workflow_actions_summary"] = workflow_actions_summary
+    updated["platform_audit_timeline_summary"] = audit_timeline_summary
+    updated["platform_export_summary"] = export_summary
+    updated["platform_integration_health_summary"] = integration_health_summary
     updated["overall_analysis"] = _join_sentences(
-        [updated.get("overall_analysis"), overview_summary, dossier_summary]
+        [updated.get("overall_analysis"), overview_summary, dossier_summary, workflow_actions_summary]
     )
     updated["strategy_view"] = _join_sentences(
-        [updated.get("strategy_view"), monitoring_summary]
+        [updated.get("strategy_view"), monitoring_summary, access_control_summary]
     )
     updated["evidence_provenance"] = _join_sentences(
         [
@@ -2689,6 +2758,8 @@ def attach_platform_context(
             f"Platform profile is {platform_profile.get('profile_id')} with preferred dossier sections {_fmt_list(platform_profile.get('preferred_dossier_sections') or [])}."
             if platform_profile
             else None,
+            export_summary,
+            integration_health_summary,
         ]
     )
     evidence_map = dict(updated.get("evidence_map") or {})
@@ -2705,6 +2776,26 @@ def attach_platform_context(
     evidence_map["platform_monitoring_summary"] = [
         "platform.dossier.monitoring_state",
         "axiom.risk_deployability_memo",
+    ]
+    evidence_map["platform_access_control_summary"] = [
+        "platform.access_summary",
+        "platform.permissions",
+    ]
+    evidence_map["platform_workflow_actions_summary"] = [
+        "platform.allowed_actions",
+        "platform.approvals",
+    ]
+    evidence_map["platform_audit_timeline_summary"] = [
+        "platform.timeline",
+        "platform.audit",
+    ]
+    evidence_map["platform_export_summary"] = [
+        "platform.exports",
+        "platform.supported_export_packs",
+    ]
+    evidence_map["platform_integration_health_summary"] = [
+        "platform.integration_summary",
+        "platform.health_summary",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

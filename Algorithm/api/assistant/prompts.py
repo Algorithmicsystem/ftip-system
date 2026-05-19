@@ -58,6 +58,9 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"AXIOM lineage: {report.get('axiom_lineage_summary', 'n/a')}.",
             f"Platform workflow: {report.get('platform_overview_summary', 'n/a')}.",
             f"Platform dossier: {report.get('platform_dossier_summary', 'n/a')}.",
+            f"Platform controls: {report.get('platform_workflow_actions_summary', 'n/a')}.",
+            f"Platform exports: {report.get('platform_export_summary', 'n/a')}.",
+            f"Platform access: {report.get('platform_access_control_summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -97,6 +100,13 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "platform_workflow_template": report.get("platform_workflow_template"),
         "platform_dossier": report.get("platform_dossier"),
         "platform_summary_view": report.get("platform_summary_view"),
+        "platform_access_summary": report.get("platform_access_summary"),
+        "platform_allowed_actions": report.get("platform_allowed_actions"),
+        "platform_approvals": report.get("platform_approvals"),
+        "platform_timeline": report.get("platform_timeline"),
+        "platform_exports": report.get("platform_exports"),
+        "platform_integration_summary": report.get("platform_integration_summary"),
+        "platform_health_summary": report.get("platform_health_summary"),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -162,6 +172,19 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "platform_overview_summary": report.get("platform_overview_summary"),
         "platform_dossier_summary": report.get("platform_dossier_summary"),
         "platform_monitoring_summary": report.get("platform_monitoring_summary"),
+        "platform_access_control_summary": report.get(
+            "platform_access_control_summary"
+        ),
+        "platform_workflow_actions_summary": report.get(
+            "platform_workflow_actions_summary"
+        ),
+        "platform_audit_timeline_summary": report.get(
+            "platform_audit_timeline_summary"
+        ),
+        "platform_export_summary": report.get("platform_export_summary"),
+        "platform_integration_health_summary": report.get(
+            "platform_integration_health_summary"
+        ),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
         "monthly_operating_summary": report.get("monthly_operating_summary"),

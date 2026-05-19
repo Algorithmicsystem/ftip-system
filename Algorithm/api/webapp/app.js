@@ -221,6 +221,14 @@ const buildActiveAnalysisFromReport = (report) => ({
   platform_dossier_id: report?.platform_dossier?.dossier_id || null,
   platform_dossier_type: report?.platform_dossier?.dossier_type || null,
   platform_dossier_status: report?.platform_dossier?.evidence_status || null,
+  platform_access_role:
+    report?.platform_access_summary?.effective_role || null,
+  platform_pending_approval_count:
+    report?.platform_summary_view?.pending_approval_count ?? null,
+  platform_export_count:
+    report?.platform_summary_view?.export_count ?? null,
+  platform_recommendation_locked:
+    report?.platform_dossier?.metadata?.recommendation_locked ?? null,
   operating_workflow_version: report?.operating_workflow_version || "n/a",
   daily_operating_summary: report?.daily_operating_summary || "",
   weekly_operating_summary: report?.weekly_operating_summary || "",
@@ -367,6 +375,20 @@ const buildStoredReportEntry = (report, activeAnalysis) => {
         report?.platform_dossier?.dossier_type || analysis?.platform_dossier_type || null,
       platform_dossier_status:
         report?.platform_dossier?.evidence_status || analysis?.platform_dossier_status || null,
+      platform_access_role:
+        report?.platform_access_summary?.effective_role || analysis?.platform_access_role || null,
+      platform_pending_approval_count:
+        report?.platform_summary_view?.pending_approval_count ??
+        analysis?.platform_pending_approval_count ??
+        null,
+      platform_export_count:
+        report?.platform_summary_view?.export_count ??
+        analysis?.platform_export_count ??
+        null,
+      platform_recommendation_locked:
+        report?.platform_dossier?.metadata?.recommendation_locked ??
+        analysis?.platform_recommendation_locked ??
+        null,
       platform_overview_summary: report?.platform_overview_summary || "",
       platform_dossier_summary: report?.platform_dossier_summary || "",
       platform_monitoring_summary: report?.platform_monitoring_summary || "",
@@ -3007,6 +3029,96 @@ const renderPlatformMonitoring = (report) => {
   ].join("");
 };
 
+const renderPlatformControls = (report) => {
+  const container = qs("#assistant-platform-controls");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Workflow actions, approvals, audit timeline, export packs, access context, and integrations render here."
+    );
+    return;
+  }
+  const access = report.platform_access_summary || {};
+  const actions = report.platform_allowed_actions || [];
+  const approvals = report.platform_approvals || [];
+  const timeline = report.platform_timeline || [];
+  const exports = report.platform_exports || [];
+  const integrationSummary = report.platform_integration_summary || {};
+  const health = report.platform_health_summary || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Workflow Actions</h5>
+      ${renderBullets(
+        [
+          report.platform_workflow_actions_summary,
+          ...actions.slice(0, 6).map(
+            (item) =>
+              `${item.action_type || "action"}: ${item.allowed ? "allowed" : "blocked"}${
+                item.next_stage ? ` / next ${item.next_stage}` : ""
+              }${item.note ? ` / ${item.note}` : ""}`
+          ),
+        ].filter(Boolean),
+        "No workflow action state is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Audit &amp; Approvals</h5>
+      ${renderBullets(
+        [
+          report.platform_audit_timeline_summary,
+          ...approvals.slice(0, 4).map(
+            (item) =>
+              `${item.requested_role || "review"} approval: ${item.status || "pending"} / stage ${
+                item.stage || "n/a"
+              }`
+          ),
+          ...timeline.slice(0, 4).map(
+            (item) =>
+              `${item.title || item.event_type || "event"}: ${item.summary || "no summary"}`
+          ),
+        ].filter(Boolean),
+        "No audit or approval activity is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Export Packs</h5>
+      ${renderBullets(
+        [
+          report.platform_export_summary,
+          ...exports.slice(0, 4).map(
+            (item) =>
+              `${item.pack_type || "pack"}: ${item.status || "generated"} / ${
+                item.approval_status || "no approval gate"
+              } / ${item.content_hash || "no hash"}`
+          ),
+        ].filter(Boolean),
+        "No export pack metadata is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Access / Integration / Health</h5>
+      ${renderBullets(
+        [
+          report.platform_access_control_summary,
+          `Role ${access.effective_role || "service_account"} / permissions ${
+            (access.effective_permissions || []).length
+          }`,
+          report.platform_integration_health_summary,
+          `Integrations ${(integrationSummary.binding_count ?? 0)} / warnings ${
+            (integrationSummary.warnings || []).length
+          }`,
+          `Platform warnings ${(health.warnings || []).length} / pending approvals ${
+            health.pending_approval_count ?? 0
+          }`,
+        ].filter(Boolean),
+        "No access or health context is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderOperatingWorkflow = (report) => {
   const container = qs("#assistant-operating-workflow");
   if (!container) {
@@ -3589,6 +3701,7 @@ const renderAssistantReport = (report) => {
     renderPlatformDossiers(null);
     renderPlatformDossierDetail(null);
     renderPlatformMonitoring(null);
+    renderPlatformControls(null);
     renderOperatingWorkflow(null);
     renderOperatorRunbook(null);
     renderDeploymentReadiness(null);
@@ -3881,6 +3994,7 @@ const renderAssistantReport = (report) => {
   renderPlatformDossiers(report);
   renderPlatformDossierDetail(report);
   renderPlatformMonitoring(report);
+  renderPlatformControls(report);
   renderOperatingWorkflow(report);
   renderOperatorRunbook(report);
   renderSystemHealth(state.assistantHealth, report);

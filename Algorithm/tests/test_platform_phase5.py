@@ -18,6 +18,16 @@ def _reset_platform_store(store: PlatformStore) -> None:
     store._workflows.clear()
     store._dossiers.clear()
     store._dossier_links.clear()
+    if hasattr(store, "_memberships"):
+        store._memberships.clear()
+    if hasattr(store, "_approval_requests"):
+        store._approval_requests.clear()
+    if hasattr(store, "_audit_events"):
+        store._audit_events.clear()
+    if hasattr(store, "_export_manifests"):
+        store._export_manifests.clear()
+    if hasattr(store, "_integration_bindings"):
+        store._integration_bindings.clear()
 
 
 def _sample_platform_report(symbol: str = "NVDA") -> dict[str, Any]:

@@ -65,6 +65,10 @@ class AnalysisReference(BaseModel):
     platform_dossier_id: Optional[str] = None
     platform_dossier_type: Optional[str] = None
     platform_dossier_status: Optional[str] = None
+    platform_access_role: Optional[str] = None
+    platform_pending_approval_count: Optional[int] = None
+    platform_export_count: Optional[int] = None
+    platform_recommendation_locked: Optional[bool] = None
 
 
 class ChatResponse(BaseModel):

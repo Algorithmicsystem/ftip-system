@@ -147,6 +147,228 @@ class PlatformSummaryView(BaseModel):
     current_dossier: Optional[Dict[str, Any]] = None
 
 
+class ResourceRef(BaseModel):
+    resource_type: str
+    resource_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PermissionSet(BaseModel):
+    permissions: List[str] = Field(default_factory=list)
+
+
+class RoleDefinition(BaseModel):
+    role_id: str
+    description: str
+    scope: str = "workspace"
+    permissions: PermissionSet
+
+
+class UserContext(BaseModel):
+    user_id: str
+    user_name: Optional[str] = None
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    role: str = "service_account"
+    permissions: List[str] = Field(default_factory=list)
+    auth_mode: str = "development"
+    is_system: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class MembershipRecord(BaseModel):
+    membership_id: str
+    user_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    role: str
+    permissions: List[str] = Field(default_factory=list)
+    status: str = "active"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class AccessDecision(BaseModel):
+    allowed: bool
+    permission: str
+    role: str
+    reason: str
+    enforcement_mode: str = "default"
+    permissions: List[str] = Field(default_factory=list)
+    missing_permissions: List[str] = Field(default_factory=list)
+    membership: Optional[MembershipRecord] = None
+    resource: Optional[ResourceRef] = None
+
+
+class AuditEvent(BaseModel):
+    event_id: str
+    event_type: str
+    resource_type: str
+    resource_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    actor: Dict[str, Any] = Field(default_factory=dict)
+    timestamp: Optional[str] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskState(BaseModel):
+    task_id: str
+    label: str
+    status: str = "pending"
+    owner_placeholder: Optional[str] = None
+    due_at: Optional[str] = None
+    notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowAction(BaseModel):
+    action_id: str
+    workflow_id: str
+    dossier_id: Optional[str] = None
+    action_type: str
+    requested_stage: Optional[str] = None
+    requested_status: Optional[str] = None
+    rationale: Optional[str] = None
+    actor: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+
+
+class StageTransition(BaseModel):
+    template_id: str
+    from_stage: str
+    to_stage: str
+    allowed: bool = True
+    requires_role: Optional[str] = None
+    requires_approval: bool = False
+    notes: List[str] = Field(default_factory=list)
+
+
+class WorkflowTimelineEvent(BaseModel):
+    event_id: str
+    workflow_id: str
+    dossier_id: Optional[str] = None
+    event_type: str
+    title: str
+    summary: str
+    stage: Optional[str] = None
+    status: Optional[str] = None
+    actor_label: Optional[str] = None
+    created_at: Optional[str] = None
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ApprovalRequest(BaseModel):
+    approval_id: str
+    workflow_id: str
+    dossier_id: Optional[str] = None
+    requested_role: str
+    requested_by: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "pending"
+    stage: Optional[str] = None
+    rationale: Optional[str] = None
+    required_permissions: List[str] = Field(default_factory=list)
+    decisions: List[Dict[str, Any]] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ApprovalDecision(BaseModel):
+    decision_id: str
+    approval_id: str
+    decision_type: str
+    decided_by: Dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    created_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExportSection(BaseModel):
+    section_key: str
+    title: str
+    content: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "available"
+
+
+class ExportManifest(BaseModel):
+    export_id: str
+    dossier_id: str
+    workflow_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    pack_type: str
+    title: str
+    subtitle: Optional[str] = None
+    generated_at: Optional[str] = None
+    framework_version: Optional[str] = None
+    organization_context: Dict[str, Any] = Field(default_factory=dict)
+    workspace_context: Dict[str, Any] = Field(default_factory=dict)
+    entity_context: Dict[str, Any] = Field(default_factory=dict)
+    approval_status: Optional[str] = None
+    evidence_summary: Optional[str] = None
+    ordered_sections: List[ExportSection] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    content_hash: Optional[str] = None
+    status: str = "generated"
+
+
+class ConnectorCapability(BaseModel):
+    capability_id: str
+    title: str
+    description: str
+
+
+class ConnectorHealthState(BaseModel):
+    status: str = "unknown"
+    checked_at: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IntegrationDefinition(BaseModel):
+    integration_type: str
+    title: str
+    description: str
+    scope: str = "workspace"
+    capabilities: List[ConnectorCapability] = Field(default_factory=list)
+    config_schema: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IntegrationBinding(BaseModel):
+    binding_id: str
+    integration_type: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    status: str = "configured"
+    config: Dict[str, Any] = Field(default_factory=dict)
+    health: ConnectorHealthState = Field(default_factory=ConnectorHealthState)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class PlatformHealthSummary(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    access_summary: Dict[str, Any] = Field(default_factory=dict)
+    pending_approval_count: int = 0
+    export_count: int = 0
+    audit_event_count: int = 0
+    integration_health_summary: Dict[str, Any] = Field(default_factory=dict)
+    workflow_integrity_checks: List[str] = Field(default_factory=list)
+    dossier_integrity_checks: List[str] = Field(default_factory=list)
+    export_integrity_checks: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+
+
 class CreateOrganizationRequest(BaseModel):
     name: str
     organization_type: str = "research_team"
@@ -198,3 +420,36 @@ class AttachAnalysisRequest(BaseModel):
     axiom_history_artifact_id: Optional[str] = None
     axiom_calibration_artifact_id: Optional[str] = None
 
+
+class WorkflowActionRequest(BaseModel):
+    dossier_id: Optional[str] = None
+    action_type: str
+    requested_stage: Optional[str] = None
+    requested_status: Optional[str] = None
+    rationale: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowApprovalRequestPayload(BaseModel):
+    approval_id: Optional[str] = None
+    dossier_id: Optional[str] = None
+    mode: str = "request"
+    requested_role: str = "committee"
+    decision_type: Optional[str] = None
+    rationale: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DossierExportRequest(BaseModel):
+    pack_type: str = "dossier_pack"
+    report_profile: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateIntegrationBindingRequest(BaseModel):
+    integration_type: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    status: str = "configured"
+    config: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)

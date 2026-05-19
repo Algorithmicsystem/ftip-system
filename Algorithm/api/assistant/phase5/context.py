@@ -136,6 +136,21 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "platform_overview_summary": report.get("platform_overview_summary") or "",
         "platform_dossier_summary": report.get("platform_dossier_summary") or "",
         "platform_monitoring_summary": report.get("platform_monitoring_summary") or "",
+        "platform_access_control_summary": report.get("platform_access_control_summary")
+        or "",
+        "platform_workflow_actions_summary": report.get(
+            "platform_workflow_actions_summary"
+        )
+        or "",
+        "platform_audit_timeline_summary": report.get(
+            "platform_audit_timeline_summary"
+        )
+        or "",
+        "platform_export_summary": report.get("platform_export_summary") or "",
+        "platform_integration_health_summary": report.get(
+            "platform_integration_health_summary"
+        )
+        or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",
@@ -321,6 +336,19 @@ def build_narrator_context(
         or ((report.get("platform_dossier") or {}).get("dossier_type")),
         "platform_dossier_status": active_analysis.get("platform_dossier_status")
         or ((report.get("platform_dossier") or {}).get("evidence_status")),
+        "platform_access_role": active_analysis.get("platform_access_role")
+        or ((report.get("platform_access_summary") or {}).get("effective_role")),
+        "platform_pending_approval_count": active_analysis.get(
+            "platform_pending_approval_count"
+        )
+        or ((report.get("platform_summary_view") or {}).get("pending_approval_count")),
+        "platform_export_count": active_analysis.get("platform_export_count")
+        or ((report.get("platform_summary_view") or {}).get("export_count")),
+        "platform_recommendation_locked": active_analysis.get(
+            "platform_recommendation_locked"
+        )
+        if active_analysis.get("platform_recommendation_locked") is not None
+        else (((report.get("platform_dossier") or {}).get("metadata") or {}).get("recommendation_locked")),
         "operating_workflow_version": active_analysis.get("operating_workflow_version")
         or report.get("operating_workflow_version"),
         "daily_operating_summary": active_analysis.get("daily_operating_summary")
@@ -466,6 +494,13 @@ def build_narrator_context(
             "overview_summary": report.get("platform_overview_summary"),
             "dossier_summary": report.get("platform_dossier_summary"),
             "monitoring_summary": report.get("platform_monitoring_summary"),
+            "access_control_summary": report.get("platform_access_control_summary"),
+            "workflow_actions_summary": report.get("platform_workflow_actions_summary"),
+            "audit_timeline_summary": report.get("platform_audit_timeline_summary"),
+            "export_summary": report.get("platform_export_summary"),
+            "integration_health_summary": report.get("platform_integration_health_summary"),
+            "effective_role": (report.get("platform_access_summary") or {}).get("effective_role"),
+            "pending_approval_count": (report.get("platform_summary_view") or {}).get("pending_approval_count"),
         },
         "operating_workflow_snapshot": {
             "operating_workflow_version": report.get("operating_workflow_version"),
@@ -547,6 +582,11 @@ def build_narrator_context(
             "platform_overview_summary": sections["platform_overview_summary"],
             "platform_dossier_summary": sections["platform_dossier_summary"],
             "platform_monitoring_summary": sections["platform_monitoring_summary"],
+            "platform_access_control_summary": sections["platform_access_control_summary"],
+            "platform_workflow_actions_summary": sections["platform_workflow_actions_summary"],
+            "platform_audit_timeline_summary": sections["platform_audit_timeline_summary"],
+            "platform_export_summary": sections["platform_export_summary"],
+            "platform_integration_health_summary": sections["platform_integration_health_summary"],
             "daily_operating_summary": sections["daily_operating_summary"],
             "weekly_operating_summary": sections["weekly_operating_summary"],
             "monthly_operating_summary": sections["monthly_operating_summary"],

@@ -77,6 +77,7 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-platform-dossiers"' in html
     assert 'id="assistant-platform-dossier-detail"' in html
     assert 'id="assistant-platform-monitoring"' in html
+    assert 'id="assistant-platform-controls"' in html
     assert 'id="assistant-learning-metrics"' in html
     assert 'id="assistant-learning-regimes"' in html
     assert 'id="assistant-learning-adaptations"' in html
@@ -142,6 +143,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderPlatformDossiers" in js
     assert "renderPlatformDossierDetail" in js
     assert "renderPlatformMonitoring" in js
+    assert "renderPlatformControls" in js
+    assert "platform_access_control_summary" in js
+    assert "platform_workflow_actions_summary" in js
+    assert "platform_audit_timeline_summary" in js
+    assert "platform_export_summary" in js
+    assert "platform_integration_health_summary" in js
     assert "renderOperatingWorkflow" in js
     assert "renderOperatorRunbook" in js
     assert "commercialization_readiness_summary" in js

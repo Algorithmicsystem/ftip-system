@@ -578,6 +578,11 @@ def _migration_axiom_phase3_history(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_platform_controls(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("028_platform_controls.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -621,6 +626,14 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "026_axiom_phase3_history",
         _migration_axiom_phase3_history,
+    ),
+    (
+        "027_platform_foundation",
+        lambda cur: cur.execute(Path(__file__).with_name("027_platform_foundation.sql").read_text()),
+    ),
+    (
+        "028_platform_controls",
+        _migration_platform_controls,
     ),
 ]
 

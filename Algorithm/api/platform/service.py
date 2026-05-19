@@ -1,33 +1,53 @@
 from __future__ import annotations
 
+import datetime as dt
 import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
 from api.assistant.reports import sanitize_payload
-from api.platform.contracts import (
-    AnalysisLink,
-    CoverageEntity,
-    DossierRecord,
-    PlatformSummaryView,
-    WorkflowInstance,
-    WorkspaceRecord,
+from api.platform.access import build_access_summary, require_access
+from api.platform.actions import (
+    apply_workflow_action,
+    list_allowed_actions,
+    permission_for_action,
+    stage_requires_approval,
 )
+from api.platform.approvals import (
+    approval_status_after_decision,
+    build_approval_decision,
+    build_approval_request,
+)
+from api.platform.audit import audit_event_to_timeline, build_audit_event
+from api.platform.contracts import DossierRecord, PlatformSummaryView, ResourceRef
 from api.platform.dossiers import (
     build_analysis_link,
-    build_dossier_record,
     dossier_preview,
     refresh_dossier_record,
 )
 from api.platform.entities import build_coverage_entity
+from api.platform.exports import build_export_manifest, supported_pack_types
+from api.platform.guardrails import summarize_guardrails
+from api.platform.health import build_platform_health_summary
+from api.platform.integration_registry import get_integration_definition, list_integration_definitions
+from api.platform.integrations import build_integration_binding, integration_health_summary
 from api.platform.persistence import PlatformStore, platform_store
-from api.platform.profiles import get_platform_profile, get_platform_profile_for_audience, list_platform_profiles
+from api.platform.profiles import (
+    get_platform_profile,
+    get_platform_profile_for_audience,
+    list_platform_profiles,
+)
+from api.platform.security import normalize_user_context
 from api.platform.templates import get_workflow_template, list_workflow_templates
 from api.platform.workflows import build_workflow_instance
 
 
-PLATFORM_FOUNDATION_VERSION = "platform_phase5_foundation_v1"
+PLATFORM_FOUNDATION_VERSION = "platform_phase6_enterprise_controls_v1"
+
+
+def _now_utc() -> str:
+    return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
 def _normalize_symbol(symbol: str | None) -> str:
@@ -40,6 +60,132 @@ def _default_org_name(profile_id: str) -> str:
 
 def _default_workspace_name(profile_id: str) -> str:
     return f"{profile_id.replace('_', ' ').title()} Workspace"
+
+
+def _workspace_resource(workspace: Optional[Dict[str, Any]]) -> ResourceRef:
+    return ResourceRef(
+        resource_type="workspace",
+        resource_id=(workspace or {}).get("workspace_id"),
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+
+
+def _workflow_resource(
+    workflow: Optional[Dict[str, Any]],
+    workspace: Optional[Dict[str, Any]],
+) -> ResourceRef:
+    return ResourceRef(
+        resource_type="workflow",
+        resource_id=(workflow or {}).get("workflow_id"),
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        metadata={"workflow_template_id": (workflow or {}).get("workflow_template_id")},
+    )
+
+
+def _dossier_resource(
+    dossier: Optional[Dict[str, Any]],
+    workspace: Optional[Dict[str, Any]],
+) -> ResourceRef:
+    return ResourceRef(
+        resource_type="dossier",
+        resource_id=(dossier or {}).get("dossier_id"),
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        metadata={"workflow_id": (dossier or {}).get("workflow_id")},
+    )
+
+
+def _report_snapshot(report: Dict[str, Any]) -> Dict[str, Any]:
+    return sanitize_payload(
+        {
+            "symbol": report.get("symbol"),
+            "as_of_date": report.get("as_of_date"),
+            "overall_analysis": report.get("overall_analysis"),
+            "strategy_view": report.get("strategy_view"),
+            "risk_quality_analysis": report.get("risk_quality_analysis"),
+            "execution_quality_analysis": report.get("execution_quality_analysis"),
+            "deployment_permission_analysis": report.get("deployment_permission_analysis"),
+            "monitoring_triggers": report.get("monitoring_triggers") or [],
+            "axiom_summary": report.get("axiom_summary"),
+            "axiom_summary_card": report.get("axiom_summary_card") or {},
+            "axiom_summary_card_text": report.get("axiom_summary_card_text"),
+            "axiom_regime_label": report.get("axiom_regime_label"),
+            "axiom_trade_family": report.get("axiom_trade_family"),
+            "axiom_deployability_tier": report.get("axiom_deployability_tier"),
+            "axiom_evidence_backed_deployability_tier": report.get(
+                "axiom_evidence_backed_deployability_tier"
+            ),
+            "axiom_size_band_recommendation": report.get(
+                "axiom_size_band_recommendation"
+            ),
+            "axiom_final_size_band": report.get("axiom_final_size_band"),
+            "axiom_portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
+            "axiom_portfolio_governance": report.get("axiom_portfolio_governance")
+            or {},
+            "axiom_portfolio_governance_summary": report.get(
+                "axiom_portfolio_governance_summary"
+            ),
+            "axiom_historical_evidence_report": report.get(
+                "axiom_historical_evidence_report"
+            )
+            or {},
+            "axiom_historical_evidence_summary_text": report.get(
+                "axiom_historical_evidence_summary_text"
+            ),
+            "axiom_calibration_summary": report.get("axiom_calibration_summary") or {},
+            "axiom_calibration_summary_text": report.get("axiom_calibration_summary_text"),
+            "axiom_risk_deployability_memo": report.get(
+                "axiom_risk_deployability_memo"
+            )
+            or {},
+            "axiom_risk_deployability_memo_summary": report.get(
+                "axiom_risk_deployability_memo_summary"
+            ),
+            "axiom_ic_memo": report.get("axiom_ic_memo") or {},
+            "axiom_lineage": report.get("axiom_lineage") or {},
+            "axiom_lineage_summary": report.get("axiom_lineage_summary"),
+            "axiom_framework_version": report.get("axiom_framework_version"),
+            "report_version": report.get("report_version"),
+        }
+    )
+
+
+def _latest_report_from_dossier(dossier: Dict[str, Any]) -> Dict[str, Any]:
+    return sanitize_payload(
+        ((dossier.get("metadata") or {}).get("latest_report_snapshot") or {})
+    )
+
+
+def _latest_approval_status(
+    workflow_id: str,
+    *,
+    store: PlatformStore,
+) -> Optional[str]:
+    approvals = store.list_approval_requests(workflow_id=workflow_id)
+    return approvals[0].get("status") if approvals else None
+
+
+def _create_audit_event(
+    *,
+    event_type: str,
+    resource: ResourceRef,
+    user_context: Any,
+    payload: Optional[Dict[str, Any]],
+    rationale: Optional[str],
+    metadata: Optional[Dict[str, Any]],
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    event = build_audit_event(
+        event_type=event_type,
+        resource=resource,
+        user_context=user_context,
+        payload=payload,
+        rationale=rationale,
+        metadata=metadata,
+    )
+    return store.create_audit_event(event.model_dump(mode="python"))
 
 
 def ensure_default_foundation(
@@ -94,6 +240,7 @@ def ensure_default_foundation(
 def create_workspace_service(
     payload: Dict[str, Any],
     *,
+    user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
     profile = get_platform_profile(payload.get("platform_profile"))
@@ -112,12 +259,27 @@ def create_workspace_service(
             "organization_id": organization_id,
             "name": payload.get("name"),
             "audience_type": payload.get("audience_type") or profile.audience_type,
-            "report_profile": payload.get("report_profile") or profile.default_report_profile,
+            "report_profile": payload.get("report_profile")
+            or profile.default_report_profile,
             "default_workflow_template": payload.get("default_workflow_template")
             or profile.default_workflow_template,
             "platform_profile": profile.profile_id,
             "settings": payload.get("settings") or {},
         }
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=organization_id,
+        workspace_id=workspace.get("workspace_id"),
+    )
+    _create_audit_event(
+        event_type="workspace_created",
+        resource=_workspace_resource(workspace),
+        user_context=normalized,
+        payload={"workspace": workspace},
+        rationale="Workspace created.",
+        metadata={"platform_profile": profile.profile_id},
+        store=store,
     )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
@@ -129,12 +291,26 @@ def create_workspace_service(
 def create_workflow_service(
     payload: Dict[str, Any],
     *,
+    user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
     workspace = store.get_workspace(payload.get("workspace_id") or "")
     if workspace is None:
         raise HTTPException(status_code=404, detail="workspace not found")
-    template = get_workflow_template(payload.get("workflow_template_id") or workspace.get("default_workflow_template"))
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=workspace.get("organization_id"),
+        workspace_id=workspace.get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    template = get_workflow_template(
+        payload.get("workflow_template_id") or workspace.get("default_workflow_template")
+    )
     workflow = build_workflow_instance(
         workflow_id=str(uuid.uuid4()),
         workspace_id=workspace["workspace_id"],
@@ -147,6 +323,15 @@ def create_workflow_service(
         metadata=payload.get("metadata") or {},
     ).model_dump(mode="python")
     persisted = store.create_workflow(workflow)
+    _create_audit_event(
+        event_type="workflow_created",
+        resource=_workflow_resource(persisted, workspace),
+        user_context=normalized,
+        payload={"workflow": persisted, "template": template.template_id},
+        rationale="Workflow created.",
+        metadata={"workspace_id": workspace["workspace_id"]},
+        store=store,
+    )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "workflow": persisted,
@@ -172,17 +357,20 @@ def _resolve_entity(
             if str(existing.get("entity_id")) == str(entity_id):
                 return existing
     resolved_symbol = _normalize_symbol(symbol or (report or {}).get("symbol"))
-    existing = store.find_coverage_entity_by_symbol(resolved_symbol) if resolved_symbol else None
+    existing = (
+        store.find_coverage_entity_by_symbol(resolved_symbol) if resolved_symbol else None
+    )
     if existing is not None:
         return existing
     entity = build_coverage_entity(
         symbol=resolved_symbol,
         display_name=display_name or resolved_symbol,
         entity_type=entity_type,
-        sector=sector or ((report or {}).get("data_bundle") or {}).get("symbol_meta", {}).get("sector"),
+        sector=sector
+        or ((report or {}).get("data_bundle") or {}).get("symbol_meta", {}).get("sector"),
         strategy=strategy,
         theme=theme or (report or {}).get("axiom_trade_family"),
-        metadata={"source": "platform_phase5"},
+        metadata={"source": "platform_phase6"},
         entity_id=entity_id,
     )
     return store.upsert_coverage_entity(entity.model_dump(mode="python"))
@@ -191,11 +379,24 @@ def _resolve_entity(
 def create_dossier_service(
     payload: Dict[str, Any],
     *,
+    user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
     workflow = store.get_workflow(payload.get("workflow_id") or "")
     if workflow is None:
         raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="create_dossier",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
     entity = _resolve_entity(
         symbol=payload.get("symbol"),
         report=None,
@@ -213,7 +414,10 @@ def create_dossier_service(
             workflow_id=workflow["workflow_id"],
             entity_id=entity["entity_id"],
             dossier_type=str(payload.get("dossier_type") or "coverage"),
-            title=str(payload.get("title") or f"{entity.get('display_name') or entity.get('symbol')} Dossier"),
+            title=str(
+                payload.get("title")
+                or f"{entity.get('display_name') or entity.get('symbol')} Dossier"
+            ),
             current_summary={
                 "symbol": entity.get("symbol"),
                 "display_name": entity.get("display_name"),
@@ -224,10 +428,20 @@ def create_dossier_service(
             metadata=payload.get("metadata") or {},
         ).model_dump(mode="python")
     )
+    _create_audit_event(
+        event_type="dossier_created",
+        resource=_dossier_resource(dossier, workspace),
+        user_context=normalized,
+        payload={"dossier": dossier, "entity": entity},
+        rationale="Dossier created.",
+        metadata={"workflow_id": workflow["workflow_id"]},
+        store=store,
+    )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "dossier": dossier,
         "workflow": workflow,
+        "workspace": workspace,
         "entity": entity,
     }
 
@@ -235,6 +449,7 @@ def create_dossier_service(
 def get_dossier_view(
     dossier_id: str,
     *,
+    user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
     dossier = store.get_dossier(dossier_id)
@@ -242,13 +457,37 @@ def get_dossier_view(
         raise HTTPException(status_code=404, detail="dossier not found")
     workflow = store.get_workflow(dossier["workflow_id"])
     workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
     links = store.list_dossier_analysis_links(dossier_id)
+    approvals = store.list_approval_requests(
+        workflow_id=(workflow or {}).get("workflow_id"),
+        dossier_id=dossier_id,
+    )
+    exports = store.list_export_manifests(dossier_id)
+    timeline = list_workflow_timeline_service(
+        (workflow or {}).get("workflow_id"),
+        user_context=normalized,
+        store=store,
+    ) if workflow else {"timeline": []}
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "dossier": dossier,
         "workflow": workflow,
         "workspace": workspace,
         "analysis_links": links,
+        "approvals": approvals,
+        "exports": exports,
+        "timeline": timeline.get("timeline") or [],
     }
 
 
@@ -256,11 +495,25 @@ def attach_analysis_to_dossier_service(
     dossier_id: str,
     payload: Dict[str, Any],
     *,
+    user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
     dossier = store.get_dossier(dossier_id)
     if dossier is None:
         raise HTTPException(status_code=404, detail="dossier not found")
+    workflow = store.get_workflow(dossier["workflow_id"])
+    workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="attach_analysis",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
     report = sanitize_payload(payload.get("report") or {})
     analysis_link = build_analysis_link(
         report=report,
@@ -274,9 +527,30 @@ def attach_analysis_to_dossier_service(
     )
     store.add_dossier_analysis_link(dossier_id, analysis_link.model_dump(mode="python"))
     refreshed = refresh_dossier_record(dossier, report=report, analysis_link=analysis_link)
+    refreshed["metadata"] = {
+        **dict(refreshed.get("metadata") or {}),
+        "latest_report_snapshot": _report_snapshot(report),
+        "latest_report_id": payload.get("report_id"),
+        "latest_session_id": payload.get("session_id"),
+        "last_attached_at": _now_utc(),
+    }
     persisted = store.update_dossier(dossier_id, refreshed)
     workflow = store.get_workflow(persisted["workflow_id"])
     workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    _create_audit_event(
+        event_type="analysis_attached",
+        resource=_dossier_resource(persisted, workspace),
+        user_context=normalized,
+        payload={
+            "dossier_id": dossier_id,
+            "workflow_id": (workflow or {}).get("workflow_id"),
+            "report_id": payload.get("report_id"),
+            "axiom_artifact_id": payload.get("axiom_artifact_id"),
+        },
+        rationale="Analysis attached to dossier.",
+        metadata={"workflow_id": (workflow or {}).get("workflow_id")},
+        store=store,
+    )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "dossier": persisted,
@@ -284,6 +558,565 @@ def attach_analysis_to_dossier_service(
         "workspace": workspace,
         "analysis_link": analysis_link.model_dump(mode="python"),
         "dossier_preview": dossier_preview(persisted),
+    }
+
+
+def create_membership_service(
+    payload: Dict[str, Any],
+    *,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    membership = store.create_membership(payload)
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "membership": membership,
+    }
+
+
+def build_access_summary_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    summary = build_access_summary(
+        user_context=user_context,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "access_summary": summary,
+    }
+
+
+def execute_workflow_action_service(
+    workflow_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    dossier = (
+        store.get_dossier(str(payload.get("dossier_id")))
+        if payload.get("dossier_id")
+        else next(
+            iter(store.list_dossiers(workflow_id=workflow_id, limit=1)),
+            None,
+        )
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    permission = permission_for_action(str(payload.get("action_type") or ""))
+    require_access(
+        permission=permission,
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    template = get_workflow_template(workflow.get("workflow_template_id"))
+    approvals = store.list_approval_requests(
+        workflow_id=workflow_id,
+        dossier_id=(dossier or {}).get("dossier_id"),
+    )
+    try:
+        applied = apply_workflow_action(
+            workflow=workflow,
+            dossier=dossier,
+            template=template,
+            action_type=str(payload.get("action_type") or ""),
+            requested_stage=payload.get("requested_stage"),
+            requested_status=payload.get("requested_status"),
+            rationale=payload.get("rationale"),
+            metadata=payload.get("metadata") or {},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    transition = applied.get("transition") or {}
+    if (
+        str(payload.get("action_type") or "") == "advance_stage"
+        and transition.get("requires_approval")
+    ):
+        approved = any(
+            str(item.get("status")) == "approved"
+            and str(item.get("stage") or "") == str(transition.get("to_stage") or "")
+            for item in approvals
+        )
+        if not approved:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Stage {transition.get('to_stage')} requires approval before advancement.",
+            )
+    updated_workflow = workflow
+    if applied.get("workflow_updates"):
+        updated_workflow = store.create_workflow(
+            {
+                **workflow,
+                **sanitize_payload(applied["workflow_updates"]),
+                "updated_at": _now_utc(),
+            }
+        )
+    updated_dossier = dossier
+    if dossier is not None and applied.get("dossier_updates"):
+        updated_dossier = store.update_dossier(
+            dossier["dossier_id"],
+            {
+                **sanitize_payload(applied["dossier_updates"]),
+                "updated_at": _now_utc(),
+            },
+        )
+    audit = _create_audit_event(
+        event_type=f"workflow_{payload.get('action_type')}",
+        resource=_workflow_resource(updated_workflow, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": workflow_id,
+            "dossier_id": (updated_dossier or {}).get("dossier_id"),
+            "stage": updated_workflow.get("stage"),
+            "status": updated_workflow.get("status"),
+            "summary": applied.get("summary"),
+        },
+        rationale=payload.get("rationale"),
+        metadata={
+            "workflow_id": workflow_id,
+            "dossier_id": (updated_dossier or {}).get("dossier_id"),
+        },
+        store=store,
+    )
+    guardrails = summarize_guardrails(
+        workflow=updated_workflow,
+        dossier=updated_dossier,
+        approval_status=_latest_approval_status(workflow_id, store=store),
+    )
+    access_summary = build_access_summary(
+        user_context=normalized,
+        resource=_workflow_resource(updated_workflow, workspace),
+        store=store,
+    )
+    allowed_actions = list_allowed_actions(
+        workflow=updated_workflow,
+        dossier=updated_dossier,
+        template=template,
+        effective_permissions=access_summary.get("effective_permissions") or [],
+        approvals=store.list_approval_requests(
+            workflow_id=workflow_id,
+            dossier_id=(updated_dossier or {}).get("dossier_id"),
+        ),
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": updated_workflow,
+        "dossier": updated_dossier,
+        "action": sanitize_payload(payload),
+        "transition": transition,
+        "allowed_actions": allowed_actions,
+        "guardrails": guardrails,
+        "audit_event": audit,
+    }
+
+
+def handle_workflow_approval_service(
+    workflow_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    dossier = (
+        store.get_dossier(str(payload.get("dossier_id")))
+        if payload.get("dossier_id")
+        else next(iter(store.list_dossiers(workflow_id=workflow_id, limit=1)), None)
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    mode = str(payload.get("mode") or "request")
+    if mode == "request":
+        require_access(
+            permission="request_approval",
+            user_context=normalized,
+            resource=_workflow_resource(workflow, workspace),
+            store=store,
+        )
+        template = get_workflow_template(workflow.get("workflow_template_id"))
+        stage = (workflow.get("stage_state") or {}).get("next_stage") or workflow.get("stage")
+        approval = build_approval_request(
+            workflow_id=workflow_id,
+            dossier_id=(dossier or {}).get("dossier_id"),
+            requested_role=str(payload.get("requested_role") or "committee"),
+            user_context=normalized,
+            stage=str(stage),
+            rationale=payload.get("rationale"),
+            required_permissions=["approve_stage"]
+            if stage_requires_approval(template, str(stage))
+            else [],
+            metadata=payload.get("metadata") or {},
+        )
+        persisted = store.create_approval_request(approval.model_dump(mode="python"))
+        audit = _create_audit_event(
+            event_type="approval_requested",
+            resource=_workflow_resource(workflow, workspace),
+            user_context=normalized,
+            payload={
+                "workflow_id": workflow_id,
+                "dossier_id": (dossier or {}).get("dossier_id"),
+                "approval_id": persisted["approval_id"],
+                "stage": persisted.get("stage"),
+                "status": persisted.get("status"),
+            },
+            rationale=payload.get("rationale"),
+            metadata={"workflow_id": workflow_id, "dossier_id": (dossier or {}).get("dossier_id")},
+            store=store,
+        )
+        return {
+            "platform_version": PLATFORM_FOUNDATION_VERSION,
+            "approval": persisted,
+            "workflow": workflow,
+            "dossier": dossier,
+            "audit_event": audit,
+        }
+
+    require_access(
+        permission="approve_stage",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    approval_id = payload.get("approval_id")
+    approval = store.get_approval_request(str(approval_id or ""))
+    if approval is None:
+        raise HTTPException(status_code=404, detail="approval request not found")
+    decision = build_approval_decision(
+        approval_id=approval["approval_id"],
+        decision_type=str(payload.get("decision_type") or "request_changes"),
+        user_context=normalized,
+        rationale=payload.get("rationale"),
+        metadata=payload.get("metadata") or {},
+    )
+    decisions = list(approval.get("decisions") or [])
+    decisions.append(decision.model_dump(mode="python"))
+    updated_approval = store.update_approval_request(
+        approval["approval_id"],
+        {
+            "status": approval_status_after_decision(decision.decision_type),
+            "decisions": decisions,
+            "updated_at": _now_utc(),
+        },
+    )
+    action_map = {
+        "approve": "approve",
+        "reject": "reject",
+        "request_changes": "request_changes",
+    }
+    workflow_result = execute_workflow_action_service(
+        workflow_id,
+        {
+            "dossier_id": (dossier or {}).get("dossier_id"),
+            "action_type": action_map.get(decision.decision_type, "request_changes"),
+            "rationale": payload.get("rationale"),
+        },
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    audit = _create_audit_event(
+        event_type=f"approval_{decision.decision_type}",
+        resource=_workflow_resource(workflow_result["workflow"], workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": workflow_id,
+            "approval_id": updated_approval["approval_id"],
+            "dossier_id": (dossier or {}).get("dossier_id"),
+            "status": updated_approval["status"],
+        },
+        rationale=payload.get("rationale"),
+        metadata={"workflow_id": workflow_id, "dossier_id": (dossier or {}).get("dossier_id")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "approval": updated_approval,
+        "decision": decision.model_dump(mode="python"),
+        "workflow": workflow_result["workflow"],
+        "dossier": workflow_result["dossier"],
+        "audit_event": audit,
+    }
+
+
+def list_workflow_timeline_service(
+    workflow_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(str(workflow_id))
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    events = [
+        item
+        for item in store.list_audit_events(
+            workspace_id=(workspace or {}).get("workspace_id"),
+            limit=400,
+        )
+        if str((item.get("payload") or {}).get("workflow_id") or (item.get("metadata") or {}).get("workflow_id") or "") == str(workflow_id)
+    ]
+    timeline = [
+        audit_event_to_timeline(item).model_dump(mode="python")
+        for item in events
+    ]
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": workflow,
+        "timeline": timeline,
+    }
+
+
+def create_dossier_export_service(
+    dossier_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier = store.get_dossier(dossier_id)
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    workflow = store.get_workflow(dossier["workflow_id"])
+    workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    organization = (
+        store.get_organization(workspace["organization_id"]) if workspace else None
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="export_report_pack",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
+    report = _latest_report_from_dossier(dossier)
+    approval_status = _latest_approval_status(dossier["workflow_id"], store=store)
+    manifest = build_export_manifest(
+        pack_type=str(payload.get("pack_type") or "dossier_pack"),
+        dossier=dossier,
+        report=report,
+        workflow=workflow,
+        workspace=workspace,
+        organization=organization,
+        approval_status=approval_status,
+        metadata=payload.get("metadata") or {},
+    )
+    persisted = store.create_export_manifest(manifest.model_dump(mode="python"))
+    audit = _create_audit_event(
+        event_type="export_generated",
+        resource=_dossier_resource(dossier, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": dossier.get("workflow_id"),
+            "dossier_id": dossier_id,
+            "export_id": persisted["export_id"],
+            "pack_type": persisted["pack_type"],
+            "status": persisted["status"],
+        },
+        rationale="Export pack generated.",
+        metadata={"workflow_id": dossier.get("workflow_id"), "dossier_id": dossier_id},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "export": persisted,
+        "audit_event": audit,
+    }
+
+
+def list_dossier_exports_service(
+    dossier_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier = store.get_dossier(dossier_id)
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    workflow = store.get_workflow(dossier["workflow_id"])
+    workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "supported_pack_types": supported_pack_types(),
+        "exports": store.list_export_manifests(dossier_id),
+    }
+
+
+def create_integration_binding_service(
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = (
+        store.get_workspace(str(payload.get("workspace_id"))) if payload.get("workspace_id") else None
+    )
+    organization_id = payload.get("organization_id") or (
+        workspace.get("organization_id") if workspace else None
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=organization_id,
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="manage_integrations",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    binding = build_integration_binding(
+        integration_type=str(payload.get("integration_type") or "custom"),
+        organization_id=organization_id,
+        workspace_id=(workspace or {}).get("workspace_id"),
+        status=str(payload.get("status") or "configured"),
+        config=payload.get("config") or {},
+        metadata=payload.get("metadata") or {},
+    )
+    persisted = store.create_integration_binding(binding.model_dump(mode="python"))
+    _create_audit_event(
+        event_type="integration_binding_created",
+        resource=_workspace_resource(workspace),
+        user_context=normalized,
+        payload={"binding": persisted},
+        rationale="Integration binding created.",
+        metadata={"workspace_id": (workspace or {}).get("workspace_id")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "binding": persisted,
+        "definition": get_integration_definition(binding.integration_type).model_dump(
+            mode="python"
+        ),
+    }
+
+
+def list_integrations_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    bindings = store.list_integration_bindings(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=workspace_id,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "integration_definitions": [
+            item.model_dump(mode="python") for item in list_integration_definitions()
+        ],
+        "bindings": bindings,
+        "health_summary": integration_health_summary(bindings),
+    }
+
+
+def build_platform_health_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    access_summary = build_access_summary(
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    workflows = store.list_workflows(workspace_id=workspace_id)
+    dossiers = store.list_dossiers(workspace_id=workspace_id)
+    approvals: List[Dict[str, Any]] = []
+    for workflow in workflows:
+        approvals.extend(
+            store.list_approval_requests(workflow_id=workflow.get("workflow_id"))
+        )
+    exports: List[Dict[str, Any]] = []
+    for dossier in dossiers:
+        exports.extend(store.list_export_manifests(dossier.get("dossier_id")))
+    audit_events = store.list_audit_events(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        limit=400,
+    )
+    integration_bindings = store.list_integration_bindings(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=workspace_id,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "health": build_platform_health_summary(
+            platform_version=PLATFORM_FOUNDATION_VERSION,
+            workspace_id=(workspace or {}).get("workspace_id"),
+            organization_id=(workspace or {}).get("organization_id"),
+            access_summary=access_summary,
+            workflows=workflows,
+            dossiers=dossiers,
+            approvals=approvals,
+            exports=exports,
+            audit_events=audit_events,
+            integration_bindings=integration_bindings,
+        ),
     }
 
 
@@ -314,6 +1147,7 @@ def sync_analysis_into_platform(
     audience_type = str(request.get("audience_type") or "general")
     report_profile = str(request.get("report_profile") or "trading_focused")
     platform_profile = request.get("platform_profile")
+    platform_user_context = request.get("platform_user_context")
 
     workspace = None
     organization = None
@@ -345,8 +1179,12 @@ def sync_analysis_into_platform(
                 "workflow_template_id": request.get("workflow_template_id")
                 or workspace.get("default_workflow_template"),
                 "title": f"{report.get('symbol')} {request.get('workflow_template_id') or workspace.get('default_workflow_template')}",
-                "priority": "high" if report.get("axiom_evidence_backed_deployability_tier") == "live_candidate" else "normal",
+                "priority": "high"
+                if report.get("axiom_evidence_backed_deployability_tier")
+                == "live_candidate"
+                else "normal",
             },
+            user_context=platform_user_context,
             store=store,
         )
         workflow = workflow_response["workflow"]
@@ -366,6 +1204,7 @@ def sync_analysis_into_platform(
                 "axiom_history_artifact_id": axiom_history_artifact_id,
                 "axiom_calibration_artifact_id": axiom_calibration_artifact_id,
             },
+            user_context=platform_user_context,
             store=store,
         )
         dossier = dossier_view["dossier"]
@@ -379,6 +1218,7 @@ def sync_analysis_into_platform(
                     "workflow_template_id": workspace.get("default_workflow_template"),
                     "title": f"{report.get('symbol')} {workspace.get('default_workflow_template')}",
                 },
+                user_context=platform_user_context,
                 store=store,
             )
             workflow = workflow_response["workflow"]
@@ -394,6 +1234,7 @@ def sync_analysis_into_platform(
                 "title": f"{report.get('symbol')} Institutional Dossier",
                 "metadata": {"created_from_analysis": True},
             },
+            user_context=platform_user_context,
             store=store,
         )
         dossier = create_response["dossier"]
@@ -409,12 +1250,14 @@ def sync_analysis_into_platform(
                 "axiom_history_artifact_id": axiom_history_artifact_id,
                 "axiom_calibration_artifact_id": axiom_calibration_artifact_id,
             },
+            user_context=platform_user_context,
             store=store,
         )
         dossier = dossier_view["dossier"]
 
     summary = build_platform_summary_service(
         workspace_id=workspace["workspace_id"] if workspace else None,
+        user_context=platform_user_context,
         store=store,
         current_workspace=workspace,
         current_workflow=workflow,
@@ -423,7 +1266,56 @@ def sync_analysis_into_platform(
     template = (
         get_workflow_template(str(workflow.get("workflow_template_id"))) if workflow else None
     )
-    profile = get_platform_profile(platform_profile or workspace.get("platform_profile") if workspace else None)
+    profile = get_platform_profile(
+        platform_profile or workspace.get("platform_profile") if workspace else None
+    )
+    access_summary = build_access_summary(
+        user_context=platform_user_context,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    approvals = (
+        store.list_approval_requests(
+            workflow_id=(workflow or {}).get("workflow_id"),
+            dossier_id=(dossier or {}).get("dossier_id"),
+        )
+        if workflow
+        else []
+    )
+    allowed_actions = (
+        list_allowed_actions(
+            workflow=workflow or {},
+            dossier=dossier,
+            template=template or get_workflow_template("research_watchlist"),
+            effective_permissions=access_summary.get("effective_permissions") or [],
+            approvals=approvals,
+        )
+        if workflow
+        else []
+    )
+    timeline = (
+        list_workflow_timeline_service(
+            workflow.get("workflow_id"),
+            user_context=platform_user_context,
+            store=store,
+        ).get("timeline")
+        if workflow
+        else []
+    )
+    exports = (
+        store.list_export_manifests((dossier or {}).get("dossier_id"))
+        if dossier
+        else []
+    )
+    integrations = store.list_integration_bindings(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    health = build_platform_health_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=platform_user_context,
+        store=store,
+    ).get("health")
     return {
         "platform_foundation_version": PLATFORM_FOUNDATION_VERSION,
         "platform_profile": profile.model_dump(mode="python"),
@@ -434,24 +1326,47 @@ def sync_analysis_into_platform(
         "dossier": dossier,
         "analysis_link": dossier_view["analysis_link"] if dossier_view else None,
         "summary_view": summary,
+        "access_summary": access_summary,
+        "allowed_actions": allowed_actions,
+        "approvals": approvals,
+        "timeline": timeline,
+        "exports": exports,
+        "integration_summary": integration_health_summary(integrations),
+        "integration_bindings": integrations,
+        "health_summary": health,
+        "supported_export_packs": supported_pack_types(),
     }
 
 
 def build_platform_summary_service(
     *,
     workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
     current_workspace: Optional[Dict[str, Any]] = None,
     current_workflow: Optional[Dict[str, Any]] = None,
     current_dossier: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    workspace = current_workspace or (store.get_workspace(workspace_id) if workspace_id else None)
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
     workspaces = store.list_workspaces()
     workflows = store.list_workflows(workspace_id=workspace_id)
     dossiers = store.list_dossiers(workspace_id=workspace_id)
+    approvals: List[Dict[str, Any]] = []
+    export_count = 0
+    audit_count = len(
+        store.list_audit_events(workspace_id=(workspace or {}).get("workspace_id"), limit=400)
+    )
     by_tier: Dict[str, int] = {}
     by_regime: Dict[str, int] = {}
     by_stage: Dict[str, int] = {}
     latest: List[Dict[str, Any]] = []
+    for workflow in workflows:
+        approvals.extend(store.list_approval_requests(workflow_id=workflow["workflow_id"]))
     for dossier in dossiers[:12]:
         tier = str(dossier.get("latest_deployability_tier") or "unknown")
         regime = str(dossier.get("latest_regime_label") or "unknown")
@@ -460,6 +1375,7 @@ def build_platform_summary_service(
         by_regime[regime] = by_regime.get(regime, 0) + 1
         by_stage[stage] = by_stage.get(stage, 0) + 1
         latest.append(dossier_preview(dossier))
+        export_count += len(store.list_export_manifests(dossier["dossier_id"]))
     summary = PlatformSummaryView(
         platform_version=PLATFORM_FOUNDATION_VERSION,
         workspace_count=len(workspaces),
@@ -472,14 +1388,32 @@ def build_platform_summary_service(
         current_workspace=sanitize_payload(current_workspace or {}),
         current_workflow=sanitize_payload(current_workflow or {}),
         current_dossier=sanitize_payload(current_dossier or {}),
+    ).model_dump(mode="python")
+    summary["pending_approval_count"] = sum(
+        1 for item in approvals if str(item.get("status")) == "pending"
     )
-    return summary.model_dump(mode="python")
+    summary["export_count"] = export_count
+    summary["audit_event_count"] = audit_count
+    summary["access_summary"] = build_access_summary(
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    return summary
 
 
 def list_templates_service() -> Dict[str, Any]:
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
-        "workflow_templates": [template.model_dump(mode="python") for template in list_workflow_templates()],
-        "platform_profiles": [profile.model_dump(mode="python") for profile in list_platform_profiles()],
+        "workflow_templates": [
+            template.model_dump(mode="python") for template in list_workflow_templates()
+        ],
+        "platform_profiles": [
+            profile.model_dump(mode="python") for profile in list_platform_profiles()
+        ],
+        "integration_definitions": [
+            definition.model_dump(mode="python")
+            for definition in list_integration_definitions()
+        ],
+        "supported_export_packs": supported_pack_types(),
     }
-
