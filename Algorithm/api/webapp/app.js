@@ -2827,6 +2827,109 @@ const renderPlatformOverview = (report) => {
   `;
 };
 
+const formatDistributionSummary = (distribution) => {
+  const entries = Object.entries(distribution || {}).filter(([, value]) => value != null);
+  if (!entries.length) {
+    return "none";
+  }
+  return entries
+    .map(([key, value]) => `${String(key).replaceAll("_", " ")} ${value}`)
+    .join(", ");
+};
+
+const platformFilterValue = (selector) =>
+  String(qs(selector)?.value || "")
+    .trim()
+    .toLowerCase();
+
+const dossierMatchesPlatformFilters = (dossier) => {
+  const filters = {
+    workspace: platformFilterValue("#assistant-platform-filter-workspace"),
+    template: platformFilterValue("#assistant-platform-filter-workflow-template"),
+    tier: platformFilterValue("#assistant-platform-filter-tier"),
+    regime: platformFilterValue("#assistant-platform-filter-regime"),
+    stage: platformFilterValue("#assistant-platform-filter-stage"),
+    evidence: platformFilterValue("#assistant-platform-filter-evidence"),
+  };
+  const fields = {
+    workspace: String(dossier.workspace_name || dossier.workspace || "").toLowerCase(),
+    template: String(dossier.workflow_template_id || dossier.workflow_template || "").toLowerCase(),
+    tier: String(dossier.latest_deployability_tier || "").toLowerCase(),
+    regime: String(dossier.latest_regime_label || "").toLowerCase(),
+    stage: String(dossier.stage || "").toLowerCase(),
+    evidence: String(dossier.evidence_status || "").toLowerCase(),
+  };
+  return Object.entries(filters).every(([key, value]) => !value || fields[key].includes(value));
+};
+
+const renderPlatformDashboard = (report) => {
+  const container = qs("#assistant-platform-dashboard");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Executive dashboard metrics, high-DAU dossiers, export activity, and integration health render here."
+    );
+    return;
+  }
+  const dashboard = report.platform_dashboard || {};
+  const metrics = dashboard.executive_metrics || {};
+  const pending = dashboard.pending_approvals || [];
+  const exports = dashboard.recent_exports || [];
+  const highDau = dashboard.high_dau_dossiers || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Executive Metrics</h5>
+      ${renderBullets(
+        [
+          `Workspace ${metrics.workspace_name || "n/a"}`,
+          `Dossiers ${metrics.dossier_count ?? 0} / workflows ${metrics.workflow_count ?? 0}`,
+          `Pending approvals ${metrics.pending_approval_count ?? 0} / exports ${metrics.export_count ?? 0}`,
+          `Integration bindings ${metrics.integration_binding_count ?? 0}`,
+          report.platform_dashboard_summary,
+        ].filter(Boolean),
+        "No executive metrics are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Pending Approvals</h5>
+      ${renderBullets(
+        pending.slice(0, 5).map(
+          (item) =>
+            `${item.requested_role || "review"} / ${item.status || "pending"} / stage ${item.stage || "n/a"}`
+        ),
+        "No pending approvals are open."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Recent High-DAU Dossiers</h5>
+      ${renderBullets(
+        highDau.slice(0, 5).map(
+          (item) =>
+            `${item.title || item.symbol || "Dossier"} / DAU ${formatScore(
+              item.deployable_alpha_utility,
+              1
+            )} / ${item.latest_deployability_tier || "n/a"}`
+        ),
+        "No high-DAU dossier list is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Export / Integration Snapshot</h5>
+      ${renderBullets(
+        [
+          `Recent exports ${exports.length}`,
+          report.platform_export_rendering_summary,
+          report.platform_integration_health_summary,
+          report.platform_demo_readiness_summary,
+        ].filter(Boolean),
+        "No export or integration snapshot is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderPlatformTemplateProfile = (report) => {
   const container = qs("#assistant-platform-template-profile");
   if (!container) {
@@ -2883,15 +2986,20 @@ const renderPlatformDossiers = (report) => {
     );
     return;
   }
-  const dossiers = report.platform_recent_dossiers || [];
+  const workspaceAnalytics = report.platform_workspace_analytics || {};
+  const dossiers = (
+    workspaceAnalytics.dossier_records ||
+    report.platform_recent_dossiers ||
+    []
+  ).filter(dossierMatchesPlatformFilters);
   if (!dossiers.length) {
     container.innerHTML = emptyStateCard(
-      "No dossier is attached yet. Run Analyze with dossier creation enabled or attach to an existing dossier."
+      "No dossier matches the current filters. Run Analyze with dossier creation enabled or attach to an existing dossier."
     );
     return;
   }
   container.innerHTML = dossiers
-    .slice(0, 8)
+    .slice(0, 12)
     .map(
       (item) => `
         <section class="recent-analysis-card">
@@ -2907,12 +3015,15 @@ const renderPlatformDossiers = (report) => {
             <span class="legacy-badge">${escapeHtml(item.latest_deployability_tier || "n/a")}</span>
           </div>
           <div class="recent-analysis-meta">
+            <span class="micro-chip">workspace ${escapeHtml(item.workspace_name || report.platform_workspace?.name || "n/a")}</span>
+            <span class="micro-chip">template ${escapeHtml(item.workflow_template_id || report.platform_workflow?.workflow_template_id || "n/a")}</span>
             <span class="micro-chip">stage ${escapeHtml(item.stage || "n/a")}</span>
             <span class="micro-chip">status ${escapeHtml(item.status || "n/a")}</span>
             <span class="micro-chip">regime ${escapeHtml(item.latest_regime_label || "n/a")}</span>
             <span class="micro-chip">family ${escapeHtml(item.latest_trade_family || "n/a")}</span>
             <span class="micro-chip">size ${escapeHtml(item.latest_size_band || "n/a")}</span>
             <span class="micro-chip">evidence ${escapeHtml(item.evidence_status || "partial")}</span>
+            <span class="micro-chip">DAU ${escapeHtml(formatScore(item.deployable_alpha_utility, 1))}</span>
           </div>
           <div class="table-note">${escapeHtml(
             item.dossier_id || "No dossier identifier available."
@@ -3114,6 +3225,236 @@ const renderPlatformControls = (report) => {
           }`,
         ].filter(Boolean),
         "No access or health context is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformApprovals = (report) => {
+  const container = qs("#assistant-platform-approvals");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Pending approvals, recent decisions, and stage progression visibility render here."
+    );
+    return;
+  }
+  const approvals = report.platform_approvals || [];
+  const timeline = report.platform_timeline || [];
+  const dossier = report.platform_dossier || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Pending / Recent Decisions</h5>
+      ${renderBullets(
+        approvals.slice(0, 6).map(
+          (item) =>
+            `${item.requested_role || "review"} / ${item.status || "pending"} / stage ${item.stage || "n/a"}`
+        ),
+        "No approvals are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Recommendation Lock</h5>
+      ${renderBullets(
+        [
+          `Locked ${String((dossier.metadata || {}).recommendation_locked || false)}`,
+          report.platform_workflow_actions_summary,
+        ].filter(Boolean),
+        "No lock state is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Stage Progression</h5>
+      ${renderBullets(
+        timeline.slice(0, 6).map(
+          (item) =>
+            `${item.stage || "n/a"} / ${item.title || item.event_type || "event"} / ${
+              item.status || "n/a"
+            }`
+        ),
+        "No workflow timeline is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformExports = (report) => {
+  const container = qs("#assistant-platform-exports");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Available packs, rendered export formats, and preview snippets render here."
+    );
+    return;
+  }
+  const exports = report.platform_exports || [];
+  const rendered = report.platform_rendered_exports || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Available Packs</h5>
+      ${renderBullets(
+        [
+          ...((report.platform_supported_export_packs || []).slice(0, 8).map(
+            (item) => `${item.replaceAll("_", " ")}`
+          )),
+          report.platform_export_summary,
+        ].filter(Boolean),
+        "No export pack types are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Generated Exports</h5>
+      ${renderBullets(
+        exports.slice(0, 5).map(
+          (item) =>
+            `${item.pack_type || "pack"} / ${item.approval_status || "no gate"} / ${
+              item.content_hash || "no hash"
+            }`
+        ),
+        "No generated export manifests are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Rendered Output</h5>
+      ${renderBullets(
+        rendered.slice(0, 5).map(
+          (item) =>
+            `${item.export_format || "format"} / ${item.file_name_hint || "file"} / checksum ${
+              item.checksum || "n/a"
+            }`
+        ),
+        "No rendered export output is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Preview Snippets</h5>
+      ${renderBullets(
+        rendered.slice(0, 3).map((item) =>
+          String(item.rendered_content || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .slice(0, 180)
+        ),
+        "No rendered preview snippet is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformIntegrations = (report) => {
+  const container = qs("#assistant-platform-integrations");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Integration bindings, health states, last execution, and capabilities render here."
+    );
+    return;
+  }
+  const bindings = report.platform_integration_bindings || [];
+  const health = report.platform_health_summary || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Bindings</h5>
+      ${renderBullets(
+        bindings.slice(0, 6).map(
+          (item) =>
+            `${item.integration_type || "custom"} / ${item.status || "configured"} / ${
+              ((item.health || {}).status) || "unknown"
+            }`
+        ),
+        "No integration binding is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Capabilities / Last Execution</h5>
+      ${renderBullets(
+        bindings.slice(0, 5).flatMap((item) => {
+          const definition = item.definition || {};
+          const capabilityList = (definition.capabilities || [])
+            .slice(0, 2)
+            .map((cap) => `${item.integration_type}: ${cap.title || cap.capability_id}`);
+          const lastExecution = item.last_execution
+            ? `${item.integration_type} last execution ${item.last_execution.status || "n/a"} / ${
+                item.last_execution.completed_at || "n/a"
+              }`
+            : `${item.integration_type} has no execution history`;
+          return [lastExecution, ...capabilityList];
+        }),
+        "No connector capability or execution history is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Health / Warnings</h5>
+      ${renderBullets(
+        [
+          report.platform_integration_health_summary,
+          `Platform warnings ${(health.warnings || []).length}`,
+          ...((health.warnings || []).slice(0, 4)),
+        ].filter(Boolean),
+        "No integration warning state is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformAnalytics = (report) => {
+  const container = qs("#assistant-platform-analytics");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Cross-workspace analytics, tier distribution, regime distribution, and evidence support render here."
+    );
+    return;
+  }
+  const analytics = report.platform_cross_workspace_analytics || {};
+  const workspaceAnalytics = report.platform_workspace_analytics || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Workspace Analytics</h5>
+      ${renderBullets(
+        [
+          `Average DAU ${formatScore(workspaceAnalytics.average_dau, 1)}`,
+          `Live-candidate ratio ${formatPct(workspaceAnalytics.live_candidate_ratio, 1)}`,
+          `Evidence distribution ${formatDistributionSummary(
+            workspaceAnalytics.evidence_status_distribution
+          )}`,
+          report.platform_dashboard_summary,
+        ].filter(Boolean),
+        "No workspace analytics are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Cross-Workspace Distribution</h5>
+      ${renderBullets(
+        [
+          `Deployability ${formatDistributionSummary(analytics.deployability_distribution)}`,
+          `Regime ${formatDistributionSummary(analytics.regime_distribution)}`,
+          `Trade family ${formatDistributionSummary(analytics.trade_family_distribution)}`,
+          `Audience ${formatDistributionSummary(analytics.counts_by_audience_type)}`,
+          report.platform_analytics_summary,
+        ],
+        "No cross-workspace distribution is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Throughput / Evidence Support</h5>
+      ${renderBullets(
+        [
+          `Approval throughput ${formatDistributionSummary(analytics.approval_throughput)}`,
+          `Export throughput ${formatDistributionSummary(analytics.export_throughput)}`,
+          `Supportive evidence ratio ${formatPct(analytics.supportive_evidence_ratio, 1)}`,
+          `Average DAU across workspaces ${formatScore(analytics.average_dau_across_workspaces, 1)}`,
+          report.platform_demo_readiness_summary,
+        ].filter(Boolean),
+        "No throughput or evidence support analytics are attached."
       )}
     </section>`,
   ].join("");
@@ -3696,12 +4037,17 @@ const renderAssistantReport = (report) => {
     renderResearchDrilldown(null);
     renderSystemAudit(null);
     renderCommercialReadiness(null);
+    renderPlatformDashboard(null);
     renderPlatformOverview(null);
     renderPlatformTemplateProfile(null);
     renderPlatformDossiers(null);
     renderPlatformDossierDetail(null);
     renderPlatformMonitoring(null);
     renderPlatformControls(null);
+    renderPlatformApprovals(null);
+    renderPlatformExports(null);
+    renderPlatformIntegrations(null);
+    renderPlatformAnalytics(null);
     renderOperatingWorkflow(null);
     renderOperatorRunbook(null);
     renderDeploymentReadiness(null);
@@ -3989,12 +4335,17 @@ const renderAssistantReport = (report) => {
   renderResearchDrilldown(report);
   renderSystemAudit(report);
   renderCommercialReadiness(report);
+  renderPlatformDashboard(report);
   renderPlatformOverview(report);
   renderPlatformTemplateProfile(report);
   renderPlatformDossiers(report);
   renderPlatformDossierDetail(report);
   renderPlatformMonitoring(report);
   renderPlatformControls(report);
+  renderPlatformApprovals(report);
+  renderPlatformExports(report);
+  renderPlatformIntegrations(report);
+  renderPlatformAnalytics(report);
   renderOperatingWorkflow(report);
   renderOperatorRunbook(report);
   renderSystemHealth(state.assistantHealth, report);
@@ -4421,6 +4772,25 @@ qs("#symbol-input").addEventListener("input", (event) => {
   if (!legacySymbol.value.trim()) {
     legacySymbol.value = event.target.value.trim().toUpperCase();
   }
+});
+
+[
+  "#assistant-platform-filter-workspace",
+  "#assistant-platform-filter-workflow-template",
+  "#assistant-platform-filter-tier",
+  "#assistant-platform-filter-regime",
+  "#assistant-platform-filter-stage",
+  "#assistant-platform-filter-evidence",
+].forEach((selector) => {
+  const element = qs(selector);
+  if (!element) {
+    return;
+  }
+  element.addEventListener("input", () => {
+    if (state.assistantLatestReport) {
+      renderPlatformDossiers(state.assistantLatestReport);
+    }
+  });
 });
 
 document.body.addEventListener("click", (event) => {

@@ -319,6 +319,19 @@ class ExportManifest(BaseModel):
     status: str = "generated"
 
 
+class RenderedExportResult(BaseModel):
+    render_id: str
+    export_id: str
+    export_format: str
+    content_type: str
+    rendered_content: str
+    file_name_hint: str
+    section_count: int = 0
+    checksum: Optional[str] = None
+    generated_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ConnectorCapability(BaseModel):
     capability_id: str
     title: str
@@ -354,6 +367,25 @@ class IntegrationBinding(BaseModel):
     updated_at: Optional[str] = None
 
 
+class IntegrationExecutionRecord(BaseModel):
+    execution_id: str
+    binding_id: str
+    integration_type: str
+    action_type: str
+    status: str = "completed"
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    dossier_id: Optional[str] = None
+    export_id: Optional[str] = None
+    render_id: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    payload_summary: Dict[str, Any] = Field(default_factory=dict)
+    output_summary: Dict[str, Any] = Field(default_factory=dict)
+    error_summary: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class PlatformHealthSummary(BaseModel):
     platform_version: str
     workspace_id: Optional[str] = None
@@ -367,6 +399,74 @@ class PlatformHealthSummary(BaseModel):
     dossier_integrity_checks: List[str] = Field(default_factory=list)
     export_integrity_checks: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+
+
+class WorkspaceAnalyticsView(BaseModel):
+    workspace_id: str
+    organization_id: Optional[str] = None
+    workspace_name: Optional[str] = None
+    audience_type: Optional[str] = None
+    workflow_count: int = 0
+    dossier_count: int = 0
+    pending_approval_count: int = 0
+    export_count: int = 0
+    integration_binding_count: int = 0
+    dossiers_by_deployability_tier: Dict[str, int] = Field(default_factory=dict)
+    dossiers_by_regime: Dict[str, int] = Field(default_factory=dict)
+    dossiers_by_stage: Dict[str, int] = Field(default_factory=dict)
+    evidence_status_distribution: Dict[str, int] = Field(default_factory=dict)
+    workflow_template_distribution: Dict[str, int] = Field(default_factory=dict)
+    average_dau: Optional[float] = None
+    live_candidate_ratio: Optional[float] = None
+    size_band_distribution: Dict[str, int] = Field(default_factory=dict)
+    high_dau_dossiers: List[Dict[str, Any]] = Field(default_factory=list)
+    recent_exports: List[Dict[str, Any]] = Field(default_factory=list)
+    recent_approvals: List[Dict[str, Any]] = Field(default_factory=list)
+    dossier_records: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class PlatformAnalyticsView(BaseModel):
+    platform_version: str
+    workspace_analytics: List[WorkspaceAnalyticsView] = Field(default_factory=list)
+    counts_by_audience_type: Dict[str, int] = Field(default_factory=dict)
+    counts_by_workflow_template: Dict[str, int] = Field(default_factory=dict)
+    deployability_distribution: Dict[str, int] = Field(default_factory=dict)
+    regime_distribution: Dict[str, int] = Field(default_factory=dict)
+    trade_family_distribution: Dict[str, int] = Field(default_factory=dict)
+    evidence_status_distribution: Dict[str, int] = Field(default_factory=dict)
+    approval_throughput: Dict[str, int] = Field(default_factory=dict)
+    export_throughput: Dict[str, int] = Field(default_factory=dict)
+    live_candidate_ratio: Optional[float] = None
+    supportive_evidence_ratio: Optional[float] = None
+    average_dau_across_workspaces: Optional[float] = None
+    size_band_distribution: Dict[str, int] = Field(default_factory=dict)
+    recent_high_dau_dossiers: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class DemoWorkspaceSnapshot(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    workspace_name: Optional[str] = None
+    top_dossiers: List[Dict[str, Any]] = Field(default_factory=list)
+    pending_approvals: List[Dict[str, Any]] = Field(default_factory=list)
+    recent_exports: List[Dict[str, Any]] = Field(default_factory=list)
+    integration_summary: Dict[str, Any] = Field(default_factory=dict)
+    health_summary: Dict[str, Any] = Field(default_factory=dict)
+    pilot_ready: bool = False
+    warnings: List[str] = Field(default_factory=list)
+
+
+class PlatformReadinessSnapshot(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    analysis_readiness: str = "partial"
+    workflow_readiness: str = "partial"
+    export_readiness: str = "partial"
+    integration_readiness: str = "partial"
+    health_warnings: List[str] = Field(default_factory=list)
+    missing_enterprise_items: List[str] = Field(default_factory=list)
+    pilot_ready: bool = False
+    rationale: Optional[str] = None
 
 
 class CreateOrganizationRequest(BaseModel):
@@ -446,10 +546,27 @@ class DossierExportRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class RenderExportRequest(BaseModel):
+    pack_type: str = "dossier_pack"
+    export_format: str = "html"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class CreateIntegrationBindingRequest(BaseModel):
     integration_type: str
     organization_id: Optional[str] = None
     workspace_id: Optional[str] = None
     status: str = "configured"
     config: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class IntegrationExecutionRequest(BaseModel):
+    action_type: str = "sync_export"
+    dossier_id: Optional[str] = None
+    export_id: Optional[str] = None
+    render_id: Optional[str] = None
+    pack_type: str = "dossier_pack"
+    export_format: str = "html"
+    event_type: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)

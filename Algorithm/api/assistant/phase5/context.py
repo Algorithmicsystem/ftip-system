@@ -147,8 +147,18 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         )
         or "",
         "platform_export_summary": report.get("platform_export_summary") or "",
+        "platform_export_rendering_summary": report.get(
+            "platform_export_rendering_summary"
+        )
+        or "",
         "platform_integration_health_summary": report.get(
             "platform_integration_health_summary"
+        )
+        or "",
+        "platform_dashboard_summary": report.get("platform_dashboard_summary") or "",
+        "platform_analytics_summary": report.get("platform_analytics_summary") or "",
+        "platform_demo_readiness_summary": report.get(
+            "platform_demo_readiness_summary"
         )
         or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
@@ -498,7 +508,11 @@ def build_narrator_context(
             "workflow_actions_summary": report.get("platform_workflow_actions_summary"),
             "audit_timeline_summary": report.get("platform_audit_timeline_summary"),
             "export_summary": report.get("platform_export_summary"),
+            "export_rendering_summary": report.get("platform_export_rendering_summary"),
             "integration_health_summary": report.get("platform_integration_health_summary"),
+            "dashboard_summary": report.get("platform_dashboard_summary"),
+            "analytics_summary": report.get("platform_analytics_summary"),
+            "demo_readiness_summary": report.get("platform_demo_readiness_summary"),
             "effective_role": (report.get("platform_access_summary") or {}).get("effective_role"),
             "pending_approval_count": (report.get("platform_summary_view") or {}).get("pending_approval_count"),
         },
@@ -586,7 +600,15 @@ def build_narrator_context(
             "platform_workflow_actions_summary": sections["platform_workflow_actions_summary"],
             "platform_audit_timeline_summary": sections["platform_audit_timeline_summary"],
             "platform_export_summary": sections["platform_export_summary"],
+            "platform_export_rendering_summary": sections[
+                "platform_export_rendering_summary"
+            ],
             "platform_integration_health_summary": sections["platform_integration_health_summary"],
+            "platform_dashboard_summary": sections["platform_dashboard_summary"],
+            "platform_analytics_summary": sections["platform_analytics_summary"],
+            "platform_demo_readiness_summary": sections[
+                "platform_demo_readiness_summary"
+            ],
             "daily_operating_summary": sections["daily_operating_summary"],
             "weekly_operating_summary": sections["weekly_operating_summary"],
             "monthly_operating_summary": sections["monthly_operating_summary"],

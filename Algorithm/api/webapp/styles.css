@@ -568,6 +568,13 @@ textarea {
   color: var(--text-soft);
 }
 
+#assistant-platform-dossier-filters label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
 .report-sections {
   display: grid;
   gap: 12px;

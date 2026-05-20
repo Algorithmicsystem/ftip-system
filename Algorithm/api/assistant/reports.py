@@ -2651,9 +2651,15 @@ def attach_platform_context(
     access_summary = dict(platform_context.get("access_summary") or {})
     integration_summary = dict(platform_context.get("integration_summary") or {})
     health_summary = dict(platform_context.get("health_summary") or {})
+    workspace_analytics = dict(platform_context.get("workspace_analytics") or {})
+    platform_analytics = dict(platform_context.get("platform_analytics") or {})
+    dashboard = dict(platform_context.get("dashboard") or {})
+    demo_snapshot = dict(platform_context.get("demo_snapshot") or {})
+    readiness_snapshot = dict(platform_context.get("readiness_snapshot") or {})
     approvals = list(platform_context.get("approvals") or [])
     timeline = list(platform_context.get("timeline") or [])
     exports = list(platform_context.get("exports") or [])
+    rendered_exports = list(platform_context.get("rendered_exports") or [])
     allowed_actions = list(platform_context.get("allowed_actions") or [])
     bindings = list(platform_context.get("integration_bindings") or [])
 
@@ -2709,8 +2715,34 @@ def attach_platform_context(
         if integration_summary
         else "No platform integration summary is attached."
     )
+    export_rendering_summary = (
+        f"Rendered exports total {len(rendered_exports)} across format(s) "
+        f"{_fmt_list([item.get('export_format') for item in rendered_exports[:6]])}."
+        if rendered_exports
+        else "No rendered export output is attached yet."
+    )
+    dashboard_summary = (
+        f"Executive dashboard shows {((dashboard.get('executive_metrics') or {}).get('dossier_count')) or 0} dossier(s), "
+        f"{((dashboard.get('executive_metrics') or {}).get('pending_approval_count')) or 0} pending approval(s), and "
+        f"{len(dashboard.get('high_dau_dossiers') or [])} recent high-DAU dossier(s)."
+        if dashboard
+        else "No platform dashboard snapshot is attached."
+    )
+    analytics_summary = (
+        f"Cross-workspace analytics show deployability distribution {sanitize_payload(platform_analytics.get('deployability_distribution') or {})} "
+        f"and regime distribution {sanitize_payload(platform_analytics.get('regime_distribution') or {})}."
+        if platform_analytics
+        else "No cross-workspace analytics are attached."
+    )
+    demo_readiness_summary = (
+        f"Demo snapshot pilot readiness is {demo_snapshot.get('pilot_ready')} and readiness state is "
+        f"{readiness_snapshot.get('analysis_readiness') or 'partial'} / {readiness_snapshot.get('workflow_readiness') or 'partial'} / "
+        f"{readiness_snapshot.get('export_readiness') or 'partial'} / {readiness_snapshot.get('integration_readiness') or 'partial'}."
+        if demo_snapshot or readiness_snapshot
+        else "No demo or readiness snapshot is attached."
+    )
 
-    updated["report_version"] = "2.16"
+    updated["report_version"] = "2.17"
     updated["platform_foundation_version"] = platform_context.get(
         "platform_foundation_version"
     )
@@ -2732,12 +2764,18 @@ def attach_platform_context(
     updated["platform_approvals"] = sanitize_payload(approvals)
     updated["platform_timeline"] = sanitize_payload(timeline)
     updated["platform_exports"] = sanitize_payload(exports)
+    updated["platform_rendered_exports"] = sanitize_payload(rendered_exports)
     updated["platform_supported_export_packs"] = sanitize_payload(
         platform_context.get("supported_export_packs") or []
     )
     updated["platform_integration_summary"] = sanitize_payload(integration_summary)
     updated["platform_integration_bindings"] = sanitize_payload(bindings)
     updated["platform_health_summary"] = sanitize_payload(health_summary)
+    updated["platform_workspace_analytics"] = sanitize_payload(workspace_analytics)
+    updated["platform_cross_workspace_analytics"] = sanitize_payload(platform_analytics)
+    updated["platform_dashboard"] = sanitize_payload(dashboard)
+    updated["platform_demo_snapshot"] = sanitize_payload(demo_snapshot)
+    updated["platform_readiness_snapshot"] = sanitize_payload(readiness_snapshot)
     updated["platform_overview_summary"] = overview_summary
     updated["platform_dossier_summary"] = dossier_summary
     updated["platform_monitoring_summary"] = monitoring_summary
@@ -2746,11 +2784,27 @@ def attach_platform_context(
     updated["platform_audit_timeline_summary"] = audit_timeline_summary
     updated["platform_export_summary"] = export_summary
     updated["platform_integration_health_summary"] = integration_health_summary
+    updated["platform_export_rendering_summary"] = export_rendering_summary
+    updated["platform_dashboard_summary"] = dashboard_summary
+    updated["platform_analytics_summary"] = analytics_summary
+    updated["platform_demo_readiness_summary"] = demo_readiness_summary
     updated["overall_analysis"] = _join_sentences(
-        [updated.get("overall_analysis"), overview_summary, dossier_summary, workflow_actions_summary]
+        [
+            updated.get("overall_analysis"),
+            overview_summary,
+            dossier_summary,
+            workflow_actions_summary,
+            dashboard_summary,
+        ]
     )
     updated["strategy_view"] = _join_sentences(
-        [updated.get("strategy_view"), monitoring_summary, access_control_summary]
+        [
+            updated.get("strategy_view"),
+            monitoring_summary,
+            access_control_summary,
+            analytics_summary,
+            demo_readiness_summary,
+        ]
     )
     updated["evidence_provenance"] = _join_sentences(
         [
@@ -2759,6 +2813,7 @@ def attach_platform_context(
             if platform_profile
             else None,
             export_summary,
+            export_rendering_summary,
             integration_health_summary,
         ]
     )
@@ -2793,8 +2848,25 @@ def attach_platform_context(
         "platform.exports",
         "platform.supported_export_packs",
     ]
+    evidence_map["platform_export_rendering_summary"] = [
+        "platform.rendered_exports",
+        "platform.exports",
+    ]
     evidence_map["platform_integration_health_summary"] = [
         "platform.integration_summary",
+        "platform.health_summary",
+    ]
+    evidence_map["platform_dashboard_summary"] = [
+        "platform.dashboard",
+        "platform.workspace_analytics",
+    ]
+    evidence_map["platform_analytics_summary"] = [
+        "platform.platform_analytics",
+        "platform.workspace_analytics",
+    ]
+    evidence_map["platform_demo_readiness_summary"] = [
+        "platform.demo_snapshot",
+        "platform.readiness_snapshot",
         "platform.health_summary",
     ]
     updated["evidence_map"] = evidence_map

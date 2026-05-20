@@ -6,6 +6,45 @@ from api.platform.contracts import ConnectorCapability, IntegrationDefinition
 
 
 _DEFINITIONS: Dict[str, IntegrationDefinition] = {
+    "local_archive": IntegrationDefinition(
+        integration_type="local_archive",
+        title="Local Archive",
+        description="Pilot-safe local archive for rendered exports and dossier packs.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="archive_export",
+                title="Archive Export",
+                description="Persist rendered export packs to a managed local archive path.",
+            ),
+        ],
+        config_schema={"required": ["target_root"]},
+    ),
+    "webhook": IntegrationDefinition(
+        integration_type="webhook",
+        title="Webhook Outbox",
+        description="Pilot-safe webhook-style outbox for workflow, export, and approval events.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="event_delivery",
+                title="Event Delivery",
+                description="Queue structured platform events into a deterministic webhook outbox.",
+            ),
+        ],
+        config_schema={"required": ["outbox_root"]},
+    ),
+    "internal_sink": IntegrationDefinition(
+        integration_type="internal_sink",
+        title="Internal Sink",
+        description="Internal event sink for audit-compatible platform activity capture.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="sink_event",
+                title="Sink Event",
+                description="Write platform execution events into an internal structured sink.",
+            ),
+        ],
+        config_schema={"required": ["sink_path"]},
+    ),
     "crm": IntegrationDefinition(
         integration_type="crm",
         title="CRM",

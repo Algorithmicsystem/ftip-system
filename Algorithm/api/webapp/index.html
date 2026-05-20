@@ -584,10 +584,14 @@
 
               <section class="research-panel hidden" data-research-panel="platform">
                 <div class="workspace-grid">
-                  <section class="legacy-card">
+                  <section class="legacy-card workspace-span-2">
                     <div class="legacy-card-head">
-                      <h4>Workspace / Workflow Overview</h4>
-                      <span class="legacy-badge">Platform foundation</span>
+                      <h4>Executive Dashboard</h4>
+                      <span class="legacy-badge">Enterprise console</span>
+                    </div>
+                    <div id="assistant-platform-dashboard" class="drilldown-grid empty-state-card">
+                      Executive dashboard metrics, pending approvals, export activity, integration health,
+                      and recent high-DAU dossiers will render here.
                     </div>
                     <div id="assistant-platform-overview" class="summary-grid empty-state-card">
                       Run Analyze with dossier creation enabled, or attach analysis to an
@@ -607,8 +611,34 @@
 
                   <section class="legacy-card workspace-span-2">
                     <div class="legacy-card-head">
-                      <h4>Dossier List</h4>
+                      <h4>Dossiers Console</h4>
                       <span class="legacy-badge">Institutional objects</span>
+                    </div>
+                    <div id="assistant-platform-dossier-filters" class="summary-grid empty-state-card">
+                      <label>
+                        Workspace
+                        <input id="assistant-platform-filter-workspace" type="text" placeholder="filter workspace" />
+                      </label>
+                      <label>
+                        Workflow Template
+                        <input id="assistant-platform-filter-workflow-template" type="text" placeholder="filter template" />
+                      </label>
+                      <label>
+                        Tier
+                        <input id="assistant-platform-filter-tier" type="text" placeholder="filter tier" />
+                      </label>
+                      <label>
+                        Regime
+                        <input id="assistant-platform-filter-regime" type="text" placeholder="filter regime" />
+                      </label>
+                      <label>
+                        Stage
+                        <input id="assistant-platform-filter-stage" type="text" placeholder="filter stage" />
+                      </label>
+                      <label>
+                        Evidence
+                        <input id="assistant-platform-filter-evidence" type="text" placeholder="filter evidence" />
+                      </label>
                     </div>
                     <div id="assistant-platform-dossiers" class="drilldown-grid empty-state-card">
                       Dossiers linked to the current workspace will render here once the platform
@@ -638,6 +668,36 @@
                     </div>
                   </section>
 
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Approvals / Workflow Console</h4>
+                      <span class="legacy-badge">Decisions and locks</span>
+                    </div>
+                    <div id="assistant-platform-approvals" class="drilldown-grid empty-state-card">
+                      Pending approvals, recent decisions, and stage progression visibility will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Exports Console</h4>
+                      <span class="legacy-badge">Render and preview</span>
+                    </div>
+                    <div id="assistant-platform-exports" class="drilldown-grid empty-state-card">
+                      Available packs, rendered export formats, approval state, and preview snippets will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card">
+                    <div class="legacy-card-head">
+                      <h4>Integrations / Health Console</h4>
+                      <span class="legacy-badge">Bindings and execution</span>
+                    </div>
+                    <div id="assistant-platform-integrations" class="drilldown-grid empty-state-card">
+                      Integration bindings, health state, last execution, and connector capabilities will render here.
+                    </div>
+                  </section>
+
                   <section class="legacy-card workspace-span-2">
                     <div class="legacy-card-head">
                       <h4>Workflow Controls / Audit / Exports</h4>
@@ -646,6 +706,17 @@
                     <div id="assistant-platform-controls" class="drilldown-grid empty-state-card">
                       Workflow actions, approval state, audit timeline, export packs, access
                       visibility, and integration health will render here.
+                    </div>
+                  </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Analytics Console</h4>
+                      <span class="legacy-badge">Cross-workspace view</span>
+                    </div>
+                    <div id="assistant-platform-analytics" class="drilldown-grid empty-state-card">
+                      Cross-workspace analytics, deployability distribution, regime distribution, evidence support,
+                      and export throughput will render here.
                     </div>
                   </section>
                 </div>

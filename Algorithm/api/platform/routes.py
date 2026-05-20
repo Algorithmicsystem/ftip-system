@@ -12,6 +12,8 @@ from api.platform.contracts import (
     CreateWorkflowRequest,
     CreateWorkspaceRequest,
     DossierExportRequest,
+    IntegrationExecutionRequest,
+    RenderExportRequest,
     WorkflowActionRequest,
     WorkflowApprovalRequestPayload,
 )
@@ -173,6 +175,45 @@ def dossier_exports(dossier_id: str, request: Request) -> Dict[str, Any]:
     )
 
 
+@router.get("/dossiers/{dossier_id}/preview-export")
+def preview_dossier_export(
+    dossier_id: str,
+    request: Request,
+    pack_type: str = Query(default="dossier_pack"),
+    export_format: str = Query(default="html"),
+) -> Dict[str, Any]:
+    return service.preview_dossier_export_service(
+        dossier_id,
+        pack_type=pack_type,
+        export_format=export_format,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/dossiers/{dossier_id}/render-export")
+def render_dossier_export(
+    dossier_id: str,
+    payload: RenderExportRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.render_dossier_export_service(
+        dossier_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/exports/{render_id}")
+def get_rendered_export(render_id: str, request: Request) -> Dict[str, Any]:
+    return service.get_rendered_export_service(
+        render_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
 @router.get("/summary")
 def platform_summary(
     request: Request,
@@ -180,6 +221,40 @@ def platform_summary(
 ) -> Dict[str, Any]:
     return service.build_platform_summary_service(
         workspace_id=workspace_id,
+        user_context=_user_context(request, workspace_id=workspace_id),
+        store=platform_store,
+    )
+
+
+@router.get("/dashboard")
+def platform_dashboard(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_platform_dashboard_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request, workspace_id=workspace_id),
+        store=platform_store,
+        emit_audit=True,
+    )
+
+
+@router.get("/analytics")
+def platform_analytics(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_platform_analytics_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request, workspace_id=workspace_id),
+        store=platform_store,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/analytics")
+def workspace_analytics(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.build_workspace_analytics_service(
+        workspace_id,
         user_context=_user_context(request, workspace_id=workspace_id),
         store=platform_store,
     )
@@ -244,12 +319,60 @@ def create_integration(
     )
 
 
+@router.post("/integrations/{binding_id}/execute")
+def execute_integration(
+    binding_id: str,
+    payload: IntegrationExecutionRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.execute_integration_service(
+        binding_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/integrations/{binding_id}/history")
+def integration_history(binding_id: str, request: Request) -> Dict[str, Any]:
+    return service.list_integration_history_service(
+        binding_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
 @router.get("/health")
 def platform_health(
     request: Request,
     workspace_id: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
     return service.build_platform_health_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request, workspace_id=workspace_id),
+        store=platform_store,
+    )
+
+
+@router.get("/demo/snapshot")
+def platform_demo_snapshot(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_demo_snapshot_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request, workspace_id=workspace_id),
+        store=platform_store,
+        emit_audit=True,
+    )
+
+
+@router.get("/demo/readiness")
+def platform_demo_readiness(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_demo_readiness_service(
         workspace_id=workspace_id,
         user_context=_user_context(request, workspace_id=workspace_id),
         store=platform_store,

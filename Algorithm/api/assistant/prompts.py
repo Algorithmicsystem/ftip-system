@@ -61,6 +61,9 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Platform controls: {report.get('platform_workflow_actions_summary', 'n/a')}.",
             f"Platform exports: {report.get('platform_export_summary', 'n/a')}.",
             f"Platform access: {report.get('platform_access_control_summary', 'n/a')}.",
+            f"Platform dashboard: {report.get('platform_dashboard_summary', 'n/a')}.",
+            f"Platform analytics: {report.get('platform_analytics_summary', 'n/a')}.",
+            f"Platform demo readiness: {report.get('platform_demo_readiness_summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -105,8 +108,14 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "platform_approvals": report.get("platform_approvals"),
         "platform_timeline": report.get("platform_timeline"),
         "platform_exports": report.get("platform_exports"),
+        "platform_rendered_exports": report.get("platform_rendered_exports"),
         "platform_integration_summary": report.get("platform_integration_summary"),
         "platform_health_summary": report.get("platform_health_summary"),
+        "platform_workspace_analytics": report.get("platform_workspace_analytics"),
+        "platform_cross_workspace_analytics": report.get("platform_cross_workspace_analytics"),
+        "platform_dashboard": report.get("platform_dashboard"),
+        "platform_demo_snapshot": report.get("platform_demo_snapshot"),
+        "platform_readiness_snapshot": report.get("platform_readiness_snapshot"),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -182,8 +191,16 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
             "platform_audit_timeline_summary"
         ),
         "platform_export_summary": report.get("platform_export_summary"),
+        "platform_export_rendering_summary": report.get(
+            "platform_export_rendering_summary"
+        ),
         "platform_integration_health_summary": report.get(
             "platform_integration_health_summary"
+        ),
+        "platform_dashboard_summary": report.get("platform_dashboard_summary"),
+        "platform_analytics_summary": report.get("platform_analytics_summary"),
+        "platform_demo_readiness_summary": report.get(
+            "platform_demo_readiness_summary"
         ),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
@@ -244,7 +261,7 @@ def build_grounded_chat_messages(
                 "Prefer referencing AXIOM first when it is present, then use the report's signal summary, overall analysis, strategy view, "
                 "risks/weaknesses/invalidators, and evidence provenance sections to explain the same decision."
                 " When the user asks for an IC memo, one-pager, lineage, direct versus derived evidence, audience-specific framing, or why evidence is weak, use the AXIOM institutional reports and lineage sections first."
-                " When the user asks about dossiers, workflows, workspace context, or institutional review stages, use the platform workflow and dossier sections directly."
+                " When the user asks about dossiers, workflows, workspace context, institutional review stages, dashboard analytics, export readiness, integration execution, or pilot readiness, use the platform workflow, analytics, export, integration, and demo-readiness sections directly."
             ),
         },
         {"role": "system", "content": _grounding_block(report, context)},

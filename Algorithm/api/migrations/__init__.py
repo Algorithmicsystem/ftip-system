@@ -583,6 +583,11 @@ def _migration_platform_controls(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_platform_phase7_console(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("029_platform_phase7_console.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -634,6 +639,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "028_platform_controls",
         _migration_platform_controls,
+    ),
+    (
+        "029_platform_phase7_console",
+        _migration_platform_phase7_console,
     ),
 ]
 

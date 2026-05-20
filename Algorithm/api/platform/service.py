@@ -14,6 +14,10 @@ from api.platform.actions import (
     permission_for_action,
     stage_requires_approval,
 )
+from api.platform.analytics import (
+    build_cross_workspace_analytics,
+    build_workspace_analytics_view,
+)
 from api.platform.approvals import (
     approval_status_after_decision,
     build_approval_decision,
@@ -21,12 +25,20 @@ from api.platform.approvals import (
 )
 from api.platform.audit import audit_event_to_timeline, build_audit_event
 from api.platform.contracts import DossierRecord, PlatformSummaryView, ResourceRef
+from api.platform.dashboard import build_dashboard_payload
+from api.platform.demo import build_demo_workspace_snapshot, build_readiness_snapshot
 from api.platform.dossiers import (
     build_analysis_link,
     dossier_preview,
     refresh_dossier_record,
 )
 from api.platform.entities import build_coverage_entity
+from api.platform.execution import (
+    execute_internal_sink,
+    execute_local_archive,
+    execute_webhook_outbox,
+)
+from api.platform.export_renderers import render_export_manifest
 from api.platform.exports import build_export_manifest, supported_pack_types
 from api.platform.guardrails import summarize_guardrails
 from api.platform.health import build_platform_health_summary
@@ -114,6 +126,8 @@ def _report_snapshot(report: Dict[str, Any]) -> Dict[str, Any]:
             "axiom_regime_label": report.get("axiom_regime_label"),
             "axiom_trade_family": report.get("axiom_trade_family"),
             "axiom_deployability_tier": report.get("axiom_deployability_tier"),
+            "axiom_validated_edge": report.get("axiom_validated_edge"),
+            "axiom_deployable_alpha_utility": report.get("axiom_deployable_alpha_utility"),
             "axiom_evidence_backed_deployability_tier": report.get(
                 "axiom_evidence_backed_deployability_tier"
             ),
@@ -165,6 +179,46 @@ def _latest_approval_status(
 ) -> Optional[str]:
     approvals = store.list_approval_requests(workflow_id=workflow_id)
     return approvals[0].get("status") if approvals else None
+
+
+def _workspace_scope_bundle(
+    *,
+    workspace_id: Optional[str],
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    workspaces = (
+        [store.get_workspace(workspace_id)]
+        if workspace_id and store.get_workspace(workspace_id)
+        else store.list_workspaces()
+    )
+    workflows = store.list_workflows(workspace_id=workspace_id)
+    dossiers = store.list_dossiers(workspace_id=workspace_id)
+    approvals: List[Dict[str, Any]] = []
+    exports: List[Dict[str, Any]] = []
+    rendered_exports: List[Dict[str, Any]] = []
+    for workflow in workflows:
+        approvals.extend(store.list_approval_requests(workflow_id=workflow.get("workflow_id")))
+    for dossier in dossiers:
+        dossier_exports = store.list_export_manifests(dossier.get("dossier_id"))
+        exports.extend(dossier_exports)
+        for export in dossier_exports:
+            rendered_exports.extend(
+                store.list_rendered_exports(export_id=export.get("export_id"))
+            )
+    integrations = (
+        store.list_integration_bindings(workspace_id=workspace_id)
+        if workspace_id
+        else store.list_integration_bindings()
+    )
+    return {
+        "workspaces": [item for item in workspaces if item],
+        "workflows": workflows,
+        "dossiers": dossiers,
+        "approvals": approvals,
+        "exports": exports,
+        "rendered_exports": rendered_exports,
+        "integration_bindings": integrations,
+    }
 
 
 def _create_audit_event(
@@ -983,6 +1037,184 @@ def list_dossier_exports_service(
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "supported_pack_types": supported_pack_types(),
         "exports": store.list_export_manifests(dossier_id),
+        "rendered_exports": [
+            rendered
+            for export in store.list_export_manifests(dossier_id)
+            for rendered in store.list_rendered_exports(export_id=export.get("export_id"))
+        ],
+    }
+
+
+def _resolve_dossier_export_context(
+    dossier_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]],
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    dossier = store.get_dossier(dossier_id)
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    workflow = store.get_workflow(dossier["workflow_id"])
+    workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    organization = (
+        store.get_organization(workspace["organization_id"]) if workspace else None
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="export_report_pack",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
+    report = _latest_report_from_dossier(dossier)
+    approval_status = _latest_approval_status(dossier["workflow_id"], store=store)
+    return {
+        "dossier": dossier,
+        "workflow": workflow,
+        "workspace": workspace,
+        "organization": organization,
+        "normalized": normalized,
+        "report": report,
+        "approval_status": approval_status,
+    }
+
+
+def preview_dossier_export_service(
+    dossier_id: str,
+    *,
+    pack_type: str = "dossier_pack",
+    export_format: str = "html",
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_dossier_export_context(
+        dossier_id,
+        user_context=user_context,
+        store=store,
+    )
+    manifest = build_export_manifest(
+        pack_type=pack_type,
+        dossier=context["dossier"],
+        report=context["report"],
+        workflow=context["workflow"],
+        workspace=context["workspace"],
+        organization=context["organization"],
+        approval_status=context["approval_status"],
+        metadata={"preview_only": True},
+    )
+    rendered = render_export_manifest(
+        manifest,
+        export_format=export_format,
+        metadata={"preview_only": True},
+    )
+    audit = _create_audit_event(
+        event_type="export_previewed",
+        resource=_dossier_resource(context["dossier"], context["workspace"]),
+        user_context=context["normalized"],
+        payload={
+            "workflow_id": context["dossier"].get("workflow_id"),
+            "dossier_id": dossier_id,
+            "pack_type": pack_type,
+            "export_format": export_format,
+        },
+        rationale="Export preview generated.",
+        metadata={"preview_only": True},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "preview": rendered.model_dump(mode="python"),
+        "manifest": manifest.model_dump(mode="python"),
+        "audit_event": audit,
+    }
+
+
+def render_dossier_export_service(
+    dossier_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_dossier_export_context(
+        dossier_id,
+        user_context=user_context,
+        store=store,
+    )
+    export_response = create_dossier_export_service(
+        dossier_id,
+        {
+            "pack_type": str(payload.get("pack_type") or "dossier_pack"),
+            "metadata": payload.get("metadata") or {},
+        },
+        user_context=context["normalized"].model_dump(mode="python"),
+        store=store,
+    )
+    manifest = export_response["export"]
+    rendered = render_export_manifest(
+        manifest,
+        export_format=str(payload.get("export_format") or "html"),
+        metadata=payload.get("metadata") or {},
+    )
+    persisted_render = store.create_rendered_export(rendered.model_dump(mode="python"))
+    audit = _create_audit_event(
+        event_type="export_rendered",
+        resource=_dossier_resource(context["dossier"], context["workspace"]),
+        user_context=context["normalized"],
+        payload={
+            "workflow_id": context["dossier"].get("workflow_id"),
+            "dossier_id": dossier_id,
+            "export_id": manifest.get("export_id"),
+            "render_id": persisted_render.get("render_id"),
+            "pack_type": manifest.get("pack_type"),
+            "export_format": persisted_render.get("export_format"),
+        },
+        rationale="Rendered export generated.",
+        metadata={"checksum": persisted_render.get("checksum")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "export": manifest,
+        "rendered_export": persisted_render,
+        "audit_event": audit,
+    }
+
+
+def get_rendered_export_service(
+    render_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    rendered = store.get_rendered_export(render_id)
+    if rendered is None:
+        raise HTTPException(status_code=404, detail="rendered export not found")
+    manifest = store.get_export_manifest(str(rendered.get("export_id") or ""))
+    workspace = (
+        store.get_workspace(str(manifest.get("workspace_id")))
+        if manifest and manifest.get("workspace_id")
+        else None
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "rendered_export": rendered,
+        "export": manifest,
     }
 
 
@@ -1058,14 +1290,262 @@ def list_integrations_service(
         organization_id=(workspace or {}).get("organization_id"),
         workspace_id=workspace_id,
     )
+    enriched_bindings: List[Dict[str, Any]] = []
+    for binding in bindings:
+        history = store.list_integration_executions(str(binding.get("binding_id")))
+        enriched = sanitize_payload(
+            {
+                **binding,
+                "definition": get_integration_definition(
+                    str(binding.get("integration_type") or "custom")
+                ).model_dump(mode="python"),
+                "execution_count": len(history),
+                "last_execution": history[0] if history else None,
+            }
+        )
+        enriched_bindings.append(enriched)
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "integration_definitions": [
             item.model_dump(mode="python") for item in list_integration_definitions()
         ],
-        "bindings": bindings,
-        "health_summary": integration_health_summary(bindings),
+        "bindings": enriched_bindings,
+        "health_summary": integration_health_summary(enriched_bindings),
     }
+
+
+def list_integration_history_service(
+    binding_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    binding = store.get_integration_binding(binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="integration binding not found")
+    workspace = (
+        store.get_workspace(str(binding.get("workspace_id")))
+        if binding.get("workspace_id")
+        else None
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=binding.get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    history = store.list_integration_executions(binding_id)
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "binding": binding,
+        "history": history,
+        "definition": get_integration_definition(
+            str(binding.get("integration_type") or "custom")
+        ).model_dump(mode="python"),
+    }
+
+
+def execute_integration_service(
+    binding_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    binding = store.get_integration_binding(binding_id)
+    if binding is None:
+        raise HTTPException(status_code=404, detail="integration binding not found")
+    workspace = (
+        store.get_workspace(str(binding.get("workspace_id")))
+        if binding.get("workspace_id")
+        else None
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=binding.get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="manage_integrations",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+
+    dossier_id = payload.get("dossier_id")
+    export_id = payload.get("export_id")
+    render_id = payload.get("render_id")
+    rendered_export = (
+        store.get_rendered_export(str(render_id))
+        if render_id
+        else None
+    )
+    if rendered_export is None and export_id:
+        rendered_exports = store.list_rendered_exports(export_id=str(export_id))
+        rendered_export = rendered_exports[0] if rendered_exports else None
+    if rendered_export is None and dossier_id and payload.get("action_type") == "sync_export":
+        rendered_response = render_dossier_export_service(
+            str(dossier_id),
+            {
+                "pack_type": payload.get("pack_type") or "dossier_pack",
+                "export_format": payload.get("export_format") or "html",
+                "metadata": {
+                    **dict(payload.get("metadata") or {}),
+                    "integration_binding_id": binding_id,
+                },
+            },
+            user_context=normalized.model_dump(mode="python"),
+            store=store,
+        )
+        rendered_export = rendered_response.get("rendered_export")
+        export_id = (rendered_response.get("export") or {}).get("export_id")
+        render_id = (rendered_export or {}).get("render_id")
+
+    try:
+        integration_type = str(binding.get("integration_type") or "custom")
+        if integration_type == "local_archive":
+            if rendered_export is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="local_archive execution requires a rendered export or dossier context",
+                )
+            execution = execute_local_archive(
+                binding=binding,
+                rendered_export=rendered_export,
+                dossier_id=dossier_id,
+                export_id=export_id,
+                metadata=payload.get("metadata") or {},
+            )
+        elif integration_type == "webhook":
+            execution = execute_webhook_outbox(
+                binding=binding,
+                rendered_export=rendered_export,
+                dossier_id=dossier_id,
+                export_id=export_id,
+                event_type=payload.get("event_type") or "platform_export_event",
+                metadata=payload.get("metadata") or {},
+            )
+        elif integration_type == "internal_sink":
+            execution = execute_internal_sink(
+                binding=binding,
+                dossier_id=dossier_id,
+                export_id=export_id,
+                render_id=(rendered_export or {}).get("render_id") or render_id,
+                event_type=payload.get("event_type") or "platform_sink_event",
+                metadata=payload.get("metadata") or {},
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"integration type {integration_type} is not executable in Phase 7",
+            )
+        persisted = store.create_integration_execution(execution)
+        binding = store.update_integration_binding(
+            binding_id,
+            {
+                "health": {
+                    **dict(binding.get("health") or {}),
+                    "status": "healthy" if persisted.get("status") in {"completed", "queued"} else "degraded",
+                    "checked_at": _now_utc(),
+                    "warnings": []
+                    if persisted.get("status") in {"completed", "queued"}
+                    else [persisted.get("error_summary") or "integration execution failed"],
+                    "details": {
+                        **dict((binding.get("health") or {}).get("details") or {}),
+                        "last_execution_status": persisted.get("status"),
+                        "last_execution_at": persisted.get("completed_at"),
+                        "last_execution_id": persisted.get("execution_id"),
+                    },
+                },
+                "updated_at": _now_utc(),
+            },
+        )
+        audit = _create_audit_event(
+            event_type="integration_executed",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={
+                "binding_id": binding_id,
+                "dossier_id": dossier_id,
+                "export_id": export_id,
+                "render_id": render_id or (rendered_export or {}).get("render_id"),
+                "status": persisted.get("status"),
+            },
+            rationale="Integration execution completed.",
+            metadata={"execution_id": persisted.get("execution_id")},
+            store=store,
+        )
+        return {
+            "platform_version": PLATFORM_FOUNDATION_VERSION,
+            "binding": binding,
+            "execution": persisted,
+            "rendered_export": rendered_export,
+            "audit_event": audit,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        failed_execution = store.create_integration_execution(
+            {
+                "execution_id": str(uuid.uuid4()),
+                "binding_id": binding_id,
+                "integration_type": binding.get("integration_type"),
+                "action_type": payload.get("action_type") or "sync_export",
+                "status": "failed",
+                "workspace_id": binding.get("workspace_id"),
+                "organization_id": binding.get("organization_id"),
+                "dossier_id": dossier_id,
+                "export_id": export_id,
+                "render_id": render_id or (rendered_export or {}).get("render_id"),
+                "started_at": _now_utc(),
+                "completed_at": _now_utc(),
+                "payload_summary": sanitize_payload(payload),
+                "output_summary": {},
+                "error_summary": str(exc),
+                "metadata": payload.get("metadata") or {},
+            }
+        )
+        store.update_integration_binding(
+            binding_id,
+            {
+                "health": {
+                    **dict(binding.get("health") or {}),
+                    "status": "degraded",
+                    "checked_at": _now_utc(),
+                    "warnings": [str(exc)],
+                    "details": {
+                        **dict((binding.get("health") or {}).get("details") or {}),
+                        "last_execution_status": "failed",
+                        "last_execution_at": failed_execution.get("completed_at"),
+                        "last_execution_id": failed_execution.get("execution_id"),
+                    },
+                },
+                "updated_at": _now_utc(),
+            },
+        )
+        audit = _create_audit_event(
+            event_type="integration_failed",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={
+                "binding_id": binding_id,
+                "dossier_id": dossier_id,
+                "export_id": export_id,
+                "error_summary": str(exc),
+            },
+            rationale="Integration execution failed.",
+            metadata={"execution_id": failed_execution.get("execution_id")},
+            store=store,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"integration execution failed: {exc}",
+        ) from exc
 
 
 def build_platform_health_service(
@@ -1085,38 +1565,331 @@ def build_platform_health_service(
         resource=_workspace_resource(workspace),
         store=store,
     )
-    workflows = store.list_workflows(workspace_id=workspace_id)
-    dossiers = store.list_dossiers(workspace_id=workspace_id)
-    approvals: List[Dict[str, Any]] = []
-    for workflow in workflows:
-        approvals.extend(
-            store.list_approval_requests(workflow_id=workflow.get("workflow_id"))
-        )
-    exports: List[Dict[str, Any]] = []
-    for dossier in dossiers:
-        exports.extend(store.list_export_manifests(dossier.get("dossier_id")))
+    scope = _workspace_scope_bundle(workspace_id=workspace_id, store=store)
+    workflows = scope["workflows"]
+    dossiers = scope["dossiers"]
+    approvals = scope["approvals"]
+    exports = scope["exports"]
     audit_events = store.list_audit_events(
         workspace_id=(workspace or {}).get("workspace_id"),
         limit=400,
     )
-    integration_bindings = store.list_integration_bindings(
+    integration_bindings = scope["integration_bindings"]
+    rendered_exports = scope["rendered_exports"]
+    integration_execution_count = sum(
+        len(store.list_integration_executions(str(item.get("binding_id"))))
+        for item in integration_bindings
+    )
+    health = build_platform_health_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=(workspace or {}).get("workspace_id"),
         organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=workspace_id,
+        access_summary=access_summary,
+        workflows=workflows,
+        dossiers=dossiers,
+        approvals=approvals,
+        exports=exports,
+        audit_events=audit_events,
+        integration_bindings=integration_bindings,
+    )
+    health["rendered_export_count"] = len(rendered_exports)
+    health["integration_execution_count"] = integration_execution_count
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "health": health,
+    }
+
+
+def build_workspace_analytics_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=workspace.get("organization_id"),
+        workspace_id=workspace.get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    scope = _workspace_scope_bundle(workspace_id=workspace_id, store=store)
+    analytics = build_workspace_analytics_view(
+        workspace=workspace,
+        workflows=scope["workflows"],
+        dossiers=scope["dossiers"],
+        approvals=scope["approvals"],
+        exports=scope["exports"],
+        integration_bindings=scope["integration_bindings"],
+    ).model_dump(mode="python")
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": workspace,
+        "analytics": analytics,
+    }
+
+
+def build_platform_analytics_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    scope = _workspace_scope_bundle(workspace_id=workspace_id, store=store)
+    workspaces = scope["workspaces"] if workspace_id else store.list_workspaces()
+    analytics = build_cross_workspace_analytics(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspaces=workspaces,
+        workflows=scope["workflows"],
+        dossiers=scope["dossiers"],
+        approvals=scope["approvals"],
+        exports=scope["exports"],
+        integration_bindings=scope["integration_bindings"],
     )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
-        "health": build_platform_health_summary(
-            platform_version=PLATFORM_FOUNDATION_VERSION,
-            workspace_id=(workspace or {}).get("workspace_id"),
-            organization_id=(workspace or {}).get("organization_id"),
-            access_summary=access_summary,
-            workflows=workflows,
-            dossiers=dossiers,
-            approvals=approvals,
-            exports=exports,
-            audit_events=audit_events,
-            integration_bindings=integration_bindings,
-        ),
+        "analytics": analytics,
+    }
+
+
+def build_platform_dashboard_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    summary = build_platform_summary_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    workspace_analytics = (
+        build_workspace_analytics_service(
+            workspace["workspace_id"],
+            user_context=normalized.model_dump(mode="python"),
+            store=store,
+        )["analytics"]
+        if workspace
+        else {
+            "workspace_name": None,
+            "workflow_count": 0,
+            "dossier_count": 0,
+            "pending_approval_count": 0,
+            "export_count": 0,
+            "integration_binding_count": 0,
+            "high_dau_dossiers": [],
+            "recent_exports": [],
+            "recent_approvals": [],
+            "dossier_records": [],
+        }
+    )
+    cross_workspace = build_platform_analytics_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )["analytics"]
+    approvals: List[Dict[str, Any]] = []
+    if workspace:
+        for wf in store.list_workflows(workspace_id=workspace["workspace_id"]):
+            approvals.extend(
+                store.list_approval_requests(workflow_id=wf.get("workflow_id"))
+            )
+    timeline = store.list_audit_events(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        limit=40,
+    )
+    exports: List[Dict[str, Any]] = []
+    if workspace:
+        for dossier in store.list_dossiers(workspace_id=workspace["workspace_id"]):
+            exports.extend(store.list_export_manifests(dossier.get("dossier_id")))
+    integrations = list_integrations_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    health = build_platform_health_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )["health"]
+    dashboard = build_dashboard_payload(
+        workspace=workspace,
+        summary_view=summary,
+        workspace_analytics=workspace_analytics,
+        cross_workspace_analytics=cross_workspace,
+        approvals=approvals,
+        timeline=timeline,
+        exports=exports,
+        integration_summary=integrations["health_summary"],
+        health_summary=health,
+    )
+    if emit_audit:
+        _create_audit_event(
+            event_type="dashboard_view_generated",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={"workspace_id": (workspace or {}).get("workspace_id")},
+            rationale="Platform dashboard generated.",
+            metadata={"dashboard_scope": "workspace" if workspace else "global"},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dashboard": dashboard,
+    }
+
+
+def build_demo_snapshot_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    workspace_analytics = (
+        build_workspace_analytics_service(
+            workspace["workspace_id"],
+            user_context=normalized.model_dump(mode="python"),
+            store=store,
+        )["analytics"]
+        if workspace
+        else {}
+    )
+    approvals: List[Dict[str, Any]] = []
+    exports: List[Dict[str, Any]] = []
+    if workspace:
+        for wf in store.list_workflows(workspace_id=workspace["workspace_id"]):
+            approvals.extend(
+                store.list_approval_requests(workflow_id=wf.get("workflow_id"))
+            )
+        for dossier in store.list_dossiers(workspace_id=workspace["workspace_id"]):
+            exports.extend(store.list_export_manifests(dossier.get("dossier_id")))
+    integrations = list_integrations_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    health = build_platform_health_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )["health"]
+    snapshot = build_demo_workspace_snapshot(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace=workspace,
+        workspace_analytics=workspace_analytics,
+        approvals=approvals,
+        exports=exports,
+        integration_summary=integrations["health_summary"],
+        health_summary=health,
+    )
+    if emit_audit:
+        _create_audit_event(
+            event_type="demo_snapshot_generated",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={"workspace_id": (workspace or {}).get("workspace_id")},
+            rationale="Demo workspace snapshot generated.",
+            metadata={"snapshot_type": "workspace"},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "snapshot": snapshot,
+    }
+
+
+def build_demo_readiness_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace = store.get_workspace(workspace_id) if workspace_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    workspace_analytics = (
+        build_workspace_analytics_service(
+            workspace["workspace_id"],
+            user_context=normalized.model_dump(mode="python"),
+            store=store,
+        )["analytics"]
+        if workspace
+        else {}
+    )
+    health = build_platform_health_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )["health"]
+    integrations = list_integrations_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    readiness = build_readiness_snapshot(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace=workspace,
+        workspace_analytics=workspace_analytics,
+        health_summary=health,
+        integration_summary=integrations["health_summary"],
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "readiness": readiness,
     }
 
 
@@ -1307,15 +2080,53 @@ def sync_analysis_into_platform(
         if dossier
         else []
     )
-    integrations = store.list_integration_bindings(
-        organization_id=(workspace or {}).get("organization_id"),
+    rendered_exports = [
+        rendered
+        for export in exports
+        for rendered in store.list_rendered_exports(export_id=export.get("export_id"))
+    ]
+    integration_payload = list_integrations_service(
         workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=platform_user_context,
+        store=store,
     )
+    integrations = integration_payload.get("bindings") or []
     health = build_platform_health_service(
         workspace_id=(workspace or {}).get("workspace_id"),
         user_context=platform_user_context,
         store=store,
     ).get("health")
+    workspace_analytics = (
+        build_workspace_analytics_service(
+            workspace["workspace_id"],
+            user_context=platform_user_context,
+            store=store,
+        ).get("analytics")
+        if workspace
+        else {}
+    )
+    platform_analytics = build_platform_analytics_service(
+        workspace_id=None,
+        user_context=platform_user_context,
+        store=store,
+    ).get("analytics")
+    dashboard = build_platform_dashboard_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=platform_user_context,
+        store=store,
+        emit_audit=False,
+    ).get("dashboard")
+    demo_snapshot = build_demo_snapshot_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=platform_user_context,
+        store=store,
+        emit_audit=False,
+    ).get("snapshot")
+    readiness_snapshot = build_demo_readiness_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=platform_user_context,
+        store=store,
+    ).get("readiness")
     return {
         "platform_foundation_version": PLATFORM_FOUNDATION_VERSION,
         "platform_profile": profile.model_dump(mode="python"),
@@ -1331,9 +2142,15 @@ def sync_analysis_into_platform(
         "approvals": approvals,
         "timeline": timeline,
         "exports": exports,
-        "integration_summary": integration_health_summary(integrations),
+        "rendered_exports": rendered_exports,
+        "integration_summary": integration_payload.get("health_summary") or integration_health_summary(integrations),
         "integration_bindings": integrations,
         "health_summary": health,
+        "workspace_analytics": workspace_analytics,
+        "platform_analytics": platform_analytics,
+        "dashboard": dashboard,
+        "demo_snapshot": demo_snapshot,
+        "readiness_snapshot": readiness_snapshot,
         "supported_export_packs": supported_pack_types(),
     }
 

@@ -26,8 +26,12 @@ def _reset_platform_store(store: PlatformStore) -> None:
         store._audit_events.clear()
     if hasattr(store, "_export_manifests"):
         store._export_manifests.clear()
+    if hasattr(store, "_rendered_exports"):
+        store._rendered_exports.clear()
     if hasattr(store, "_integration_bindings"):
         store._integration_bindings.clear()
+    if hasattr(store, "_integration_executions"):
+        store._integration_executions.clear()
 
 
 def _sample_platform_report(symbol: str = "NVDA") -> dict[str, Any]:
@@ -56,7 +60,11 @@ def _sample_platform_report(symbol: str = "NVDA") -> dict[str, Any]:
             "deployability_tier": "paper_trade_only",
             "size_band": "small",
             "evidence_status": "limited",
+            "deployable_alpha_utility": 62.75,
+            "validated_edge": 49.64,
         },
+        "axiom_deployable_alpha_utility": 62.75,
+        "axiom_validated_edge": 49.64,
         "axiom_regime_label": "fundamental_convergence",
         "axiom_trade_family": "convergence",
         "axiom_deployability_tier": "paper_trade_only",
@@ -352,6 +360,11 @@ def test_assistant_analyze_can_create_platform_dossier(monkeypatch) -> None:
     assert data["platform_dossier_summary"]
     assert data["platform_monitoring_summary"]
     assert data["platform_summary_view"]["dossier_count"] >= 1
+    assert data["platform_dashboard"]["executive_metrics"]["dossier_count"] >= 1
+    assert data["platform_workspace_analytics"]["dossier_count"] >= 1
+    assert "deployability_distribution" in data["platform_cross_workspace_analytics"]
+    assert "pilot_ready" in data["platform_demo_snapshot"]
+    assert "export_readiness" in data["platform_readiness_snapshot"]
     assert data["active_analysis"]["platform_profile"] == "hf_core"
     assert (
         data["active_analysis"]["platform_dossier_id"]

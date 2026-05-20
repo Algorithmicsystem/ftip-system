@@ -161,6 +161,10 @@ def build_dossier_summary(report: Dict[str, Any]) -> Dict[str, Any]:
             "signal_summary": report.get("signal_summary"),
             "overall_analysis": report.get("overall_analysis"),
             "axiom_summary_card": summary_card,
+            "deployable_alpha_utility": report.get("axiom_deployable_alpha_utility")
+            or summary_card.get("deployable_alpha_utility"),
+            "validated_edge": report.get("axiom_validated_edge")
+            or summary_card.get("validated_edge"),
             "deployability_tier": report.get("axiom_evidence_backed_deployability_tier")
             or report.get("axiom_deployability_tier"),
             "regime_label": report.get("axiom_regime_label"),
@@ -271,4 +275,3 @@ def dossier_preview(dossier: Dict[str, Any]) -> Dict[str, Any]:
         "symbol": record.current_summary.get("symbol"),
         "as_of_date": record.current_summary.get("as_of_date"),
     }
-

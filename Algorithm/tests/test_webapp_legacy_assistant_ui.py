@@ -73,11 +73,17 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-operator-runbook"' in html
     assert 'data-research-tab="platform"' in html
     assert 'id="assistant-platform-overview"' in html
+    assert 'id="assistant-platform-dashboard"' in html
     assert 'id="assistant-platform-template-profile"' in html
+    assert 'id="assistant-platform-dossier-filters"' in html
     assert 'id="assistant-platform-dossiers"' in html
     assert 'id="assistant-platform-dossier-detail"' in html
     assert 'id="assistant-platform-monitoring"' in html
     assert 'id="assistant-platform-controls"' in html
+    assert 'id="assistant-platform-approvals"' in html
+    assert 'id="assistant-platform-exports"' in html
+    assert 'id="assistant-platform-integrations"' in html
+    assert 'id="assistant-platform-analytics"' in html
     assert 'id="assistant-learning-metrics"' in html
     assert 'id="assistant-learning-regimes"' in html
     assert 'id="assistant-learning-adaptations"' in html
@@ -139,16 +145,29 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "data_reliability_score" in js
     assert "renderCommercialReadiness" in js
     assert "renderPlatformOverview" in js
+    assert "renderPlatformDashboard" in js
     assert "renderPlatformTemplateProfile" in js
     assert "renderPlatformDossiers" in js
     assert "renderPlatformDossierDetail" in js
     assert "renderPlatformMonitoring" in js
     assert "renderPlatformControls" in js
+    assert "renderPlatformApprovals" in js
+    assert "renderPlatformExports" in js
+    assert "renderPlatformIntegrations" in js
+    assert "renderPlatformAnalytics" in js
     assert "platform_access_control_summary" in js
     assert "platform_workflow_actions_summary" in js
     assert "platform_audit_timeline_summary" in js
     assert "platform_export_summary" in js
+    assert "platform_export_rendering_summary" in js
     assert "platform_integration_health_summary" in js
+    assert "platform_dashboard_summary" in js
+    assert "platform_analytics_summary" in js
+    assert "platform_demo_readiness_summary" in js
+    assert "assistant-platform-filter-tier" in html
+    assert "assistant-platform-filter-regime" in html
+    assert "assistant-platform-filter-stage" in html
+    assert "assistant-platform-filter-evidence" in html
     assert "renderOperatingWorkflow" in js
     assert "renderOperatorRunbook" in js
     assert "commercialization_readiness_summary" in js

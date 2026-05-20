@@ -17,8 +17,10 @@ from api.platform.contracts import (
     DossierRecord,
     ExportManifest,
     IntegrationBinding,
+    IntegrationExecutionRecord,
     MembershipRecord,
     OrganizationProfile,
+    RenderedExportResult,
     WorkflowInstance,
     WorkspaceRecord,
 )
@@ -56,7 +58,9 @@ class PlatformStore:
         self._approval_requests: Dict[str, Dict[str, Any]] = {}
         self._audit_events: List[Dict[str, Any]] = []
         self._export_manifests: Dict[str, Dict[str, Any]] = {}
+        self._rendered_exports: Dict[str, Dict[str, Any]] = {}
         self._integration_bindings: Dict[str, Dict[str, Any]] = {}
+        self._integration_executions: Dict[str, Dict[str, Any]] = {}
 
     def _now(self) -> float:
         return time.time()
@@ -1313,6 +1317,164 @@ class PlatformStore:
             for row in rows
         ]
 
+    def get_export_manifest(self, export_id: str) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            return self._export_manifests.get(str(export_id))
+        row = db.safe_fetchone(
+            """
+            SELECT export_id, dossier_id, workflow_id, workspace_id, pack_type, title, subtitle,
+                   generated_at, framework_version, organization_context, workspace_context, entity_context,
+                   approval_status, evidence_summary, ordered_sections, metadata, content_hash, status
+            FROM platform_export_packs
+            WHERE export_id=%s
+            """,
+            (export_id,),
+        )
+        if not row:
+            return None
+        return {
+            "export_id": str(row[0]),
+            "dossier_id": str(row[1]),
+            "workflow_id": str(row[2]) if row[2] is not None else None,
+            "workspace_id": str(row[3]) if row[3] is not None else None,
+            "pack_type": row[4],
+            "title": row[5],
+            "subtitle": row[6],
+            "generated_at": row[7],
+            "framework_version": row[8],
+            "organization_context": sanitize_payload(row[9]) if row[9] is not None else {},
+            "workspace_context": sanitize_payload(row[10]) if row[10] is not None else {},
+            "entity_context": sanitize_payload(row[11]) if row[11] is not None else {},
+            "approval_status": row[12],
+            "evidence_summary": row[13],
+            "ordered_sections": sanitize_payload(row[14]) if row[14] is not None else [],
+            "metadata": sanitize_payload(row[15]) if row[15] is not None else {},
+            "content_hash": row[16],
+            "status": row[17],
+        }
+
+    def create_rendered_export(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = RenderedExportResult.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["generated_at"] = record.get("generated_at") or self._now_iso()
+            self._rendered_exports[record["render_id"]] = sanitize_payload(record)
+            return self._rendered_exports[record["render_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_rendered_exports (
+                render_id, export_id, export_format, content_type, rendered_content,
+                file_name_hint, section_count, checksum, generated_at, metadata
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s::timestamptz, now()), %s::jsonb)
+            ON CONFLICT (render_id)
+            DO UPDATE SET
+                export_id = EXCLUDED.export_id,
+                export_format = EXCLUDED.export_format,
+                content_type = EXCLUDED.content_type,
+                rendered_content = EXCLUDED.rendered_content,
+                file_name_hint = EXCLUDED.file_name_hint,
+                section_count = EXCLUDED.section_count,
+                checksum = EXCLUDED.checksum,
+                generated_at = EXCLUDED.generated_at,
+                metadata = EXCLUDED.metadata
+            RETURNING render_id, export_id, export_format, content_type, rendered_content,
+                file_name_hint, section_count, checksum, generated_at, metadata
+            """,
+            (
+                record["render_id"],
+                record["export_id"],
+                record["export_format"],
+                record["content_type"],
+                record["rendered_content"],
+                record["file_name_hint"],
+                record["section_count"],
+                record.get("checksum"),
+                record.get("generated_at"),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return {
+            "render_id": str(row[0]),
+            "export_id": str(row[1]),
+            "export_format": row[2],
+            "content_type": row[3],
+            "rendered_content": row[4],
+            "file_name_hint": row[5],
+            "section_count": row[6],
+            "checksum": row[7],
+            "generated_at": row[8],
+            "metadata": sanitize_payload(row[9]) if row[9] is not None else {},
+        }
+
+    def get_rendered_export(self, render_id: str) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            return self._rendered_exports.get(str(render_id))
+        row = db.safe_fetchone(
+            """
+            SELECT render_id, export_id, export_format, content_type, rendered_content,
+                   file_name_hint, section_count, checksum, generated_at, metadata
+            FROM platform_rendered_exports
+            WHERE render_id=%s
+            """,
+            (render_id,),
+        )
+        if not row:
+            return None
+        return {
+            "render_id": str(row[0]),
+            "export_id": str(row[1]),
+            "export_format": row[2],
+            "content_type": row[3],
+            "rendered_content": row[4],
+            "file_name_hint": row[5],
+            "section_count": row[6],
+            "checksum": row[7],
+            "generated_at": row[8],
+            "metadata": sanitize_payload(row[9]) if row[9] is not None else {},
+        }
+
+    def list_rendered_exports(
+        self,
+        *,
+        export_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._rendered_exports.values())
+            if export_id is not None:
+                rows = [row for row in rows if str(row.get("export_id")) == str(export_id)]
+            rows.sort(key=lambda item: item.get("generated_at", ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if export_id is not None:
+            clauses.append("export_id=%s")
+            params.append(export_id)
+        rows = db.safe_fetchall(
+            f"""
+            SELECT render_id, export_id, export_format, content_type, rendered_content,
+                   file_name_hint, section_count, checksum, generated_at, metadata
+            FROM platform_rendered_exports
+            WHERE {' AND '.join(clauses)}
+            ORDER BY generated_at DESC
+            """,
+            params,
+        )
+        return [
+            {
+                "render_id": str(row[0]),
+                "export_id": str(row[1]),
+                "export_format": row[2],
+                "content_type": row[3],
+                "rendered_content": row[4],
+                "file_name_hint": row[5],
+                "section_count": row[6],
+                "checksum": row[7],
+                "generated_at": row[8],
+                "metadata": sanitize_payload(row[9]) if row[9] is not None else {},
+            }
+            for row in rows
+        ]
+
     def create_integration_binding(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         record = IntegrationBinding.model_validate(payload).model_dump(mode="python")
         if self.use_memory:
@@ -1405,6 +1567,157 @@ class PlatformStore:
                 "metadata": sanitize_payload(row[7]) if row[7] is not None else {},
                 "created_at": row[8],
                 "updated_at": row[9],
+            }
+            for row in rows
+        ]
+
+    def get_integration_binding(self, binding_id: str) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            return self._integration_bindings.get(str(binding_id))
+        row = db.safe_fetchone(
+            """
+            SELECT binding_id, integration_type, organization_id, workspace_id, status, config, health, metadata, created_at, updated_at
+            FROM platform_integration_bindings
+            WHERE binding_id=%s
+            """,
+            (binding_id,),
+        )
+        if not row:
+            return None
+        return {
+            "binding_id": str(row[0]),
+            "integration_type": row[1],
+            "organization_id": str(row[2]) if row[2] is not None else None,
+            "workspace_id": str(row[3]) if row[3] is not None else None,
+            "status": row[4],
+            "config": sanitize_payload(row[5]) if row[5] is not None else {},
+            "health": sanitize_payload(row[6]) if row[6] is not None else {},
+            "metadata": sanitize_payload(row[7]) if row[7] is not None else {},
+            "created_at": row[8],
+            "updated_at": row[9],
+        }
+
+    def update_integration_binding(self, binding_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        merged = {**(self.get_integration_binding(binding_id) or {}), **sanitize_payload(payload)}
+        merged["binding_id"] = binding_id
+        return self.create_integration_binding(merged)
+
+    def create_integration_execution(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = IntegrationExecutionRecord.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["started_at"] = record.get("started_at") or self._now_iso()
+            record["completed_at"] = record.get("completed_at") or self._now_iso()
+            self._integration_executions[record["execution_id"]] = sanitize_payload(record)
+            return self._integration_executions[record["execution_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_integration_executions (
+                execution_id, binding_id, integration_type, action_type, status, workspace_id,
+                organization_id, dossier_id, export_id, render_id, started_at, completed_at,
+                payload_summary, output_summary, error_summary, metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                COALESCE(%s::timestamptz, now()), COALESCE(%s::timestamptz, now()),
+                %s::jsonb, %s::jsonb, %s, %s::jsonb
+            )
+            ON CONFLICT (execution_id)
+            DO UPDATE SET
+                binding_id = EXCLUDED.binding_id,
+                integration_type = EXCLUDED.integration_type,
+                action_type = EXCLUDED.action_type,
+                status = EXCLUDED.status,
+                workspace_id = EXCLUDED.workspace_id,
+                organization_id = EXCLUDED.organization_id,
+                dossier_id = EXCLUDED.dossier_id,
+                export_id = EXCLUDED.export_id,
+                render_id = EXCLUDED.render_id,
+                started_at = EXCLUDED.started_at,
+                completed_at = EXCLUDED.completed_at,
+                payload_summary = EXCLUDED.payload_summary,
+                output_summary = EXCLUDED.output_summary,
+                error_summary = EXCLUDED.error_summary,
+                metadata = EXCLUDED.metadata
+            RETURNING execution_id, binding_id, integration_type, action_type, status, workspace_id,
+                organization_id, dossier_id, export_id, render_id, started_at, completed_at,
+                payload_summary, output_summary, error_summary, metadata
+            """,
+            (
+                record["execution_id"],
+                record["binding_id"],
+                record["integration_type"],
+                record["action_type"],
+                record["status"],
+                record.get("workspace_id"),
+                record.get("organization_id"),
+                record.get("dossier_id"),
+                record.get("export_id"),
+                record.get("render_id"),
+                record.get("started_at"),
+                record.get("completed_at"),
+                Json(sanitize_payload(record.get("payload_summary") or {})),
+                Json(sanitize_payload(record.get("output_summary") or {})),
+                record.get("error_summary"),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return {
+            "execution_id": str(row[0]),
+            "binding_id": str(row[1]),
+            "integration_type": row[2],
+            "action_type": row[3],
+            "status": row[4],
+            "workspace_id": str(row[5]) if row[5] is not None else None,
+            "organization_id": str(row[6]) if row[6] is not None else None,
+            "dossier_id": str(row[7]) if row[7] is not None else None,
+            "export_id": str(row[8]) if row[8] is not None else None,
+            "render_id": str(row[9]) if row[9] is not None else None,
+            "started_at": row[10],
+            "completed_at": row[11],
+            "payload_summary": sanitize_payload(row[12]) if row[12] is not None else {},
+            "output_summary": sanitize_payload(row[13]) if row[13] is not None else {},
+            "error_summary": row[14],
+            "metadata": sanitize_payload(row[15]) if row[15] is not None else {},
+        }
+
+    def list_integration_executions(self, binding_id: str) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = [
+                item
+                for item in self._integration_executions.values()
+                if str(item.get("binding_id")) == str(binding_id)
+            ]
+            rows.sort(key=lambda item: item.get("completed_at", ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        rows = db.safe_fetchall(
+            """
+            SELECT execution_id, binding_id, integration_type, action_type, status, workspace_id,
+                   organization_id, dossier_id, export_id, render_id, started_at, completed_at,
+                   payload_summary, output_summary, error_summary, metadata
+            FROM platform_integration_executions
+            WHERE binding_id=%s
+            ORDER BY completed_at DESC
+            """,
+            (binding_id,),
+        )
+        return [
+            {
+                "execution_id": str(row[0]),
+                "binding_id": str(row[1]),
+                "integration_type": row[2],
+                "action_type": row[3],
+                "status": row[4],
+                "workspace_id": str(row[5]) if row[5] is not None else None,
+                "organization_id": str(row[6]) if row[6] is not None else None,
+                "dossier_id": str(row[7]) if row[7] is not None else None,
+                "export_id": str(row[8]) if row[8] is not None else None,
+                "render_id": str(row[9]) if row[9] is not None else None,
+                "started_at": row[10],
+                "completed_at": row[11],
+                "payload_summary": sanitize_payload(row[12]) if row[12] is not None else {},
+                "output_summary": sanitize_payload(row[13]) if row[13] is not None else {},
+                "error_summary": row[14],
+                "metadata": sanitize_payload(row[15]) if row[15] is not None else {},
             }
             for row in rows
         ]
