@@ -60,7 +60,7 @@ from api.platform.templates import get_workflow_template, list_workflow_template
 from api.platform.workflows import build_workflow_instance
 
 
-PLATFORM_FOUNDATION_VERSION = "platform_phase6_enterprise_controls_v1"
+PLATFORM_FOUNDATION_VERSION = "platform_phase8a_tenant_enforcement_v1"
 
 
 def _now_utc() -> str:
