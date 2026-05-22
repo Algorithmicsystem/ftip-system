@@ -9,6 +9,10 @@ from typing import Any, Dict
 
 from api.assistant.reports import sanitize_payload
 from api.platform.contracts import ExportManifest, RenderedExportResult
+from api.platform.export_layouts import (
+    build_export_layout_metadata,
+    export_format_capabilities,
+)
 from api.platform.serializers import content_hash, stable_json_dumps
 
 
@@ -65,6 +69,7 @@ def render_export_html(manifest: ExportManifest) -> str:
         + html.escape(manifest.title)
         + "</title>"
         "<style>"
+        "@page{margin:0.75in;}"
         "body{font-family:Georgia,serif;background:#f5f1e8;color:#1d1d1d;margin:40px;line-height:1.5;}"
         ".export-shell{max-width:980px;margin:0 auto;background:#fff;border:1px solid #d9d2c1;padding:32px;}"
         ".export-kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#6c6257;}"
@@ -72,6 +77,7 @@ def render_export_html(manifest: ExportManifest) -> str:
         ".export-meta{margin:0 0 28px;padding-left:18px;color:#544d45;}"
         ".export-section{border-top:1px solid #ebe2d2;padding-top:18px;margin-top:18px;}"
         ".export-footer{border-top:2px solid #1d1d1d;padding-top:18px;margin-top:26px;font-size:12px;color:#6c6257;}"
+        "@media print{body{background:#fff;margin:0;} .export-shell{border:none;box-shadow:none;max-width:none;padding:0;}}"
         "</style>"
         "</head><body><div class=\"export-shell\">"
         f"<div class=\"export-kicker\">AXIOM Institutional Export</div><h1>{html.escape(manifest.title)}</h1>"
@@ -138,6 +144,10 @@ def render_export_manifest(
     else:
         rendered = render_export_json(manifest)
         content_type = "application/json"
+    layout_metadata = build_export_layout_metadata(
+        manifest,
+        export_format=normalized_format,
+    )
     payload = {
         "render_id": str(uuid.uuid4()),
         "export_id": manifest.export_id,
@@ -154,6 +164,12 @@ def render_export_manifest(
             }
         ),
         "generated_at": now_utc(),
-        "metadata": sanitize_payload(metadata or {}),
+        "metadata": sanitize_payload(
+            {
+                **dict(metadata or {}),
+                "format_capabilities": export_format_capabilities(normalized_format),
+                "layout_metadata": layout_metadata,
+            }
+        ),
     }
     return RenderedExportResult.model_validate(payload)

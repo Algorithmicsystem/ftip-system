@@ -28,7 +28,13 @@ from api.platform.approvals import (
     build_approval_request,
 )
 from api.platform.audit import audit_event_to_timeline, build_audit_event
-from api.platform.contracts import DossierRecord, PlatformSummaryView, ResourceRef
+from api.platform.contracts import (
+    DossierRecord,
+    ExportRetrievalResult,
+    PlatformSummaryView,
+    ResourceRef,
+    StoredExportRecord,
+)
 from api.platform.dashboard import build_dashboard_payload
 from api.platform.demo import build_demo_workspace_snapshot, build_readiness_snapshot
 from api.platform.dossiers import (
@@ -37,12 +43,22 @@ from api.platform.dossiers import (
     refresh_dossier_record,
 )
 from api.platform.entities import build_coverage_entity
+from api.platform.export_integrity import build_export_integrity_result
+from api.platform.export_layouts import (
+    build_export_layout_metadata,
+    export_format_capabilities,
+)
 from api.platform.execution import (
     execute_internal_sink,
     execute_local_archive,
     execute_webhook_outbox,
 )
 from api.platform.export_renderers import render_export_manifest
+from api.platform.export_storage import (
+    default_storage_backend_name,
+    retrieve_export_content,
+    store_export_content,
+)
 from api.platform.exports import build_export_manifest, supported_pack_types
 from api.platform.guardrails import summarize_guardrails
 from api.platform.health import build_platform_health_summary
@@ -60,7 +76,7 @@ from api.platform.templates import get_workflow_template, list_workflow_template
 from api.platform.workflows import build_workflow_instance
 
 
-PLATFORM_FOUNDATION_VERSION = "platform_phase8a_tenant_enforcement_v1"
+PLATFORM_FOUNDATION_VERSION = "platform_phase8b_export_storage_v1"
 
 
 def _now_utc() -> str:
@@ -201,6 +217,7 @@ def _workspace_scope_bundle(
             "approvals": [],
             "exports": [],
             "rendered_exports": [],
+            "stored_exports": [],
             "integration_bindings": [],
         }
     workspaces = (
@@ -235,6 +252,7 @@ def _workspace_scope_bundle(
     approvals: List[Dict[str, Any]] = []
     exports: List[Dict[str, Any]] = []
     rendered_exports: List[Dict[str, Any]] = []
+    stored_exports: List[Dict[str, Any]] = []
     for workflow in workflows:
         approvals.extend(store.list_approval_requests(workflow_id=workflow.get("workflow_id")))
     for dossier in dossiers:
@@ -252,6 +270,13 @@ def _workspace_scope_bundle(
                     workspace_ids=workspace_ids,
                 )
             )
+        stored_exports.extend(
+            store.list_stored_exports(
+                dossier_id=dossier.get("dossier_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            )
+        )
     integrations = (
         store.list_integration_bindings(
             workspace_id=workspace_id,
@@ -271,6 +296,7 @@ def _workspace_scope_bundle(
         "approvals": approvals,
         "exports": exports,
         "rendered_exports": rendered_exports,
+        "stored_exports": stored_exports,
         "integration_bindings": integrations,
     }
 
@@ -1351,6 +1377,11 @@ def list_dossier_exports_service(
                 workspace_ids=scope["workspace_ids"],
             )
         ],
+        "stored_exports": store.list_stored_exports(
+            dossier_id=dossier_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ),
     }
 
 
@@ -1390,6 +1421,169 @@ def _resolve_dossier_export_context(
         "report": report,
         "approval_status": approval_status,
     }
+
+
+def _storage_version_group_key(
+    *,
+    dossier_id: str,
+    pack_type: str,
+    export_format: str,
+) -> str:
+    return f"{dossier_id}:{pack_type}:{export_format}"
+
+
+def _storage_key_for_export(
+    *,
+    organization_id: Optional[str],
+    workspace_id: Optional[str],
+    dossier_id: Optional[str],
+    pack_type: str,
+    export_format: str,
+    version_number: int,
+    file_name_hint: str,
+) -> str:
+    org_part = str(organization_id or "org-unscoped")
+    workspace_part = str(workspace_id or "workspace-unscoped")
+    dossier_part = str(dossier_id or "dossier-unscoped")
+    return (
+        f"{org_part}/{workspace_part}/{dossier_part}/"
+        f"{pack_type}/{export_format}/v{version_number:04d}/{file_name_hint}"
+    )
+
+
+def _export_evidence_status(
+    *,
+    dossier: Dict[str, Any],
+    report: Dict[str, Any],
+) -> str:
+    return str(
+        dossier.get("evidence_status")
+        or (report.get("axiom_summary_card") or {}).get("evidence_status")
+        or "partial"
+    )
+
+
+def _build_stored_export_record_payload(
+    *,
+    dossier: Dict[str, Any],
+    workflow: Optional[Dict[str, Any]],
+    workspace: Optional[Dict[str, Any]],
+    report: Dict[str, Any],
+    manifest: Dict[str, Any],
+    rendered_export: Dict[str, Any],
+    normalized_user_context: Any,
+    store: PlatformStore,
+    storage_backend: str,
+    storage_key: str,
+    storage_ref: Dict[str, Any],
+    version_group_key: str,
+    version_number: int,
+) -> Dict[str, Any]:
+    actor = build_access_summary(
+        user_context=normalized_user_context,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    evidence_status = _export_evidence_status(dossier=dossier, report=report)
+    pack_type = str(manifest.get("pack_type") or "dossier_pack")
+    export_format = str(rendered_export.get("export_format") or "html")
+    version_label = f"v{version_number}"
+    format_capabilities = export_format_capabilities(export_format)
+    layout_metadata = build_export_layout_metadata(
+        manifest,
+        export_format=export_format,
+    )
+    return StoredExportRecord(
+        stored_export_id=str(uuid.uuid4()),
+        export_id=str(manifest.get("export_id") or ""),
+        render_id=str(rendered_export.get("render_id") or ""),
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        dossier_id=dossier.get("dossier_id"),
+        workflow_id=(workflow or {}).get("workflow_id"),
+        pack_type=pack_type,
+        export_format=export_format,
+        framework_version=manifest.get("framework_version"),
+        approval_status=manifest.get("approval_status"),
+        evidence_status=evidence_status,
+        checksum=rendered_export.get("checksum"),
+        source_manifest_hash=manifest.get("content_hash"),
+        content_hash=rendered_export.get("checksum"),
+        manifest_hash=manifest.get("content_hash"),
+        section_count=int(rendered_export.get("section_count") or 0),
+        file_name_hint=str(rendered_export.get("file_name_hint") or ""),
+        content_type=rendered_export.get("content_type"),
+        storage_backend=storage_backend,
+        storage_key=storage_key,
+        storage_ref=storage_ref,
+        version_group_key=version_group_key,
+        version_number=version_number,
+        version_label=version_label,
+        status="stored",
+        document_identity={
+            "title": manifest.get("title"),
+            "subtitle": manifest.get("subtitle"),
+            "file_name_hint": rendered_export.get("file_name_hint"),
+            "version_number": version_number,
+            "version_label": version_label,
+            "content_type": rendered_export.get("content_type"),
+        },
+        source_context={
+            "organization": manifest.get("organization_context") or {},
+            "workspace": manifest.get("workspace_context") or {},
+            "entity": manifest.get("entity_context") or {},
+            "dossier_id": dossier.get("dossier_id"),
+            "workflow_id": (workflow or {}).get("workflow_id"),
+        },
+        approval_context={
+            "approval_status": manifest.get("approval_status"),
+            "workflow_stage": (workflow or {}).get("stage"),
+            "workflow_status": (workflow or {}).get("status"),
+        },
+        axiom_context={
+            "symbol": report.get("symbol"),
+            "framework_version": manifest.get("framework_version"),
+            "regime_label": dossier.get("latest_regime_label"),
+            "trade_family": dossier.get("latest_trade_family"),
+            "deployability_tier": dossier.get("latest_deployability_tier"),
+            "size_band": dossier.get("latest_size_band"),
+            "deployable_alpha_utility": report.get("axiom_deployable_alpha_utility"),
+            "validated_edge": report.get("axiom_validated_edge"),
+        },
+        evidence_context={
+            "evidence_status": evidence_status,
+            "evidence_summary": manifest.get("evidence_summary"),
+            "lineage_summary": report.get("axiom_lineage_summary"),
+            "historical_evidence_summary": report.get(
+                "axiom_historical_evidence_summary_text"
+            ),
+        },
+        export_context={
+            "pack_type": pack_type,
+            "export_format": export_format,
+            "storage_backend": storage_backend,
+            "storage_key": storage_key,
+            "format_capabilities": format_capabilities,
+            "layout_metadata": layout_metadata,
+            "print_ready": bool(layout_metadata.get("print_ready")),
+        },
+        lineage_summary=sanitize_payload(report.get("axiom_lineage") or {}),
+        created_by={
+            "user_id": normalized_user_context.user_id,
+            "role": normalized_user_context.role,
+            "auth_mode": normalized_user_context.auth_mode,
+            "session_id": normalized_user_context.session_id,
+            "actor_email": normalized_user_context.email,
+        },
+        metadata={
+            "source_manifest_metadata": manifest.get("metadata") or {},
+            "render_metadata": rendered_export.get("metadata") or {},
+            "latest_access_role": actor.get("effective_role"),
+            "content_preview": str(rendered_export.get("rendered_content") or "")[
+                :240
+            ],
+        },
+    ).model_dump(mode="python")
 
 
 def preview_dossier_export_service(
@@ -1543,6 +1737,511 @@ def get_rendered_export_service(
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "rendered_export": rendered,
         "export": manifest,
+    }
+
+
+def _persist_latest_stored_export_reference(
+    *,
+    dossier: Dict[str, Any],
+    stored_export: Dict[str, Any],
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    metadata = dict(dossier.get("metadata") or {})
+    latest = dict(metadata.get("latest_stored_exports") or {})
+    latest[
+        f"{stored_export.get('pack_type')}:{stored_export.get('export_format')}"
+    ] = {
+        "stored_export_id": stored_export.get("stored_export_id"),
+        "version_number": stored_export.get("version_number"),
+        "version_label": stored_export.get("version_label"),
+        "status": stored_export.get("status"),
+        "generated_at": stored_export.get("created_at"),
+    }
+    metadata["latest_stored_exports"] = sanitize_payload(latest)
+    return store.update_dossier(
+        str(dossier.get("dossier_id") or ""),
+        {"metadata": metadata},
+    )
+
+
+def store_dossier_export_service(
+    dossier_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_dossier_export_context(
+        dossier_id,
+        user_context=user_context,
+        store=store,
+    )
+    organization_ids = (
+        None
+        if context["normalized"].is_system
+        else context["normalized"].organization_ids
+    )
+    workspace_ids = (
+        None if context["normalized"].is_system else context["normalized"].workspace_ids
+    )
+    rendered_export = None
+    manifest = None
+    requested_render_id = str(payload.get("render_id") or "").strip() or None
+    if requested_render_id:
+        rendered_export = store.get_rendered_export(
+            requested_render_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        if rendered_export is None:
+            raise HTTPException(status_code=404, detail="rendered export not found")
+        manifest = store.get_export_manifest(
+            str(rendered_export.get("export_id") or ""),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        if manifest is None or str(manifest.get("dossier_id") or "") != str(dossier_id):
+            raise HTTPException(
+                status_code=400,
+                detail="rendered export does not belong to the requested dossier",
+            )
+    else:
+        render_response = render_dossier_export_service(
+            dossier_id,
+            {
+                "pack_type": str(payload.get("pack_type") or "dossier_pack"),
+                "export_format": str(payload.get("export_format") or "html"),
+                "metadata": payload.get("metadata") or {},
+            },
+            user_context=context["normalized"].model_dump(mode="python"),
+            store=store,
+        )
+        manifest = render_response["export"]
+        rendered_export = render_response["rendered_export"]
+    pack_type = str((manifest or {}).get("pack_type") or payload.get("pack_type") or "dossier_pack")
+    export_format = str(
+        (rendered_export or {}).get("export_format") or payload.get("export_format") or "html"
+    )
+    version_group_key = _storage_version_group_key(
+        dossier_id=dossier_id,
+        pack_type=pack_type,
+        export_format=export_format,
+    )
+    existing_versions = store.list_stored_exports(
+        dossier_id=dossier_id,
+        pack_type=pack_type,
+        export_format=export_format,
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    version_number = max(
+        [int(item.get("version_number") or 0) for item in existing_versions] or [0]
+    ) + 1
+    storage_backend = str(
+        payload.get("storage_backend")
+        or default_storage_backend_name(use_memory=store.use_memory)
+    )
+    storage_key = _storage_key_for_export(
+        organization_id=(context["workspace"] or {}).get("organization_id"),
+        workspace_id=(context["workspace"] or {}).get("workspace_id"),
+        dossier_id=dossier_id,
+        pack_type=pack_type,
+        export_format=export_format,
+        version_number=version_number,
+        file_name_hint=str((rendered_export or {}).get("file_name_hint") or "export.txt"),
+    )
+    try:
+        storage_ref = store_export_content(
+            storage_backend=storage_backend,
+            storage_key=storage_key,
+            rendered_content=str((rendered_export or {}).get("rendered_content") or ""),
+            content_type=str((rendered_export or {}).get("content_type") or "text/plain"),
+            metadata={
+                "export_id": (manifest or {}).get("export_id"),
+                "render_id": (rendered_export or {}).get("render_id"),
+                "pack_type": pack_type,
+                "export_format": export_format,
+            },
+        ).model_dump(mode="python")
+    except Exception as exc:
+        audit = _create_audit_event(
+            event_type="export_storage_failed",
+            resource=_dossier_resource(context["dossier"], context["workspace"]),
+            user_context=context["normalized"],
+            payload={
+                "workflow_id": context["dossier"].get("workflow_id"),
+                "dossier_id": dossier_id,
+                "pack_type": pack_type,
+                "export_format": export_format,
+                "storage_backend": storage_backend,
+                "error": str(exc),
+            },
+            rationale="Durable export storage failed.",
+            metadata={"storage_backend": storage_backend},
+            store=store,
+        )
+        raise HTTPException(status_code=500, detail={"error": "export_storage_failed", "message": str(exc), "audit_event": audit})
+    stored_payload = _build_stored_export_record_payload(
+        dossier=context["dossier"],
+        workflow=context["workflow"],
+        workspace=context["workspace"],
+        report=context["report"],
+        manifest=manifest or {},
+        rendered_export=rendered_export or {},
+        normalized_user_context=context["normalized"],
+        store=store,
+        storage_backend=storage_backend,
+        storage_key=storage_key,
+        storage_ref=storage_ref,
+        version_group_key=version_group_key,
+        version_number=version_number,
+    )
+    stored_export = store.create_stored_export(stored_payload)
+    superseded = store.supersede_stored_exports(
+        version_group_key=version_group_key,
+        except_stored_export_id=str(stored_export.get("stored_export_id") or ""),
+    )
+    dossier = _persist_latest_stored_export_reference(
+        dossier=context["dossier"],
+        stored_export=stored_export,
+        store=store,
+    )
+    retrieval = retrieve_export_content(
+        storage_backend=str(stored_export.get("storage_backend") or ""),
+        storage_key=str(stored_export.get("storage_key") or ""),
+    )
+    integrity = build_export_integrity_result(
+        stored_export=stored_export,
+        manifest=manifest or {},
+        rendered_export=rendered_export or {},
+        rendered_content=str(retrieval.get("rendered_content") or ""),
+    ).model_dump(mode="python")
+    audit = _create_audit_event(
+        event_type="export_stored",
+        resource=_dossier_resource(dossier, context["workspace"]),
+        user_context=context["normalized"],
+        payload={
+            "workflow_id": dossier.get("workflow_id"),
+            "dossier_id": dossier_id,
+            "stored_export_id": stored_export.get("stored_export_id"),
+            "export_id": stored_export.get("export_id"),
+            "render_id": stored_export.get("render_id"),
+            "pack_type": stored_export.get("pack_type"),
+            "export_format": stored_export.get("export_format"),
+            "version_number": stored_export.get("version_number"),
+            "status": stored_export.get("status"),
+        },
+        rationale="Durable stored export created.",
+        metadata={
+            "storage_backend": stored_export.get("storage_backend"),
+            "storage_key": stored_export.get("storage_key"),
+            "checksum": stored_export.get("checksum"),
+        },
+        store=store,
+    )
+    supersede_audits = [
+        _create_audit_event(
+            event_type="export_superseded",
+            resource=_dossier_resource(dossier, context["workspace"]),
+            user_context=context["normalized"],
+            payload={
+                "workflow_id": dossier.get("workflow_id"),
+                "dossier_id": dossier_id,
+                "stored_export_id": item.get("stored_export_id"),
+                "status": item.get("status"),
+                "version_number": item.get("version_number"),
+            },
+            rationale="Older stored export version superseded by a newer revision.",
+            metadata={"version_group_key": version_group_key},
+            store=store,
+        )
+        for item in superseded
+    ]
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossier": dossier,
+        "export": manifest,
+        "rendered_export": rendered_export,
+        "stored_export": stored_export,
+        "integrity": integrity,
+        "audit_event": audit,
+        "superseded_events": supersede_audits,
+    }
+
+
+def list_dossier_export_history_service(
+    dossier_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_dossier_export_context(
+        dossier_id,
+        user_context=user_context,
+        store=store,
+    )
+    stored_exports = store.list_stored_exports(
+        dossier_id=dossier_id,
+        organization_ids=(
+            None
+            if context["normalized"].is_system
+            else context["normalized"].organization_ids
+        ),
+        workspace_ids=(
+            None
+            if context["normalized"].is_system
+            else context["normalized"].workspace_ids
+        ),
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossier": context["dossier"],
+        "stored_exports": stored_exports,
+    }
+
+
+def list_workspace_stored_exports_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = store.get_workspace(
+        workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    require_access(
+        permission="view_workspace",
+        user_context=scope["user_context"],
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": workspace,
+        "stored_exports": store.list_stored_exports(
+            workspace_id=workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ),
+    }
+
+
+def _resolve_stored_export_context(
+    stored_export_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    normalized = normalize_user_context(user_context)
+    scope = _resolve_scope(
+        user_context=normalized.model_dump(mode="python"),
+        workspace_id=normalized.workspace_id,
+        organization_id=normalized.organization_id,
+        store=store,
+    )
+    stored_export = store.get_stored_export(
+        stored_export_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    if stored_export is None:
+        raise HTTPException(status_code=404, detail="stored export not found")
+    workspace = (
+        store.get_workspace(
+            str(stored_export.get("workspace_id") or ""),
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if stored_export.get("workspace_id")
+        else None
+    )
+    normalized = normalize_user_context(
+        scope["user_context"],
+        organization_id=stored_export.get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id") or stored_export.get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    manifest = store.get_export_manifest(
+        str(stored_export.get("export_id") or ""),
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    rendered_export = store.get_rendered_export(
+        str(stored_export.get("render_id") or ""),
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    return {
+        "normalized": normalized,
+        "workspace": workspace,
+        "stored_export": stored_export,
+        "manifest": manifest,
+        "rendered_export": rendered_export,
+    }
+
+
+def get_stored_export_metadata_service(
+    stored_export_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_stored_export_context(
+        stored_export_id,
+        user_context=user_context,
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "stored_export": context["stored_export"],
+        "export": context["manifest"],
+        "rendered_export": context["rendered_export"],
+    }
+
+
+def get_stored_export_content_service(
+    stored_export_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_stored_export_context(
+        stored_export_id,
+        user_context=user_context,
+        store=store,
+    )
+    stored_export = context["stored_export"]
+    retrieved = retrieve_export_content(
+        storage_backend=str(stored_export.get("storage_backend") or ""),
+        storage_key=str(stored_export.get("storage_key") or ""),
+    )
+    payload = ExportRetrievalResult(
+        stored_export_id=str(stored_export.get("stored_export_id") or ""),
+        export_id=str(stored_export.get("export_id") or ""),
+        render_id=str(stored_export.get("render_id") or ""),
+        export_format=str(stored_export.get("export_format") or ""),
+        content_type=str(stored_export.get("content_type") or retrieved.get("content_type") or "text/plain"),
+        rendered_content=str(retrieved.get("rendered_content") or ""),
+        file_name_hint=str(stored_export.get("file_name_hint") or ""),
+        storage_ref=stored_export.get("storage_ref") or {
+            "storage_backend": stored_export.get("storage_backend"),
+            "storage_key": stored_export.get("storage_key"),
+        },
+        retrieved_at=_now_utc(),
+        metadata={"size_bytes": retrieved.get("size_bytes")},
+    ).model_dump(mode="python")
+    audit = _create_audit_event(
+        event_type="export_retrieved",
+        resource=ResourceRef(
+            resource_type="stored_export",
+            resource_id=stored_export_id,
+            organization_id=stored_export.get("organization_id"),
+            workspace_id=stored_export.get("workspace_id"),
+        ),
+        user_context=context["normalized"],
+        payload={
+            "stored_export_id": stored_export_id,
+            "export_id": stored_export.get("export_id"),
+            "render_id": stored_export.get("render_id"),
+            "pack_type": stored_export.get("pack_type"),
+            "export_format": stored_export.get("export_format"),
+            "version_number": stored_export.get("version_number"),
+        },
+        rationale="Stored export content retrieved.",
+        metadata={"storage_backend": stored_export.get("storage_backend")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "retrieval": payload,
+        "audit_event": audit,
+    }
+
+
+def get_stored_export_integrity_service(
+    stored_export_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_stored_export_context(
+        stored_export_id,
+        user_context=user_context,
+        store=store,
+    )
+    stored_export = context["stored_export"]
+    retrieved = retrieve_export_content(
+        storage_backend=str(stored_export.get("storage_backend") or ""),
+        storage_key=str(stored_export.get("storage_key") or ""),
+    )
+    integrity = build_export_integrity_result(
+        stored_export=stored_export,
+        manifest=context["manifest"],
+        rendered_export=context["rendered_export"],
+        rendered_content=str(retrieved.get("rendered_content") or ""),
+    ).model_dump(mode="python")
+    audit = _create_audit_event(
+        event_type="export_integrity_checked",
+        resource=ResourceRef(
+            resource_type="stored_export",
+            resource_id=stored_export_id,
+            organization_id=stored_export.get("organization_id"),
+            workspace_id=stored_export.get("workspace_id"),
+        ),
+        user_context=context["normalized"],
+        payload={
+            "stored_export_id": stored_export_id,
+            "status": integrity.get("status"),
+            "version_number": stored_export.get("version_number"),
+        },
+        rationale="Stored export integrity checked.",
+        metadata={
+            "checksum_expected": integrity.get("checksum_expected"),
+            "checksum_actual": integrity.get("checksum_actual"),
+        },
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "integrity": integrity,
+        "audit_event": audit,
+    }
+
+
+def list_stored_export_versions_service(
+    stored_export_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    context = _resolve_stored_export_context(
+        stored_export_id,
+        user_context=user_context,
+        store=store,
+    )
+    versions = store.list_stored_export_versions(
+        stored_export_id,
+        organization_ids=context["normalized"].organization_ids,
+        workspace_ids=context["normalized"].workspace_ids,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "stored_export": context["stored_export"],
+        "versions": versions,
     }
 
 
@@ -2000,6 +2699,7 @@ def build_platform_health_service(
     dossiers = scope_bundle["dossiers"]
     approvals = scope_bundle["approvals"]
     exports = scope_bundle["exports"]
+    stored_exports = scope_bundle["stored_exports"]
     audit_events = (
         store.list_audit_events(
             organization_ids=scope["organization_ids"],
@@ -2031,10 +2731,12 @@ def build_platform_health_service(
         dossiers=dossiers,
         approvals=approvals,
         exports=exports,
+        stored_exports=stored_exports,
         audit_events=audit_events,
         integration_bindings=integration_bindings,
     )
     health["rendered_export_count"] = len(rendered_exports)
+    health["stored_export_count"] = len(stored_exports)
     health["integration_execution_count"] = integration_execution_count
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
@@ -2623,6 +3325,11 @@ def sync_analysis_into_platform(
         for export in exports
         for rendered in store.list_rendered_exports(export_id=export.get("export_id"))
     ]
+    stored_exports = (
+        store.list_stored_exports(dossier_id=(dossier or {}).get("dossier_id"))
+        if dossier
+        else []
+    )
     integration_payload = list_integrations_service(
         workspace_id=(workspace or {}).get("workspace_id"),
         user_context=platform_user_context,
@@ -2681,6 +3388,8 @@ def sync_analysis_into_platform(
         "timeline": timeline,
         "exports": exports,
         "rendered_exports": rendered_exports,
+        "stored_exports": stored_exports,
+        "export_capabilities": export_format_capabilities("html"),
         "integration_summary": integration_payload.get("health_summary") or integration_health_summary(integrations),
         "integration_bindings": integrations,
         "health_summary": health,
@@ -2739,6 +3448,7 @@ def build_platform_summary_service(
         dossiers = []
     approvals: List[Dict[str, Any]] = []
     export_count = 0
+    stored_export_count = 0
     audit_count = (
         len(
             store.list_audit_events(
@@ -2772,6 +3482,13 @@ def build_platform_summary_service(
                 workspace_ids=scope["workspace_ids"],
             )
         )
+        stored_export_count += len(
+            store.list_stored_exports(
+                dossier_id=dossier["dossier_id"],
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+            )
+        )
     summary = PlatformSummaryView(
         platform_version=PLATFORM_FOUNDATION_VERSION,
         workspace_count=len(workspaces),
@@ -2789,6 +3506,7 @@ def build_platform_summary_service(
         1 for item in approvals if str(item.get("status")) == "pending"
     )
     summary["export_count"] = export_count
+    summary["stored_export_count"] = stored_export_count
     summary["audit_event_count"] = audit_count
     summary["access_summary"] = build_access_summary(
         user_context=normalized,

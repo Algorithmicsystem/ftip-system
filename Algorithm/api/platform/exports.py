@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from api.assistant.reports import sanitize_payload
 from api.platform.contracts import ExportManifest
 from api.platform.document_packs import PACK_TYPE_TITLES, build_export_sections, supported_pack_types
+from api.platform.export_layouts import build_export_layout_metadata, export_format_capabilities
 from api.platform.serializers import content_hash
 
 
@@ -51,7 +52,19 @@ def build_export_manifest(
         evidence_summary=report.get("axiom_historical_evidence_summary_text")
         or report.get("axiom_lineage_summary"),
         ordered_sections=sections,
-        metadata=sanitize_payload(metadata or {}),
+        metadata=sanitize_payload(
+            {
+                **dict(metadata or {}),
+                "format_capabilities": export_format_capabilities(None),
+                "layout_metadata": build_export_layout_metadata(
+                    {
+                        "pack_type": pack_type,
+                        "ordered_sections": [section.model_dump(mode="python") for section in sections],
+                    },
+                    export_format="html",
+                ),
+            }
+        ),
         status="generated",
     )
     payload = manifest.model_dump(mode="python")

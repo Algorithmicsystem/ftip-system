@@ -3293,6 +3293,8 @@ const renderPlatformExports = (report) => {
   }
   const exports = report.platform_exports || [];
   const rendered = report.platform_rendered_exports || [];
+  const stored = report.platform_stored_exports || [];
+  const capabilities = report.platform_export_capabilities || {};
   container.innerHTML = [
     `<section class="drilldown-card">
       <h5>Available Packs</h5>
@@ -3331,10 +3333,51 @@ const renderPlatformExports = (report) => {
       )}
     </section>`,
     `<section class="drilldown-card">
+      <h5>Stored Export History</h5>
+      ${renderBullets(
+        stored.slice(0, 6).map(
+          (item) =>
+            `${item.pack_type || "pack"} / ${item.export_format || "format"} / ${
+              item.version_label || "v?"
+            } / ${item.approval_status || "no approval"} / ${item.checksum || "no checksum"}`
+        ),
+        "No durable stored export history is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Export Detail</h5>
+      ${renderBullets(
+        stored.slice(0, 3).map(
+          (item) =>
+            `${item.file_name_hint || "file"} / ${item.storage_backend || "backend"} / ${
+              item.storage_key || "no storage key"
+            } / integrity ${item.status || "unknown"}`
+        ),
+        "No stored export detail is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Export Capabilities</h5>
+      ${renderBullets(
+        [
+          `html ${String(capabilities.html_supported ?? true)}`,
+          `markdown ${String(capabilities.markdown_supported ?? true)}`,
+          `json ${String(capabilities.json_supported ?? true)}`,
+          `pdf ready ${String(capabilities.pdf_ready ?? false)}`,
+          `docx ready ${String(capabilities.docx_ready ?? false)}`,
+          report.platform_export_capability_summary,
+          report.platform_export_storage_summary,
+        ].filter(Boolean),
+        "No export capability summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
       <h5>Preview Snippets</h5>
       ${renderBullets(
-        rendered.slice(0, 3).map((item) =>
-          String(item.rendered_content || "")
+        (stored.length ? stored : rendered).slice(0, 3).map((item) =>
+          String(
+            item.rendered_content || item?.metadata?.content_preview || item?.metadata?.render_metadata?.content_preview || ""
+          )
             .replace(/\s+/g, " ")
             .trim()
             .slice(0, 180)

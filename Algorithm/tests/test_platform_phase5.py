@@ -6,6 +6,7 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from api.main import app
+from api.platform.export_storage import clear_in_memory_export_storage
 from api.platform import service as platform_service
 from api.platform.persistence import PlatformStore, platform_store
 
@@ -28,10 +29,13 @@ def _reset_platform_store(store: PlatformStore) -> None:
         store._export_manifests.clear()
     if hasattr(store, "_rendered_exports"):
         store._rendered_exports.clear()
+    if hasattr(store, "_stored_exports"):
+        store._stored_exports.clear()
     if hasattr(store, "_integration_bindings"):
         store._integration_bindings.clear()
     if hasattr(store, "_integration_executions"):
         store._integration_executions.clear()
+    clear_in_memory_export_storage()
 
 
 def _sample_platform_report(symbol: str = "NVDA") -> dict[str, Any]:

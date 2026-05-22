@@ -160,6 +160,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "platform_audit_timeline_summary" in js
     assert "platform_export_summary" in js
     assert "platform_export_rendering_summary" in js
+    assert "platform_export_storage_summary" in js
+    assert "platform_export_capability_summary" in js
+    assert "platform_stored_exports" in js
     assert "platform_integration_health_summary" in js
     assert "platform_dashboard_summary" in js
     assert "platform_analytics_summary" in js
@@ -190,6 +193,8 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "refreshAssistantSystemHealth" in js
     assert "platform_profile" in js
     assert "create_dossier" in js
+    assert "Stored Export History" in js
+    assert "Export Capabilities" in js
 
 
 def test_recent_report_persistence_quota_failure_does_not_break_analyze_flow() -> None:

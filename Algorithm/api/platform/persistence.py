@@ -15,12 +15,17 @@ from api.platform.contracts import (
     AuditEvent,
     CoverageEntity,
     DossierRecord,
+    ExportIntegrityResult,
     ExportManifest,
+    ExportRetrievalResult,
+    ExportStorageRef,
+    ExportVersionRecord,
     IntegrationBinding,
     IntegrationExecutionRecord,
     MembershipRecord,
     OrganizationProfile,
     RenderedExportResult,
+    StoredExportRecord,
     WorkflowInstance,
     WorkspaceRecord,
 )
@@ -59,6 +64,7 @@ class PlatformStore:
         self._audit_events: List[Dict[str, Any]] = []
         self._export_manifests: Dict[str, Dict[str, Any]] = {}
         self._rendered_exports: Dict[str, Dict[str, Any]] = {}
+        self._stored_exports: Dict[str, Dict[str, Any]] = {}
         self._integration_bindings: Dict[str, Dict[str, Any]] = {}
         self._integration_executions: Dict[str, Dict[str, Any]] = {}
 
@@ -1807,6 +1813,388 @@ class PlatformStore:
                 "metadata": sanitize_payload(row[9]) if row[9] is not None else {},
             }
             for row in rows
+        ]
+
+    def _row_to_stored_export(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "stored_export_id": str(row[0]),
+            "export_id": str(row[1]),
+            "render_id": str(row[2]),
+            "organization_id": str(row[3]) if row[3] is not None else None,
+            "workspace_id": str(row[4]) if row[4] is not None else None,
+            "dossier_id": str(row[5]) if row[5] is not None else None,
+            "workflow_id": str(row[6]) if row[6] is not None else None,
+            "pack_type": row[7],
+            "export_format": row[8],
+            "framework_version": row[9],
+            "approval_status": row[10],
+            "evidence_status": row[11],
+            "checksum": row[12],
+            "source_manifest_hash": row[13],
+            "content_hash": row[14],
+            "manifest_hash": row[15],
+            "section_count": row[16],
+            "file_name_hint": row[17],
+            "content_type": row[18],
+            "storage_backend": row[19],
+            "storage_key": row[20],
+            "storage_ref": sanitize_payload(row[21]) if row[21] is not None else {},
+            "version_group_key": row[22],
+            "version_number": row[23],
+            "version_label": row[24],
+            "status": row[25],
+            "document_identity": sanitize_payload(row[26]) if row[26] is not None else {},
+            "source_context": sanitize_payload(row[27]) if row[27] is not None else {},
+            "approval_context": sanitize_payload(row[28]) if row[28] is not None else {},
+            "axiom_context": sanitize_payload(row[29]) if row[29] is not None else {},
+            "evidence_context": sanitize_payload(row[30]) if row[30] is not None else {},
+            "export_context": sanitize_payload(row[31]) if row[31] is not None else {},
+            "lineage_summary": sanitize_payload(row[32]) if row[32] is not None else {},
+            "created_by": sanitize_payload(row[33]) if row[33] is not None else {},
+            "metadata": sanitize_payload(row[34]) if row[34] is not None else {},
+            "created_at": row[35],
+            "updated_at": row[36],
+        }
+
+    def create_stored_export(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = StoredExportRecord.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            record["updated_at"] = self._now_iso()
+            self._stored_exports[record["stored_export_id"]] = sanitize_payload(record)
+            return self._stored_exports[record["stored_export_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_stored_exports (
+                stored_export_id, export_id, render_id, organization_id, workspace_id, dossier_id,
+                workflow_id, pack_type, export_format, framework_version, approval_status,
+                evidence_status, checksum, source_manifest_hash, content_hash, manifest_hash,
+                section_count, file_name_hint, content_type, storage_backend, storage_key,
+                storage_ref, version_group_key, version_number, version_label, status,
+                document_identity, source_context, approval_context, axiom_context,
+                evidence_context, export_context, lineage_summary, created_by, metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb,
+                %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb
+            )
+            ON CONFLICT (stored_export_id)
+            DO UPDATE SET
+                export_id = EXCLUDED.export_id,
+                render_id = EXCLUDED.render_id,
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                dossier_id = EXCLUDED.dossier_id,
+                workflow_id = EXCLUDED.workflow_id,
+                pack_type = EXCLUDED.pack_type,
+                export_format = EXCLUDED.export_format,
+                framework_version = EXCLUDED.framework_version,
+                approval_status = EXCLUDED.approval_status,
+                evidence_status = EXCLUDED.evidence_status,
+                checksum = EXCLUDED.checksum,
+                source_manifest_hash = EXCLUDED.source_manifest_hash,
+                content_hash = EXCLUDED.content_hash,
+                manifest_hash = EXCLUDED.manifest_hash,
+                section_count = EXCLUDED.section_count,
+                file_name_hint = EXCLUDED.file_name_hint,
+                content_type = EXCLUDED.content_type,
+                storage_backend = EXCLUDED.storage_backend,
+                storage_key = EXCLUDED.storage_key,
+                storage_ref = EXCLUDED.storage_ref,
+                version_group_key = EXCLUDED.version_group_key,
+                version_number = EXCLUDED.version_number,
+                version_label = EXCLUDED.version_label,
+                status = EXCLUDED.status,
+                document_identity = EXCLUDED.document_identity,
+                source_context = EXCLUDED.source_context,
+                approval_context = EXCLUDED.approval_context,
+                axiom_context = EXCLUDED.axiom_context,
+                evidence_context = EXCLUDED.evidence_context,
+                export_context = EXCLUDED.export_context,
+                lineage_summary = EXCLUDED.lineage_summary,
+                created_by = EXCLUDED.created_by,
+                metadata = EXCLUDED.metadata,
+                updated_at = now()
+            RETURNING stored_export_id, export_id, render_id, organization_id, workspace_id, dossier_id,
+                workflow_id, pack_type, export_format, framework_version, approval_status,
+                evidence_status, checksum, source_manifest_hash, content_hash, manifest_hash,
+                section_count, file_name_hint, content_type, storage_backend, storage_key,
+                storage_ref, version_group_key, version_number, version_label, status,
+                document_identity, source_context, approval_context, axiom_context,
+                evidence_context, export_context, lineage_summary, created_by, metadata,
+                created_at, updated_at
+            """,
+            (
+                record["stored_export_id"],
+                record["export_id"],
+                record["render_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record.get("dossier_id"),
+                record.get("workflow_id"),
+                record["pack_type"],
+                record["export_format"],
+                record.get("framework_version"),
+                record.get("approval_status"),
+                record.get("evidence_status"),
+                record.get("checksum"),
+                record.get("source_manifest_hash"),
+                record.get("content_hash"),
+                record.get("manifest_hash"),
+                record.get("section_count"),
+                record["file_name_hint"],
+                record.get("content_type"),
+                record["storage_backend"],
+                record["storage_key"],
+                Json(sanitize_payload(record.get("storage_ref") or {})),
+                record["version_group_key"],
+                record.get("version_number"),
+                record.get("version_label"),
+                record.get("status"),
+                Json(sanitize_payload(record.get("document_identity") or {})),
+                Json(sanitize_payload(record.get("source_context") or {})),
+                Json(sanitize_payload(record.get("approval_context") or {})),
+                Json(sanitize_payload(record.get("axiom_context") or {})),
+                Json(sanitize_payload(record.get("evidence_context") or {})),
+                Json(sanitize_payload(record.get("export_context") or {})),
+                Json(sanitize_payload(record.get("lineage_summary") or {})),
+                Json(sanitize_payload(record.get("created_by") or {})),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return self._row_to_stored_export(row)
+
+    def update_stored_export(
+        self,
+        stored_export_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        current = self.get_stored_export(stored_export_id)
+        if current is None:
+            raise KeyError(stored_export_id)
+        merged = {**current, **sanitize_payload(payload), "stored_export_id": stored_export_id}
+        return self.create_stored_export(merged)
+
+    def supersede_stored_exports(
+        self,
+        *,
+        version_group_key: str,
+        except_stored_export_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            updated: List[Dict[str, Any]] = []
+            for key, item in list(self._stored_exports.items()):
+                if str(item.get("version_group_key")) != str(version_group_key):
+                    continue
+                if except_stored_export_id and str(key) == str(except_stored_export_id):
+                    continue
+                if str(item.get("status")) == "stored":
+                    item = {**item, "status": "superseded", "updated_at": self._now_iso()}
+                    self._stored_exports[key] = sanitize_payload(item)
+                    updated.append(self._stored_exports[key])
+            return updated
+        clauses = ["version_group_key=%s", "status=%s"]
+        params: List[Any] = [version_group_key, "stored"]
+        if except_stored_export_id:
+            clauses.append("stored_export_id<>%s")
+            params.append(except_stored_export_id)
+        rows = db.safe_fetchall(
+            f"""
+            UPDATE platform_stored_exports
+            SET status='superseded', updated_at=now()
+            WHERE {' AND '.join(clauses)}
+            RETURNING stored_export_id, export_id, render_id, organization_id, workspace_id, dossier_id,
+                workflow_id, pack_type, export_format, framework_version, approval_status,
+                evidence_status, checksum, source_manifest_hash, content_hash, manifest_hash,
+                section_count, file_name_hint, content_type, storage_backend, storage_key,
+                storage_ref, version_group_key, version_number, version_label, status,
+                document_identity, source_context, approval_context, axiom_context,
+                evidence_context, export_context, lineage_summary, created_by, metadata,
+                created_at, updated_at
+            """,
+            params,
+        )
+        return [self._row_to_stored_export(row) for row in rows]
+
+    def get_stored_export(
+        self,
+        stored_export_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            item = self._stored_exports.get(str(stored_export_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return sanitize_payload(item)
+            return None
+        row = db.safe_fetchone(
+            """
+            SELECT stored_export_id, export_id, render_id, organization_id, workspace_id, dossier_id,
+                   workflow_id, pack_type, export_format, framework_version, approval_status,
+                   evidence_status, checksum, source_manifest_hash, content_hash, manifest_hash,
+                   section_count, file_name_hint, content_type, storage_backend, storage_key,
+                   storage_ref, version_group_key, version_number, version_label, status,
+                   document_identity, source_context, approval_context, axiom_context,
+                   evidence_context, export_context, lineage_summary, created_by, metadata,
+                   created_at, updated_at
+            FROM platform_stored_exports
+            WHERE stored_export_id=%s
+            """,
+            (stored_export_id,),
+        )
+        if not row:
+            return None
+        result = self._row_to_stored_export(row)
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
+
+    def list_stored_exports(
+        self,
+        *,
+        dossier_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        export_id: Optional[str] = None,
+        pack_type: Optional[str] = None,
+        export_format: Optional[str] = None,
+        version_group_key: Optional[str] = None,
+        include_superseded: bool = True,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._stored_exports.values())
+            if dossier_id is not None:
+                rows = [item for item in rows if str(item.get("dossier_id")) == str(dossier_id)]
+            if workspace_id is not None:
+                rows = [item for item in rows if str(item.get("workspace_id")) == str(workspace_id)]
+            if export_id is not None:
+                rows = [item for item in rows if str(item.get("export_id")) == str(export_id)]
+            if pack_type is not None:
+                rows = [item for item in rows if str(item.get("pack_type")) == str(pack_type)]
+            if export_format is not None:
+                rows = [item for item in rows if str(item.get("export_format")) == str(export_format)]
+            if version_group_key is not None:
+                rows = [
+                    item for item in rows if str(item.get("version_group_key")) == str(version_group_key)
+                ]
+            if not include_superseded:
+                rows = [item for item in rows if str(item.get("status")) != "superseded"]
+            rows = [
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(
+                key=lambda item: (
+                    str(item.get("created_at") or ""),
+                    int(item.get("version_number") or 0),
+                ),
+                reverse=True,
+            )
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if workspace_id is not None:
+            clauses.append("workspace_id=%s")
+            params.append(workspace_id)
+        if export_id is not None:
+            clauses.append("export_id=%s")
+            params.append(export_id)
+        if pack_type is not None:
+            clauses.append("pack_type=%s")
+            params.append(pack_type)
+        if export_format is not None:
+            clauses.append("export_format=%s")
+            params.append(export_format)
+        if version_group_key is not None:
+            clauses.append("version_group_key=%s")
+            params.append(version_group_key)
+        if not include_superseded:
+            clauses.append("status<>%s")
+            params.append("superseded")
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT stored_export_id, export_id, render_id, organization_id, workspace_id, dossier_id,
+                   workflow_id, pack_type, export_format, framework_version, approval_status,
+                   evidence_status, checksum, source_manifest_hash, content_hash, manifest_hash,
+                   section_count, file_name_hint, content_type, storage_backend, storage_key,
+                   storage_ref, version_group_key, version_number, version_label, status,
+                   document_identity, source_context, approval_context, axiom_context,
+                   evidence_context, export_context, lineage_summary, created_by, metadata,
+                   created_at, updated_at
+            FROM platform_stored_exports
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC, version_number DESC
+            """,
+            params,
+        )
+        return [self._row_to_stored_export(row) for row in rows]
+
+    def list_stored_export_versions(
+        self,
+        stored_export_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        record = self.get_stored_export(
+            stored_export_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        if record is None:
+            return []
+        return [
+            ExportVersionRecord(
+                stored_export_id=str(item.get("stored_export_id") or ""),
+                export_id=str(item.get("export_id") or ""),
+                render_id=str(item.get("render_id") or ""),
+                pack_type=str(item.get("pack_type") or ""),
+                export_format=str(item.get("export_format") or ""),
+                version_group_key=str(item.get("version_group_key") or ""),
+                version_number=int(item.get("version_number") or 1),
+                version_label=str(item.get("version_label") or "v1"),
+                status=str(item.get("status") or "stored"),
+                approval_status=item.get("approval_status"),
+                evidence_status=item.get("evidence_status"),
+                checksum=item.get("checksum"),
+                storage_backend=str(item.get("storage_backend") or ""),
+                storage_key=str(item.get("storage_key") or ""),
+                file_name_hint=str(item.get("file_name_hint") or ""),
+                created_at=item.get("created_at"),
+            ).model_dump(mode="python")
+            for item in self.list_stored_exports(
+                version_group_key=str(record.get("version_group_key") or ""),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            )
         ]
 
     def create_integration_binding(self, payload: Dict[str, Any]) -> Dict[str, Any]:

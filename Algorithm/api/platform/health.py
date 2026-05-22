@@ -18,6 +18,7 @@ def build_platform_health_summary(
     dossiers: List[Dict[str, Any]],
     approvals: List[Dict[str, Any]],
     exports: List[Dict[str, Any]],
+    stored_exports: Optional[List[Dict[str, Any]]] = None,
     audit_events: List[Dict[str, Any]],
     integration_bindings: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -37,6 +38,15 @@ def build_platform_health_summary(
             export_checks.append(f"Export {export.get('export_id')} has no content hash.")
         if not export.get("ordered_sections"):
             export_checks.append(f"Export {export.get('export_id')} has no ordered sections.")
+    for stored_export in (stored_exports or [])[:20]:
+        if not stored_export.get("storage_key"):
+            export_checks.append(
+                f"Stored export {stored_export.get('stored_export_id')} has no storage key."
+            )
+        if not stored_export.get("checksum"):
+            export_checks.append(
+                f"Stored export {stored_export.get('stored_export_id')} has no checksum."
+            )
     warnings = [
         *workflow_checks,
         *dossier_checks,

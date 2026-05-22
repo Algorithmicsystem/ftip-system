@@ -392,6 +392,118 @@ class RenderedExportResult(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ExportStorageRef(BaseModel):
+    storage_backend: str
+    storage_key: str
+    retrieval_hint: Optional[str] = None
+    local_path: Optional[str] = None
+    content_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+
+
+class ExportVersionRecord(BaseModel):
+    stored_export_id: str
+    export_id: str
+    render_id: str
+    pack_type: str
+    export_format: str
+    version_group_key: str
+    version_number: int
+    version_label: str
+    status: str
+    approval_status: Optional[str] = None
+    evidence_status: Optional[str] = None
+    checksum: Optional[str] = None
+    storage_backend: str
+    storage_key: str
+    file_name_hint: str
+    created_at: Optional[str] = None
+
+
+class StoredExportRecord(BaseModel):
+    stored_export_id: str
+    export_id: str
+    render_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    dossier_id: Optional[str] = None
+    workflow_id: Optional[str] = None
+    pack_type: str
+    export_format: str
+    framework_version: Optional[str] = None
+    approval_status: Optional[str] = None
+    evidence_status: Optional[str] = None
+    checksum: Optional[str] = None
+    source_manifest_hash: Optional[str] = None
+    content_hash: Optional[str] = None
+    manifest_hash: Optional[str] = None
+    section_count: int = 0
+    file_name_hint: str
+    content_type: Optional[str] = None
+    storage_backend: str
+    storage_key: str
+    storage_ref: ExportStorageRef
+    version_group_key: str
+    version_number: int = 1
+    version_label: str = "v1"
+    status: str = "stored"
+    document_identity: Dict[str, Any] = Field(default_factory=dict)
+    source_context: Dict[str, Any] = Field(default_factory=dict)
+    approval_context: Dict[str, Any] = Field(default_factory=dict)
+    axiom_context: Dict[str, Any] = Field(default_factory=dict)
+    evidence_context: Dict[str, Any] = Field(default_factory=dict)
+    export_context: Dict[str, Any] = Field(default_factory=dict)
+    lineage_summary: Dict[str, Any] = Field(default_factory=dict)
+    created_by: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class ExportIntegrityResult(BaseModel):
+    stored_export_id: str
+    export_id: str
+    render_id: str
+    version_number: int = 1
+    version_label: str = "v1"
+    status: str = "valid"
+    checksum_expected: Optional[str] = None
+    checksum_actual: Optional[str] = None
+    section_count_expected: int = 0
+    section_count_actual: int = 0
+    manifest_hash_expected: Optional[str] = None
+    manifest_hash_actual: Optional[str] = None
+    tenant_scope_consistent: bool = True
+    approval_context_consistent: bool = True
+    checks: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    errors: List[str] = Field(default_factory=list)
+    verified_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExportRetrievalResult(BaseModel):
+    stored_export_id: str
+    export_id: str
+    render_id: str
+    export_format: str
+    content_type: str
+    rendered_content: str
+    file_name_hint: str
+    storage_ref: ExportStorageRef
+    retrieved_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ExportFormatCapabilities(BaseModel):
+    html_supported: bool = True
+    markdown_supported: bool = True
+    json_supported: bool = True
+    pdf_ready: bool = False
+    docx_ready: bool = False
+    print_ready_html: bool = False
+
+
 class ConnectorCapability(BaseModel):
     capability_id: str
     title: str
@@ -609,6 +721,14 @@ class DossierExportRequest(BaseModel):
 class RenderExportRequest(BaseModel):
     pack_type: str = "dossier_pack"
     export_format: str = "html"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StoreExportRequest(BaseModel):
+    pack_type: str = "dossier_pack"
+    export_format: str = "html"
+    render_id: Optional[str] = None
+    storage_backend: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

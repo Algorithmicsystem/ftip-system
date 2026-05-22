@@ -588,6 +588,16 @@ def _migration_platform_phase7_console(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_platform_phase8a_tenant_auth(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("030_platform_phase8a_tenant_auth.sql")
+    cur.execute(sql_path.read_text())
+
+
+def _migration_platform_phase8b_export_storage(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("031_platform_phase8b_export_storage.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -643,6 +653,14 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "029_platform_phase7_console",
         _migration_platform_phase7_console,
+    ),
+    (
+        "030_platform_phase8a_tenant_auth",
+        _migration_platform_phase8a_tenant_auth,
+    ),
+    (
+        "031_platform_phase8b_export_storage",
+        _migration_platform_phase8b_export_storage,
     ),
 ]
 

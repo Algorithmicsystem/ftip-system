@@ -2660,8 +2660,10 @@ def attach_platform_context(
     timeline = list(platform_context.get("timeline") or [])
     exports = list(platform_context.get("exports") or [])
     rendered_exports = list(platform_context.get("rendered_exports") or [])
+    stored_exports = list(platform_context.get("stored_exports") or [])
     allowed_actions = list(platform_context.get("allowed_actions") or [])
     bindings = list(platform_context.get("integration_bindings") or [])
+    export_capabilities = dict(platform_context.get("export_capabilities") or {})
 
     overview_summary = (
         f"Workspace {workspace.get('name') or 'n/a'} is running "
@@ -2721,6 +2723,19 @@ def attach_platform_context(
         if rendered_exports
         else "No rendered export output is attached yet."
     )
+    export_storage_summary = (
+        f"Stored export history contains {len(stored_exports)} versioned artifact(s) across backends "
+        f"{_fmt_list([item.get('storage_backend') for item in stored_exports[:6]])}."
+        if stored_exports
+        else "No durable stored export history is attached yet."
+    )
+    export_capability_summary = (
+        f"Export capabilities are html={export_capabilities.get('html_supported')}, "
+        f"markdown={export_capabilities.get('markdown_supported')}, json={export_capabilities.get('json_supported')}, "
+        f"pdf_ready={export_capabilities.get('pdf_ready')}, docx_ready={export_capabilities.get('docx_ready')}."
+        if export_capabilities
+        else "No export capability summary is attached."
+    )
     dashboard_summary = (
         f"Executive dashboard shows {((dashboard.get('executive_metrics') or {}).get('dossier_count')) or 0} dossier(s), "
         f"{((dashboard.get('executive_metrics') or {}).get('pending_approval_count')) or 0} pending approval(s), and "
@@ -2765,9 +2780,11 @@ def attach_platform_context(
     updated["platform_timeline"] = sanitize_payload(timeline)
     updated["platform_exports"] = sanitize_payload(exports)
     updated["platform_rendered_exports"] = sanitize_payload(rendered_exports)
+    updated["platform_stored_exports"] = sanitize_payload(stored_exports)
     updated["platform_supported_export_packs"] = sanitize_payload(
         platform_context.get("supported_export_packs") or []
     )
+    updated["platform_export_capabilities"] = sanitize_payload(export_capabilities)
     updated["platform_integration_summary"] = sanitize_payload(integration_summary)
     updated["platform_integration_bindings"] = sanitize_payload(bindings)
     updated["platform_health_summary"] = sanitize_payload(health_summary)
@@ -2785,6 +2802,8 @@ def attach_platform_context(
     updated["platform_export_summary"] = export_summary
     updated["platform_integration_health_summary"] = integration_health_summary
     updated["platform_export_rendering_summary"] = export_rendering_summary
+    updated["platform_export_storage_summary"] = export_storage_summary
+    updated["platform_export_capability_summary"] = export_capability_summary
     updated["platform_dashboard_summary"] = dashboard_summary
     updated["platform_analytics_summary"] = analytics_summary
     updated["platform_demo_readiness_summary"] = demo_readiness_summary
@@ -2793,6 +2812,8 @@ def attach_platform_context(
             updated.get("overall_analysis"),
             overview_summary,
             dossier_summary,
+            export_storage_summary,
+            export_capability_summary,
             workflow_actions_summary,
             dashboard_summary,
         ]

@@ -14,6 +14,7 @@ from api.platform.contracts import (
     DossierExportRequest,
     IntegrationExecutionRequest,
     RenderExportRequest,
+    StoreExportRequest,
     WorkflowActionRequest,
     WorkflowApprovalRequestPayload,
 )
@@ -214,10 +215,90 @@ def render_dossier_export(
     )
 
 
+@router.post("/dossiers/{dossier_id}/store-export")
+def store_dossier_export(
+    dossier_id: str,
+    payload: StoreExportRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.store_dossier_export_service(
+        dossier_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/dossiers/{dossier_id}/exports/history")
+def dossier_export_history(dossier_id: str, request: Request) -> Dict[str, Any]:
+    return service.list_dossier_export_history_service(
+        dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
 @router.get("/exports/{render_id}")
 def get_rendered_export(render_id: str, request: Request) -> Dict[str, Any]:
     return service.get_rendered_export_service(
         render_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/exports/{stored_export_id}/metadata")
+def get_stored_export_metadata(
+    stored_export_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.get_stored_export_metadata_service(
+        stored_export_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/exports/{stored_export_id}/content")
+def get_stored_export_content(
+    stored_export_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.get_stored_export_content_service(
+        stored_export_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/exports/{stored_export_id}/integrity")
+def get_stored_export_integrity(
+    stored_export_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.get_stored_export_integrity_service(
+        stored_export_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/exports/{stored_export_id}/versions")
+def get_stored_export_versions(
+    stored_export_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.list_stored_export_versions_service(
+        stored_export_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/exports")
+def list_workspace_exports(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.list_workspace_stored_exports_service(
+        workspace_id,
         user_context=_user_context(request),
         store=platform_store,
     )
