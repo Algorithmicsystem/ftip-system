@@ -24,10 +24,11 @@ from api.platform.security import user_context_from_headers
 router = APIRouter(prefix="/platform", tags=["platform"])
 
 
-def _user_context(request: Request, *, workspace_id: Optional[str] = None) -> Dict[str, Any]:
-    return user_context_from_headers(request.headers, workspace_id=workspace_id).model_dump(
-        mode="python"
-    )
+def _user_context(request: Request) -> Dict[str, Any]:
+    return user_context_from_headers(
+        request.headers,
+        store=platform_store,
+    ).model_dump(mode="python")
 
 
 @router.get("/templates")
@@ -45,28 +46,36 @@ def create_workspace(payload: CreateWorkspaceRequest, request: Request) -> Dict[
 
 
 @router.get("/workspaces")
-def list_workspaces() -> Dict[str, Any]:
-    return {
-        "platform_version": service.PLATFORM_FOUNDATION_VERSION,
-        "workspaces": platform_store.list_workspaces(),
-    }
+def list_workspaces(
+    request: Request,
+    organization_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.list_workspaces_service(
+        organization_id=organization_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
 
 
 @router.post("/workflows")
 def create_workflow(payload: CreateWorkflowRequest, request: Request) -> Dict[str, Any]:
     return service.create_workflow_service(
         payload.model_dump(),
-        user_context=_user_context(request, workspace_id=payload.workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
 
 @router.get("/workflows")
-def list_workflows(workspace_id: Optional[str] = Query(default=None)) -> Dict[str, Any]:
-    return {
-        "platform_version": service.PLATFORM_FOUNDATION_VERSION,
-        "workflows": platform_store.list_workflows(workspace_id=workspace_id),
-    }
+def list_workflows(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.list_workflows_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
 
 
 @router.post("/workflows/{workflow_id}/actions")
@@ -117,16 +126,16 @@ def create_dossier(payload: CreateDossierRequest, request: Request) -> Dict[str,
 
 @router.get("/dossiers")
 def list_dossiers(
+    request: Request,
     workspace_id: Optional[str] = Query(default=None),
     workflow_id: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
-    return {
-        "platform_version": service.PLATFORM_FOUNDATION_VERSION,
-        "dossiers": platform_store.list_dossiers(
-            workspace_id=workspace_id,
-            workflow_id=workflow_id,
-        ),
-    }
+    return service.list_dossiers_service(
+        workspace_id=workspace_id,
+        workflow_id=workflow_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
 
 
 @router.get("/dossiers/{dossier_id}")
@@ -221,7 +230,7 @@ def platform_summary(
 ) -> Dict[str, Any]:
     return service.build_platform_summary_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -233,7 +242,7 @@ def platform_dashboard(
 ) -> Dict[str, Any]:
     return service.build_platform_dashboard_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
         emit_audit=True,
     )
@@ -246,7 +255,7 @@ def platform_analytics(
 ) -> Dict[str, Any]:
     return service.build_platform_analytics_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -255,7 +264,7 @@ def platform_analytics(
 def workspace_analytics(workspace_id: str, request: Request) -> Dict[str, Any]:
     return service.build_workspace_analytics_service(
         workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -267,7 +276,49 @@ def access_summary(
 ) -> Dict[str, Any]:
     return service.build_access_summary_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/auth/session")
+def auth_session(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+    organization_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_auth_session_service(
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/access/effective")
+def effective_access(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+    organization_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_effective_access_service(
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/tenancy/summary")
+def tenancy_summary(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+    organization_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_tenancy_summary_service(
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -279,20 +330,13 @@ def list_audit(
     resource_type: Optional[str] = Query(default=None),
     resource_id: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
-    user_context = _user_context(request, workspace_id=workspace_id)
-    return {
-        "platform_version": service.PLATFORM_FOUNDATION_VERSION,
-        "access_summary": service.build_access_summary_service(
-            workspace_id=workspace_id,
-            user_context=user_context,
-            store=platform_store,
-        )["access_summary"],
-        "audit_events": platform_store.list_audit_events(
-            workspace_id=workspace_id,
-            resource_type=resource_type,
-            resource_id=resource_id,
-        ),
-    }
+    return service.list_audit_service(
+        workspace_id=workspace_id,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
 
 
 @router.get("/integrations")
@@ -302,7 +346,7 @@ def list_integrations(
 ) -> Dict[str, Any]:
     return service.list_integrations_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -314,7 +358,7 @@ def create_integration(
 ) -> Dict[str, Any]:
     return service.create_integration_binding_service(
         payload.model_dump(mode="python"),
-        user_context=_user_context(request, workspace_id=payload.workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -349,7 +393,7 @@ def platform_health(
 ) -> Dict[str, Any]:
     return service.build_platform_health_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )
 
@@ -361,7 +405,7 @@ def platform_demo_snapshot(
 ) -> Dict[str, Any]:
     return service.build_demo_snapshot_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
         emit_audit=True,
     )
@@ -374,6 +418,6 @@ def platform_demo_readiness(
 ) -> Dict[str, Any]:
     return service.build_demo_readiness_service(
         workspace_id=workspace_id,
-        user_context=_user_context(request, workspace_id=workspace_id),
+        user_context=_user_context(request),
         store=platform_store,
     )

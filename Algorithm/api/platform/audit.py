@@ -22,6 +22,7 @@ def build_audit_event(
     rationale: Optional[str] = None,
     metadata: Optional[Dict[str, Any]] = None,
 ) -> AuditEvent:
+    actor = actor_payload(user_context)
     return AuditEvent(
         event_id=str(uuid.uuid4()),
         event_type=event_type,
@@ -29,11 +30,20 @@ def build_audit_event(
         resource_id=resource.resource_id,
         organization_id=resource.organization_id,
         workspace_id=resource.workspace_id,
-        actor=actor_payload(user_context),
+        session_id=actor.get("session_id"),
+        auth_mode=actor.get("auth_mode"),
+        actor=actor,
         timestamp=now_utc(),
         payload=sanitize_payload(payload or {}),
         rationale=rationale,
-        metadata=sanitize_payload(metadata or {}),
+        metadata=sanitize_payload(
+            {
+                **dict(metadata or {}),
+                "tenant_scope_summary": actor.get("tenant_scope_summary"),
+                "actor_email": actor.get("actor_email"),
+                "actor_username": actor.get("actor_username"),
+            }
+        ),
     )
 
 

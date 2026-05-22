@@ -7,7 +7,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from api.assistant.reports import sanitize_payload
-from api.platform.access import build_access_summary, require_access
+from api.platform.access import (
+    build_access_summary,
+    require_access,
+    scope_resource_query,
+)
 from api.platform.actions import (
     apply_workflow_action,
     list_allowed_actions,
@@ -51,6 +55,7 @@ from api.platform.profiles import (
     list_platform_profiles,
 )
 from api.platform.security import normalize_user_context
+from api.platform.tenant import build_tenancy_summary
 from api.platform.templates import get_workflow_template, list_workflow_templates
 from api.platform.workflows import build_workflow_instance
 
@@ -184,31 +189,80 @@ def _latest_approval_status(
 def _workspace_scope_bundle(
     *,
     workspace_id: Optional[str],
+    organization_ids: Optional[List[str]] = None,
+    workspace_ids: Optional[List[str]] = None,
     store: PlatformStore,
 ) -> Dict[str, Any]:
+    if organization_ids == [] and workspace_ids == []:
+        return {
+            "workspaces": [],
+            "workflows": [],
+            "dossiers": [],
+            "approvals": [],
+            "exports": [],
+            "rendered_exports": [],
+            "integration_bindings": [],
+        }
     workspaces = (
-        [store.get_workspace(workspace_id)]
-        if workspace_id and store.get_workspace(workspace_id)
-        else store.list_workspaces()
+        [
+            store.get_workspace(
+                workspace_id,
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            )
+        ]
+        if workspace_id
+        and store.get_workspace(
+            workspace_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        else store.list_workspaces(
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
     )
-    workflows = store.list_workflows(workspace_id=workspace_id)
-    dossiers = store.list_dossiers(workspace_id=workspace_id)
+    workflows = store.list_workflows(
+        workspace_id=workspace_id,
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    dossiers = store.list_dossiers(
+        workspace_id=workspace_id,
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
     approvals: List[Dict[str, Any]] = []
     exports: List[Dict[str, Any]] = []
     rendered_exports: List[Dict[str, Any]] = []
     for workflow in workflows:
         approvals.extend(store.list_approval_requests(workflow_id=workflow.get("workflow_id")))
     for dossier in dossiers:
-        dossier_exports = store.list_export_manifests(dossier.get("dossier_id"))
+        dossier_exports = store.list_export_manifests(
+            dossier.get("dossier_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
         exports.extend(dossier_exports)
         for export in dossier_exports:
             rendered_exports.extend(
-                store.list_rendered_exports(export_id=export.get("export_id"))
+                store.list_rendered_exports(
+                    export_id=export.get("export_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
             )
     integrations = (
-        store.list_integration_bindings(workspace_id=workspace_id)
+        store.list_integration_bindings(
+            workspace_id=workspace_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
         if workspace_id
-        else store.list_integration_bindings()
+        else store.list_integration_bindings(
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
     )
     return {
         "workspaces": [item for item in workspaces if item],
@@ -219,6 +273,28 @@ def _workspace_scope_bundle(
         "rendered_exports": rendered_exports,
         "integration_bindings": integrations,
     }
+
+
+def _resolve_scope(
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    workspace_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    return scope_resource_query(
+        user_context=user_context,
+        requested_workspace_id=workspace_id,
+        requested_organization_id=organization_id,
+        store=store,
+    )
+
+
+def _scope_allows_listing(scope: Dict[str, Any]) -> bool:
+    return bool(
+        scope.get("has_access", True)
+        or getattr(scope.get("user_context"), "is_system", False)
+    )
 
 
 def _create_audit_event(
@@ -299,6 +375,22 @@ def create_workspace_service(
 ) -> Dict[str, Any]:
     profile = get_platform_profile(payload.get("platform_profile"))
     organization_id = payload.get("organization_id")
+    existing_org = store.get_organization(organization_id) if organization_id else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=organization_id,
+    )
+    if existing_org is not None:
+        require_access(
+            permission="edit_workspace",
+            user_context=normalized,
+            resource=ResourceRef(
+                resource_type="organization",
+                resource_id=existing_org["organization_id"],
+                organization_id=existing_org["organization_id"],
+            ),
+            store=store,
+        )
     if not organization_id:
         org = store.create_organization(
             {
@@ -308,6 +400,10 @@ def create_workspace_service(
             }
         )
         organization_id = org["organization_id"]
+        normalized = normalize_user_context(
+            user_context,
+            organization_id=organization_id,
+        )
     workspace = store.create_workspace(
         {
             "organization_id": organization_id,
@@ -322,7 +418,7 @@ def create_workspace_service(
         }
     )
     normalized = normalize_user_context(
-        user_context,
+        normalized,
         organization_id=organization_id,
         workspace_id=workspace.get("workspace_id"),
     )
@@ -339,6 +435,143 @@ def create_workspace_service(
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "workspace": workspace,
         "platform_profile": profile.model_dump(mode="python"),
+    }
+
+
+def build_auth_session_service(
+    *,
+    workspace_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+        store=store,
+    )
+    normalized = scope["user_context"]
+    accessible_workspaces = (
+        []
+        if not _scope_allows_listing(scope)
+        else store.list_workspaces(
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "session": sanitize_payload(
+            {
+                "user_id": normalized.user_id,
+                "user_name": normalized.user_name,
+                "email": normalized.email,
+                "username": normalized.username,
+                "role": normalized.role,
+                "auth_mode": normalized.auth_mode,
+                "is_system": normalized.is_system,
+                "session_id": normalized.session_id,
+                "organization_id": normalized.organization_id,
+                "workspace_id": normalized.workspace_id,
+                "organization_ids": normalized.organization_ids,
+                "workspace_ids": normalized.workspace_ids,
+                "tenant_scope_summary": (normalized.metadata or {}).get(
+                    "tenant_scope_summary"
+                ),
+                "fallback_used": bool((normalized.metadata or {}).get("fallback_used")),
+            }
+        ),
+        "tenancy_summary": build_tenancy_summary(
+            user_context=normalized,
+            accessible_workspaces=accessible_workspaces,
+        ),
+    }
+
+
+def list_workspaces_service(
+    *,
+    organization_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        organization_id=organization_id,
+        store=store,
+    )
+    workspaces = (
+        []
+        if not _scope_allows_listing(scope)
+        else store.list_workspaces(
+            organization_id=organization_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspaces": workspaces,
+        "tenancy_summary": build_tenancy_summary(
+            user_context=scope["user_context"],
+            accessible_workspaces=workspaces,
+        ),
+    }
+
+
+def list_workflows_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workflows = (
+        []
+        if not _scope_allows_listing(scope)
+        else store.list_workflows(
+            workspace_id=workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflows": workflows,
+        "tenancy_summary": build_tenancy_summary(user_context=scope["user_context"]),
+    }
+
+
+def list_dossiers_service(
+    *,
+    workspace_id: Optional[str] = None,
+    workflow_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    dossiers = (
+        []
+        if not _scope_allows_listing(scope)
+        else store.list_dossiers(
+            workspace_id=workspace_id,
+            workflow_id=workflow_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossiers": dossiers,
+        "tenancy_summary": build_tenancy_summary(user_context=scope["user_context"]),
     }
 
 
@@ -633,15 +866,74 @@ def build_access_summary_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    summary = build_access_summary(
+    scope = _resolve_scope(
         user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    summary = build_access_summary(
+        user_context=scope["user_context"],
         resource=_workspace_resource(workspace),
         store=store,
     )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "access_summary": summary,
+    }
+
+
+def build_effective_access_service(
+    *,
+    workspace_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    session = build_auth_session_service(
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+        user_context=user_context,
+        store=store,
+    )
+    access = build_access_summary_service(
+        workspace_id=workspace_id,
+        user_context=user_context,
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "session": session["session"],
+        "tenancy_summary": session["tenancy_summary"],
+        "access_summary": access["access_summary"],
+    }
+
+
+def build_tenancy_summary_service(
+    *,
+    workspace_id: Optional[str] = None,
+    organization_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    session = build_auth_session_service(
+        workspace_id=workspace_id,
+        organization_id=organization_id,
+        user_context=user_context,
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "tenancy_summary": session["tenancy_summary"],
+        "session": session["session"],
     }
 
 
@@ -1033,14 +1325,31 @@ def list_dossier_exports_service(
         resource=_dossier_resource(dossier, workspace),
         store=store,
     )
+    scope = _resolve_scope(
+        user_context=normalized.model_dump(mode="python"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        store=store,
+    )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "supported_pack_types": supported_pack_types(),
-        "exports": store.list_export_manifests(dossier_id),
+        "exports": store.list_export_manifests(
+            dossier_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ),
         "rendered_exports": [
             rendered
-            for export in store.list_export_manifests(dossier_id)
-            for rendered in store.list_rendered_exports(export_id=export.get("export_id"))
+            for export in store.list_export_manifests(
+                dossier_id,
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+            )
+            for rendered in store.list_rendered_exports(
+                export_id=export.get("export_id"),
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+            )
         ],
     }
 
@@ -1191,17 +1500,36 @@ def get_rendered_export_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    rendered = store.get_rendered_export(render_id)
+    normalized = normalize_user_context(user_context)
+    scope = _resolve_scope(
+        user_context=normalized.model_dump(mode="python"),
+        workspace_id=normalized.workspace_id,
+        organization_id=normalized.organization_id,
+        store=store,
+    )
+    rendered = store.get_rendered_export(
+        render_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
     if rendered is None:
         raise HTTPException(status_code=404, detail="rendered export not found")
-    manifest = store.get_export_manifest(str(rendered.get("export_id") or ""))
+    manifest = store.get_export_manifest(
+        str(rendered.get("export_id") or ""),
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
     workspace = (
-        store.get_workspace(str(manifest.get("workspace_id")))
+        store.get_workspace(
+            str(manifest.get("workspace_id")),
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
         if manifest and manifest.get("workspace_id")
         else None
     )
     normalized = normalize_user_context(
-        user_context,
+        normalized,
         organization_id=(workspace or {}).get("organization_id"),
         workspace_id=(workspace or {}).get("workspace_id"),
     )
@@ -1274,25 +1602,44 @@ def list_integrations_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
     )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
     require_access(
         permission="view_workspace",
         user_context=normalized,
         resource=_workspace_resource(workspace),
         store=store,
     )
-    bindings = store.list_integration_bindings(
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=workspace_id,
+    bindings = (
+        store.list_integration_bindings(
+            organization_id=(workspace or {}).get("organization_id"),
+            workspace_id=workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if _scope_allows_listing(scope)
+        else []
     )
     enriched_bindings: List[Dict[str, Any]] = []
     for binding in bindings:
-        history = store.list_integration_executions(str(binding.get("binding_id")))
+        history = store.list_integration_executions(
+            str(binding.get("binding_id")),
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
         enriched = sanitize_payload(
             {
                 **binding,
@@ -1320,7 +1667,15 @@ def list_integration_history_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    binding = store.get_integration_binding(binding_id)
+    scope = _resolve_scope(
+        user_context=user_context,
+        store=store,
+    )
+    binding = store.get_integration_binding(
+        binding_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
     if binding is None:
         raise HTTPException(status_code=404, detail="integration binding not found")
     workspace = (
@@ -1329,7 +1684,7 @@ def list_integration_history_service(
         else None
     )
     normalized = normalize_user_context(
-        user_context,
+        scope["user_context"],
         organization_id=binding.get("organization_id"),
         workspace_id=(workspace or {}).get("workspace_id"),
     )
@@ -1339,7 +1694,11 @@ def list_integration_history_service(
         resource=_workspace_resource(workspace),
         store=store,
     )
-    history = store.list_integration_executions(binding_id)
+    history = store.list_integration_executions(
+        binding_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "binding": binding,
@@ -1350,6 +1709,55 @@ def list_integration_history_service(
     }
 
 
+def list_audit_service(
+    *,
+    workspace_id: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    require_access(
+        permission="view_audit_log",
+        user_context=scope["user_context"],
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "access_summary": build_access_summary_service(
+            workspace_id=workspace_id,
+            user_context=scope["user_context"].model_dump(mode="python"),
+            store=store,
+        )["access_summary"],
+        "audit_events": (
+            store.list_audit_events(
+                workspace_id=workspace_id,
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+                resource_type=resource_type,
+                resource_id=resource_id,
+            )
+            if _scope_allows_listing(scope)
+            else []
+        ),
+    }
+
+
 def execute_integration_service(
     binding_id: str,
     payload: Dict[str, Any],
@@ -1357,7 +1765,15 @@ def execute_integration_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    binding = store.get_integration_binding(binding_id)
+    scope = _resolve_scope(
+        user_context=user_context,
+        store=store,
+    )
+    binding = store.get_integration_binding(
+        binding_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
     if binding is None:
         raise HTTPException(status_code=404, detail="integration binding not found")
     workspace = (
@@ -1366,7 +1782,7 @@ def execute_integration_service(
         else None
     )
     normalized = normalize_user_context(
-        user_context,
+        scope["user_context"],
         organization_id=binding.get("organization_id"),
         workspace_id=(workspace or {}).get("workspace_id"),
     )
@@ -1554,30 +1970,56 @@ def build_platform_health_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
     )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
     access_summary = build_access_summary(
         user_context=normalized,
         resource=_workspace_resource(workspace),
         store=store,
     )
-    scope = _workspace_scope_bundle(workspace_id=workspace_id, store=store)
-    workflows = scope["workflows"]
-    dossiers = scope["dossiers"]
-    approvals = scope["approvals"]
-    exports = scope["exports"]
-    audit_events = store.list_audit_events(
-        workspace_id=(workspace or {}).get("workspace_id"),
-        limit=400,
+    scope_bundle = _workspace_scope_bundle(
+        workspace_id=workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+        store=store,
     )
-    integration_bindings = scope["integration_bindings"]
-    rendered_exports = scope["rendered_exports"]
+    workflows = scope_bundle["workflows"]
+    dossiers = scope_bundle["dossiers"]
+    approvals = scope_bundle["approvals"]
+    exports = scope_bundle["exports"]
+    audit_events = (
+        store.list_audit_events(
+            organization_ids=scope["organization_ids"],
+            workspace_id=(workspace or {}).get("workspace_id"),
+            workspace_ids=scope["workspace_ids"],
+            limit=400,
+        )
+        if _scope_allows_listing(scope)
+        else []
+    )
+    integration_bindings = scope_bundle["integration_bindings"]
+    rendered_exports = scope_bundle["rendered_exports"]
     integration_execution_count = sum(
-        len(store.list_integration_executions(str(item.get("binding_id"))))
+        len(
+            store.list_integration_executions(
+                str(item.get("binding_id")),
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+            )
+        )
         for item in integration_bindings
     )
     health = build_platform_health_summary(
@@ -1606,28 +2048,38 @@ def build_workspace_analytics_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id)
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = store.get_workspace(
+        workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
     if workspace is None:
         raise HTTPException(status_code=404, detail="workspace not found")
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=workspace.get("organization_id"),
-        workspace_id=workspace.get("workspace_id"),
-    )
+    normalized = scope["user_context"]
     require_access(
         permission="view_workspace",
         user_context=normalized,
         resource=_workspace_resource(workspace),
         store=store,
     )
-    scope = _workspace_scope_bundle(workspace_id=workspace_id, store=store)
+    scope_bundle = _workspace_scope_bundle(
+        workspace_id=workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+        store=store,
+    )
     analytics = build_workspace_analytics_view(
         workspace=workspace,
-        workflows=scope["workflows"],
-        dossiers=scope["dossiers"],
-        approvals=scope["approvals"],
-        exports=scope["exports"],
-        integration_bindings=scope["integration_bindings"],
+        workflows=scope_bundle["workflows"],
+        dossiers=scope_bundle["dossiers"],
+        approvals=scope_bundle["approvals"],
+        exports=scope_bundle["exports"],
+        integration_bindings=scope_bundle["integration_bindings"],
     ).model_dump(mode="python")
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
@@ -1642,28 +2094,53 @@ def build_platform_analytics_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
     )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
     require_access(
         permission="view_workspace",
         user_context=normalized,
         resource=_workspace_resource(workspace),
         store=store,
     )
-    scope = _workspace_scope_bundle(workspace_id=workspace_id, store=store)
-    workspaces = scope["workspaces"] if workspace_id else store.list_workspaces()
+    scope_bundle = _workspace_scope_bundle(
+        workspace_id=workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+        store=store,
+    )
+    workspaces = (
+        scope_bundle["workspaces"]
+        if workspace_id
+        else (
+            store.list_workspaces(
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+            )
+            if _scope_allows_listing(scope)
+            else []
+        )
+    )
     analytics = build_cross_workspace_analytics(
         platform_version=PLATFORM_FOUNDATION_VERSION,
         workspaces=workspaces,
-        workflows=scope["workflows"],
-        dossiers=scope["dossiers"],
-        approvals=scope["approvals"],
-        exports=scope["exports"],
-        integration_bindings=scope["integration_bindings"],
+        workflows=scope_bundle["workflows"],
+        dossiers=scope_bundle["dossiers"],
+        approvals=scope_bundle["approvals"],
+        exports=scope_bundle["exports"],
+        integration_bindings=scope_bundle["integration_bindings"],
     )
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
@@ -1678,12 +2155,21 @@ def build_platform_dashboard_service(
     store: PlatformStore = platform_store,
     emit_audit: bool = False,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
     )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
     require_access(
         permission="view_workspace",
         user_context=normalized,
@@ -1722,18 +2208,38 @@ def build_platform_dashboard_service(
     )["analytics"]
     approvals: List[Dict[str, Any]] = []
     if workspace:
-        for wf in store.list_workflows(workspace_id=workspace["workspace_id"]):
+        for wf in store.list_workflows(
+            workspace_id=workspace["workspace_id"],
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ):
             approvals.extend(
                 store.list_approval_requests(workflow_id=wf.get("workflow_id"))
             )
-    timeline = store.list_audit_events(
-        workspace_id=(workspace or {}).get("workspace_id"),
-        limit=40,
+    timeline = (
+        store.list_audit_events(
+            organization_ids=scope["organization_ids"],
+            workspace_id=(workspace or {}).get("workspace_id"),
+            workspace_ids=scope["workspace_ids"],
+            limit=40,
+        )
+        if _scope_allows_listing(scope)
+        else []
     )
     exports: List[Dict[str, Any]] = []
     if workspace:
-        for dossier in store.list_dossiers(workspace_id=workspace["workspace_id"]):
-            exports.extend(store.list_export_manifests(dossier.get("dossier_id")))
+        for dossier in store.list_dossiers(
+            workspace_id=workspace["workspace_id"],
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ):
+            exports.extend(
+                store.list_export_manifests(
+                    dossier.get("dossier_id"),
+                    organization_ids=scope["organization_ids"],
+                    workspace_ids=scope["workspace_ids"],
+                )
+            )
     integrations = list_integrations_service(
         workspace_id=(workspace or {}).get("workspace_id"),
         user_context=normalized.model_dump(mode="python"),
@@ -1778,12 +2284,21 @@ def build_demo_snapshot_service(
     store: PlatformStore = platform_store,
     emit_audit: bool = False,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
     )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
     require_access(
         permission="view_workspace",
         user_context=normalized,
@@ -1802,12 +2317,26 @@ def build_demo_snapshot_service(
     approvals: List[Dict[str, Any]] = []
     exports: List[Dict[str, Any]] = []
     if workspace:
-        for wf in store.list_workflows(workspace_id=workspace["workspace_id"]):
+        for wf in store.list_workflows(
+            workspace_id=workspace["workspace_id"],
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ):
             approvals.extend(
                 store.list_approval_requests(workflow_id=wf.get("workflow_id"))
             )
-        for dossier in store.list_dossiers(workspace_id=workspace["workspace_id"]):
-            exports.extend(store.list_export_manifests(dossier.get("dossier_id")))
+        for dossier in store.list_dossiers(
+            workspace_id=workspace["workspace_id"],
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        ):
+            exports.extend(
+                store.list_export_manifests(
+                    dossier.get("dossier_id"),
+                    organization_ids=scope["organization_ids"],
+                    workspace_ids=scope["workspace_ids"],
+                )
+            )
     integrations = list_integrations_service(
         workspace_id=(workspace or {}).get("workspace_id"),
         user_context=normalized.model_dump(mode="python"),
@@ -1849,12 +2378,21 @@ def build_demo_readiness_service(
     user_context: Optional[Dict[str, Any]] = None,
     store: PlatformStore = platform_store,
 ) -> Dict[str, Any]:
-    workspace = store.get_workspace(workspace_id) if workspace_id else None
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
     )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
     require_access(
         permission="view_workspace",
         user_context=normalized,
@@ -2164,19 +2702,54 @@ def build_platform_summary_service(
     current_workflow: Optional[Dict[str, Any]] = None,
     current_dossier: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    workspace = current_workspace or (store.get_workspace(workspace_id) if workspace_id else None)
-    normalized = normalize_user_context(
-        user_context,
-        organization_id=(workspace or {}).get("organization_id"),
-        workspace_id=(workspace or {}).get("workspace_id"),
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id or (current_workspace or {}).get("workspace_id"),
+        organization_id=(current_workspace or {}).get("organization_id"),
+        store=store,
     )
-    workspaces = store.list_workspaces()
-    workflows = store.list_workflows(workspace_id=workspace_id)
-    dossiers = store.list_dossiers(workspace_id=workspace_id)
+    workspace = current_workspace or (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
+    if _scope_allows_listing(scope):
+        workspaces = store.list_workspaces(
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        workflows = store.list_workflows(
+            workspace_id=workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        dossiers = store.list_dossiers(
+            workspace_id=workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+    else:
+        workspaces = []
+        workflows = []
+        dossiers = []
     approvals: List[Dict[str, Any]] = []
     export_count = 0
-    audit_count = len(
-        store.list_audit_events(workspace_id=(workspace or {}).get("workspace_id"), limit=400)
+    audit_count = (
+        len(
+            store.list_audit_events(
+                workspace_id=(workspace or {}).get("workspace_id"),
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+                limit=400,
+            )
+        )
+        if _scope_allows_listing(scope)
+        else 0
     )
     by_tier: Dict[str, int] = {}
     by_regime: Dict[str, int] = {}
@@ -2192,7 +2765,13 @@ def build_platform_summary_service(
         by_regime[regime] = by_regime.get(regime, 0) + 1
         by_stage[stage] = by_stage.get(stage, 0) + 1
         latest.append(dossier_preview(dossier))
-        export_count += len(store.list_export_manifests(dossier["dossier_id"]))
+        export_count += len(
+            store.list_export_manifests(
+                dossier["dossier_id"],
+                organization_ids=scope["organization_ids"],
+                workspace_ids=scope["workspace_ids"],
+            )
+        )
     summary = PlatformSummaryView(
         platform_version=PLATFORM_FOUNDATION_VERSION,
         workspace_count=len(workspaces),

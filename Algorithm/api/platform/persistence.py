@@ -71,6 +71,30 @@ class PlatformStore:
     def _uuid(self) -> str:
         return str(uuid.uuid4())
 
+    def _matches_scope(
+        self,
+        *,
+        organization_id: Optional[str],
+        workspace_id: Optional[str],
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> bool:
+        scoped_org_ids = {str(item) for item in organization_ids or [] if item is not None}
+        scoped_workspace_ids = {
+            str(item) for item in workspace_ids or [] if item is not None
+        }
+        if workspace_ids is not None:
+            if workspace_id is not None and str(workspace_id) in scoped_workspace_ids:
+                return True
+            if organization_ids is not None and organization_id is not None and str(
+                organization_id
+            ) in scoped_org_ids:
+                return True
+            return False
+        if organization_ids is not None:
+            return organization_id is not None and str(organization_id) in scoped_org_ids
+        return True
+
     def create_organization(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         record = OrganizationProfile.model_validate(
             {
@@ -223,12 +247,28 @@ class PlatformStore:
             "updated_at": row[9],
         }
 
-    def list_workspaces(self, *, organization_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_workspaces(
+        self,
+        *,
+        organization_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = [
                 item
                 for item in self._workspaces.values()
                 if organization_id is None or str(item.get("organization_id")) == str(organization_id)
+            ]
+            rows = [
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
             ]
             rows.sort(key=lambda item: item.get("created_at", 0), reverse=True)
             return [sanitize_payload(item) for item in rows]
@@ -237,6 +277,12 @@ class PlatformStore:
         if organization_id is not None:
             clauses.append("organization_id=%s")
             params.append(organization_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         rows = db.safe_fetchall(
             f"""
             SELECT workspace_id, organization_id, name, audience_type, report_profile,
@@ -263,9 +309,23 @@ class PlatformStore:
             for row in rows
         ]
 
-    def get_workspace(self, workspace_id: str) -> Optional[Dict[str, Any]]:
+    def get_workspace(
+        self,
+        workspace_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
-            return self._workspaces.get(str(workspace_id))
+            item = self._workspaces.get(str(workspace_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return item
+            return None
         row = db.safe_fetchone(
             """
             SELECT workspace_id, organization_id, name, audience_type, report_profile,
@@ -277,7 +337,7 @@ class PlatformStore:
         )
         if not row:
             return None
-        return {
+        result = {
             "workspace_id": str(row[0]),
             "organization_id": str(row[1]),
             "name": row[2],
@@ -289,6 +349,14 @@ class PlatformStore:
             "created_at": row[8],
             "updated_at": row[9],
         }
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
 
     def upsert_coverage_entity(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         entity = CoverageEntity.model_validate(payload).model_dump(mode="python")
@@ -448,13 +516,38 @@ class PlatformStore:
             "updated_at": row[11],
         }
 
-    def list_workflows(self, *, workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def list_workflows(
+        self,
+        *,
+        workspace_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = [
                 item
                 for item in self._workflows.values()
                 if workspace_id is None or str(item.get("workspace_id")) == str(workspace_id)
             ]
+            scoped_workspace_ids = set(str(item) for item in workspace_ids or [])
+            if scoped_workspace_ids:
+                rows = [
+                    item
+                    for item in rows
+                    if str(item.get("workspace_id")) in scoped_workspace_ids
+                ]
+            elif organization_ids:
+                scoped_org_ids = set(str(item) for item in organization_ids or [])
+                rows = [
+                    item
+                    for item in rows
+                    if str(
+                        (self._workspaces.get(str(item.get("workspace_id"))) or {}).get(
+                            "organization_id"
+                        )
+                    )
+                    in scoped_org_ids
+                ]
             rows.sort(key=lambda item: item.get("created_at", 0), reverse=True)
             return [sanitize_payload(item) for item in rows]
         clauses = ["1=1"]
@@ -462,11 +555,20 @@ class PlatformStore:
         if workspace_id is not None:
             clauses.append("workspace_id=%s")
             params.append(workspace_id)
+        join = ""
+        if organization_ids:
+            join = "JOIN workspaces ws ON ws.workspace_id = workflow_instances.workspace_id"
+            clauses.append("ws.organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workflow_instances.workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         rows = db.safe_fetchall(
             f"""
             SELECT workflow_id, workspace_id, workflow_template_id, title, status, stage,
                    priority, owner_placeholder, metadata, stage_state, created_at, updated_at
             FROM workflow_instances
+            {join}
             WHERE {' AND '.join(clauses)}
             ORDER BY updated_at DESC, created_at DESC
             """,
@@ -490,9 +592,28 @@ class PlatformStore:
             for row in rows
         ]
 
-    def get_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+    def get_workflow(
+        self,
+        workflow_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
-            return self._workflows.get(str(workflow_id))
+            item = self._workflows.get(str(workflow_id))
+            if item is None:
+                return None
+            if workspace_ids and str(item.get("workspace_id")) not in {
+                str(value) for value in workspace_ids
+            }:
+                if not organization_ids:
+                    return None
+                workspace = self._workspaces.get(str(item.get("workspace_id"))) or {}
+                if str(workspace.get("organization_id")) not in {
+                    str(value) for value in organization_ids
+                }:
+                    return None
+            return item
         row = db.safe_fetchone(
             """
             SELECT workflow_id, workspace_id, workflow_template_id, title, status, stage,
@@ -504,7 +625,7 @@ class PlatformStore:
         )
         if not row:
             return None
-        return {
+        result = {
             "workflow_id": str(row[0]),
             "workspace_id": str(row[1]),
             "workflow_template_id": row[2],
@@ -518,6 +639,17 @@ class PlatformStore:
             "created_at": row[10],
             "updated_at": row[11],
         }
+        if workspace_ids and str(result.get("workspace_id")) not in {
+            str(value) for value in workspace_ids
+        }:
+            if not organization_ids:
+                return None
+            workspace = self.get_workspace(str(result.get("workspace_id")))
+            if str((workspace or {}).get("organization_id")) not in {
+                str(value) for value in organization_ids
+            }:
+                return None
+        return result
 
     def create_dossier(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         record = DossierRecord.model_validate(payload).model_dump(mode="python")
@@ -616,9 +748,28 @@ class PlatformStore:
         merged["dossier_id"] = dossier_id
         return self.create_dossier(merged)
 
-    def get_dossier(self, dossier_id: str) -> Optional[Dict[str, Any]]:
+    def get_dossier(
+        self,
+        dossier_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
-            return self._dossiers.get(str(dossier_id))
+            item = self._dossiers.get(str(dossier_id))
+            if item is None:
+                return None
+            if workspace_ids or organization_ids:
+                workflow = self._workflows.get(str(item.get("workflow_id"))) or {}
+                workspace = self._workspaces.get(str(workflow.get("workspace_id"))) or {}
+                if not self._matches_scope(
+                    organization_id=workspace.get("organization_id"),
+                    workspace_id=workflow.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                ):
+                    return None
+            return item
         row = db.safe_fetchone(
             """
             SELECT dossier_id, workflow_id, entity_id, dossier_type, title, current_summary,
@@ -633,13 +784,24 @@ class PlatformStore:
         )
         if not row:
             return None
-        return self._row_to_dossier(row)
+        result = self._row_to_dossier(row)
+        if workspace_ids or organization_ids:
+            workflow = self.get_workflow(
+                str(result.get("workflow_id")),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            )
+            if workflow is None:
+                return None
+        return result
 
     def list_dossiers(
         self,
         *,
         workspace_id: Optional[str] = None,
         workflow_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
         if self.use_memory:
@@ -653,6 +815,22 @@ class PlatformStore:
                     if str(workflow.get("workspace_id")) == str(workspace_id)
                 }
                 rows = [row for row in rows if str(row.get("workflow_id")) in workflow_ids]
+            if workspace_ids or organization_ids:
+                allowed_workflow_ids = {
+                    workflow["workflow_id"]
+                    for workflow in self._workflows.values()
+                    if self._matches_scope(
+                        organization_id=(
+                            self._workspaces.get(str(workflow.get("workspace_id"))) or {}
+                        ).get("organization_id"),
+                        workspace_id=workflow.get("workspace_id"),
+                        organization_ids=organization_ids,
+                        workspace_ids=workspace_ids,
+                    )
+                }
+                rows = [
+                    row for row in rows if str(row.get("workflow_id")) in allowed_workflow_ids
+                ]
             rows.sort(key=lambda item: item.get("updated_at", 0), reverse=True)
             return [sanitize_payload(item) for item in rows[:limit]]
         clauses = ["1=1"]
@@ -663,6 +841,12 @@ class PlatformStore:
         if workspace_id is not None:
             clauses.append("w.workspace_id=%s")
             params.append(workspace_id)
+        if organization_ids:
+            clauses.append("w.organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("w.workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         params.append(limit)
         rows = db.safe_fetchall(
             f"""
@@ -840,6 +1024,7 @@ class PlatformStore:
         user_id: str,
         organization_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        include_org_fallback: bool = True,
     ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
             candidates = [
@@ -850,6 +1035,15 @@ class PlatformStore:
                 and (workspace_id is None or str(item.get("workspace_id")) == str(workspace_id))
                 and str(item.get("status") or "active") == "active"
             ]
+            if not candidates and include_org_fallback and organization_id is not None:
+                candidates = [
+                    item
+                    for item in self._memberships.values()
+                    if str(item.get("user_id")) == str(user_id)
+                    and str(item.get("organization_id")) == str(organization_id)
+                    and item.get("workspace_id") in {None, ""}
+                    and str(item.get("status") or "active") == "active"
+                ]
             candidates.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
             return sanitize_payload(candidates[0]) if candidates else None
         clauses = ["user_id=%s", "status='active'"]
@@ -870,6 +1064,17 @@ class PlatformStore:
             """,
             params,
         )
+        if not row and include_org_fallback and organization_id is not None and workspace_id is not None:
+            row = db.safe_fetchone(
+                """
+                SELECT membership_id, user_id, organization_id, workspace_id, role, permissions, status, metadata, created_at, updated_at
+                FROM platform_memberships
+                WHERE user_id=%s AND organization_id=%s AND workspace_id IS NULL AND status='active'
+                ORDER BY updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (user_id, organization_id),
+            )
         if not row:
             return None
         return {
@@ -888,11 +1093,14 @@ class PlatformStore:
     def list_memberships(
         self,
         *,
+        user_id: Optional[str] = None,
         organization_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = list(self._memberships.values())
+            if user_id is not None:
+                rows = [row for row in rows if str(row.get("user_id")) == str(user_id)]
             if organization_id is not None:
                 rows = [row for row in rows if str(row.get("organization_id")) == str(organization_id)]
             if workspace_id is not None:
@@ -901,6 +1109,9 @@ class PlatformStore:
             return [sanitize_payload(item) for item in rows]
         clauses = ["1=1"]
         params: List[Any] = []
+        if user_id is not None:
+            clauses.append("user_id=%s")
+            params.append(user_id)
         if organization_id is not None:
             clauses.append("organization_id=%s")
             params.append(organization_id)
@@ -1089,9 +1300,9 @@ class PlatformStore:
             """
             INSERT INTO platform_audit_events (
                 event_id, event_type, resource_type, resource_id, organization_id, workspace_id,
-                actor, event_ts, payload, rationale, metadata
+                session_id, auth_mode, actor, event_ts, payload, rationale, metadata
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, COALESCE(%s::timestamptz, now()), %s::jsonb, %s, %s::jsonb)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, COALESCE(%s::timestamptz, now()), %s::jsonb, %s, %s::jsonb)
             ON CONFLICT (event_id)
             DO UPDATE SET
                 event_type = EXCLUDED.event_type,
@@ -1099,13 +1310,15 @@ class PlatformStore:
                 resource_id = EXCLUDED.resource_id,
                 organization_id = EXCLUDED.organization_id,
                 workspace_id = EXCLUDED.workspace_id,
+                session_id = EXCLUDED.session_id,
+                auth_mode = EXCLUDED.auth_mode,
                 actor = EXCLUDED.actor,
                 event_ts = EXCLUDED.event_ts,
                 payload = EXCLUDED.payload,
                 rationale = EXCLUDED.rationale,
                 metadata = EXCLUDED.metadata
             RETURNING event_id, event_type, resource_type, resource_id, organization_id, workspace_id,
-                actor, event_ts, payload, rationale, metadata
+                session_id, auth_mode, actor, event_ts, payload, rationale, metadata
             """,
             (
                 record["event_id"],
@@ -1114,6 +1327,8 @@ class PlatformStore:
                 record.get("resource_id"),
                 record.get("organization_id"),
                 record.get("workspace_id"),
+                record.get("session_id"),
+                record.get("auth_mode"),
                 Json(sanitize_payload(record.get("actor") or {})),
                 record.get("timestamp"),
                 Json(sanitize_payload(record.get("payload") or {})),
@@ -1128,25 +1343,45 @@ class PlatformStore:
             "resource_id": str(row[3]) if row[3] is not None else None,
             "organization_id": str(row[4]) if row[4] is not None else None,
             "workspace_id": str(row[5]) if row[5] is not None else None,
-            "actor": sanitize_payload(row[6]) if row[6] is not None else {},
-            "timestamp": row[7],
-            "payload": sanitize_payload(row[8]) if row[8] is not None else {},
-            "rationale": row[9],
-            "metadata": sanitize_payload(row[10]) if row[10] is not None else {},
+            "session_id": row[6],
+            "auth_mode": row[7],
+            "actor": sanitize_payload(row[8]) if row[8] is not None else {},
+            "timestamp": row[9],
+            "payload": sanitize_payload(row[10]) if row[10] is not None else {},
+            "rationale": row[11],
+            "metadata": sanitize_payload(row[12]) if row[12] is not None else {},
         }
 
     def list_audit_events(
         self,
         *,
+        organization_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
         workspace_id: Optional[str] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
         resource_type: Optional[str] = None,
         resource_id: Optional[str] = None,
         limit: int = 200,
     ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = list(self._audit_events)
+            if organization_id is not None:
+                rows = [
+                    row for row in rows if str(row.get("organization_id")) == str(organization_id)
+                ]
             if workspace_id is not None:
                 rows = [row for row in rows if str(row.get("workspace_id")) == str(workspace_id)]
+            if organization_ids or workspace_ids:
+                rows = [
+                    row
+                    for row in rows
+                    if self._matches_scope(
+                        organization_id=row.get("organization_id"),
+                        workspace_id=row.get("workspace_id"),
+                        organization_ids=organization_ids,
+                        workspace_ids=workspace_ids,
+                    )
+                ]
             if resource_type is not None:
                 rows = [row for row in rows if str(row.get("resource_type")) == str(resource_type)]
             if resource_id is not None:
@@ -1155,9 +1390,18 @@ class PlatformStore:
             return [sanitize_payload(item) for item in rows[:limit]]
         clauses = ["1=1"]
         params: List[Any] = []
+        if organization_id is not None:
+            clauses.append("organization_id=%s")
+            params.append(organization_id)
         if workspace_id is not None:
             clauses.append("workspace_id=%s")
             params.append(workspace_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         if resource_type is not None:
             clauses.append("resource_type=%s")
             params.append(resource_type)
@@ -1168,7 +1412,7 @@ class PlatformStore:
         rows = db.safe_fetchall(
             f"""
             SELECT event_id, event_type, resource_type, resource_id, organization_id, workspace_id,
-                   actor, event_ts, payload, rationale, metadata
+                   session_id, auth_mode, actor, event_ts, payload, rationale, metadata
             FROM platform_audit_events
             WHERE {' AND '.join(clauses)}
             ORDER BY event_ts DESC
@@ -1184,11 +1428,13 @@ class PlatformStore:
                 "resource_id": str(row[3]) if row[3] is not None else None,
                 "organization_id": str(row[4]) if row[4] is not None else None,
                 "workspace_id": str(row[5]) if row[5] is not None else None,
-                "actor": sanitize_payload(row[6]) if row[6] is not None else {},
-                "timestamp": row[7],
-                "payload": sanitize_payload(row[8]) if row[8] is not None else {},
-                "rationale": row[9],
-                "metadata": sanitize_payload(row[10]) if row[10] is not None else {},
+                "session_id": row[6],
+                "auth_mode": row[7],
+                "actor": sanitize_payload(row[8]) if row[8] is not None else {},
+                "timestamp": row[9],
+                "payload": sanitize_payload(row[10]) if row[10] is not None else {},
+                "rationale": row[11],
+                "metadata": sanitize_payload(row[12]) if row[12] is not None else {},
             }
             for row in rows
         ]
@@ -1275,23 +1521,55 @@ class PlatformStore:
             "status": row[17],
         }
 
-    def list_export_manifests(self, dossier_id: str) -> List[Dict[str, Any]]:
+    def list_export_manifests(
+        self,
+        dossier_id: Optional[str] = None,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
         if self.use_memory:
+            rows = list(self._export_manifests.values())
+            if dossier_id is not None:
+                rows = [
+                    item
+                    for item in rows
+                    if str(item.get("dossier_id")) == str(dossier_id)
+                ]
             rows = [
-                item for item in self._export_manifests.values() if str(item.get("dossier_id")) == str(dossier_id)
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_context", {}).get("organization_id")
+                    or item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
             ]
             rows.sort(key=lambda item: item.get("generated_at", ""), reverse=True)
             return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("(organization_context->>'organization_id') = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         rows = db.safe_fetchall(
-            """
+            f"""
             SELECT export_id, dossier_id, workflow_id, workspace_id, pack_type, title, subtitle,
                    generated_at, framework_version, organization_context, workspace_context, entity_context,
                    approval_status, evidence_summary, ordered_sections, metadata, content_hash, status
             FROM platform_export_packs
-            WHERE dossier_id=%s
+            WHERE {' AND '.join(clauses)}
             ORDER BY generated_at DESC
             """,
-            (dossier_id,),
+            params,
         )
         return [
             {
@@ -1317,9 +1595,24 @@ class PlatformStore:
             for row in rows
         ]
 
-    def get_export_manifest(self, export_id: str) -> Optional[Dict[str, Any]]:
+    def get_export_manifest(
+        self,
+        export_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
-            return self._export_manifests.get(str(export_id))
+            item = self._export_manifests.get(str(export_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_context", {}).get("organization_id")
+                or item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return item
+            return None
         row = db.safe_fetchone(
             """
             SELECT export_id, dossier_id, workflow_id, workspace_id, pack_type, title, subtitle,
@@ -1332,7 +1625,7 @@ class PlatformStore:
         )
         if not row:
             return None
-        return {
+        result = {
             "export_id": str(row[0]),
             "dossier_id": str(row[1]),
             "workflow_id": str(row[2]) if row[2] is not None else None,
@@ -1352,6 +1645,14 @@ class PlatformStore:
             "content_hash": row[16],
             "status": row[17],
         }
+        if not self._matches_scope(
+            organization_id=result.get("organization_context", {}).get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
 
     def create_rendered_export(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         record = RenderedExportResult.model_validate(payload).model_dump(mode="python")
@@ -1406,9 +1707,23 @@ class PlatformStore:
             "metadata": sanitize_payload(row[9]) if row[9] is not None else {},
         }
 
-    def get_rendered_export(self, render_id: str) -> Optional[Dict[str, Any]]:
+    def get_rendered_export(
+        self,
+        render_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
-            return self._rendered_exports.get(str(render_id))
+            item = self._rendered_exports.get(str(render_id))
+            if item is None:
+                return None
+            export = self.get_export_manifest(
+                str(item.get("export_id") or ""),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            )
+            return item if export is not None else None
         row = db.safe_fetchone(
             """
             SELECT render_id, export_id, export_format, content_type, rendered_content,
@@ -1420,7 +1735,7 @@ class PlatformStore:
         )
         if not row:
             return None
-        return {
+        result = {
             "render_id": str(row[0]),
             "export_id": str(row[1]),
             "export_format": row[2],
@@ -1432,16 +1747,35 @@ class PlatformStore:
             "generated_at": row[8],
             "metadata": sanitize_payload(row[9]) if row[9] is not None else {},
         }
+        export = self.get_export_manifest(
+            str(result.get("export_id") or ""),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        return result if export is not None else None
 
     def list_rendered_exports(
         self,
         *,
         export_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = list(self._rendered_exports.values())
             if export_id is not None:
                 rows = [row for row in rows if str(row.get("export_id")) == str(export_id)]
+            if organization_ids or workspace_ids:
+                rows = [
+                    row
+                    for row in rows
+                    if self.get_export_manifest(
+                        str(row.get("export_id") or ""),
+                        organization_ids=organization_ids,
+                        workspace_ids=workspace_ids,
+                    )
+                    is not None
+                ]
             rows.sort(key=lambda item: item.get("generated_at", ""), reverse=True)
             return [sanitize_payload(item) for item in rows]
         clauses = ["1=1"]
@@ -1529,6 +1863,8 @@ class PlatformStore:
         *,
         organization_id: Optional[str] = None,
         workspace_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = list(self._integration_bindings.values())
@@ -1536,6 +1872,16 @@ class PlatformStore:
                 rows = [row for row in rows if str(row.get("organization_id")) == str(organization_id)]
             if workspace_id is not None:
                 rows = [row for row in rows if str(row.get("workspace_id")) == str(workspace_id)]
+            rows = [
+                row
+                for row in rows
+                if self._matches_scope(
+                    organization_id=row.get("organization_id"),
+                    workspace_id=row.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
             rows.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
             return [sanitize_payload(item) for item in rows]
         clauses = ["1=1"]
@@ -1546,6 +1892,12 @@ class PlatformStore:
         if workspace_id is not None:
             clauses.append("workspace_id=%s")
             params.append(workspace_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         rows = db.safe_fetchall(
             f"""
             SELECT binding_id, integration_type, organization_id, workspace_id, status, config, health, metadata, created_at, updated_at
@@ -1571,9 +1923,23 @@ class PlatformStore:
             for row in rows
         ]
 
-    def get_integration_binding(self, binding_id: str) -> Optional[Dict[str, Any]]:
+    def get_integration_binding(
+        self,
+        binding_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         if self.use_memory:
-            return self._integration_bindings.get(str(binding_id))
+            item = self._integration_bindings.get(str(binding_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return item
+            return None
         row = db.safe_fetchone(
             """
             SELECT binding_id, integration_type, organization_id, workspace_id, status, config, health, metadata, created_at, updated_at
@@ -1584,7 +1950,7 @@ class PlatformStore:
         )
         if not row:
             return None
-        return {
+        result = {
             "binding_id": str(row[0]),
             "integration_type": row[1],
             "organization_id": str(row[2]) if row[2] is not None else None,
@@ -1596,6 +1962,14 @@ class PlatformStore:
             "created_at": row[8],
             "updated_at": row[9],
         }
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
 
     def update_integration_binding(self, binding_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         merged = {**(self.get_integration_binding(binding_id) or {}), **sanitize_payload(payload)}
@@ -1680,25 +2054,49 @@ class PlatformStore:
             "metadata": sanitize_payload(row[15]) if row[15] is not None else {},
         }
 
-    def list_integration_executions(self, binding_id: str) -> List[Dict[str, Any]]:
+    def list_integration_executions(
+        self,
+        binding_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
         if self.use_memory:
             rows = [
                 item
                 for item in self._integration_executions.values()
                 if str(item.get("binding_id")) == str(binding_id)
             ]
+            rows = [
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
             rows.sort(key=lambda item: item.get("completed_at", ""), reverse=True)
             return [sanitize_payload(item) for item in rows]
+        clauses = ["binding_id=%s"]
+        params: List[Any] = [binding_id]
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
         rows = db.safe_fetchall(
-            """
+            f"""
             SELECT execution_id, binding_id, integration_type, action_type, status, workspace_id,
                    organization_id, dossier_id, export_id, render_id, started_at, completed_at,
                    payload_summary, output_summary, error_summary, metadata
             FROM platform_integration_executions
-            WHERE binding_id=%s
+            WHERE {' AND '.join(clauses)}
             ORDER BY completed_at DESC
             """,
-            (binding_id,),
+            params,
         )
         return [
             {

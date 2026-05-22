@@ -155,6 +155,12 @@ class ResourceRef(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ScopedResourceRef(ResourceRef):
+    required_organization_id: Optional[str] = None
+    required_workspace_id: Optional[str] = None
+    tenant_scope_required: bool = True
+
+
 class PermissionSet(BaseModel):
     permissions: List[str] = Field(default_factory=list)
 
@@ -169,12 +175,19 @@ class RoleDefinition(BaseModel):
 class UserContext(BaseModel):
     user_id: str
     user_name: Optional[str] = None
+    email: Optional[str] = None
+    username: Optional[str] = None
     organization_id: Optional[str] = None
     workspace_id: Optional[str] = None
+    organization_ids: List[str] = Field(default_factory=list)
+    workspace_ids: List[str] = Field(default_factory=list)
     role: str = "service_account"
     permissions: List[str] = Field(default_factory=list)
     auth_mode: str = "development"
     is_system: bool = False
+    session_id: Optional[str] = None
+    role_bindings: List[Dict[str, Any]] = Field(default_factory=list)
+    request_metadata: Dict[str, Any] = Field(default_factory=dict)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -191,6 +204,46 @@ class MembershipRecord(BaseModel):
     updated_at: Optional[str] = None
 
 
+class AuthenticatedUser(BaseModel):
+    user_id: str
+    user_name: Optional[str] = None
+    email: Optional[str] = None
+    username: Optional[str] = None
+    auth_mode: str = "development"
+    is_system: bool = False
+
+
+class TenantContext(BaseModel):
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    organization_ids: List[str] = Field(default_factory=list)
+    workspace_ids: List[str] = Field(default_factory=list)
+    role_bindings: List[Dict[str, Any]] = Field(default_factory=list)
+    is_scoped: bool = False
+    fallback_used: bool = False
+    scope_summary: str = "unscoped"
+
+
+class SessionContext(BaseModel):
+    session_id: Optional[str] = None
+    actor: AuthenticatedUser
+    tenant: TenantContext
+    role: str = "service_account"
+    permissions: List[str] = Field(default_factory=list)
+    auth_mode: str = "development"
+    is_system: bool = False
+    request_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AuthResolution(BaseModel):
+    session: SessionContext
+    user_context: UserContext
+    auth_headers_present: bool = False
+    fallback_used: bool = False
+    enforcement_mode: str = "development_fallback"
+    effective_membership: Optional[MembershipRecord] = None
+
+
 class AccessDecision(BaseModel):
     allowed: bool
     permission: str
@@ -201,6 +254,11 @@ class AccessDecision(BaseModel):
     missing_permissions: List[str] = Field(default_factory=list)
     membership: Optional[MembershipRecord] = None
     resource: Optional[ResourceRef] = None
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    auth_mode: Optional[str] = None
+    actor_user_id: Optional[str] = None
+    tenant_scope_summary: Optional[str] = None
 
 
 class AuditEvent(BaseModel):
@@ -210,6 +268,8 @@ class AuditEvent(BaseModel):
     resource_id: Optional[str] = None
     organization_id: Optional[str] = None
     workspace_id: Optional[str] = None
+    session_id: Optional[str] = None
+    auth_mode: Optional[str] = None
     actor: Dict[str, Any] = Field(default_factory=dict)
     timestamp: Optional[str] = None
     payload: Dict[str, Any] = Field(default_factory=dict)

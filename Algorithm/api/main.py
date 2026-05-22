@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from psycopg.types.json import Json
+from starlette.responses import JSONResponse
 
 from api import db, lifecycle, security
 from api.db import DBError
@@ -1903,9 +1904,22 @@ async def http_exception_handler(request: Request, exc: HTTPException):
     detail_msg = (
         exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc.detail)
     )
-    return security.json_error_response(
-        "http_error", detail_msg, trace_id, exc.status_code
-    )
+    if isinstance(exc.detail, dict):
+        payload = {
+            "error": {
+                "type": "http_error",
+                "message": detail_msg or exc.detail.get("reason"),
+                "detail": exc.detail,
+                "trace_id": trace_id,
+            },
+            "trace_id": trace_id,
+        }
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=payload,
+            headers={"X-Trace-Id": trace_id},
+        )
+    return security.json_error_response("http_error", detail_msg, trace_id, exc.status_code)
 
 
 @app.exception_handler(RequestValidationError)
