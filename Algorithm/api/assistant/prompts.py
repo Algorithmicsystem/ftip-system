@@ -64,6 +64,9 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Platform dashboard: {report.get('platform_dashboard_summary', 'n/a')}.",
             f"Platform analytics: {report.get('platform_analytics_summary', 'n/a')}.",
             f"Platform demo readiness: {report.get('platform_demo_readiness_summary', 'n/a')}.",
+            f"Platform bootstrap: {report.get('platform_bootstrap_summary_text', 'n/a')}.",
+            f"Platform readiness report: {report.get('platform_readiness_report_summary', 'n/a')}.",
+            f"Platform pilot package: {report.get('platform_pilot_package_summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -114,8 +117,13 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "platform_workspace_analytics": report.get("platform_workspace_analytics"),
         "platform_cross_workspace_analytics": report.get("platform_cross_workspace_analytics"),
         "platform_dashboard": report.get("platform_dashboard"),
+        "platform_bootstrap_summary": report.get("platform_bootstrap_summary"),
+        "platform_bootstrap_templates": report.get("platform_bootstrap_templates"),
+        "platform_demo_bundles": report.get("platform_demo_bundles"),
         "platform_demo_snapshot": report.get("platform_demo_snapshot"),
         "platform_readiness_snapshot": report.get("platform_readiness_snapshot"),
+        "platform_readiness_report": report.get("platform_readiness_report"),
+        "platform_pilot_package": report.get("platform_pilot_package"),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -202,6 +210,16 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "platform_demo_readiness_summary": report.get(
             "platform_demo_readiness_summary"
         ),
+        "platform_bootstrap_summary_text": report.get(
+            "platform_bootstrap_summary_text"
+        ),
+        "platform_readiness_report_summary": report.get(
+            "platform_readiness_report_summary"
+        ),
+        "platform_pilot_package_summary": report.get(
+            "platform_pilot_package_summary"
+        ),
+        "platform_demo_bundle_summary": report.get("platform_demo_bundle_summary"),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
         "monthly_operating_summary": report.get("monthly_operating_summary"),

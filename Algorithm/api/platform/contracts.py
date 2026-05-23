@@ -128,9 +128,13 @@ class PlatformProfile(BaseModel):
     audience_type: str
     default_workflow_template: str
     default_report_profile: str
+    default_workspace_name_pattern: Optional[str] = None
     default_memo_emphasis: List[str] = Field(default_factory=list)
+    default_dashboard_emphasis: List[str] = Field(default_factory=list)
+    default_export_pack_emphasis: List[str] = Field(default_factory=list)
     preferred_axiom_sections: List[str] = Field(default_factory=list)
     preferred_dossier_sections: List[str] = Field(default_factory=list)
+    pilot_bootstrap_defaults: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PlatformSummaryView(BaseModel):
@@ -641,6 +645,120 @@ class PlatformReadinessSnapshot(BaseModel):
     rationale: Optional[str] = None
 
 
+class DemoSeedBundle(BaseModel):
+    bundle_id: str
+    platform_profile: str
+    audience_type: str
+    workflow_template_id: str
+    title: str
+    description: str
+    seeded_entities: List[Dict[str, Any]] = Field(default_factory=list)
+    default_export_packs: List[str] = Field(default_factory=list)
+    default_dashboard_emphasis: List[str] = Field(default_factory=list)
+    default_dossier_sections: List[str] = Field(default_factory=list)
+    walkthrough_hints: List[str] = Field(default_factory=list)
+    readiness_narrative: Optional[str] = None
+    includes_comments: bool = True
+    includes_committee_state: bool = True
+    includes_exports: bool = True
+    includes_integrations: bool = False
+    demo_seeded: bool = True
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceBootstrapSummary(BaseModel):
+    organization_created: bool = False
+    workspace_created: bool = False
+    platform_profile: str
+    workflow_template_id: str
+    demo_bundle_id: Optional[str] = None
+    demo_seeded: bool = False
+    seeded_workflow_count: int = 0
+    seeded_dossier_count: int = 0
+    seeded_export_count: int = 0
+    seeded_stored_export_count: int = 0
+    seeded_integration_count: int = 0
+    warnings: List[str] = Field(default_factory=list)
+    walkthrough_hints: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+
+
+class ReadinessWarning(BaseModel):
+    category: str
+    severity: str = "warning"
+    message: str
+    remediation: Optional[str] = None
+    blocking: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class DeploymentReadinessCheck(BaseModel):
+    check_key: str
+    label: str
+    status: str = "partial"
+    summary: str
+    severity: str = "warning"
+    remediation_notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReadinessCategoryResult(BaseModel):
+    category: str
+    status: str = "partial"
+    score: Optional[float] = None
+    summary: str
+    warnings: List[ReadinessWarning] = Field(default_factory=list)
+    remediation_notes: List[str] = Field(default_factory=list)
+    checks: List[DeploymentReadinessCheck] = Field(default_factory=list)
+
+
+class DeploymentReadinessReport(BaseModel):
+    platform_version: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    overall_status: str = "partial"
+    overall_score: Optional[float] = None
+    pilot_ready: bool = False
+    generated_at: Optional[str] = None
+    categories: List[ReadinessCategoryResult] = Field(default_factory=list)
+    warnings: List[ReadinessWarning] = Field(default_factory=list)
+    remediation_notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PilotPackageSummary(BaseModel):
+    platform_version: str
+    organization: Dict[str, Any] = Field(default_factory=dict)
+    workspace: Dict[str, Any] = Field(default_factory=dict)
+    platform_profile: Dict[str, Any] = Field(default_factory=dict)
+    workflow_template: Dict[str, Any] = Field(default_factory=dict)
+    workspace_summary: Dict[str, Any] = Field(default_factory=dict)
+    top_dossiers: List[Dict[str, Any]] = Field(default_factory=list)
+    export_summary: Dict[str, Any] = Field(default_factory=dict)
+    collaboration_summary: Dict[str, Any] = Field(default_factory=dict)
+    integration_summary: Dict[str, Any] = Field(default_factory=dict)
+    readiness_categories: List[ReadinessCategoryResult] = Field(default_factory=list)
+    top_warnings: List[ReadinessWarning] = Field(default_factory=list)
+    walkthrough_hints: List[str] = Field(default_factory=list)
+    pilot_ready: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PilotBootstrapResult(BaseModel):
+    platform_version: str
+    organization: Dict[str, Any] = Field(default_factory=dict)
+    workspace: Dict[str, Any] = Field(default_factory=dict)
+    platform_profile: Dict[str, Any] = Field(default_factory=dict)
+    workflow_template: Dict[str, Any] = Field(default_factory=dict)
+    demo_bundle: Optional[Dict[str, Any]] = None
+    seeded_workflows: List[Dict[str, Any]] = Field(default_factory=list)
+    seeded_dossiers: List[Dict[str, Any]] = Field(default_factory=list)
+    bootstrap_summary: WorkspaceBootstrapSummary
+    readiness_report: Optional[DeploymentReadinessReport] = None
+    pilot_package: Optional[PilotPackageSummary] = None
+
+
 class ReviewComment(BaseModel):
     comment_id: str
     organization_id: Optional[str] = None
@@ -837,6 +955,30 @@ class CreateWorkspaceRequest(BaseModel):
     default_workflow_template: Optional[str] = None
     platform_profile: str = "research_core"
     settings: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PilotBootstrapRequest(BaseModel):
+    organization_id: Optional[str] = None
+    organization_name: Optional[str] = None
+    organization_type: Optional[str] = None
+    workspace_name: Optional[str] = None
+    audience_type: Optional[str] = None
+    report_profile: Optional[str] = None
+    platform_profile: str = "research_core"
+    workflow_template_id: Optional[str] = None
+    demo_bundle_id: Optional[str] = None
+    seed_demo_bundle: bool = False
+    include_exports: bool = True
+    include_integrations: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ApplyDemoBundleRequest(BaseModel):
+    workspace_id: str
+    workflow_template_id: Optional[str] = None
+    include_exports: bool = True
+    include_integrations: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateWorkflowRequest(BaseModel):

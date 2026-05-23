@@ -2654,8 +2654,16 @@ def attach_platform_context(
     workspace_analytics = dict(platform_context.get("workspace_analytics") or {})
     platform_analytics = dict(platform_context.get("platform_analytics") or {})
     dashboard = dict(platform_context.get("dashboard") or {})
+    bootstrap_summary = dict(platform_context.get("bootstrap_summary") or {})
+    bootstrap_profile_defaults = dict(
+        platform_context.get("bootstrap_profile_defaults") or {}
+    )
+    bootstrap_templates = list(platform_context.get("bootstrap_templates") or [])
+    demo_bundles = list(platform_context.get("demo_bundles") or [])
     demo_snapshot = dict(platform_context.get("demo_snapshot") or {})
     readiness_snapshot = dict(platform_context.get("readiness_snapshot") or {})
+    readiness_report = dict(platform_context.get("readiness_report") or {})
+    pilot_package = dict(platform_context.get("pilot_package") or {})
     approvals = list(platform_context.get("approvals") or [])
     timeline = list(platform_context.get("timeline") or [])
     exports = list(platform_context.get("exports") or [])
@@ -2783,8 +2791,36 @@ def attach_platform_context(
         if assignment_summary or assignments
         else "No assignment state is attached."
     )
+    bootstrap_summary_text = (
+        f"Bootstrap profile {bootstrap_summary.get('platform_profile') or platform_profile.get('profile_id') or 'n/a'} "
+        f"seeded {bootstrap_summary.get('seeded_dossier_count', 0)} dossier(s), "
+        f"{bootstrap_summary.get('seeded_stored_export_count', 0)} stored export(s), and "
+        f"{bootstrap_summary.get('seeded_integration_count', 0)} integration execution path(s)."
+        if bootstrap_summary or bootstrap_profile_defaults
+        else "No pilot bootstrap summary is attached."
+    )
+    readiness_report_summary = (
+        f"Readiness is {readiness_report.get('overall_status') or 'partial'} with score "
+        f"{readiness_report.get('overall_score') if readiness_report.get('overall_score') is not None else 'n/a'} "
+        f"across {len(readiness_report.get('categories') or [])} category checks and "
+        f"{len(readiness_report.get('warnings') or [])} warning(s)."
+        if readiness_report
+        else "No deployment readiness report is attached."
+    )
+    pilot_package_summary = (
+        f"Pilot package covers {len(pilot_package.get('top_dossiers') or [])} top dossier(s), "
+        f"{((pilot_package.get('export_summary') or {}).get('stored_export_count')) or 0} stored export version(s), and "
+        f"pilot_ready={pilot_package.get('pilot_ready')}."
+        if pilot_package
+        else "No pilot package summary is attached."
+    )
+    demo_bundle_summary = (
+        f"Available demo bundles include {_fmt_list([item.get('bundle_id') for item in demo_bundles[:6]])}."
+        if demo_bundles
+        else "No demo bundle catalog is attached."
+    )
 
-    updated["report_version"] = "2.17"
+    updated["report_version"] = "2.18"
     updated["platform_foundation_version"] = platform_context.get(
         "platform_foundation_version"
     )
@@ -2818,8 +2854,16 @@ def attach_platform_context(
     updated["platform_workspace_analytics"] = sanitize_payload(workspace_analytics)
     updated["platform_cross_workspace_analytics"] = sanitize_payload(platform_analytics)
     updated["platform_dashboard"] = sanitize_payload(dashboard)
+    updated["platform_bootstrap_summary"] = sanitize_payload(bootstrap_summary)
+    updated["platform_bootstrap_profile_defaults"] = sanitize_payload(
+        bootstrap_profile_defaults
+    )
+    updated["platform_bootstrap_templates"] = sanitize_payload(bootstrap_templates)
+    updated["platform_demo_bundles"] = sanitize_payload(demo_bundles)
     updated["platform_demo_snapshot"] = sanitize_payload(demo_snapshot)
     updated["platform_readiness_snapshot"] = sanitize_payload(readiness_snapshot)
+    updated["platform_readiness_report"] = sanitize_payload(readiness_report)
+    updated["platform_pilot_package"] = sanitize_payload(pilot_package)
     updated["platform_review_comments"] = sanitize_payload(review_comments)
     updated["platform_review_summary"] = sanitize_payload(review_summary)
     updated["platform_assignments"] = sanitize_payload(assignments)
@@ -2841,6 +2885,10 @@ def attach_platform_context(
     updated["platform_dashboard_summary"] = dashboard_summary
     updated["platform_analytics_summary"] = analytics_summary
     updated["platform_demo_readiness_summary"] = demo_readiness_summary
+    updated["platform_bootstrap_summary_text"] = bootstrap_summary_text
+    updated["platform_readiness_report_summary"] = readiness_report_summary
+    updated["platform_pilot_package_summary"] = pilot_package_summary
+    updated["platform_demo_bundle_summary"] = demo_bundle_summary
     updated["platform_collaboration_summary"] = collaboration_summary
     updated["platform_committee_summary"] = committee_summary
     updated["platform_assignment_summary_text"] = assignment_summary_text
@@ -2851,6 +2899,8 @@ def attach_platform_context(
             dossier_summary,
             export_storage_summary,
             export_capability_summary,
+            bootstrap_summary_text,
+            readiness_report_summary,
             collaboration_summary,
             workflow_actions_summary,
             dashboard_summary,
@@ -2865,6 +2915,7 @@ def attach_platform_context(
             assignment_summary_text,
             analytics_summary,
             demo_readiness_summary,
+            pilot_package_summary,
         ]
     )
     updated["evidence_provenance"] = _join_sentences(
@@ -2876,6 +2927,7 @@ def attach_platform_context(
             export_summary,
             export_rendering_summary,
             integration_health_summary,
+            demo_bundle_summary,
         ]
     )
     evidence_map = dict(updated.get("evidence_map") or {})
@@ -2921,6 +2973,10 @@ def attach_platform_context(
         "platform.dashboard",
         "platform.workspace_analytics",
     ]
+    evidence_map["platform_bootstrap_summary_text"] = [
+        "platform.bootstrap_summary",
+        "platform.bootstrap_templates",
+    ]
     evidence_map["platform_analytics_summary"] = [
         "platform.platform_analytics",
         "platform.workspace_analytics",
@@ -2929,6 +2985,16 @@ def attach_platform_context(
         "platform.demo_snapshot",
         "platform.readiness_snapshot",
         "platform.health_summary",
+    ]
+    evidence_map["platform_readiness_report_summary"] = [
+        "platform.readiness_report",
+        "platform.health_summary",
+        "platform.integration_summary",
+    ]
+    evidence_map["platform_pilot_package_summary"] = [
+        "platform.pilot_package",
+        "platform.workspace_analytics",
+        "platform.stored_exports",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

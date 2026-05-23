@@ -3,6 +3,7 @@
 clients/
 __pycache__/
 *.pyc
+artifacts/
 
 # local env
 .env

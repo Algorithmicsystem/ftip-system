@@ -75,6 +75,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-platform-overview"' in html
     assert 'id="assistant-platform-dashboard"' in html
     assert 'id="assistant-platform-template-profile"' in html
+    assert 'id="assistant-platform-bootstrap"' in html
+    assert 'id="assistant-platform-readiness"' in html
+    assert 'id="assistant-platform-pilot-package"' in html
+    assert 'id="assistant-platform-demo-bundles"' in html
     assert 'id="assistant-platform-dossier-filters"' in html
     assert 'id="assistant-platform-dossiers"' in html
     assert 'id="assistant-platform-dossier-detail"' in html
@@ -151,6 +155,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderPlatformOverview" in js
     assert "renderPlatformDashboard" in js
     assert "renderPlatformTemplateProfile" in js
+    assert "renderPlatformBootstrap" in js
+    assert "renderPlatformReadiness" in js
+    assert "renderPlatformPilotPackage" in js
+    assert "renderPlatformDemoBundles" in js
     assert "renderPlatformDossiers" in js
     assert "renderPlatformDossierDetail" in js
     assert "renderPlatformMonitoring" in js
@@ -175,6 +183,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "platform_dashboard_summary" in js
     assert "platform_analytics_summary" in js
     assert "platform_demo_readiness_summary" in js
+    assert "platform_bootstrap_summary_text" in js
+    assert "platform_readiness_report_summary" in js
+    assert "platform_pilot_package_summary" in js
+    assert "platform_demo_bundle_summary" in js
     assert "platform_collaboration_summary" in js
     assert "platform_committee_summary" in js
     assert "platform_assignment_summary_text" in js
@@ -206,6 +218,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "create_dossier" in js
     assert "Stored Export History" in js
     assert "Export Capabilities" in js
+    assert "Pilot Package" in html
+    assert "Bootstrap / Provisioning" in html
+    assert "Demo Bundles" in html
 
 
 def test_recent_report_persistence_quota_failure_does_not_break_analyze_flow() -> None:

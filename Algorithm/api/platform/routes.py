@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query, Request
 
 from api.platform import service
 from api.platform.contracts import (
+    ApplyDemoBundleRequest,
     AttachAnalysisRequest,
     CommitteeDecisionRequest,
     CreateDossierRequest,
@@ -14,6 +15,7 @@ from api.platform.contracts import (
     CreateWorkspaceRequest,
     DossierExportRequest,
     IntegrationExecutionRequest,
+    PilotBootstrapRequest,
     RenderExportRequest,
     ResolveCommentRequest,
     ReviewCommentRequest,
@@ -40,6 +42,54 @@ def _user_context(request: Request) -> Dict[str, Any]:
 @router.get("/templates")
 def list_templates() -> Dict[str, Any]:
     return service.list_templates_service()
+
+
+@router.get("/bootstrap/templates")
+def bootstrap_templates() -> Dict[str, Any]:
+    return service.build_bootstrap_templates_service()
+
+
+@router.post("/bootstrap/workspace")
+def bootstrap_workspace(
+    payload: PilotBootstrapRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.bootstrap_workspace_service(
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/bootstrap/demo")
+def bootstrap_demo(
+    payload: PilotBootstrapRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.bootstrap_demo_service(
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/demo/bundles")
+def list_demo_bundles() -> Dict[str, Any]:
+    return service.list_demo_bundles_service()
+
+
+@router.post("/demo/bundles/{bundle_id}/apply")
+def apply_demo_bundle(
+    bundle_id: str,
+    payload: ApplyDemoBundleRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.apply_demo_bundle_service(
+        bundle_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
 
 
 @router.post("/workspaces")
@@ -609,6 +659,39 @@ def platform_health(
         workspace_id=workspace_id,
         user_context=_user_context(request),
         store=platform_store,
+    )
+
+
+@router.get("/readiness")
+def platform_readiness(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_deployment_readiness_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+        emit_audit=True,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/readiness")
+def workspace_readiness(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.build_deployment_readiness_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+        emit_audit=True,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/pilot-package")
+def workspace_pilot_package(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.build_workspace_pilot_package_service(
+        workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+        emit_audit=True,
     )
 
 

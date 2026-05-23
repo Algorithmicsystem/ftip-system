@@ -2975,6 +2975,239 @@ const renderPlatformTemplateProfile = (report) => {
   ].join("");
 };
 
+const renderPlatformBootstrap = (report) => {
+  const container = qs("#assistant-platform-bootstrap");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Workspace bootstrap defaults, seeded demo summary, and profile-driven provisioning context render here."
+    );
+    return;
+  }
+  const summary = report.platform_bootstrap_summary || {};
+  const defaults = report.platform_bootstrap_profile_defaults || {};
+  const bundles = report.platform_demo_bundles || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Bootstrap Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_bootstrap_summary_text,
+          `Profile ${summary.platform_profile || report.platform_profile || "n/a"}`,
+          `Workflow template ${summary.workflow_template_id || report.platform_workflow?.workflow_template_id || "n/a"}`,
+          `Seeded workflows ${summary.seeded_workflow_count ?? 0} / dossiers ${summary.seeded_dossier_count ?? 0}`,
+          `Seeded exports ${summary.seeded_export_count ?? 0} / stored exports ${
+            summary.seeded_stored_export_count ?? 0
+          } / integrations ${summary.seeded_integration_count ?? 0}`,
+        ].filter(Boolean),
+        "No bootstrap summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Profile Defaults</h5>
+      ${renderBullets(
+        [
+          `Workspace pattern ${defaults.default_workspace_name_pattern || "n/a"}`,
+          `Dashboard emphasis ${(defaults.default_dashboard_emphasis || []).join(", ") || "n/a"}`,
+          `Export emphasis ${(defaults.default_export_pack_emphasis || []).join(", ") || "n/a"}`,
+          `Preferred AXIOM sections ${(defaults.preferred_axiom_sections || []).join(", ") || "n/a"}`,
+          `Preferred dossier sections ${(defaults.preferred_dossier_sections || []).join(", ") || "n/a"}`,
+        ],
+        "No bootstrap profile defaults are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Walkthrough Hints</h5>
+      ${renderBullets(
+        summary.walkthrough_hints || [],
+        "No walkthrough hints are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Available Seed Bundles</h5>
+      ${renderBullets(
+        bundles.slice(0, 6).map(
+          (item) =>
+            `${item.bundle_id || "bundle"} / ${(item.workflow_template_id || "template").replaceAll("_", " ")} / ${
+              item.seeded_entities?.length || 0
+            } seeded entity(s)`
+        ),
+        "No demo bundle catalog is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformReadiness = (report) => {
+  const container = qs("#assistant-platform-readiness");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Deployment readiness categories, warnings, and remediation notes render here."
+    );
+    return;
+  }
+  const readiness = report.platform_readiness_report || {};
+  const snapshot = report.platform_readiness_snapshot || {};
+  const categories = readiness.categories || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Overall Readiness</h5>
+      ${renderBullets(
+        [
+          report.platform_readiness_report_summary,
+          `Pilot ready ${String(readiness.pilot_ready ?? snapshot.pilot_ready ?? false)}`,
+          `Status ${readiness.overall_status || "partial"} / score ${formatScore(readiness.overall_score, 1)}`,
+          `Legacy readiness ${snapshot.analysis_readiness || "partial"} / ${
+            snapshot.workflow_readiness || "partial"
+          } / ${snapshot.export_readiness || "partial"} / ${
+            snapshot.integration_readiness || "partial"
+          }`,
+        ].filter(Boolean),
+        "No readiness report is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Category Status</h5>
+      ${renderBullets(
+        categories.slice(0, 8).map(
+          (item) =>
+            `${item.category || "category"} / ${item.status || "partial"} / score ${formatScore(
+              item.score,
+              1
+            )} / ${item.summary || "no summary"}`
+        ),
+        "No readiness categories are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Warnings / Remediation</h5>
+      ${renderBullets(
+        [
+          ...((readiness.warnings || []).slice(0, 5).map(
+            (item) => `${item.category || "warning"} / ${item.severity || "warning"} / ${item.message || "n/a"}`
+          )),
+          ...((readiness.remediation_notes || []).slice(0, 4)),
+        ],
+        "No readiness warnings are attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformPilotPackage = (report) => {
+  const container = qs("#assistant-platform-pilot-package");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Pilot package profile, dossier counts, export counts, and walkthrough hints render here."
+    );
+    return;
+  }
+  const pilotPackage = report.platform_pilot_package || {};
+  const workspaceSummary = pilotPackage.workspace_summary || {};
+  const collaborationSummary = pilotPackage.collaboration_summary || {};
+  const exportSummary = pilotPackage.export_summary || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Pilot Package Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_pilot_package_summary,
+          `Workspace ${(pilotPackage.workspace || {}).name || report.platform_workspace?.name || "n/a"}`,
+          `Profile ${(pilotPackage.platform_profile || {}).profile_id || report.platform_profile || "n/a"}`,
+          `Workflow template ${(pilotPackage.workflow_template || {}).template_id || report.platform_workflow?.workflow_template_id || "n/a"}`,
+        ].filter(Boolean),
+        "No pilot package is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Operational Counts</h5>
+      ${renderBullets(
+        [
+          `Dossiers ${((workspaceSummary.summary_view || {}).dossier_count) ?? 0}`,
+          `Workflows ${((workspaceSummary.summary_view || {}).workflow_count) ?? 0}`,
+          `Stored exports ${exportSummary.stored_export_count ?? 0}`,
+          `Unresolved concerns ${collaborationSummary.unresolved_concern_count ?? 0}`,
+          `Locked recommendations ${collaborationSummary.locked_recommendation_count ?? 0}`,
+          `Committee snapshots ${collaborationSummary.committee_snapshot_count ?? 0}`,
+        ],
+        "No pilot-package operational counts are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Top Warnings / Walkthrough</h5>
+      ${renderBullets(
+        [
+          ...((pilotPackage.top_warnings || []).slice(0, 4).map(
+            (item) => `${item.category || "warning"} / ${item.severity || "warning"} / ${item.message || "n/a"}`
+          )),
+          ...((pilotPackage.walkthrough_hints || []).slice(0, 4)),
+        ],
+        "No pilot-package warnings or walkthrough hints are attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformDemoBundles = (report) => {
+  const container = qs("#assistant-platform-demo-bundles");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Available demo bundles, seeded objects, and apply status render here."
+    );
+    return;
+  }
+  const bundles = report.platform_demo_bundles || [];
+  const summary = report.platform_bootstrap_summary || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Bundle Catalog</h5>
+      ${renderBullets(
+        bundles.slice(0, 8).map(
+          (item) =>
+            `${item.bundle_id || "bundle"} / ${item.audience_type || "general"} / ${
+              item.title || "Untitled Bundle"
+            }`
+        ),
+        "No demo bundle catalog is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Seeded Scope</h5>
+      ${renderBullets(
+        bundles.slice(0, 6).map(
+          (item) =>
+            `${item.bundle_id || "bundle"} seeds ${(item.seeded_entities || []).length} dossier blueprint(s) and ${
+              (item.default_export_packs || []).length
+            } default pack(s)`
+        ),
+        "No seeded-scope summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Apply State</h5>
+      ${renderBullets(
+        [
+          report.platform_demo_bundle_summary,
+          `Applied bundle ${summary.demo_bundle_id || "n/a"}`,
+          `Demo seeded ${String(summary.demo_seeded || false)}`,
+        ].filter(Boolean),
+        "No demo bundle apply state is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderPlatformDossiers = (report) => {
   const container = qs("#assistant-platform-dossiers");
   if (!container) {
@@ -4261,6 +4494,10 @@ const renderAssistantReport = (report) => {
     renderPlatformDashboard(null);
     renderPlatformOverview(null);
     renderPlatformTemplateProfile(null);
+    renderPlatformBootstrap(null);
+    renderPlatformReadiness(null);
+    renderPlatformPilotPackage(null);
+    renderPlatformDemoBundles(null);
     renderPlatformDossiers(null);
     renderPlatformDossierDetail(null);
     renderPlatformMonitoring(null);
@@ -4563,6 +4800,10 @@ const renderAssistantReport = (report) => {
   renderPlatformDashboard(report);
   renderPlatformOverview(report);
   renderPlatformTemplateProfile(report);
+  renderPlatformBootstrap(report);
+  renderPlatformReadiness(report);
+  renderPlatformPilotPackage(report);
+  renderPlatformDemoBundles(report);
   renderPlatformDossiers(report);
   renderPlatformDossierDetail(report);
   renderPlatformMonitoring(report);

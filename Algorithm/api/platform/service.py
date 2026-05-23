@@ -12,6 +12,11 @@ from api.platform.access import (
     require_access,
     scope_resource_query,
 )
+from api.platform.bootstrap import (
+    build_profile_bootstrap_defaults,
+    build_workspace_bootstrap_summary,
+    render_workspace_name,
+)
 from api.platform.actions import (
     apply_workflow_action,
     list_allowed_actions,
@@ -67,10 +72,19 @@ from api.platform.health import build_platform_health_summary
 from api.platform.integration_registry import get_integration_definition, list_integration_definitions
 from api.platform.integrations import build_integration_binding, integration_health_summary
 from api.platform.persistence import PlatformStore, platform_store
+from api.platform.pilot import (
+    build_demo_seed_report,
+    get_demo_seed_bundle,
+    list_demo_seed_bundles,
+)
 from api.platform.profiles import (
     get_platform_profile,
     get_platform_profile_for_audience,
     list_platform_profiles,
+)
+from api.platform.readiness import (
+    build_deployment_readiness_report,
+    build_pilot_package_summary,
 )
 from api.platform.recommendations import (
     build_escalation_record,
@@ -86,7 +100,7 @@ from api.platform.templates import get_workflow_template, list_workflow_template
 from api.platform.workflows import build_workflow_instance
 
 
-PLATFORM_FOUNDATION_VERSION = "platform_phase8c_collaboration_v1"
+PLATFORM_FOUNDATION_VERSION = "platform_phase8d_pilot_bootstrap_v1"
 
 
 def _now_utc() -> str:
@@ -103,6 +117,94 @@ def _default_org_name(profile_id: str) -> str:
 
 def _default_workspace_name(profile_id: str) -> str:
     return f"{profile_id.replace('_', ' ').title()} Workspace"
+
+
+def _merge_workspace_settings(
+    workspace: Dict[str, Any],
+    payload: Dict[str, Any],
+    *,
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    merged_settings = {
+        **dict(workspace.get("settings") or {}),
+        **sanitize_payload(payload),
+    }
+    return store.update_workspace(
+        str(workspace.get("workspace_id") or ""),
+        {"settings": merged_settings},
+    )
+
+
+def _bootstrap_system_context(workspace: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    return {
+        "user_id": "platform-bootstrap-system",
+        "user_name": "Platform Bootstrap System",
+        "email": "system@ftip.local",
+        "role": "service_account",
+        "auth_mode": "platform_bootstrap",
+        "is_system": True,
+        "organization_id": (workspace or {}).get("organization_id"),
+        "workspace_id": (workspace or {}).get("workspace_id"),
+        "organization_ids": [str((workspace or {}).get("organization_id"))]
+        if (workspace or {}).get("organization_id")
+        else [],
+        "workspace_ids": [str((workspace or {}).get("workspace_id"))]
+        if (workspace or {}).get("workspace_id")
+        else [],
+        "metadata": {"platform_bootstrap": True},
+    }
+
+
+def _ensure_bootstrap_memberships(
+    *,
+    workspace: Dict[str, Any],
+    normalized_user_context: Any,
+    store: PlatformStore,
+) -> List[Dict[str, Any]]:
+    if getattr(normalized_user_context, "is_system", False):
+        return []
+    created: List[Dict[str, Any]] = []
+    organization_id = workspace.get("organization_id")
+    workspace_id = workspace.get("workspace_id")
+    user_id = normalized_user_context.user_id
+    existing_org = store.find_membership(
+        user_id=user_id,
+        organization_id=organization_id,
+        workspace_id=None,
+        include_org_fallback=False,
+    )
+    if existing_org is None and organization_id:
+        created.append(
+            create_membership_service(
+                {
+                    "user_id": user_id,
+                    "organization_id": organization_id,
+                    "role": "org_admin",
+                    "metadata": {"created_by_bootstrap": True},
+                },
+                store=store,
+            )["membership"]
+        )
+    existing_workspace = store.find_membership(
+        user_id=user_id,
+        organization_id=organization_id,
+        workspace_id=workspace_id,
+        include_org_fallback=False,
+    )
+    if existing_workspace is None and workspace_id:
+        created.append(
+            create_membership_service(
+                {
+                    "user_id": user_id,
+                    "organization_id": organization_id,
+                    "workspace_id": workspace_id,
+                    "role": "workspace_admin",
+                    "metadata": {"created_by_bootstrap": True},
+                },
+                store=store,
+            )["membership"]
+        )
+    return created
 
 
 def _workspace_resource(workspace: Optional[Dict[str, Any]]) -> ResourceRef:
@@ -4199,9 +4301,841 @@ def build_demo_readiness_service(
         health_summary=health,
         integration_summary=integrations["health_summary"],
     )
+    readiness_report = build_deployment_readiness_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        emit_audit=False,
+    )["readiness_report"]
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "readiness": readiness,
+        "readiness_report": readiness_report,
+    }
+
+
+def build_bootstrap_templates_service() -> Dict[str, Any]:
+    bundles = [bundle.model_dump(mode="python") for bundle in list_demo_seed_bundles()]
+    bundle_by_profile = {
+        str(bundle.get("platform_profile")): bundle for bundle in bundles
+    }
+    workflow_templates = [
+        template.model_dump(mode="python") for template in list_workflow_templates()
+    ]
+    template_by_id = {
+        str(item.get("template_id")): item for item in workflow_templates
+    }
+    bootstrap_profiles = [
+        build_profile_bootstrap_defaults(
+            profile=profile,
+            template=get_workflow_template(profile.default_workflow_template),
+            demo_bundle=bundle_by_profile.get(profile.profile_id),
+        )
+        for profile in list_platform_profiles()
+    ]
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "bootstrap_profiles": bootstrap_profiles,
+        "workflow_templates": workflow_templates,
+        "platform_profiles": [
+            profile.model_dump(mode="python") for profile in list_platform_profiles()
+        ],
+        "demo_seed_bundles": bundles,
+        "supported_export_packs": supported_pack_types(),
+    }
+
+
+def list_demo_bundles_service() -> Dict[str, Any]:
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "demo_seed_bundles": [
+            bundle.model_dump(mode="python") for bundle in list_demo_seed_bundles()
+        ],
+    }
+
+
+def apply_demo_bundle_service(
+    bundle_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace_id = str(payload.get("workspace_id") or "").strip()
+    if not workspace_id:
+        raise HTTPException(status_code=400, detail="workspace_id is required")
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = store.get_workspace(
+        workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    organization = store.get_organization(str(workspace.get("organization_id") or ""))
+    normalized = normalize_user_context(
+        scope["user_context"],
+        organization_id=workspace.get("organization_id"),
+        workspace_id=workspace.get("workspace_id"),
+    )
+    require_access(
+        permission="edit_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    bundle = get_demo_seed_bundle(bundle_id)
+    workflow_template_id = str(
+        payload.get("workflow_template_id")
+        or bundle.workflow_template_id
+        or workspace.get("default_workflow_template")
+    )
+    system_context = _bootstrap_system_context(workspace)
+    seeded_workflows: List[Dict[str, Any]] = []
+    seeded_dossiers: List[Dict[str, Any]] = []
+    seeded_exports: List[Dict[str, Any]] = []
+    seeded_stored_exports: List[Dict[str, Any]] = []
+    seeded_integrations: List[Dict[str, Any]] = []
+    include_exports = bool(payload.get("include_exports", True))
+    include_integrations = bool(payload.get("include_integrations", False))
+
+    for blueprint in list(bundle.seeded_entities or []):
+        workflow_response = create_workflow_service(
+            {
+                "workspace_id": workspace["workspace_id"],
+                "workflow_template_id": workflow_template_id,
+                "title": blueprint.get("workflow_title")
+                or f"{blueprint.get('symbol')} {workflow_template_id}",
+                "stage": blueprint.get("stage"),
+                "priority": "high"
+                if str(blueprint.get("deployability_tier")) == "live_candidate"
+                else "normal",
+                "metadata": {
+                    "demo_seeded": True,
+                    "demo_bundle_id": bundle.bundle_id,
+                    "seed_blueprint": blueprint,
+                },
+            },
+            user_context=system_context,
+            store=store,
+        )
+        workflow = workflow_response["workflow"]
+        seeded_workflows.append(workflow)
+
+        dossier_response = create_dossier_service(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "symbol": blueprint.get("symbol"),
+                "display_name": blueprint.get("display_name") or blueprint.get("symbol"),
+                "entity_type": "public_equity",
+                "theme": blueprint.get("trade_family"),
+                "dossier_type": "coverage",
+                "title": blueprint.get("dossier_title")
+                or f"{blueprint.get('symbol')} Institutional Dossier",
+                "metadata": {
+                    "demo_seeded": True,
+                    "demo_bundle_id": bundle.bundle_id,
+                    "readiness_narrative": bundle.readiness_narrative,
+                },
+            },
+            user_context=system_context,
+            store=store,
+        )
+        dossier = dossier_response["dossier"]
+        seeded_dossiers.append(dossier)
+
+        report = build_demo_seed_report(
+            symbol=str(blueprint.get("symbol") or ""),
+            bundle=bundle,
+            blueprint=blueprint,
+        )
+        attach_analysis_to_dossier_service(
+            dossier["dossier_id"],
+            {
+                "report": report,
+                "report_id": f"demo-report-{str(blueprint.get('symbol') or '').lower()}",
+                "session_id": f"demo-session-{bundle.bundle_id}",
+                "axiom_artifact_id": report.get("axiom_artifact_id"),
+                "axiom_report_pack_artifact_id": report.get(
+                    "axiom_report_pack_artifact_id"
+                ),
+                "axiom_lineage_artifact_id": report.get("axiom_lineage_artifact_id"),
+                "axiom_history_artifact_id": report.get("axiom_history_artifact_id"),
+                "axiom_calibration_artifact_id": report.get(
+                    "axiom_calibration_artifact_id"
+                ),
+            },
+            user_context=system_context,
+            store=store,
+        )
+
+        for assignment_payload in list(blueprint.get("assignments") or []):
+            update_workflow_assignment_service(
+                workflow["workflow_id"],
+                {
+                    "dossier_id": dossier["dossier_id"],
+                    "slot_type": assignment_payload.get("slot_type") or "owner",
+                    "assignee_placeholder": assignment_payload.get(
+                        "assignee_placeholder"
+                    ),
+                    "status": assignment_payload.get("status") or "assigned",
+                    "notes": list(assignment_payload.get("notes") or []),
+                    "metadata": {
+                        **dict(assignment_payload.get("metadata") or {}),
+                        "demo_seeded": True,
+                        "demo_bundle_id": bundle.bundle_id,
+                    },
+                },
+                user_context=system_context,
+                store=store,
+            )
+
+        for comment_payload in list(blueprint.get("review_comments") or []):
+            create_dossier_comment_service(
+                dossier["dossier_id"],
+                {
+                    "stage": workflow.get("stage"),
+                    "comment_type": comment_payload.get("comment_type") or "general",
+                    "body": comment_payload.get("body") or "",
+                    "severity": comment_payload.get("severity") or "info",
+                    "metadata": {
+                        **dict(comment_payload.get("metadata") or {}),
+                        "demo_seeded": True,
+                        "demo_bundle_id": bundle.bundle_id,
+                    },
+                },
+                user_context=system_context,
+                store=store,
+            )
+
+        if bundle.includes_committee_state:
+            record_committee_decision_service(
+                workflow["workflow_id"],
+                {
+                    "dossier_id": dossier["dossier_id"],
+                    "decision_status": blueprint.get("decision_status") or "deferred",
+                    "recommendation_state": blueprint.get("recommendation_state")
+                    or "under_review",
+                    "summary": (
+                        f"Demo-seeded {bundle.title} decision for {blueprint.get('symbol')}."
+                    ),
+                    "conditions": [
+                        "Demo seed preserves explicit readiness caveats.",
+                        "Do not treat this institutional pack as live personalized advice.",
+                    ],
+                    "key_risks": [
+                        "Demo-seeded object should not be mistaken for live market evidence."
+                    ],
+                    "key_evidence_strengths": [
+                        "AXIOM analysis, dossier linkage, and export history are all provisioned."
+                    ],
+                    "key_evidence_gaps": [
+                        "Seed bundle remains synthetic and intentionally constrained."
+                    ],
+                    "rationale": bundle.readiness_narrative
+                    or "Demo committee snapshot recorded during pilot bootstrap.",
+                    "metadata": {
+                        "demo_seeded": True,
+                        "demo_bundle_id": bundle.bundle_id,
+                        "lock_recommendation": True,
+                    },
+                },
+                user_context=system_context,
+                store=store,
+            )
+
+        if include_exports and bundle.includes_exports:
+            for pack_type in list(blueprint.get("pack_types") or bundle.default_export_packs):
+                store_response = store_dossier_export_service(
+                    dossier["dossier_id"],
+                    {
+                        "pack_type": pack_type,
+                        "export_format": "html",
+                        "metadata": {
+                            "demo_seeded": True,
+                            "demo_bundle_id": bundle.bundle_id,
+                        },
+                    },
+                    user_context=system_context,
+                    store=store,
+                )
+                seeded_exports.append(store_response["export"])
+                seeded_stored_exports.append(store_response["stored_export"])
+
+    if include_integrations and bundle.includes_integrations:
+        binding = create_integration_binding_service(
+            {
+                "integration_type": "internal_sink",
+                "organization_id": workspace.get("organization_id"),
+                "workspace_id": workspace.get("workspace_id"),
+                "status": "active",
+                "config": {},
+                "metadata": {"demo_seeded": True, "demo_bundle_id": bundle.bundle_id},
+            },
+            user_context=system_context,
+            store=store,
+        )["binding"]
+        execution = execute_integration_service(
+            binding["binding_id"],
+            {
+                "action_type": "seed_demo_event",
+                "dossier_id": seeded_dossiers[0].get("dossier_id") if seeded_dossiers else None,
+                "event_type": "pilot_demo_seeded",
+                "metadata": {
+                    "demo_seeded": True,
+                    "demo_bundle_id": bundle.bundle_id,
+                },
+            },
+            user_context=system_context,
+            store=store,
+        )
+        seeded_integrations.append(
+            {
+                "binding": binding,
+                "execution": execution.get("execution") or {},
+            }
+        )
+
+    workspace = _merge_workspace_settings(
+        workspace,
+        {
+            "demo_seeded": True,
+            "demo_bundle_history": list(
+                dict.fromkeys(
+                    list((workspace.get("settings") or {}).get("demo_bundle_history") or [])
+                    + [bundle.bundle_id]
+                )
+            ),
+            "demo_bundle_applied_at": _now_utc(),
+        },
+        store=store,
+    )
+
+    audit = _create_audit_event(
+        event_type="demo_bundle_applied",
+        resource=_workspace_resource(workspace),
+        user_context=normalized,
+        payload={
+            "workspace_id": workspace.get("workspace_id"),
+            "bundle_id": bundle.bundle_id,
+            "seeded_workflow_count": len(seeded_workflows),
+            "seeded_dossier_count": len(seeded_dossiers),
+            "seeded_export_count": len(seeded_exports),
+            "seeded_stored_export_count": len(seeded_stored_exports),
+            "seeded_integration_count": len(seeded_integrations),
+        },
+        rationale=f"Demo seed bundle {bundle.bundle_id} applied.",
+        metadata={"bundle_title": bundle.title},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": workspace,
+        "organization": organization,
+        "demo_bundle": bundle.model_dump(mode="python"),
+        "seeded_workflows": seeded_workflows,
+        "seeded_dossiers": seeded_dossiers,
+        "seeded_exports": seeded_exports,
+        "seeded_stored_exports": seeded_stored_exports,
+        "seeded_integrations": seeded_integrations,
+        "audit_event": audit,
+    }
+
+
+def bootstrap_workspace_service(
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    profile = get_platform_profile(payload.get("platform_profile"))
+    template = get_workflow_template(
+        str(payload.get("workflow_template_id") or profile.default_workflow_template)
+    )
+    organization_created = False
+    workspace_created = False
+    demo_bundle_response: Optional[Dict[str, Any]] = None
+    actor = normalize_user_context(user_context)
+    organization_id = payload.get("organization_id")
+    organization = (
+        store.get_organization(str(organization_id))
+        if organization_id
+        else None
+    )
+    if organization_id and organization is None:
+        raise HTTPException(status_code=404, detail="organization not found")
+    try:
+        if organization is None:
+            organization = store.create_organization(
+                {
+                    "name": payload.get("organization_name")
+                    or _default_org_name(profile.profile_id),
+                    "organization_type": payload.get("organization_type")
+                    or profile.audience_type,
+                    "settings": {
+                        "platform_profile": profile.profile_id,
+                        "bootstrap_metadata": payload.get("metadata") or {},
+                    },
+                }
+            )
+            organization_created = True
+
+        workspace_name = payload.get("workspace_name") or render_workspace_name(
+            profile=profile,
+            organization_name=organization.get("name"),
+            fallback_name=_default_workspace_name(profile.profile_id),
+        )
+        workspace_creation_context = (
+            _bootstrap_system_context(
+                {"organization_id": organization.get("organization_id")}
+            )
+            if organization_created
+            else actor.model_dump(mode="python")
+        )
+        workspace_response = create_workspace_service(
+            {
+                "organization_id": organization.get("organization_id"),
+                "name": workspace_name,
+                "audience_type": payload.get("audience_type") or profile.audience_type,
+                "report_profile": payload.get("report_profile")
+                or profile.default_report_profile,
+                "default_workflow_template": template.template_id,
+                "platform_profile": profile.profile_id,
+                "settings": {
+                    "bootstrap_metadata": payload.get("metadata") or {},
+                    "default_dashboard_emphasis": profile.default_dashboard_emphasis,
+                    "default_export_pack_emphasis": profile.default_export_pack_emphasis,
+                    "preferred_axiom_sections": profile.preferred_axiom_sections,
+                    "preferred_dossier_sections": profile.preferred_dossier_sections,
+                },
+            },
+            user_context=workspace_creation_context,
+            store=store,
+        )
+        workspace = workspace_response["workspace"]
+        workspace_created = True
+        memberships = _ensure_bootstrap_memberships(
+            workspace=workspace,
+            normalized_user_context=normalize_user_context(
+                actor,
+                organization_id=workspace.get("organization_id"),
+                workspace_id=workspace.get("workspace_id"),
+            ),
+            store=store,
+        )
+
+        demo_bundle_id = str(
+            payload.get("demo_bundle_id")
+            or (
+                profile.pilot_bootstrap_defaults.get("demo_bundle_id")
+                if payload.get("seed_demo_bundle")
+                else ""
+            )
+            or ""
+        ).strip()
+        if demo_bundle_id:
+            demo_bundle_response = apply_demo_bundle_service(
+                demo_bundle_id,
+                {
+                    "workspace_id": workspace.get("workspace_id"),
+                    "workflow_template_id": template.template_id,
+                    "include_exports": bool(payload.get("include_exports", True)),
+                    "include_integrations": bool(
+                        payload.get(
+                            "include_integrations",
+                            profile.pilot_bootstrap_defaults.get("include_integrations"),
+                        )
+                    ),
+                    "metadata": payload.get("metadata") or {},
+                },
+                user_context=actor.model_dump(mode="python"),
+                store=store,
+            )
+            workspace = demo_bundle_response["workspace"]
+        bundle_payload = demo_bundle_response.get("demo_bundle") if demo_bundle_response else None
+        bootstrap_summary = build_workspace_bootstrap_summary(
+            platform_profile=profile.profile_id,
+            workflow_template_id=template.template_id,
+            organization_created=organization_created,
+            workspace_created=workspace_created,
+            demo_bundle_id=(bundle_payload or {}).get("bundle_id"),
+            demo_seeded=bool(bundle_payload),
+            seeded_workflow_count=len((demo_bundle_response or {}).get("seeded_workflows") or []),
+            seeded_dossier_count=len((demo_bundle_response or {}).get("seeded_dossiers") or []),
+            seeded_export_count=len((demo_bundle_response or {}).get("seeded_exports") or []),
+            seeded_stored_export_count=len(
+                (demo_bundle_response or {}).get("seeded_stored_exports") or []
+            ),
+            seeded_integration_count=len(
+                (demo_bundle_response or {}).get("seeded_integrations") or []
+            ),
+            walkthrough_hints=list((bundle_payload or {}).get("walkthrough_hints") or []),
+            warnings=[],
+            metadata={
+                "memberships_created": len(memberships),
+                "organization_name": organization.get("name"),
+            },
+        )
+        workspace = _merge_workspace_settings(
+            workspace,
+            {
+                "pilot_bootstrap_summary": bootstrap_summary,
+                "bootstrap_profile_defaults": build_profile_bootstrap_defaults(
+                    profile=profile,
+                    template=template,
+                    demo_bundle=bundle_payload,
+                ),
+            },
+            store=store,
+        )
+        readiness = build_deployment_readiness_service(
+            workspace_id=workspace["workspace_id"],
+            user_context=actor.model_dump(mode="python"),
+            store=store,
+        )["readiness_report"]
+        pilot_package = build_workspace_pilot_package_service(
+            workspace["workspace_id"],
+            user_context=actor.model_dump(mode="python"),
+            store=store,
+            emit_audit=False,
+        )["pilot_package"]
+        audit = _create_audit_event(
+            event_type="workspace_bootstrapped",
+            resource=_workspace_resource(workspace),
+            user_context=normalize_user_context(
+                actor,
+                organization_id=workspace.get("organization_id"),
+                workspace_id=workspace.get("workspace_id"),
+            ),
+            payload={
+                "workspace_id": workspace.get("workspace_id"),
+                "organization_id": workspace.get("organization_id"),
+                "platform_profile": profile.profile_id,
+                "workflow_template_id": template.template_id,
+                "demo_bundle_id": (bundle_payload or {}).get("bundle_id"),
+                "pilot_ready": readiness.get("pilot_ready"),
+            },
+            rationale="Pilot workspace bootstrap completed.",
+            metadata={"bootstrap_summary": bootstrap_summary},
+            store=store,
+        )
+        return {
+            "platform_version": PLATFORM_FOUNDATION_VERSION,
+            "organization": organization,
+            "workspace": workspace,
+            "platform_profile": profile.model_dump(mode="python"),
+            "workflow_template": template.model_dump(mode="python"),
+            "demo_bundle": bundle_payload,
+            "seeded_workflows": (demo_bundle_response or {}).get("seeded_workflows") or [],
+            "seeded_dossiers": (demo_bundle_response or {}).get("seeded_dossiers") or [],
+            "bootstrap_summary": bootstrap_summary,
+            "readiness_report": readiness,
+            "pilot_package": pilot_package,
+            "audit_event": audit,
+        }
+    except Exception as exc:
+        if organization or organization_id:
+            _create_audit_event(
+                event_type="bootstrap_failed",
+                resource=ResourceRef(
+                    resource_type="organization",
+                    resource_id=(organization or {}).get("organization_id") or organization_id,
+                    organization_id=(organization or {}).get("organization_id") or organization_id,
+                ),
+                user_context=actor,
+                payload={
+                    "platform_profile": profile.profile_id,
+                    "workflow_template_id": template.template_id,
+                    "demo_bundle_id": payload.get("demo_bundle_id"),
+                },
+                rationale=f"Pilot workspace bootstrap failed: {exc}",
+                metadata={"error": str(exc)},
+                store=store,
+            )
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=500, detail=f"pilot bootstrap failed: {exc}") from exc
+
+
+def bootstrap_demo_service(
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workspace_id = str(payload.get("workspace_id") or "").strip()
+    bundle_id = str(payload.get("demo_bundle_id") or "").strip()
+    if workspace_id:
+        return apply_demo_bundle_service(
+            bundle_id or get_platform_profile(payload.get("platform_profile")).pilot_bootstrap_defaults.get("demo_bundle_id") or "research_team_demo_bundle",
+            payload,
+            user_context=user_context,
+            store=store,
+        )
+    bootstrap_payload = {
+        **dict(payload),
+        "seed_demo_bundle": True,
+        "demo_bundle_id": bundle_id or payload.get("demo_bundle_id"),
+    }
+    return bootstrap_workspace_service(
+        bootstrap_payload,
+        user_context=user_context,
+        store=store,
+    )
+
+
+def build_deployment_readiness_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = (
+        store.get_workspace(
+            workspace_id,
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+        )
+        if workspace_id
+        else None
+    )
+    normalized = scope["user_context"]
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    organization = (
+        store.get_organization(str(workspace.get("organization_id") or ""))
+        if workspace and workspace.get("organization_id")
+        else None
+    )
+    summary_view = build_platform_summary_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        current_workspace=workspace,
+    )
+    workspace_analytics = (
+        build_workspace_analytics_service(
+            workspace["workspace_id"],
+            user_context=normalized.model_dump(mode="python"),
+            store=store,
+        )["analytics"]
+        if workspace
+        else {}
+    )
+    health = build_platform_health_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )["health"]
+    integrations = list_integrations_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    dashboard = build_platform_dashboard_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        emit_audit=False,
+    )["dashboard"]
+    demo_snapshot = build_demo_snapshot_service(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        emit_audit=False,
+    )["snapshot"]
+    scope_bundle = _workspace_scope_bundle(
+        workspace_id=(workspace or {}).get("workspace_id"),
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+        store=store,
+    )
+    audit_events = (
+        store.list_audit_events(
+            workspace_id=(workspace or {}).get("workspace_id"),
+            organization_ids=scope["organization_ids"],
+            workspace_ids=scope["workspace_ids"],
+            limit=400,
+        )
+        if _scope_allows_listing(scope)
+        else []
+    )
+    access_summary = build_access_summary(
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    readiness_report = build_deployment_readiness_report(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        organization=organization,
+        workspace=workspace,
+        access_summary=access_summary,
+        summary_view=summary_view,
+        workspace_analytics=workspace_analytics,
+        health_summary=health,
+        integration_summary=integrations.get("health_summary") or {},
+        dashboard=dashboard,
+        demo_snapshot=demo_snapshot,
+        dossiers=scope_bundle["dossiers"],
+        workflows=scope_bundle["workflows"],
+        approvals=scope_bundle["approvals"],
+        exports=scope_bundle["exports"],
+        stored_exports=scope_bundle["stored_exports"],
+        audit_events=audit_events,
+    )
+    legacy_readiness = build_readiness_snapshot(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace=workspace,
+        workspace_analytics=workspace_analytics,
+        health_summary=health,
+        integration_summary=integrations.get("health_summary") or {},
+    )
+    legacy_readiness["pilot_ready"] = bool(readiness_report.get("pilot_ready"))
+    legacy_readiness["rationale"] = (
+        "Pilot-ready for controlled institutional evaluation."
+        if readiness_report.get("pilot_ready")
+        else "Pilot hardening remains partial; review readiness categories and remediation notes."
+    )
+    if emit_audit:
+        _create_audit_event(
+            event_type="readiness_report_generated",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={
+                "workspace_id": (workspace or {}).get("workspace_id"),
+                "overall_status": readiness_report.get("overall_status"),
+                "pilot_ready": readiness_report.get("pilot_ready"),
+            },
+            rationale="Deployment readiness report generated.",
+            metadata={"overall_score": readiness_report.get("overall_score")},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "readiness": legacy_readiness,
+        "readiness_report": readiness_report,
+    }
+
+
+def build_workspace_pilot_package_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(
+        user_context=user_context,
+        workspace_id=workspace_id,
+        store=store,
+    )
+    workspace = store.get_workspace(
+        workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    normalized = scope["user_context"]
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    organization = store.get_organization(str(workspace.get("organization_id") or ""))
+    profile = get_platform_profile(workspace.get("platform_profile"))
+    template = get_workflow_template(workspace.get("default_workflow_template"))
+    summary_view = build_platform_summary_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        current_workspace=workspace,
+    )
+    workspace_analytics = build_workspace_analytics_service(
+        workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )["analytics"]
+    integration_payload = list_integrations_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+    )
+    demo_snapshot = build_demo_snapshot_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        emit_audit=False,
+    )["snapshot"]
+    dashboard = build_platform_dashboard_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        emit_audit=False,
+    )["dashboard"]
+    readiness_report = build_deployment_readiness_service(
+        workspace_id=workspace_id,
+        user_context=normalized.model_dump(mode="python"),
+        store=store,
+        emit_audit=False,
+    )["readiness_report"]
+    dossiers = store.list_dossiers(
+        workspace_id=workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    stored_exports = store.list_stored_exports(
+        workspace_id=workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    pilot_package = build_pilot_package_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        organization=organization,
+        workspace=workspace,
+        platform_profile=profile.model_dump(mode="python"),
+        workflow_template=template.model_dump(mode="python"),
+        summary_view=summary_view,
+        workspace_analytics=workspace_analytics,
+        integration_summary=integration_payload.get("health_summary") or {},
+        readiness_report=readiness_report,
+        demo_snapshot=demo_snapshot,
+        dashboard=dashboard,
+        dossiers=dossiers,
+        stored_exports=stored_exports,
+    )
+    if emit_audit:
+        _create_audit_event(
+            event_type="pilot_package_generated",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={
+                "workspace_id": workspace_id,
+                "pilot_ready": pilot_package.get("pilot_ready"),
+                "top_dossier_count": len(pilot_package.get("top_dossiers") or []),
+            },
+            rationale="Pilot package generated.",
+            metadata={"overall_status": readiness_report.get("overall_status")},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "pilot_package": pilot_package,
     }
 
 
@@ -4438,17 +5372,26 @@ def sync_analysis_into_platform(
         store=store,
         emit_audit=False,
     ).get("dashboard")
+    bootstrap_templates = build_bootstrap_templates_service()
     demo_snapshot = build_demo_snapshot_service(
         workspace_id=(workspace or {}).get("workspace_id"),
         user_context=platform_user_context,
         store=store,
         emit_audit=False,
     ).get("snapshot")
-    readiness_snapshot = build_demo_readiness_service(
+    readiness_payload = build_demo_readiness_service(
         workspace_id=(workspace or {}).get("workspace_id"),
         user_context=platform_user_context,
         store=store,
-    ).get("readiness")
+    )
+    readiness_snapshot = readiness_payload.get("readiness")
+    readiness_report = readiness_payload.get("readiness_report")
+    pilot_package = build_workspace_pilot_package_service(
+        (workspace or {}).get("workspace_id"),
+        user_context=platform_user_context,
+        store=store,
+        emit_audit=False,
+    ).get("pilot_package") if workspace else {}
     return {
         "platform_foundation_version": PLATFORM_FOUNDATION_VERSION,
         "platform_profile": profile.model_dump(mode="python"),
@@ -4480,8 +5423,31 @@ def sync_analysis_into_platform(
         "workspace_analytics": workspace_analytics,
         "platform_analytics": platform_analytics,
         "dashboard": dashboard,
+        "bootstrap_summary": ((workspace or {}).get("settings") or {}).get(
+            "pilot_bootstrap_summary"
+        )
+        or {},
+        "bootstrap_profile_defaults": ((workspace or {}).get("settings") or {}).get(
+            "bootstrap_profile_defaults"
+        )
+        or build_profile_bootstrap_defaults(
+            profile=profile,
+            template=template or get_workflow_template(workspace.get("default_workflow_template") if workspace else "research_watchlist"),
+            demo_bundle=next(
+                (
+                    item
+                    for item in (bootstrap_templates.get("demo_seed_bundles") or [])
+                    if str(item.get("platform_profile") or "") == str(profile.profile_id)
+                ),
+                None,
+            ),
+        ),
+        "bootstrap_templates": bootstrap_templates.get("bootstrap_profiles") or [],
+        "demo_bundles": bootstrap_templates.get("demo_seed_bundles") or [],
         "demo_snapshot": demo_snapshot,
         "readiness_snapshot": readiness_snapshot,
+        "readiness_report": readiness_report,
+        "pilot_package": pilot_package,
         "supported_export_packs": supported_pack_types(),
     }
 
@@ -4601,6 +5567,7 @@ def build_platform_summary_service(
 
 
 def list_templates_service() -> Dict[str, Any]:
+    catalog = build_bootstrap_templates_service()
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "workflow_templates": [
@@ -4609,6 +5576,8 @@ def list_templates_service() -> Dict[str, Any]:
         "platform_profiles": [
             profile.model_dump(mode="python") for profile in list_platform_profiles()
         ],
+        "bootstrap_profiles": catalog.get("bootstrap_profiles") or [],
+        "demo_seed_bundles": catalog.get("demo_seed_bundles") or [],
         "integration_definitions": [
             definition.model_dump(mode="python")
             for definition in list_integration_definitions()

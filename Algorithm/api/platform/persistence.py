@@ -261,6 +261,11 @@ class PlatformStore:
             "updated_at": row[9],
         }
 
+    def update_workspace(self, workspace_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        merged = {**(self.get_workspace(workspace_id) or {}), **sanitize_payload(payload)}
+        merged["workspace_id"] = workspace_id
+        return self.create_workspace(merged)
+
     def list_workspaces(
         self,
         *,

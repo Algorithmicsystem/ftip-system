@@ -161,6 +161,20 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
             "platform_demo_readiness_summary"
         )
         or "",
+        "platform_bootstrap_summary_text": report.get(
+            "platform_bootstrap_summary_text"
+        )
+        or "",
+        "platform_readiness_report_summary": report.get(
+            "platform_readiness_report_summary"
+        )
+        or "",
+        "platform_pilot_package_summary": report.get(
+            "platform_pilot_package_summary"
+        )
+        or "",
+        "platform_demo_bundle_summary": report.get("platform_demo_bundle_summary")
+        or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",
@@ -513,6 +527,12 @@ def build_narrator_context(
             "dashboard_summary": report.get("platform_dashboard_summary"),
             "analytics_summary": report.get("platform_analytics_summary"),
             "demo_readiness_summary": report.get("platform_demo_readiness_summary"),
+            "bootstrap_summary": report.get("platform_bootstrap_summary_text"),
+            "readiness_report_summary": report.get(
+                "platform_readiness_report_summary"
+            ),
+            "pilot_package_summary": report.get("platform_pilot_package_summary"),
+            "demo_bundle_summary": report.get("platform_demo_bundle_summary"),
             "effective_role": (report.get("platform_access_summary") or {}).get("effective_role"),
             "pending_approval_count": (report.get("platform_summary_view") or {}).get("pending_approval_count"),
         },
@@ -608,6 +628,18 @@ def build_narrator_context(
             "platform_analytics_summary": sections["platform_analytics_summary"],
             "platform_demo_readiness_summary": sections[
                 "platform_demo_readiness_summary"
+            ],
+            "platform_bootstrap_summary_text": sections[
+                "platform_bootstrap_summary_text"
+            ],
+            "platform_readiness_report_summary": sections[
+                "platform_readiness_report_summary"
+            ],
+            "platform_pilot_package_summary": sections[
+                "platform_pilot_package_summary"
+            ],
+            "platform_demo_bundle_summary": sections[
+                "platform_demo_bundle_summary"
             ],
             "daily_operating_summary": sections["daily_operating_summary"],
             "weekly_operating_summary": sections["weekly_operating_summary"],
