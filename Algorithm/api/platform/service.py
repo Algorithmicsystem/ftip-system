@@ -28,6 +28,8 @@ from api.platform.approvals import (
     build_approval_request,
 )
 from api.platform.audit import audit_event_to_timeline, build_audit_event
+from api.platform.comments import build_review_comment, resolve_review_comment
+from api.platform.committee import build_committee_decision_snapshot
 from api.platform.contracts import (
     DossierRecord,
     ExportRetrievalResult,
@@ -70,20 +72,28 @@ from api.platform.profiles import (
     get_platform_profile_for_audience,
     list_platform_profiles,
 )
+from api.platform.recommendations import (
+    build_escalation_record,
+    build_recommendation_change_record,
+    build_recommendation_lock_record,
+    build_recommendation_state,
+    default_recommendation_state,
+)
+from api.platform.reviews import build_review_summary, build_role_assignment_summary
 from api.platform.security import normalize_user_context
 from api.platform.tenant import build_tenancy_summary
 from api.platform.templates import get_workflow_template, list_workflow_templates
 from api.platform.workflows import build_workflow_instance
 
 
-PLATFORM_FOUNDATION_VERSION = "platform_phase8b_export_storage_v1"
+PLATFORM_FOUNDATION_VERSION = "platform_phase8c_collaboration_v1"
 
 
 def _now_utc() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def _normalize_symbol(symbol: str | None) -> str:
+def _normalize_symbol(symbol: Optional[str]) -> str:
     return str(symbol or "").strip().upper()
 
 
@@ -200,6 +210,249 @@ def _latest_approval_status(
 ) -> Optional[str]:
     approvals = store.list_approval_requests(workflow_id=workflow_id)
     return approvals[0].get("status") if approvals else None
+
+
+def _default_recommendation_state_for_dossier(dossier: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    base = default_recommendation_state()
+    if dossier:
+        locked = bool((dossier.get("metadata") or {}).get("recommendation_locked"))
+        if locked:
+            base["locked"] = True
+    return sanitize_payload(base)
+
+
+def _current_recommendation_state(dossier: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    metadata = (dossier or {}).get("metadata") or {}
+    recommendation_state = metadata.get("recommendation_state") or {}
+    if recommendation_state:
+        return sanitize_payload(recommendation_state)
+    return _default_recommendation_state_for_dossier(dossier)
+
+
+def _upsert_section(
+    sections: List[Dict[str, Any]],
+    *,
+    section_key: str,
+    title: str,
+    summary: str,
+    payload: Optional[Dict[str, Any]] = None,
+    status: str = "available",
+) -> List[Dict[str, Any]]:
+    updated = [item for item in sections if str(item.get("section_key") or "") != section_key]
+    updated.append(
+        sanitize_payload(
+            {
+                "section_key": section_key,
+                "title": title,
+                "summary": summary or "No current summary available.",
+                "payload": payload or {},
+                "status": status,
+            }
+        )
+    )
+    return updated
+
+
+def _recommendation_history_summary(history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sanitize_payload(
+        [
+            {
+                "change_id": item.get("change_id"),
+                "action_type": item.get("action_type"),
+                "previous_state": item.get("previous_state"),
+                "new_state": item.get("new_state"),
+                "locked": item.get("locked"),
+                "rationale": item.get("rationale"),
+                "created_at": item.get("created_at"),
+            }
+            for item in history[:8]
+        ]
+    )
+
+
+def _build_collaboration_bundle(
+    *,
+    workflow: Optional[Dict[str, Any]],
+    dossier: Optional[Dict[str, Any]],
+    store: PlatformStore,
+    organization_ids: Optional[List[str]] = None,
+    workspace_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    if not workflow or not dossier:
+        return {
+            "comments": [],
+            "review_summary": {},
+            "assignments": [],
+            "assignment_summary": {},
+            "committee_decision": {},
+            "recommendation_state": _default_recommendation_state_for_dossier(dossier),
+            "recommendation_history": [],
+        }
+    comments = store.list_review_comments(
+        workflow_id=workflow.get("workflow_id"),
+        dossier_id=dossier.get("dossier_id"),
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    assignments = store.list_assignments(
+        workflow_id=workflow.get("workflow_id"),
+        dossier_id=dossier.get("dossier_id"),
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    committee_decision = (
+        store.get_latest_committee_decision(
+            workflow_id=workflow.get("workflow_id"),
+            dossier_id=dossier.get("dossier_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        or {}
+    )
+    recommendation_history = store.list_recommendation_changes(
+        workflow_id=workflow.get("workflow_id"),
+        dossier_id=dossier.get("dossier_id"),
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    recommendation_state = (
+        (recommendation_history[0] or {}).get("snapshot")
+        if recommendation_history
+        else _current_recommendation_state(dossier)
+    ) or _default_recommendation_state_for_dossier(dossier)
+    review_summary = build_review_summary(
+        workflow_id=str(workflow.get("workflow_id") or ""),
+        dossier_id=str(dossier.get("dossier_id") or ""),
+        comments=comments,
+        committee_decision=committee_decision or None,
+    )
+    assignment_summary = build_role_assignment_summary(
+        workflow_id=str(workflow.get("workflow_id") or ""),
+        dossier_id=str(dossier.get("dossier_id") or ""),
+        assignments=assignments,
+    )
+    return {
+        "comments": comments,
+        "review_summary": review_summary,
+        "assignments": assignments,
+        "assignment_summary": assignment_summary,
+        "committee_decision": committee_decision,
+        "recommendation_state": sanitize_payload(recommendation_state),
+        "recommendation_history": recommendation_history,
+    }
+
+
+def _refresh_dossier_collaboration_state(
+    dossier: Optional[Dict[str, Any]],
+    *,
+    workflow: Optional[Dict[str, Any]],
+    store: PlatformStore,
+    organization_ids: Optional[List[str]] = None,
+    workspace_ids: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    if not dossier or not workflow:
+        return dossier
+    collaboration = _build_collaboration_bundle(
+        workflow=workflow,
+        dossier=dossier,
+        store=store,
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    review_summary = collaboration["review_summary"]
+    assignment_summary = collaboration["assignment_summary"]
+    committee_decision = collaboration["committee_decision"]
+    recommendation_state = collaboration["recommendation_state"]
+    recommendation_history = collaboration["recommendation_history"]
+
+    current_summary = sanitize_payload(dossier.get("current_summary") or {})
+    current_summary.update(
+        {
+            "recommendation_state": recommendation_state.get("state"),
+            "recommendation_locked": bool(recommendation_state.get("locked")),
+            "unresolved_concern_count": int(
+                review_summary.get("unresolved_concern_count") or 0
+            ),
+            "latest_committee_decision_status": committee_decision.get("decision_status"),
+            "review_comment_count": int(
+                ((review_summary.get("thread_summary") or {}).get("total_comments") or 0)
+            ),
+        }
+    )
+    metadata = sanitize_payload(dossier.get("metadata") or {})
+    metadata.update(
+        {
+            "review_summary": review_summary,
+            "review_comments": collaboration["comments"],
+            "assignments": collaboration["assignments"],
+            "assignment_summary": assignment_summary,
+            "latest_committee_decision": committee_decision,
+            "recommendation_state": recommendation_state,
+            "recommendation_history_summary": _recommendation_history_summary(
+                recommendation_history
+            ),
+            "unresolved_concern_count": int(
+                review_summary.get("unresolved_concern_count") or 0
+            ),
+        }
+    )
+    sections = [sanitize_payload(item) for item in list(dossier.get("sections") or [])]
+    sections = _upsert_section(
+        sections,
+        section_key="review_summary",
+        title="Review Summary",
+        summary=(
+            f"{review_summary.get('unresolved_concern_count', 0)} unresolved concern(s) across "
+            f"{((review_summary.get('thread_summary') or {}).get('total_comments') or 0)} review comment(s)."
+        ),
+        payload=review_summary,
+    )
+    sections = _upsert_section(
+        sections,
+        section_key="assignments",
+        title="Assignments",
+        summary=(
+            f"Assignment coverage includes owner "
+            f"{(((assignment_summary.get('owner') or {}).get('assignee_placeholder')) or 'unassigned')} "
+            f"and committee reviewer "
+            f"{(((assignment_summary.get('committee_reviewer') or {}).get('assignee_placeholder')) or 'unassigned')}."
+        ),
+        payload=assignment_summary,
+        status="available" if assignment_summary else "partial",
+    )
+    sections = _upsert_section(
+        sections,
+        section_key="committee_decision",
+        title="Committee Decision",
+        summary=(
+            committee_decision.get("summary")
+            or "No committee decision snapshot is currently recorded."
+        ),
+        payload=committee_decision,
+        status="available" if committee_decision else "partial",
+    )
+    sections = _upsert_section(
+        sections,
+        section_key="recommendation_state",
+        title="Recommendation State",
+        summary=(
+            f"Recommendation is {recommendation_state.get('state') or 'draft'} "
+            f"with lock state {bool(recommendation_state.get('locked'))}."
+        ),
+        payload={
+            "recommendation_state": recommendation_state,
+            "history": _recommendation_history_summary(recommendation_history),
+        },
+    )
+    return store.update_dossier(
+        str(dossier.get("dossier_id") or ""),
+        {
+            "current_summary": current_summary,
+            "metadata": metadata,
+            "sections": sections,
+            "updated_at": _now_utc(),
+        },
+    )
 
 
 def _workspace_scope_bundle(
@@ -741,6 +994,11 @@ def create_dossier_service(
             metadata=payload.get("metadata") or {},
         ).model_dump(mode="python")
     )
+    dossier = _refresh_dossier_collaboration_state(
+        dossier,
+        workflow=workflow,
+        store=store,
+    ) or dossier
     _create_audit_event(
         event_type="dossier_created",
         resource=_dossier_resource(dossier, workspace),
@@ -782,11 +1040,30 @@ def get_dossier_view(
         store=store,
     )
     links = store.list_dossier_analysis_links(dossier_id)
+    scoped_org_ids = None if normalized.is_system else normalized.organization_ids
+    scoped_workspace_ids = None if normalized.is_system else normalized.workspace_ids
+    dossier = (
+        _refresh_dossier_collaboration_state(
+            dossier,
+            workflow=workflow,
+            store=store,
+            organization_ids=scoped_org_ids,
+            workspace_ids=scoped_workspace_ids,
+        )
+        or dossier
+    )
     approvals = store.list_approval_requests(
         workflow_id=(workflow or {}).get("workflow_id"),
         dossier_id=dossier_id,
     )
     exports = store.list_export_manifests(dossier_id)
+    collaboration = _build_collaboration_bundle(
+        workflow=workflow,
+        dossier=dossier,
+        store=store,
+        organization_ids=scoped_org_ids,
+        workspace_ids=scoped_workspace_ids,
+    )
     timeline = list_workflow_timeline_service(
         (workflow or {}).get("workflow_id"),
         user_context=normalized,
@@ -800,6 +1077,13 @@ def get_dossier_view(
         "analysis_links": links,
         "approvals": approvals,
         "exports": exports,
+        "comments": collaboration["comments"],
+        "review_summary": collaboration["review_summary"],
+        "assignments": collaboration["assignments"],
+        "assignment_summary": collaboration["assignment_summary"],
+        "committee_decision": collaboration["committee_decision"],
+        "recommendation_state": collaboration["recommendation_state"],
+        "recommendation_history": collaboration["recommendation_history"],
         "timeline": timeline.get("timeline") or [],
     }
 
@@ -850,6 +1134,14 @@ def attach_analysis_to_dossier_service(
     persisted = store.update_dossier(dossier_id, refreshed)
     workflow = store.get_workflow(persisted["workflow_id"])
     workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    persisted = (
+        _refresh_dossier_collaboration_state(
+            persisted,
+            workflow=workflow,
+            store=store,
+        )
+        or persisted
+    )
     _create_audit_event(
         event_type="analysis_attached",
         resource=_dossier_resource(persisted, workspace),
@@ -871,6 +1163,673 @@ def attach_analysis_to_dossier_service(
         "workspace": workspace,
         "analysis_link": analysis_link.model_dump(mode="python"),
         "dossier_preview": dossier_preview(persisted),
+    }
+
+
+def list_dossier_comments_service(
+    dossier_id: str,
+    *,
+    include_resolved: bool = True,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier_view = get_dossier_view(
+        dossier_id,
+        user_context=user_context,
+        store=store,
+    )
+    dossier = dossier_view["dossier"]
+    workflow = dossier_view["workflow"]
+    workspace = dossier_view["workspace"]
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    comments = store.list_review_comments(
+        workflow_id=(workflow or {}).get("workflow_id"),
+        dossier_id=dossier_id,
+        include_resolved=include_resolved,
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    review_summary = build_review_summary(
+        workflow_id=str((workflow or {}).get("workflow_id") or ""),
+        dossier_id=dossier_id,
+        comments=comments,
+        committee_decision=dossier_view.get("committee_decision") or None,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossier": dossier,
+        "workflow": workflow,
+        "comments": comments,
+        "review_summary": review_summary,
+    }
+
+
+def create_dossier_comment_service(
+    dossier_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier = store.get_dossier(dossier_id)
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    workflow = store.get_workflow(dossier["workflow_id"])
+    workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="update_dossier",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
+    comment = build_review_comment(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        workflow_id=str((workflow or {}).get("workflow_id") or ""),
+        dossier_id=dossier_id,
+        stage=payload.get("stage") or (workflow or {}).get("stage"),
+        user_context=normalized,
+        comment_type=str(payload.get("comment_type") or "general"),
+        body=str(payload.get("body") or ""),
+        severity=str(payload.get("severity") or "info"),
+        metadata=payload.get("metadata") or {},
+    )
+    persisted_comment = store.create_review_comment(comment.model_dump(mode="python"))
+    dossier = (
+        _refresh_dossier_collaboration_state(
+            dossier,
+            workflow=workflow,
+            store=store,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        or dossier
+    )
+    audit = _create_audit_event(
+        event_type="comment_added",
+        resource=_dossier_resource(dossier, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": (workflow or {}).get("workflow_id"),
+            "dossier_id": dossier_id,
+            "comment_id": persisted_comment.get("comment_id"),
+            "stage": persisted_comment.get("stage"),
+            "status": persisted_comment.get("status"),
+            "summary": persisted_comment.get("body"),
+        },
+        rationale="Structured review comment added.",
+        metadata={"comment_type": persisted_comment.get("comment_type")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "comment": persisted_comment,
+        "dossier": dossier,
+        "review_summary": (dossier.get("metadata") or {}).get("review_summary") or {},
+        "audit_event": audit,
+    }
+
+
+def resolve_dossier_comment_service(
+    dossier_id: str,
+    comment_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier = store.get_dossier(dossier_id)
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    workflow = store.get_workflow(dossier["workflow_id"])
+    workspace = store.get_workspace(workflow["workspace_id"]) if workflow else None
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="update_dossier",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
+    comment = store.get_review_comment(
+        comment_id,
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    if comment is None or str(comment.get("dossier_id") or "") != str(dossier_id):
+        raise HTTPException(status_code=404, detail="review comment not found")
+    resolved = resolve_review_comment(
+        comment,
+        user_context=normalized,
+        rationale=payload.get("rationale"),
+        metadata=payload.get("metadata") or {},
+    )
+    persisted_comment = store.update_review_comment(comment_id, resolved)
+    dossier = (
+        _refresh_dossier_collaboration_state(
+            dossier,
+            workflow=workflow,
+            store=store,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        or dossier
+    )
+    audit = _create_audit_event(
+        event_type="comment_resolved",
+        resource=_dossier_resource(dossier, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": (workflow or {}).get("workflow_id"),
+            "dossier_id": dossier_id,
+            "comment_id": persisted_comment.get("comment_id"),
+            "stage": persisted_comment.get("stage"),
+            "status": persisted_comment.get("status"),
+            "summary": persisted_comment.get("body"),
+        },
+        rationale=payload.get("rationale") or "Review concern resolved.",
+        metadata={"comment_type": persisted_comment.get("comment_type")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "comment": persisted_comment,
+        "dossier": dossier,
+        "review_summary": (dossier.get("metadata") or {}).get("review_summary") or {},
+        "audit_event": audit,
+    }
+
+
+def list_workflow_assignments_service(
+    workflow_id: str,
+    *,
+    dossier_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    assignments = store.list_assignments(
+        workflow_id=workflow_id,
+        dossier_id=dossier_id,
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    summary = build_role_assignment_summary(
+        workflow_id=workflow_id,
+        dossier_id=dossier_id,
+        assignments=assignments,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": workflow,
+        "assignments": assignments,
+        "assignment_summary": summary,
+    }
+
+
+def update_workflow_assignment_service(
+    workflow_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="update_dossier",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    dossier_id = payload.get("dossier_id")
+    if dossier_id:
+        dossier = store.get_dossier(str(dossier_id))
+        if dossier is None:
+            raise HTTPException(status_code=404, detail="dossier not found")
+    else:
+        dossier = next(iter(store.list_dossiers(workflow_id=workflow_id, limit=1)), None)
+    existing = store.find_assignment_by_slot(
+        workflow_id=workflow_id,
+        dossier_id=(dossier or {}).get("dossier_id"),
+        slot_type=str(payload.get("slot_type") or "owner"),
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    assignment_payload = {
+        "assignment_id": (existing or {}).get("assignment_id") or str(uuid.uuid4()),
+        "organization_id": (workspace or {}).get("organization_id"),
+        "workspace_id": (workspace or {}).get("workspace_id"),
+        "workflow_id": workflow_id,
+        "dossier_id": (dossier or {}).get("dossier_id"),
+        "slot_type": str(payload.get("slot_type") or "owner"),
+        "assignee_placeholder": payload.get("assignee_placeholder"),
+        "assigned_by": {
+            "user_id": normalized.user_id,
+            "role": normalized.role,
+            "auth_mode": normalized.auth_mode,
+            "session_id": normalized.session_id,
+            "actor_email": normalized.email,
+        },
+        "status": str(payload.get("status") or "assigned"),
+        "notes": list(payload.get("notes") or []),
+        "metadata": payload.get("metadata") or {},
+        "created_at": (existing or {}).get("created_at"),
+    }
+    assignment = (
+        store.update_assignment(existing["assignment_id"], assignment_payload)
+        if existing
+        else store.create_assignment(assignment_payload)
+    )
+    dossier = (
+        _refresh_dossier_collaboration_state(
+            dossier,
+            workflow=workflow,
+            store=store,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        if dossier
+        else dossier
+    ) or dossier
+    summary = build_role_assignment_summary(
+        workflow_id=workflow_id,
+        dossier_id=(dossier or {}).get("dossier_id"),
+        assignments=store.list_assignments(
+            workflow_id=workflow_id,
+            dossier_id=(dossier or {}).get("dossier_id"),
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        ),
+    )
+    audit = _create_audit_event(
+        event_type="assignment_updated",
+        resource=_workflow_resource(workflow, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": workflow_id,
+            "dossier_id": (dossier or {}).get("dossier_id"),
+            "assignment_id": assignment.get("assignment_id"),
+            "slot_type": assignment.get("slot_type"),
+            "status": assignment.get("status"),
+            "summary": assignment.get("assignee_placeholder"),
+        },
+        rationale="Reviewer assignment updated.",
+        metadata={"slot_type": assignment.get("slot_type")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "assignment": assignment,
+        "assignment_summary": summary,
+        "dossier": dossier,
+        "audit_event": audit,
+    }
+
+
+def get_workflow_review_summary_service(
+    workflow_id: str,
+    *,
+    dossier_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    dossier = (
+        store.get_dossier(str(dossier_id))
+        if dossier_id
+        else next(iter(store.list_dossiers(workflow_id=workflow_id, limit=1)), None)
+    )
+    collaboration = _build_collaboration_bundle(
+        workflow=workflow,
+        dossier=dossier,
+        store=store,
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": workflow,
+        "dossier": dossier,
+        "review_summary": collaboration["review_summary"],
+        "comments": collaboration["comments"],
+        "committee_decision": collaboration["committee_decision"],
+    }
+
+
+def _apply_recommendation_state_update(
+    *,
+    workflow: Dict[str, Any],
+    dossier: Dict[str, Any],
+    workspace: Optional[Dict[str, Any]],
+    next_state: str,
+    action_type: str,
+    summary: Optional[str],
+    rationale: Optional[str],
+    lock_recommendation: Optional[bool],
+    source_decision_id: Optional[str],
+    user_context: Any,
+    metadata: Optional[Dict[str, Any]],
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    current_state = _current_recommendation_state(dossier)
+    next_payload = build_recommendation_state(
+        current_state,
+        next_state=next_state,
+        user_context=user_context,
+        summary=summary,
+        rationale=rationale,
+        lock_recommendation=lock_recommendation,
+        source_decision_id=source_decision_id,
+        metadata=metadata or {},
+    )
+    change_record = build_recommendation_change_record(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        workflow_id=str(workflow.get("workflow_id") or ""),
+        dossier_id=str(dossier.get("dossier_id") or ""),
+        previous_state=current_state.get("state"),
+        new_state=str(next_payload.get("state") or ""),
+        action_type=action_type,
+        recommendation_state=next_payload,
+        rationale=rationale,
+        user_context=user_context,
+        metadata=metadata or {},
+    )
+    persisted_change = store.create_recommendation_change(change_record)
+    if lock_recommendation:
+        lock_record = build_recommendation_lock_record(
+            workflow_id=str(workflow.get("workflow_id") or ""),
+            dossier_id=str(dossier.get("dossier_id") or ""),
+            recommendation_state=next_payload,
+            reason=rationale,
+            user_context=user_context,
+            metadata=metadata or {},
+        )
+    else:
+        lock_record = None
+    updated_dossier = store.update_dossier(
+        str(dossier.get("dossier_id") or ""),
+        {
+            "metadata": {
+                **dict(dossier.get("metadata") or {}),
+                "recommendation_state": next_payload,
+                "last_recommendation_change": persisted_change,
+                "last_recommendation_lock": lock_record,
+            },
+            "updated_at": _now_utc(),
+        },
+    )
+    updated_dossier = (
+        _refresh_dossier_collaboration_state(
+            updated_dossier,
+            workflow=workflow,
+            store=store,
+            organization_ids=None if getattr(user_context, "is_system", False) else getattr(user_context, "organization_ids", None),
+            workspace_ids=None if getattr(user_context, "is_system", False) else getattr(user_context, "workspace_ids", None),
+        )
+        or updated_dossier
+    )
+    return {
+        "dossier": updated_dossier,
+        "recommendation_state": next_payload,
+        "recommendation_change": persisted_change,
+        "recommendation_lock": lock_record,
+    }
+
+
+def record_committee_decision_service(
+    workflow_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="approve_stage",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    dossier = (
+        store.get_dossier(str(payload.get("dossier_id")))
+        if payload.get("dossier_id")
+        else next(iter(store.list_dossiers(workflow_id=workflow_id, limit=1)), None)
+    )
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    decision = build_committee_decision_snapshot(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        workflow_id=workflow_id,
+        dossier_id=str(dossier.get("dossier_id") or ""),
+        stage=workflow.get("stage"),
+        decision_status=str(payload.get("decision_status") or "deferred"),
+        recommendation_state=str(payload.get("recommendation_state") or "under_review"),
+        summary=str(payload.get("summary") or ""),
+        conditions=list(payload.get("conditions") or []),
+        key_risks=list(payload.get("key_risks") or []),
+        key_evidence_strengths=list(payload.get("key_evidence_strengths") or []),
+        key_evidence_gaps=list(payload.get("key_evidence_gaps") or []),
+        user_context=normalized,
+        rationale=payload.get("rationale"),
+        metadata=payload.get("metadata") or {},
+    )
+    persisted_decision = store.create_committee_decision(decision.model_dump(mode="python"))
+    recommendation_update = _apply_recommendation_state_update(
+        workflow=workflow,
+        dossier=dossier,
+        workspace=workspace,
+        next_state=str(payload.get("recommendation_state") or "under_review"),
+        action_type="committee_decision",
+        summary=str(payload.get("summary") or ""),
+        rationale=payload.get("rationale"),
+        lock_recommendation=bool((payload.get("metadata") or {}).get("lock_recommendation")),
+        source_decision_id=str(persisted_decision.get("decision_id") or ""),
+        user_context=normalized,
+        metadata=payload.get("metadata") or {},
+        store=store,
+    )
+    updated_dossier = recommendation_update["dossier"]
+    audit = _create_audit_event(
+        event_type="committee_decision_recorded",
+        resource=_workflow_resource(workflow, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": workflow_id,
+            "dossier_id": dossier.get("dossier_id"),
+            "decision_id": persisted_decision.get("decision_id"),
+            "stage": persisted_decision.get("stage"),
+            "status": persisted_decision.get("decision_status"),
+            "summary": persisted_decision.get("summary"),
+        },
+        rationale=payload.get("rationale") or persisted_decision.get("summary"),
+        metadata={"recommendation_state": persisted_decision.get("recommendation_state")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": workflow,
+        "dossier": updated_dossier,
+        "committee_decision": persisted_decision,
+        "recommendation_state": recommendation_update["recommendation_state"],
+        "recommendation_change": recommendation_update["recommendation_change"],
+        "audit_event": audit,
+    }
+
+
+def get_committee_decision_service(
+    workflow_id: str,
+    *,
+    dossier_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    dossier = (
+        store.get_dossier(str(dossier_id))
+        if dossier_id
+        else next(iter(store.list_dossiers(workflow_id=workflow_id, limit=1)), None)
+    )
+    decision = store.get_latest_committee_decision(
+        workflow_id=workflow_id,
+        dossier_id=(dossier or {}).get("dossier_id"),
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": workflow,
+        "dossier": dossier,
+        "committee_decision": decision,
+    }
+
+
+def update_recommendation_state_service(
+    workflow_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    workflow = store.get_workflow(workflow_id)
+    if workflow is None:
+        raise HTTPException(status_code=404, detail="workflow not found")
+    workspace = store.get_workspace(workflow["workspace_id"])
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    action_type = str(payload.get("action_type") or "revise_recommendation")
+    require_access(
+        permission=permission_for_action(action_type),
+        user_context=normalized,
+        resource=_workflow_resource(workflow, workspace),
+        store=store,
+    )
+    dossier = (
+        store.get_dossier(str(payload.get("dossier_id")))
+        if payload.get("dossier_id")
+        else next(iter(store.list_dossiers(workflow_id=workflow_id, limit=1)), None)
+    )
+    if dossier is None:
+        raise HTTPException(status_code=404, detail="dossier not found")
+    recommendation_update = _apply_recommendation_state_update(
+        workflow=workflow,
+        dossier=dossier,
+        workspace=workspace,
+        next_state=str(payload.get("recommendation_state") or "draft"),
+        action_type=action_type,
+        summary=payload.get("summary"),
+        rationale=payload.get("rationale"),
+        lock_recommendation=payload.get("lock_recommendation"),
+        source_decision_id=None,
+        user_context=normalized,
+        metadata=payload.get("metadata") or {},
+        store=store,
+    )
+    event_map = {
+        "freeze_recommendation": "recommendation_frozen",
+        "revise_recommendation": "recommendation_revised",
+        "downgrade_to_watch": "downgraded_to_watch",
+        "downgrade_to_paper": "downgraded_to_paper",
+        "reopen_review": "review_reopened",
+    }
+    audit = _create_audit_event(
+        event_type=event_map.get(action_type, "recommendation_revised"),
+        resource=_workflow_resource(workflow, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": workflow_id,
+            "dossier_id": dossier.get("dossier_id"),
+            "stage": workflow.get("stage"),
+            "status": workflow.get("status"),
+            "summary": payload.get("summary"),
+            "recommendation_state": recommendation_update["recommendation_state"],
+        },
+        rationale=payload.get("rationale"),
+        metadata={"action_type": action_type},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workflow": workflow,
+        "dossier": recommendation_update["dossier"],
+        "recommendation_state": recommendation_update["recommendation_state"],
+        "recommendation_change": recommendation_update["recommendation_change"],
+        "recommendation_lock": recommendation_update["recommendation_lock"],
+        "audit_event": audit,
     }
 
 
@@ -1045,8 +2004,118 @@ def execute_workflow_action_service(
                 "updated_at": _now_utc(),
             },
         )
+    action_type = str(payload.get("action_type") or "")
+    if action_type == "escalate_to_committee" and updated_dossier is not None:
+        existing_pending = next(
+            (
+                item
+                for item in approvals
+                if str(item.get("status") or "") == "pending"
+                and str(item.get("requested_role") or "") == "committee"
+            ),
+            None,
+        )
+        escalation = build_escalation_record(
+            organization_id=(workspace or {}).get("organization_id"),
+            workspace_id=(workspace or {}).get("workspace_id"),
+            workflow_id=workflow_id,
+            dossier_id=updated_dossier.get("dossier_id"),
+            action_type="escalate_to_committee",
+            from_state=_current_recommendation_state(updated_dossier).get("state"),
+            to_state="under_review",
+            rationale=payload.get("rationale"),
+            user_context=normalized,
+            metadata=payload.get("metadata") or {},
+        )
+        if existing_pending is None:
+            approval = build_approval_request(
+                workflow_id=workflow_id,
+                dossier_id=updated_dossier.get("dossier_id"),
+                requested_role="committee",
+                user_context=normalized,
+                stage=str(updated_workflow.get("stage") or ""),
+                rationale=payload.get("rationale"),
+                required_permissions=["approve_stage"],
+                metadata={
+                    **dict(payload.get("metadata") or {}),
+                    "escalation": escalation,
+                },
+            )
+            store.create_approval_request(approval.model_dump(mode="python"))
+    elif action_type == "resolve_concerns" and updated_dossier is not None:
+        open_comments = store.list_review_comments(
+            workflow_id=workflow_id,
+            dossier_id=updated_dossier.get("dossier_id"),
+            include_resolved=False,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        for comment in open_comments:
+            resolved = resolve_review_comment(
+                comment,
+                user_context=normalized,
+                rationale=payload.get("rationale") or "Workflow concern resolution action applied.",
+                metadata={"resolved_by_action": "resolve_concerns"},
+            )
+            store.update_review_comment(str(comment.get("comment_id") or ""), resolved)
+    if action_type in {
+        "downgrade_to_watch",
+        "downgrade_to_paper",
+        "freeze_recommendation",
+        "revise_recommendation",
+        "reopen_review",
+    } and updated_dossier is not None:
+        target_state_map = {
+            "downgrade_to_watch": "watch_only",
+            "downgrade_to_paper": "approved_paper",
+            "freeze_recommendation": _current_recommendation_state(updated_dossier).get("state")
+            or "draft",
+            "revise_recommendation": str(
+                (payload.get("metadata") or {}).get("recommendation_state")
+                or _current_recommendation_state(updated_dossier).get("state")
+                or "draft"
+            ),
+            "reopen_review": "under_review",
+        }
+        recommendation_result = _apply_recommendation_state_update(
+            workflow=updated_workflow,
+            dossier=updated_dossier,
+            workspace=workspace,
+            next_state=str(target_state_map.get(action_type) or "draft"),
+            action_type=action_type,
+            summary=(payload.get("metadata") or {}).get("summary")
+            or payload.get("rationale"),
+            rationale=payload.get("rationale"),
+            lock_recommendation=True if action_type == "freeze_recommendation" else (
+                False if action_type == "reopen_review" else None
+            ),
+            source_decision_id=None,
+            user_context=normalized,
+            metadata=payload.get("metadata") or {},
+            store=store,
+        )
+        updated_dossier = recommendation_result["dossier"]
+    elif updated_dossier is not None:
+        updated_dossier = (
+            _refresh_dossier_collaboration_state(
+                updated_dossier,
+                workflow=updated_workflow,
+                store=store,
+                organization_ids=None if normalized.is_system else normalized.organization_ids,
+                workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+            )
+            or updated_dossier
+        )
+    workflow_event_type = {
+        "escalate_to_committee": "escalated_to_committee",
+        "downgrade_to_watch": "downgraded_to_watch",
+        "downgrade_to_paper": "downgraded_to_paper",
+        "freeze_recommendation": "recommendation_frozen",
+        "revise_recommendation": "recommendation_revised",
+        "reopen_review": "review_reopened",
+    }.get(action_type, f"workflow_{payload.get('action_type')}")
     audit = _create_audit_event(
-        event_type=f"workflow_{payload.get('action_type')}",
+        event_type=workflow_event_type,
         resource=_workflow_resource(updated_workflow, workspace),
         user_context=normalized,
         payload={
@@ -1055,6 +2124,9 @@ def execute_workflow_action_service(
             "stage": updated_workflow.get("stage"),
             "status": updated_workflow.get("status"),
             "summary": applied.get("summary"),
+            "recommendation_state": (
+                ((updated_dossier or {}).get("metadata") or {}).get("recommendation_state")
+            ),
         },
         rationale=payload.get("rationale"),
         metadata={
@@ -3315,6 +4387,11 @@ def sync_analysis_into_platform(
         if workflow
         else []
     )
+    collaboration = _build_collaboration_bundle(
+        workflow=workflow,
+        dossier=dossier,
+        store=store,
+    )
     exports = (
         store.list_export_manifests((dossier or {}).get("dossier_id"))
         if dossier
@@ -3386,6 +4463,13 @@ def sync_analysis_into_platform(
         "allowed_actions": allowed_actions,
         "approvals": approvals,
         "timeline": timeline,
+        "review_comments": collaboration["comments"],
+        "review_summary": collaboration["review_summary"],
+        "assignments": collaboration["assignments"],
+        "assignment_summary": collaboration["assignment_summary"],
+        "committee_decision": collaboration["committee_decision"],
+        "recommendation_state": collaboration["recommendation_state"],
+        "recommendation_history": collaboration["recommendation_history"],
         "exports": exports,
         "rendered_exports": rendered_exports,
         "stored_exports": stored_exports,

@@ -17,6 +17,13 @@ ACTION_PERMISSION_MAP: Dict[str, str] = {
     "refresh_summary": "update_dossier",
     "lock_recommendation": "approve_stage",
     "unlock_recommendation": "approve_stage",
+    "escalate_to_committee": "request_approval",
+    "downgrade_to_watch": "approve_stage",
+    "downgrade_to_paper": "approve_stage",
+    "freeze_recommendation": "approve_stage",
+    "revise_recommendation": "update_dossier",
+    "resolve_concerns": "update_dossier",
+    "reopen_review": "approve_stage",
     "export_pack": "export_report_pack",
 }
 
@@ -95,7 +102,21 @@ def list_allowed_actions(
 ) -> List[Dict[str, Any]]:
     current_stage = str(workflow.get("stage") or "intake")
     stage_plan = allowed_stage_transition(template, current_stage=current_stage)
-    locked = bool((dossier or {}).get("metadata", {}).get("recommendation_locked"))
+    recommendation_state = (
+        ((dossier or {}).get("metadata", {}).get("recommendation_state") or {})
+    )
+    locked = bool(
+        recommendation_state.get("locked")
+        or (dossier or {}).get("metadata", {}).get("recommendation_locked")
+    )
+    current_recommendation_state = str(recommendation_state.get("state") or "draft")
+    unresolved_concerns = int(
+        (((dossier or {}).get("metadata") or {}).get("review_summary") or {}).get(
+            "unresolved_concern_count"
+        )
+        or ((dossier or {}).get("current_summary") or {}).get("unresolved_concern_count")
+        or 0
+    )
     pending_approval = any(str(item.get("status")) == "pending" for item in approvals)
     actions: List[Dict[str, Any]] = []
     for action_type, permission in ACTION_PERMISSION_MAP.items():
@@ -121,6 +142,27 @@ def list_allowed_actions(
         elif action_type == "unlock_recommendation" and not locked:
             allowed = False
             note = "Recommendation is not currently locked."
+        elif action_type == "freeze_recommendation" and locked:
+            allowed = False
+            note = "Recommendation is already frozen."
+        elif action_type == "revise_recommendation" and locked:
+            allowed = False
+            note = "Unlock the recommendation before revising it."
+        elif action_type == "resolve_concerns" and unresolved_concerns <= 0:
+            allowed = False
+            note = "No unresolved concern is open."
+        elif action_type == "escalate_to_committee" and pending_approval:
+            allowed = False
+            note = "A committee approval request is already pending."
+        elif action_type == "downgrade_to_watch" and current_recommendation_state == "watch_only":
+            allowed = False
+            note = "Recommendation is already downgraded to watch-only."
+        elif action_type == "downgrade_to_paper" and current_recommendation_state == "approved_paper":
+            allowed = False
+            note = "Recommendation is already capped at paper approval."
+        elif action_type == "reopen_review" and str(workflow.get("status") or "") in {"draft", "in_review"}:
+            allowed = False
+            note = "Workflow is already open for review."
         actions.append(
             sanitize_payload(
                 {
@@ -213,6 +255,56 @@ def apply_workflow_action(
             "stage_state": stage_state,
         }
         dossier_updates["workflow_stage_state"] = stage_state
+    elif action_type == "escalate_to_committee":
+        stage_state["status"] = "in_review"
+        workflow_updates = {
+            "status": "in_review",
+            "stage_state": stage_state,
+        }
+        dossier_updates["workflow_stage_state"] = stage_state
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "last_escalation_reason": rationale,
+        }
+    elif action_type == "reopen_review":
+        stage_state["status"] = "draft"
+        workflow_updates = {
+            "status": "draft",
+            "stage_state": stage_state,
+        }
+        dossier_updates["workflow_stage_state"] = stage_state
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "last_review_reopened_reason": rationale,
+        }
+    elif action_type == "downgrade_to_watch":
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "last_downgrade_reason": rationale,
+            "last_downgrade_target": "watch_only",
+        }
+    elif action_type == "downgrade_to_paper":
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "last_downgrade_reason": rationale,
+            "last_downgrade_target": "approved_paper",
+        }
+    elif action_type == "freeze_recommendation":
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "recommendation_locked": True,
+            "locked_reason": rationale,
+        }
+    elif action_type == "revise_recommendation":
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "last_recommendation_revision_reason": rationale,
+        }
+    elif action_type == "resolve_concerns":
+        dossier_updates["metadata"] = {
+            **(dossier_payload.get("metadata") or {}),
+            "last_concern_resolution_reason": rationale,
+        }
     elif action_type == "lock_recommendation":
         dossier_updates["metadata"] = {
             **(dossier_payload.get("metadata") or {}),

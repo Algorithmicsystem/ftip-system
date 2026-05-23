@@ -30,6 +30,74 @@ def _section(section_key: str, title: str, content: Any, payload: Optional[Dict[
     )
 
 
+def _collaboration_sections(dossier: Dict[str, Any]) -> List[ExportSection]:
+    metadata = dossier.get("metadata") or {}
+    review_summary = metadata.get("review_summary") or {}
+    assignment_summary = metadata.get("assignment_summary") or {}
+    committee_decision = metadata.get("latest_committee_decision") or {}
+    recommendation_state = metadata.get("recommendation_state") or {}
+    sections: List[ExportSection] = []
+    if review_summary:
+        sections.append(
+            _section(
+                "decision_rationale",
+                "Decision Rationale / Concerns",
+                (
+                    (review_summary.get("decision_rationale") or {}).get("summary")
+                    or f"{review_summary.get('unresolved_concern_count', 0)} unresolved concern(s) remain open."
+                ),
+                review_summary,
+            )
+        )
+    if review_summary.get("concern_flags"):
+        sections.append(
+            _section(
+                "unresolved_concerns",
+                "Unresolved Concerns",
+                ", ".join(
+                    str(item.get("summary") or "concern")
+                    for item in list(review_summary.get("concern_flags") or [])[:5]
+                ),
+                {"concern_flags": review_summary.get("concern_flags") or []},
+            )
+        )
+    if assignment_summary:
+        sections.append(
+            _section(
+                "reviewer_assignments",
+                "Reviewer / Assignment State",
+                (
+                    f"Owner {((assignment_summary.get('owner') or {}).get('assignee_placeholder')) or 'unassigned'}; "
+                    f"Primary reviewer {((assignment_summary.get('primary_reviewer') or {}).get('assignee_placeholder')) or 'unassigned'}; "
+                    f"Committee reviewer {((assignment_summary.get('committee_reviewer') or {}).get('assignee_placeholder')) or 'unassigned'}."
+                ),
+                assignment_summary,
+            )
+        )
+    if committee_decision:
+        sections.append(
+            _section(
+                "committee_decision",
+                "Committee Decision",
+                committee_decision.get("summary"),
+                committee_decision,
+            )
+        )
+    if recommendation_state:
+        sections.append(
+            _section(
+                "recommendation_state",
+                "Recommendation State",
+                (
+                    f"State {recommendation_state.get('state') or 'draft'} / locked "
+                    f"{bool(recommendation_state.get('locked'))}"
+                ),
+                {"recommendation_state": recommendation_state},
+            )
+        )
+    return sections
+
+
 def build_export_sections(
     *,
     pack_type: str,
@@ -57,6 +125,7 @@ def build_export_sections(
             _section("historical", "Historical Evidence Summary", report.get("axiom_historical_evidence_summary_text"), historical),
             _section("deployability", "Deployability and Size Guidance", report.get("axiom_risk_deployability_memo_summary"), risk_memo),
             _section("monitoring", "Monitoring / Invalidation Triggers", report.get("platform_monitoring_summary"), dossier.get("monitoring_state") or {}),
+            *_collaboration_sections(dossier)[:2],
         ]
     if pack_type == "ic_memo_pack":
         return [
@@ -68,6 +137,7 @@ def build_export_sections(
             _section("liquidity", "Liquidity / Implementation Notes", report.get("execution_quality_analysis"), risk_memo.get("liquidity_convexity_engine") or {}),
             _section("portfolio", "Portfolio Fit", report.get("axiom_portfolio_governance_summary"), report.get("axiom_portfolio_governance") or {}),
             _section("action", "Recommended Action", report.get("deployment_permission_analysis"), {"tier": report.get("axiom_evidence_backed_deployability_tier")}),
+            *_collaboration_sections(dossier),
             _section("escalation", "Conditions Required for Escalation or Downgrade", report.get("platform_monitoring_summary"), dossier.get("monitoring_state") or {}),
         ]
     if pack_type == "risk_deployability_pack":
@@ -76,6 +146,7 @@ def build_export_sections(
             _section("liquidity_engine", "Liquidity and Convexity", report.get("execution_quality_analysis"), risk_memo.get("liquidity_convexity_engine") or {}),
             _section("research_integrity", "Research Integrity", report.get("axiom_summary"), (report.get("axiom") or {}).get("engine_scores", {}).get("research_integrity") or {}),
             _section("deployability", "Evidence-Backed Deployability", report.get("axiom_risk_deployability_memo_summary"), risk_memo),
+            *_collaboration_sections(dossier)[-2:],
             _section("monitoring", "Downgrade / Scenario Triggers", report.get("platform_monitoring_summary"), dossier.get("monitoring_state") or {}),
         ]
     if pack_type == "historical_evidence_pack":
@@ -96,5 +167,9 @@ def build_export_sections(
                 item.get("payload") or {},
             )
         )
+    existing_keys = {str(item.section_key) for item in sections}
+    for item in _collaboration_sections(dossier):
+        if str(item.section_key) not in existing_keys:
+            sections.append(item)
     sections.append(_section("lineage", "Lineage Summary", report.get("axiom_lineage_summary"), lineage))
     return sections

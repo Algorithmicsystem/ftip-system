@@ -3280,6 +3280,184 @@ const renderPlatformApprovals = (report) => {
   ].join("");
 };
 
+const renderPlatformReviews = (report) => {
+  const container = qs("#assistant-platform-reviews");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Structured review comments, concern severity, and resolution state render here."
+    );
+    return;
+  }
+  const reviewSummary = report.platform_review_summary || {};
+  const comments = report.platform_review_comments || [];
+  const flags = reviewSummary.concern_flags || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Review Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_collaboration_summary,
+          `Comments ${((reviewSummary.thread_summary || {}).total_comments) ?? 0}`,
+          `Unresolved concerns ${reviewSummary.unresolved_concern_count ?? 0}`,
+        ].filter(Boolean),
+        "No structured review summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Open Concerns</h5>
+      ${renderBullets(
+        flags.slice(0, 6).map(
+          (item) =>
+            `${item.concern_type || "concern"} / ${item.severity || "watch"} / ${
+              item.summary || "no summary"
+            }`
+        ),
+        "No unresolved concern is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Recent Comments</h5>
+      ${renderBullets(
+        comments.slice(0, 6).map(
+          (item) =>
+            `${item.comment_type || "general"} / ${item.severity || "info"} / ${
+              item.status || "open"
+            } / ${item.body || "no comment"}`
+        ),
+        "No review comment is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformAssignments = (report) => {
+  const container = qs("#assistant-platform-assignments");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Owner, reviewer slots, and assignment coverage render here."
+    );
+    return;
+  }
+  const summary = report.platform_assignment_summary || {};
+  const assignments = report.platform_assignments || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Assignment Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_assignment_summary_text,
+          `Owner ${summary?.owner?.assignee_placeholder || "unassigned"}`,
+          `Primary reviewer ${summary?.primary_reviewer?.assignee_placeholder || "unassigned"}`,
+          `Risk reviewer ${summary?.risk_reviewer?.assignee_placeholder || "unassigned"}`,
+          `Committee reviewer ${summary?.committee_reviewer?.assignee_placeholder || "unassigned"}`,
+        ].filter(Boolean),
+        "No assignment summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Assignment Records</h5>
+      ${renderBullets(
+        assignments.slice(0, 6).map(
+          (item) =>
+            `${item.slot_type || "slot"} / ${item.assignee_placeholder || "unassigned"} / ${
+              item.status || "assigned"
+            }`
+        ),
+        "No assignment record is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformCommitteeDecision = (report) => {
+  const container = qs("#assistant-platform-committee");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Committee outcomes, conditions, evidence gaps, and risk notes render here."
+    );
+    return;
+  }
+  const decision = report.platform_committee_decision || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Latest Decision</h5>
+      ${renderBullets(
+        [
+          report.platform_committee_summary,
+          `Decision ${decision.decision_status || "not recorded"}`,
+          `Recommendation ${decision.recommendation_state || "draft"}`,
+          decision.summary,
+        ].filter(Boolean),
+        "No committee decision snapshot is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Conditions / Risks / Gaps</h5>
+      ${renderBullets(
+        [
+          ...((decision.conditions || []).slice(0, 3).map(
+            (item) => `Condition: ${item.label || item}`
+          )),
+          ...((decision.key_risks || []).slice(0, 3).map((item) => `Risk: ${item}`)),
+          ...((decision.key_evidence_gaps || []).slice(0, 3).map((item) => `Gap: ${item}`)),
+        ],
+        "No committee conditions, risks, or evidence gaps are attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformRecommendationState = (report) => {
+  const container = qs("#assistant-platform-recommendation-state");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Recommendation state, lock status, and revision history render here."
+    );
+    return;
+  }
+  const state = report.platform_recommendation_state || {};
+  const history = report.platform_recommendation_history || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Current State</h5>
+      ${renderBullets(
+        [
+          report.platform_collaboration_summary,
+          `State ${state.state || "draft"}`,
+          `Locked ${String(state.locked || false)}`,
+          state.summary,
+          state.rationale,
+        ].filter(Boolean),
+        "No recommendation state is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>State History</h5>
+      ${renderBullets(
+        history.slice(0, 6).map(
+          (item) =>
+            `${item.action_type || "change"} / ${item.previous_state || "n/a"} -> ${
+              item.new_state || "n/a"
+            } / locked ${String(item.locked || false)}`
+        ),
+        "No recommendation history is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderPlatformExports = (report) => {
   const container = qs("#assistant-platform-exports");
   if (!container) {
@@ -4088,6 +4266,10 @@ const renderAssistantReport = (report) => {
     renderPlatformMonitoring(null);
     renderPlatformControls(null);
     renderPlatformApprovals(null);
+    renderPlatformReviews(null);
+    renderPlatformAssignments(null);
+    renderPlatformCommitteeDecision(null);
+    renderPlatformRecommendationState(null);
     renderPlatformExports(null);
     renderPlatformIntegrations(null);
     renderPlatformAnalytics(null);
@@ -4386,6 +4568,10 @@ const renderAssistantReport = (report) => {
   renderPlatformMonitoring(report);
   renderPlatformControls(report);
   renderPlatformApprovals(report);
+  renderPlatformReviews(report);
+  renderPlatformAssignments(report);
+  renderPlatformCommitteeDecision(report);
+  renderPlatformRecommendationState(report);
   renderPlatformExports(report);
   renderPlatformIntegrations(report);
   renderPlatformAnalytics(report);

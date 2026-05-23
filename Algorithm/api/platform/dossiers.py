@@ -261,6 +261,11 @@ def refresh_dossier_record(
 
 def dossier_preview(dossier: Dict[str, Any]) -> Dict[str, Any]:
     record = DossierRecord.model_validate(dossier)
+    recommendation_state = (
+        ((record.metadata or {}).get("recommendation_state") or {}).get("state")
+        or record.current_summary.get("recommendation_state")
+    )
+    latest_committee_decision = (record.metadata or {}).get("latest_committee_decision") or {}
     return {
         "dossier_id": record.dossier_id,
         "title": record.title,
@@ -274,4 +279,12 @@ def dossier_preview(dossier: Dict[str, Any]) -> Dict[str, Any]:
         "status": (record.workflow_stage_state or WorkflowStageState(stage="unknown")).status,
         "symbol": record.current_summary.get("symbol"),
         "as_of_date": record.current_summary.get("as_of_date"),
+        "recommendation_state": recommendation_state,
+        "recommendation_locked": bool(
+            ((record.metadata or {}).get("recommendation_state") or {}).get("locked")
+        ),
+        "unresolved_concern_count": int(
+            (record.current_summary or {}).get("unresolved_concern_count") or 0
+        ),
+        "latest_committee_decision_status": latest_committee_decision.get("decision_status"),
     }

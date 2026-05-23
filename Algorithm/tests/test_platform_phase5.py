@@ -25,6 +25,14 @@ def _reset_platform_store(store: PlatformStore) -> None:
         store._approval_requests.clear()
     if hasattr(store, "_audit_events"):
         store._audit_events.clear()
+    if hasattr(store, "_review_comments"):
+        store._review_comments.clear()
+    if hasattr(store, "_assignments"):
+        store._assignments.clear()
+    if hasattr(store, "_committee_decisions"):
+        store._committee_decisions.clear()
+    if hasattr(store, "_recommendation_changes"):
+        store._recommendation_changes.clear()
     if hasattr(store, "_export_manifests"):
         store._export_manifests.clear()
     if hasattr(store, "_rendered_exports"):

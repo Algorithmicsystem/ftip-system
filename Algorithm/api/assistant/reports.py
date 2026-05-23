@@ -2664,6 +2664,13 @@ def attach_platform_context(
     allowed_actions = list(platform_context.get("allowed_actions") or [])
     bindings = list(platform_context.get("integration_bindings") or [])
     export_capabilities = dict(platform_context.get("export_capabilities") or {})
+    review_comments = list(platform_context.get("review_comments") or [])
+    review_summary = dict(platform_context.get("review_summary") or {})
+    assignments = list(platform_context.get("assignments") or [])
+    assignment_summary = dict(platform_context.get("assignment_summary") or {})
+    committee_decision = dict(platform_context.get("committee_decision") or {})
+    recommendation_state = dict(platform_context.get("recommendation_state") or {})
+    recommendation_history = list(platform_context.get("recommendation_history") or [])
 
     overview_summary = (
         f"Workspace {workspace.get('name') or 'n/a'} is running "
@@ -2756,6 +2763,26 @@ def attach_platform_context(
         if demo_snapshot or readiness_snapshot
         else "No demo or readiness snapshot is attached."
     )
+    collaboration_summary = (
+        f"Review layer carries {((review_summary.get('thread_summary') or {}).get('total_comments')) or 0} comment(s), "
+        f"{review_summary.get('unresolved_concern_count', 0)} unresolved concern(s), and recommendation state "
+        f"{recommendation_state.get('state') or 'draft'}."
+        if review_summary or recommendation_state or committee_decision
+        else "No structured collaboration state is attached."
+    )
+    committee_summary = (
+        f"Latest committee decision is {committee_decision.get('decision_status') or 'not recorded'} "
+        f"with summary {committee_decision.get('summary') or 'n/a'}."
+        if committee_decision
+        else "No committee decision snapshot is attached."
+    )
+    assignment_summary_text = (
+        f"Assignment coverage includes owner "
+        f"{((assignment_summary.get('owner') or {}).get('assignee_placeholder')) or 'unassigned'} and primary reviewer "
+        f"{((assignment_summary.get('primary_reviewer') or {}).get('assignee_placeholder')) or 'unassigned'}."
+        if assignment_summary or assignments
+        else "No assignment state is attached."
+    )
 
     updated["report_version"] = "2.17"
     updated["platform_foundation_version"] = platform_context.get(
@@ -2793,6 +2820,13 @@ def attach_platform_context(
     updated["platform_dashboard"] = sanitize_payload(dashboard)
     updated["platform_demo_snapshot"] = sanitize_payload(demo_snapshot)
     updated["platform_readiness_snapshot"] = sanitize_payload(readiness_snapshot)
+    updated["platform_review_comments"] = sanitize_payload(review_comments)
+    updated["platform_review_summary"] = sanitize_payload(review_summary)
+    updated["platform_assignments"] = sanitize_payload(assignments)
+    updated["platform_assignment_summary"] = sanitize_payload(assignment_summary)
+    updated["platform_committee_decision"] = sanitize_payload(committee_decision)
+    updated["platform_recommendation_state"] = sanitize_payload(recommendation_state)
+    updated["platform_recommendation_history"] = sanitize_payload(recommendation_history)
     updated["platform_overview_summary"] = overview_summary
     updated["platform_dossier_summary"] = dossier_summary
     updated["platform_monitoring_summary"] = monitoring_summary
@@ -2807,6 +2841,9 @@ def attach_platform_context(
     updated["platform_dashboard_summary"] = dashboard_summary
     updated["platform_analytics_summary"] = analytics_summary
     updated["platform_demo_readiness_summary"] = demo_readiness_summary
+    updated["platform_collaboration_summary"] = collaboration_summary
+    updated["platform_committee_summary"] = committee_summary
+    updated["platform_assignment_summary_text"] = assignment_summary_text
     updated["overall_analysis"] = _join_sentences(
         [
             updated.get("overall_analysis"),
@@ -2814,6 +2851,7 @@ def attach_platform_context(
             dossier_summary,
             export_storage_summary,
             export_capability_summary,
+            collaboration_summary,
             workflow_actions_summary,
             dashboard_summary,
         ]
@@ -2823,6 +2861,8 @@ def attach_platform_context(
             updated.get("strategy_view"),
             monitoring_summary,
             access_control_summary,
+            committee_summary,
+            assignment_summary_text,
             analytics_summary,
             demo_readiness_summary,
         ]

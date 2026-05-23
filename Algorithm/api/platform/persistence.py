@@ -11,8 +11,10 @@ from api import config, db
 from api.assistant.reports import sanitize_payload
 from api.platform.contracts import (
     AnalysisLink,
+    AssignmentRecord,
     ApprovalRequest,
     AuditEvent,
+    CommitteeDecisionSnapshot,
     CoverageEntity,
     DossierRecord,
     ExportIntegrityResult,
@@ -24,7 +26,9 @@ from api.platform.contracts import (
     IntegrationExecutionRecord,
     MembershipRecord,
     OrganizationProfile,
+    RecommendationChangeRecord,
     RenderedExportResult,
+    ReviewComment,
     StoredExportRecord,
     WorkflowInstance,
     WorkspaceRecord,
@@ -62,6 +66,10 @@ class PlatformStore:
         self._memberships: Dict[str, Dict[str, Any]] = {}
         self._approval_requests: Dict[str, Dict[str, Any]] = {}
         self._audit_events: List[Dict[str, Any]] = []
+        self._review_comments: Dict[str, Dict[str, Any]] = {}
+        self._assignments: Dict[str, Dict[str, Any]] = {}
+        self._committee_decisions: Dict[str, Dict[str, Any]] = {}
+        self._recommendation_changes: Dict[str, Dict[str, Any]] = {}
         self._export_manifests: Dict[str, Dict[str, Any]] = {}
         self._rendered_exports: Dict[str, Dict[str, Any]] = {}
         self._stored_exports: Dict[str, Dict[str, Any]] = {}
@@ -1444,6 +1452,596 @@ class PlatformStore:
             }
             for row in rows
         ]
+
+    def _row_to_review_comment(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "comment_id": str(row[0]),
+            "organization_id": str(row[1]) if row[1] is not None else None,
+            "workspace_id": str(row[2]) if row[2] is not None else None,
+            "workflow_id": str(row[3]),
+            "dossier_id": str(row[4]),
+            "stage": row[5],
+            "author": sanitize_payload(row[6]) if row[6] is not None else {},
+            "comment_type": row[7],
+            "body": row[8],
+            "severity": row[9],
+            "created_at": row[10],
+            "resolved_at": row[11],
+            "status": row[12],
+            "metadata": sanitize_payload(row[13]) if row[13] is not None else {},
+        }
+
+    def create_review_comment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = ReviewComment.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            self._review_comments[record["comment_id"]] = sanitize_payload(record)
+            return self._review_comments[record["comment_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_review_comments (
+                comment_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                author, comment_type, body, severity, created_at, resolved_at, status, metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s,
+                COALESCE(%s::timestamptz, now()), %s::timestamptz, %s, %s::jsonb
+            )
+            ON CONFLICT (comment_id)
+            DO UPDATE SET
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                stage = EXCLUDED.stage,
+                author = EXCLUDED.author,
+                comment_type = EXCLUDED.comment_type,
+                body = EXCLUDED.body,
+                severity = EXCLUDED.severity,
+                created_at = EXCLUDED.created_at,
+                resolved_at = EXCLUDED.resolved_at,
+                status = EXCLUDED.status,
+                metadata = EXCLUDED.metadata
+            RETURNING comment_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                author, comment_type, body, severity, created_at, resolved_at, status, metadata
+            """,
+            (
+                record["comment_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record["dossier_id"],
+                record.get("stage"),
+                Json(sanitize_payload(record.get("author") or {})),
+                record["comment_type"],
+                record["body"],
+                record["severity"],
+                record.get("created_at"),
+                record.get("resolved_at"),
+                record["status"],
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return self._row_to_review_comment(row)
+
+    def get_review_comment(
+        self,
+        comment_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            item = self._review_comments.get(str(comment_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return sanitize_payload(item)
+            return None
+        row = db.safe_fetchone(
+            """
+            SELECT comment_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                   author, comment_type, body, severity, created_at, resolved_at, status, metadata
+            FROM platform_review_comments
+            WHERE comment_id=%s
+            """,
+            (comment_id,),
+        )
+        if not row:
+            return None
+        result = self._row_to_review_comment(row)
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
+
+    def update_review_comment(self, comment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        merged = {**(self.get_review_comment(comment_id) or {}), **sanitize_payload(payload)}
+        merged["comment_id"] = comment_id
+        return self.create_review_comment(merged)
+
+    def list_review_comments(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        include_resolved: bool = True,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._review_comments.values())
+            if workflow_id is not None:
+                rows = [row for row in rows if str(row.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [row for row in rows if str(row.get("dossier_id")) == str(dossier_id)]
+            if not include_resolved:
+                rows = [row for row in rows if str(row.get("status") or "open") != "resolved"]
+            rows = [
+                row
+                for row in rows
+                if self._matches_scope(
+                    organization_id=row.get("organization_id"),
+                    workspace_id=row.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if not include_resolved:
+            clauses.append("status<>%s")
+            params.append("resolved")
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT comment_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                   author, comment_type, body, severity, created_at, resolved_at, status, metadata
+            FROM platform_review_comments
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_review_comment(row) for row in rows]
+
+    def _row_to_assignment(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "assignment_id": str(row[0]),
+            "organization_id": str(row[1]) if row[1] is not None else None,
+            "workspace_id": str(row[2]) if row[2] is not None else None,
+            "workflow_id": str(row[3]),
+            "dossier_id": str(row[4]) if row[4] is not None else None,
+            "slot_type": row[5],
+            "assignee_placeholder": row[6],
+            "assigned_by": sanitize_payload(row[7]) if row[7] is not None else {},
+            "status": row[8],
+            "notes": sanitize_payload(row[9]) if row[9] is not None else [],
+            "metadata": sanitize_payload(row[10]) if row[10] is not None else {},
+            "created_at": row[11],
+            "updated_at": row[12],
+        }
+
+    def create_assignment(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = AssignmentRecord.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            record["updated_at"] = self._now_iso()
+            self._assignments[record["assignment_id"]] = sanitize_payload(record)
+            return self._assignments[record["assignment_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_assignments (
+                assignment_id, organization_id, workspace_id, workflow_id, dossier_id, slot_type,
+                assignee_placeholder, assigned_by, status, notes, metadata
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb, %s::jsonb)
+            ON CONFLICT (assignment_id)
+            DO UPDATE SET
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                slot_type = EXCLUDED.slot_type,
+                assignee_placeholder = EXCLUDED.assignee_placeholder,
+                assigned_by = EXCLUDED.assigned_by,
+                status = EXCLUDED.status,
+                notes = EXCLUDED.notes,
+                metadata = EXCLUDED.metadata,
+                updated_at = now()
+            RETURNING assignment_id, organization_id, workspace_id, workflow_id, dossier_id, slot_type,
+                assignee_placeholder, assigned_by, status, notes, metadata, created_at, updated_at
+            """,
+            (
+                record["assignment_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record.get("dossier_id"),
+                record["slot_type"],
+                record.get("assignee_placeholder"),
+                Json(sanitize_payload(record.get("assigned_by") or {})),
+                record["status"],
+                Json(sanitize_payload(record.get("notes") or [])),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return self._row_to_assignment(row)
+
+    def list_assignments(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._assignments.values())
+            if workflow_id is not None:
+                rows = [row for row in rows if str(row.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [row for row in rows if str(row.get("dossier_id") or "") == str(dossier_id)]
+            rows = [
+                row for row in rows
+                if self._matches_scope(
+                    organization_id=row.get("organization_id"),
+                    workspace_id=row.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT assignment_id, organization_id, workspace_id, workflow_id, dossier_id, slot_type,
+                   assignee_placeholder, assigned_by, status, notes, metadata, created_at, updated_at
+            FROM platform_assignments
+            WHERE {' AND '.join(clauses)}
+            ORDER BY updated_at DESC, created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_assignment(row) for row in rows]
+
+    def find_assignment_by_slot(
+        self,
+        *,
+        workflow_id: str,
+        dossier_id: Optional[str],
+        slot_type: str,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        for item in self.list_assignments(
+            workflow_id=workflow_id,
+            dossier_id=dossier_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            if str(item.get("slot_type") or "") == str(slot_type):
+                return item
+        return None
+
+    def update_assignment(self, assignment_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        current = None
+        if self.use_memory:
+            current = self._assignments.get(str(assignment_id))
+        else:
+            rows = self.list_assignments()
+            current = next((row for row in rows if str(row.get("assignment_id")) == str(assignment_id)), None)
+        merged = {**(current or {}), **sanitize_payload(payload), "assignment_id": assignment_id}
+        return self.create_assignment(merged)
+
+    def _row_to_committee_decision(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "decision_id": str(row[0]),
+            "organization_id": str(row[1]) if row[1] is not None else None,
+            "workspace_id": str(row[2]) if row[2] is not None else None,
+            "workflow_id": str(row[3]),
+            "dossier_id": str(row[4]),
+            "stage": row[5],
+            "decision_status": row[6],
+            "recommendation_state": row[7],
+            "summary": row[8],
+            "conditions": sanitize_payload(row[9]) if row[9] is not None else [],
+            "key_risks": sanitize_payload(row[10]) if row[10] is not None else [],
+            "key_evidence_strengths": sanitize_payload(row[11]) if row[11] is not None else [],
+            "key_evidence_gaps": sanitize_payload(row[12]) if row[12] is not None else [],
+            "actor_context": sanitize_payload(row[13]) if row[13] is not None else {},
+            "reviewer_context": sanitize_payload(row[14]) if row[14] is not None else {},
+            "created_at": row[15],
+            "metadata": sanitize_payload(row[16]) if row[16] is not None else {},
+        }
+
+    def create_committee_decision(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = CommitteeDecisionSnapshot.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            self._committee_decisions[record["decision_id"]] = sanitize_payload(record)
+            return self._committee_decisions[record["decision_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_committee_decisions (
+                decision_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                decision_status, recommendation_state, summary, conditions, key_risks,
+                key_evidence_strengths, key_evidence_gaps, actor_context, reviewer_context,
+                created_at, metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb,
+                %s::jsonb, %s::jsonb, %s::jsonb, COALESCE(%s::timestamptz, now()), %s::jsonb
+            )
+            ON CONFLICT (decision_id)
+            DO UPDATE SET
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                stage = EXCLUDED.stage,
+                decision_status = EXCLUDED.decision_status,
+                recommendation_state = EXCLUDED.recommendation_state,
+                summary = EXCLUDED.summary,
+                conditions = EXCLUDED.conditions,
+                key_risks = EXCLUDED.key_risks,
+                key_evidence_strengths = EXCLUDED.key_evidence_strengths,
+                key_evidence_gaps = EXCLUDED.key_evidence_gaps,
+                actor_context = EXCLUDED.actor_context,
+                reviewer_context = EXCLUDED.reviewer_context,
+                created_at = EXCLUDED.created_at,
+                metadata = EXCLUDED.metadata
+            RETURNING decision_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                decision_status, recommendation_state, summary, conditions, key_risks,
+                key_evidence_strengths, key_evidence_gaps, actor_context, reviewer_context,
+                created_at, metadata
+            """,
+            (
+                record["decision_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record["dossier_id"],
+                record.get("stage"),
+                record["decision_status"],
+                record["recommendation_state"],
+                record["summary"],
+                Json(sanitize_payload(record.get("conditions") or [])),
+                Json(sanitize_payload(record.get("key_risks") or [])),
+                Json(sanitize_payload(record.get("key_evidence_strengths") or [])),
+                Json(sanitize_payload(record.get("key_evidence_gaps") or [])),
+                Json(sanitize_payload(record.get("actor_context") or {})),
+                Json(sanitize_payload(record.get("reviewer_context") or {})),
+                record.get("created_at"),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return self._row_to_committee_decision(row)
+
+    def get_latest_committee_decision(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        decisions = self.list_committee_decisions(
+            workflow_id=workflow_id,
+            dossier_id=dossier_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        return decisions[0] if decisions else None
+
+    def list_committee_decisions(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._committee_decisions.values())
+            if workflow_id is not None:
+                rows = [row for row in rows if str(row.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [row for row in rows if str(row.get("dossier_id")) == str(dossier_id)]
+            rows = [
+                row for row in rows
+                if self._matches_scope(
+                    organization_id=row.get("organization_id"),
+                    workspace_id=row.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT decision_id, organization_id, workspace_id, workflow_id, dossier_id, stage,
+                   decision_status, recommendation_state, summary, conditions, key_risks,
+                   key_evidence_strengths, key_evidence_gaps, actor_context, reviewer_context,
+                   created_at, metadata
+            FROM platform_committee_decisions
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_committee_decision(row) for row in rows]
+
+    def _row_to_recommendation_change(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "change_id": str(row[0]),
+            "organization_id": str(row[1]) if row[1] is not None else None,
+            "workspace_id": str(row[2]) if row[2] is not None else None,
+            "workflow_id": str(row[3]),
+            "dossier_id": str(row[4]),
+            "previous_state": row[5],
+            "new_state": row[6],
+            "action_type": row[7],
+            "locked": bool(row[8]),
+            "snapshot": sanitize_payload(row[9]) if row[9] is not None else {},
+            "rationale": row[10],
+            "actor": sanitize_payload(row[11]) if row[11] is not None else {},
+            "created_at": row[12],
+            "metadata": sanitize_payload(row[13]) if row[13] is not None else {},
+        }
+
+    def create_recommendation_change(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = RecommendationChangeRecord.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            self._recommendation_changes[record["change_id"]] = sanitize_payload(record)
+            return self._recommendation_changes[record["change_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_recommendation_changes (
+                change_id, organization_id, workspace_id, workflow_id, dossier_id, previous_state,
+                new_state, action_type, locked, snapshot, rationale, actor, created_at, metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::jsonb,
+                COALESCE(%s::timestamptz, now()), %s::jsonb
+            )
+            ON CONFLICT (change_id)
+            DO UPDATE SET
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                previous_state = EXCLUDED.previous_state,
+                new_state = EXCLUDED.new_state,
+                action_type = EXCLUDED.action_type,
+                locked = EXCLUDED.locked,
+                snapshot = EXCLUDED.snapshot,
+                rationale = EXCLUDED.rationale,
+                actor = EXCLUDED.actor,
+                created_at = EXCLUDED.created_at,
+                metadata = EXCLUDED.metadata
+            RETURNING change_id, organization_id, workspace_id, workflow_id, dossier_id, previous_state,
+                new_state, action_type, locked, snapshot, rationale, actor, created_at, metadata
+            """,
+            (
+                record["change_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record["dossier_id"],
+                record.get("previous_state"),
+                record["new_state"],
+                record["action_type"],
+                bool(record.get("locked")),
+                Json(sanitize_payload(record.get("snapshot") or {})),
+                record.get("rationale"),
+                Json(sanitize_payload(record.get("actor") or {})),
+                record.get("created_at"),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return self._row_to_recommendation_change(row)
+
+    def list_recommendation_changes(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._recommendation_changes.values())
+            if workflow_id is not None:
+                rows = [row for row in rows if str(row.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [row for row in rows if str(row.get("dossier_id")) == str(dossier_id)]
+            rows = [
+                row for row in rows
+                if self._matches_scope(
+                    organization_id=row.get("organization_id"),
+                    workspace_id=row.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: item.get("created_at", ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT change_id, organization_id, workspace_id, workflow_id, dossier_id, previous_state,
+                   new_state, action_type, locked, snapshot, rationale, actor, created_at, metadata
+            FROM platform_recommendation_changes
+            WHERE {' AND '.join(clauses)}
+            ORDER BY created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_recommendation_change(row) for row in rows]
 
     def create_export_manifest(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         record = ExportManifest.model_validate(payload).model_dump(mode="python")

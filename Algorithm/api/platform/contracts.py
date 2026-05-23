@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -641,6 +641,188 @@ class PlatformReadinessSnapshot(BaseModel):
     rationale: Optional[str] = None
 
 
+class ReviewComment(BaseModel):
+    comment_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    stage: Optional[str] = None
+    author: Dict[str, Any] = Field(default_factory=dict)
+    comment_type: str = "general"
+    body: str
+    severity: str = "info"
+    created_at: Optional[str] = None
+    resolved_at: Optional[str] = None
+    status: str = "open"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ConcernFlag(BaseModel):
+    concern_id: str
+    workflow_id: Optional[str] = None
+    dossier_id: Optional[str] = None
+    concern_type: str
+    severity: str = "watch"
+    summary: str
+    source_comment_id: Optional[str] = None
+    status: str = "open"
+
+
+class ReviewThreadSummary(BaseModel):
+    workflow_id: str
+    dossier_id: str
+    total_comments: int = 0
+    unresolved_comments: int = 0
+    resolved_comments: int = 0
+    comments_by_severity: Dict[str, int] = Field(default_factory=dict)
+    comments_by_type: Dict[str, int] = Field(default_factory=dict)
+    latest_comment: Optional[Dict[str, Any]] = None
+
+
+class DecisionRationale(BaseModel):
+    summary: Optional[str] = None
+    key_risks: List[str] = Field(default_factory=list)
+    key_evidence_strengths: List[str] = Field(default_factory=list)
+    key_evidence_gaps: List[str] = Field(default_factory=list)
+    notes: List[str] = Field(default_factory=list)
+
+
+class ReviewSummary(BaseModel):
+    workflow_id: str
+    dossier_id: str
+    thread_summary: ReviewThreadSummary
+    unresolved_concern_count: int = 0
+    concern_flags: List[ConcernFlag] = Field(default_factory=list)
+    latest_comments: List[Dict[str, Any]] = Field(default_factory=list)
+    decision_rationale: Optional[DecisionRationale] = None
+
+
+class ReviewerSlot(BaseModel):
+    slot_type: str
+    assignee_placeholder: Optional[str] = None
+    status: str = "open"
+    notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AssignmentRecord(BaseModel):
+    assignment_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: Optional[str] = None
+    slot_type: str
+    assignee_placeholder: Optional[str] = None
+    assigned_by: Dict[str, Any] = Field(default_factory=dict)
+    status: str = "assigned"
+    notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class RoleAssignmentSummary(BaseModel):
+    workflow_id: str
+    dossier_id: Optional[str] = None
+    owner: Optional[ReviewerSlot] = None
+    primary_reviewer: Optional[ReviewerSlot] = None
+    risk_reviewer: Optional[ReviewerSlot] = None
+    committee_reviewer: Optional[ReviewerSlot] = None
+    observers: List[ReviewerSlot] = Field(default_factory=list)
+    assignments: List[AssignmentRecord] = Field(default_factory=list)
+
+
+class DecisionCondition(BaseModel):
+    condition_id: str
+    label: str
+    status: str = "required"
+    notes: List[str] = Field(default_factory=list)
+
+
+class DecisionOutcome(BaseModel):
+    outcome: str
+    recommendation_state: Optional[str] = None
+    approved: bool = False
+
+
+class CommitteeDecisionSnapshot(BaseModel):
+    decision_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    stage: Optional[str] = None
+    decision_status: str
+    recommendation_state: str
+    summary: str
+    conditions: List[DecisionCondition] = Field(default_factory=list)
+    key_risks: List[str] = Field(default_factory=list)
+    key_evidence_strengths: List[str] = Field(default_factory=list)
+    key_evidence_gaps: List[str] = Field(default_factory=list)
+    actor_context: Dict[str, Any] = Field(default_factory=dict)
+    reviewer_context: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EscalationRecord(BaseModel):
+    escalation_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: Optional[str] = None
+    action_type: str
+    from_state: Optional[str] = None
+    to_state: Optional[str] = None
+    rationale: Optional[str] = None
+    actor: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecommendationState(BaseModel):
+    state: str = "draft"
+    locked: bool = False
+    summary: Optional[str] = None
+    rationale: Optional[str] = None
+    locked_at: Optional[str] = None
+    locked_by: Dict[str, Any] = Field(default_factory=dict)
+    last_changed_at: Optional[str] = None
+    last_changed_by: Dict[str, Any] = Field(default_factory=dict)
+    source_decision_id: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecommendationLockRecord(BaseModel):
+    lock_id: str
+    workflow_id: str
+    dossier_id: str
+    recommendation_state: RecommendationState
+    reason: Optional[str] = None
+    actor: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    unlocked_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecommendationChangeRecord(BaseModel):
+    change_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    previous_state: Optional[str] = None
+    new_state: str
+    action_type: str
+    locked: bool = False
+    snapshot: Dict[str, Any] = Field(default_factory=dict)
+    rationale: Optional[str] = None
+    actor: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class CreateOrganizationRequest(BaseModel):
     name: str
     organization_type: str = "research_team"
@@ -729,6 +911,51 @@ class StoreExportRequest(BaseModel):
     export_format: str = "html"
     render_id: Optional[str] = None
     storage_backend: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ReviewCommentRequest(BaseModel):
+    stage: Optional[str] = None
+    comment_type: str = "general"
+    body: str
+    severity: str = "info"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ResolveCommentRequest(BaseModel):
+    rationale: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowAssignmentRequest(BaseModel):
+    dossier_id: Optional[str] = None
+    slot_type: str
+    assignee_placeholder: Optional[str] = None
+    status: str = "assigned"
+    notes: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CommitteeDecisionRequest(BaseModel):
+    dossier_id: Optional[str] = None
+    decision_status: str
+    recommendation_state: str
+    summary: str
+    conditions: List[Union[Dict[str, Any], str]] = Field(default_factory=list)
+    key_risks: List[str] = Field(default_factory=list)
+    key_evidence_strengths: List[str] = Field(default_factory=list)
+    key_evidence_gaps: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecommendationStateRequest(BaseModel):
+    dossier_id: Optional[str] = None
+    recommendation_state: str
+    action_type: str = "revise_recommendation"
+    lock_recommendation: Optional[bool] = None
+    summary: Optional[str] = None
+    rationale: Optional[str] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

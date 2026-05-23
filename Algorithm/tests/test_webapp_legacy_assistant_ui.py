@@ -81,6 +81,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-platform-monitoring"' in html
     assert 'id="assistant-platform-controls"' in html
     assert 'id="assistant-platform-approvals"' in html
+    assert 'id="assistant-platform-reviews"' in html
+    assert 'id="assistant-platform-assignments"' in html
+    assert 'id="assistant-platform-committee"' in html
+    assert 'id="assistant-platform-recommendation-state"' in html
     assert 'id="assistant-platform-exports"' in html
     assert 'id="assistant-platform-integrations"' in html
     assert 'id="assistant-platform-analytics"' in html
@@ -152,6 +156,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderPlatformMonitoring" in js
     assert "renderPlatformControls" in js
     assert "renderPlatformApprovals" in js
+    assert "renderPlatformReviews" in js
+    assert "renderPlatformAssignments" in js
+    assert "renderPlatformCommitteeDecision" in js
+    assert "renderPlatformRecommendationState" in js
     assert "renderPlatformExports" in js
     assert "renderPlatformIntegrations" in js
     assert "renderPlatformAnalytics" in js
@@ -167,6 +175,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "platform_dashboard_summary" in js
     assert "platform_analytics_summary" in js
     assert "platform_demo_readiness_summary" in js
+    assert "platform_collaboration_summary" in js
+    assert "platform_committee_summary" in js
+    assert "platform_assignment_summary_text" in js
     assert "assistant-platform-filter-tier" in html
     assert "assistant-platform-filter-regime" in html
     assert "assistant-platform-filter-stage" in html

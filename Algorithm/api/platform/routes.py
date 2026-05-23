@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, Request
 from api.platform import service
 from api.platform.contracts import (
     AttachAnalysisRequest,
+    CommitteeDecisionRequest,
     CreateDossierRequest,
     CreateIntegrationBindingRequest,
     CreateWorkflowRequest,
@@ -14,9 +15,13 @@ from api.platform.contracts import (
     DossierExportRequest,
     IntegrationExecutionRequest,
     RenderExportRequest,
+    ResolveCommentRequest,
+    ReviewCommentRequest,
+    RecommendationStateRequest,
     StoreExportRequest,
     WorkflowActionRequest,
     WorkflowApprovalRequestPayload,
+    WorkflowAssignmentRequest,
 )
 from api.platform.persistence import platform_store
 from api.platform.security import user_context_from_headers
@@ -116,6 +121,90 @@ def workflow_timeline(workflow_id: str, request: Request) -> Dict[str, Any]:
     )
 
 
+@router.get("/workflows/{workflow_id}/review-summary")
+def workflow_review_summary(
+    workflow_id: str,
+    request: Request,
+    dossier_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.get_workflow_review_summary_service(
+        workflow_id,
+        dossier_id=dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/workflows/{workflow_id}/assignments")
+def workflow_assignments_update(
+    workflow_id: str,
+    payload: WorkflowAssignmentRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.update_workflow_assignment_service(
+        workflow_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/workflows/{workflow_id}/assignments")
+def workflow_assignments(
+    workflow_id: str,
+    request: Request,
+    dossier_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.list_workflow_assignments_service(
+        workflow_id,
+        dossier_id=dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/workflows/{workflow_id}/committee-decision")
+def workflow_committee_decision(
+    workflow_id: str,
+    payload: CommitteeDecisionRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.record_committee_decision_service(
+        workflow_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/workflows/{workflow_id}/committee-decision")
+def get_workflow_committee_decision(
+    workflow_id: str,
+    request: Request,
+    dossier_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.get_committee_decision_service(
+        workflow_id,
+        dossier_id=dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/workflows/{workflow_id}/recommendation-state")
+def workflow_recommendation_state(
+    workflow_id: str,
+    payload: RecommendationStateRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.update_recommendation_state_service(
+        workflow_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
 @router.post("/dossiers")
 def create_dossier(payload: CreateDossierRequest, request: Request) -> Dict[str, Any]:
     return service.create_dossier_service(
@@ -143,6 +232,50 @@ def list_dossiers(
 def get_dossier(dossier_id: str, request: Request) -> Dict[str, Any]:
     return service.get_dossier_view(
         dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/dossiers/{dossier_id}/comments")
+def dossier_comments(
+    dossier_id: str,
+    request: Request,
+    include_resolved: bool = Query(default=True),
+) -> Dict[str, Any]:
+    return service.list_dossier_comments_service(
+        dossier_id,
+        include_resolved=include_resolved,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/dossiers/{dossier_id}/comments")
+def add_dossier_comment(
+    dossier_id: str,
+    payload: ReviewCommentRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.create_dossier_comment_service(
+        dossier_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.post("/dossiers/{dossier_id}/comments/{comment_id}/resolve")
+def resolve_dossier_comment(
+    dossier_id: str,
+    comment_id: str,
+    payload: ResolveCommentRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.resolve_dossier_comment_service(
+        dossier_id,
+        comment_id,
+        payload.model_dump(mode="python"),
         user_context=_user_context(request),
         store=platform_store,
     )
