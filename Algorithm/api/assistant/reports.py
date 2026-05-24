@@ -2307,9 +2307,21 @@ def attach_axiom_context(
     updated["axiom_proprietary_synthesis"] = (
         explanation.get("proprietary_synthesis_summary") or ""
     )
+    updated["axiom_support_vs_drag_summary"] = (
+        explanation.get("support_vs_drag_summary") or ""
+    )
     updated["axiom_why_now_summary"] = explanation.get("why_now_summary") or ""
     updated["axiom_unique_mispricing_summary"] = (
         explanation.get("unique_mispricing_summary") or ""
+    )
+    updated["axiom_setup_character_summary"] = (
+        explanation.get("setup_character_summary") or ""
+    )
+    updated["axiom_false_positive_risk_summary"] = (
+        explanation.get("false_positive_risk_summary") or ""
+    )
+    updated["axiom_decision_hierarchy_summary"] = (
+        explanation.get("decision_hierarchy_summary") or ""
     )
     updated["axiom_exceptionality_summary"] = (
         explanation.get("exceptionality_summary") or ""
@@ -2333,8 +2345,12 @@ def attach_axiom_context(
     ]
     evidence_map["axiom_proprietary_synthesis"] = [
         "axiom.explanation.proprietary_synthesis_summary",
+        "axiom.explanation.support_vs_drag_summary",
         "axiom.explanation.why_now_summary",
         "axiom.explanation.unique_mispricing_summary",
+        "axiom.explanation.setup_character_summary",
+        "axiom.explanation.false_positive_risk_summary",
+        "axiom.explanation.decision_hierarchy_summary",
         "axiom.explanation.cross_engine_stack_summary",
     ]
     updated["evidence_map"] = evidence_map
@@ -2352,6 +2368,7 @@ def attach_axiom_context(
             updated.get("overall_analysis"),
             axiom_summary,
             explanation.get("proprietary_synthesis_summary"),
+            explanation.get("support_vs_drag_summary"),
             explanation.get("exceptionality_summary"),
         ]
     )
@@ -2361,6 +2378,7 @@ def attach_axiom_context(
             f"AXIOM deployable alpha utility is {_fmt_num(axiom.get('deployable_alpha_utility'), digits=1, signed=False)} / 100 with size guidance {str(updated.get('axiom_size_band_recommendation') or 'none').replace('_', ' ')}.",
             explanation.get("why_now_summary"),
             explanation.get("unique_mispricing_summary"),
+            explanation.get("decision_hierarchy_summary"),
             explanation.get("deployability_rationale"),
         ]
     )
@@ -2370,6 +2388,7 @@ def attach_axiom_context(
             f"AXIOM Fundamental Reality is {_fmt_num(((engine_scores.get('fundamental_reality') or {}).get('score')), digits=1, signed=False)} / 100, and State Pricing is {_fmt_num(((engine_scores.get('state_pricing') or {}).get('score')), digits=1, signed=False)} / 100."
             if engine_scores.get("fundamental_reality")
             else None,
+            explanation.get("setup_character_summary"),
             explanation.get("cross_engine_stack_summary"),
         ]
     )
@@ -2379,6 +2398,7 @@ def attach_axiom_context(
             f"AXIOM Critical Fragility is {_fmt_num(((engine_scores.get('critical_fragility') or {}).get('score')), digits=1, signed=False)} / 100, Liquidity and Convexity is {_fmt_num(((engine_scores.get('liquidity_convexity') or {}).get('score')), digits=1, signed=False)} / 100, and Research Integrity is {_fmt_num(((engine_scores.get('research_integrity') or {}).get('score')), digits=1, signed=False)} / 100."
             if engine_scores.get("critical_fragility")
             else None,
+            explanation.get("false_positive_risk_summary"),
             explanation.get("exceptionality_summary"),
         ]
     )
@@ -2392,6 +2412,7 @@ def attach_axiom_context(
         [
             updated.get("evidence_provenance"),
             explanation.get("proprietary_synthesis_summary"),
+            explanation.get("support_vs_drag_summary"),
             "AXIOM-50 Phase 2 is mapped directly from the normalized bundle, the canonical core lineage, current feature-factor intelligence, strategy posture, validation context, and governance layers without creating a parallel data path.",
         ]
     )
@@ -3397,8 +3418,26 @@ def build_analysis_report(
     conviction_components = feature_factor_bundle.get("conviction_components") or {}
     opportunity_quality_components = feature_factor_bundle.get("opportunity_quality_components") or {}
     strategy_component_scores = strategy.get("component_scores") or {}
+    quality_provenance = data_bundle.get("quality_provenance") or {}
+    data_provider_quality_summary = (
+        quality_provenance.get("source_strength_summary")
+        or quality_provenance.get("provider_stack_summary")
+        or _join_sentences(
+            [
+                f"Provider stack quality score is {_fmt_num(quality_provenance.get('quality_score'), digits=1, signed=False)} / 100."
+                if quality_provenance.get("quality_score") is not None
+                else None,
+                f"Freshness state is {freshness_summary['overall_status']}."
+                if freshness_summary.get("overall_status")
+                else None,
+                _fmt_list(quality_provenance.get("provider_notes") or [])
+                if quality_provenance.get("provider_notes")
+                else None,
+            ]
+        )
+    )
     domain_availability = (data_bundle.get("domain_availability") or {}) or (
-        (data_bundle.get("quality_provenance") or {}).get("domain_availability") or {}
+        quality_provenance.get("domain_availability") or {}
     )
     coverage_headwinds = [
         label.replace("_", " ")
@@ -3429,6 +3468,7 @@ def build_analysis_report(
             f"Cross-domain agreement is {_fmt_num(domain_agreement.get('domain_agreement_score'), digits=1, signed=False)} / 100 versus conflict {_fmt_num(domain_agreement.get('domain_conflict_score'), digits=1, signed=False)} / 100; the strongest confirming domains are {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_confirming_domains') or []))}, while conflicts are concentrated in {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_conflicting_domains') or []))}.",
             f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, participant fit is {_fmt_list(participant_fit)}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
             f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'} and execution posture {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')}.",
+            data_provider_quality_summary,
             f"Canonical suppression flags are {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}."
             if canonical_signal_payload.get("suppression_flags")
             else None,
@@ -3523,6 +3563,7 @@ def build_analysis_report(
             f"Suppression logic remains active through {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}, which is why the platform is treating superficially attractive setups more defensively when event windows, liquidity fragility, weak breadth, cross-asset conflict, or stress spillover are elevated."
             if canonical_signal_payload.get("suppression_flags")
             else None,
+            data_provider_quality_summary,
             f"Scenario discipline matters: base case is {(scenario_matrix.get('base') or {}).get('summary') or strategy.get('base_case')}, bull transition requires {_fmt_list((strategy.get('confirmation_triggers') or []))}, bear deterioration comes through {_fmt_list((strategy.get('deterioration_triggers') or []))}, and top invalidators are {_fmt_list((invalidation_map.get('top_invalidators') or []))}.",
             "This remains a description of the platform's computed state, not personalized investment advice.",
         ]
@@ -3535,6 +3576,12 @@ def build_analysis_report(
         data_bundle,
         reason_codes,
         strategy_component_scores,
+    )
+    evidence_provenance = _join_sentences(
+        [
+            evidence_provenance,
+            data_provider_quality_summary,
+        ]
     )
     evaluation_research_analysis = (
         "Phase 6 evaluation will attach a point-in-time research scorecard once prediction records and matured outcomes are available for this cohort."
@@ -3615,6 +3662,11 @@ def build_analysis_report(
             "strategy.fragility_vetoes",
             "strategy.invalidators",
         ],
+        "data_provider_quality_summary": [
+            "data_bundle.quality_provenance.source_strength_summary",
+            "data_bundle.quality_provenance.source_warning_flags",
+            "data_bundle.quality_provenance.fallback_domains",
+        ],
     }
 
     report = {
@@ -3640,6 +3692,7 @@ def build_analysis_report(
         "signal": signal_view,
         "key_features": key_features,
         "quality": quality,
+        "data_provider_quality_summary": data_provider_quality_summary,
         "evidence": evidence,
         "data_bundle": data_bundle,
         "domain_availability": domain_availability,

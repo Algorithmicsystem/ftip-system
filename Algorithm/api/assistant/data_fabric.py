@@ -1188,6 +1188,10 @@ def _build_quality_overlay(
     domain_notes: Dict[str, List[str]] = {}
     warnings: List[str] = list(base_quality.get("warnings") or [])
     provider_notes: List[str] = []
+    fallback_domains: List[str] = []
+    weak_source_domains: List[str] = []
+    partial_result_domains: List[str] = []
+    source_warning_flags: List[str] = []
     fetched_at = dt.datetime.now(dt.timezone.utc).isoformat()
     for domain, payload in overlays.items():
         meta = payload.get("meta") or {}
@@ -1212,14 +1216,40 @@ def _build_quality_overlay(
         if freshness_summary[domain]["status"] in {"limited", "stale", "stale_but_usable"}:
             warnings.append(f"{domain} coverage is {freshness_summary[domain]['status']}.")
         if meta.get("fallback_used"):
+            fallback_domains.append(domain)
             warnings.append(
                 f"{domain} is relying on fallback sources {', '.join(meta.get('fallback_source') or [])}."
             )
+            source_warning_flags.append("fallback_chain_used")
+        confidence_value = _safe_float(meta.get("confidence"))
+        if confidence_value is not None and confidence_value < 0.58:
+            weak_source_domains.append(domain)
+            source_warning_flags.append("low_confidence_domain")
+        if meta.get("status") in {"limited", "partial", "stale_but_usable"}:
+            partial_result_domains.append(domain)
+            source_warning_flags.append("partial_domain_coverage")
     coverage_score = _bounded_ratio(
         sum(1 for item in freshness_summary.values() if item.get("status") == "fresh"),
         len(freshness_summary),
     )
     confidence = _mean(domain_confidence.values())
+    source_strength_summary = (
+        f"Source stack is {'strong' if (confidence or 0.0) >= 0.72 and not fallback_domains and not weak_source_domains else 'mixed' if freshness_summary else 'limited'}: "
+        f"{sum(1 for item in freshness_summary.values() if item.get('status') == 'fresh')} fresh domain(s) out of {len(freshness_summary)}"
+        + (
+            f", fallback pressure in {', '.join(fallback_domains)}"
+            if fallback_domains
+            else ""
+        )
+        + (
+            f", weaker confidence in {', '.join(weak_source_domains)}"
+            if weak_source_domains
+            else ""
+        )
+        + "."
+        if freshness_summary
+        else "Source stack is limited because no enriched domain provenance was captured."
+    )
     return {
         "source_map": sources,
         "freshness_summary": freshness_summary,
@@ -1227,6 +1257,11 @@ def _build_quality_overlay(
         "domain_confidence": domain_confidence,
         "domain_notes": domain_notes,
         "provider_notes": provider_notes,
+        "fallback_domains": sorted(set(fallback_domains)),
+        "weak_source_domains": sorted(set(weak_source_domains)),
+        "partial_result_domains": sorted(set(partial_result_domains)),
+        "source_warning_flags": sorted(set(source_warning_flags)),
+        "source_strength_summary": source_strength_summary,
         "warnings": list(dict.fromkeys(warnings)),
         "freshness": {
             "fetched_at": fetched_at,
@@ -1249,6 +1284,8 @@ def _build_quality_overlay(
             ),
             "confidence": confidence,
             "notes": provider_notes,
+            "source_strength_summary": source_strength_summary,
+            "warning_flags": sorted(set(source_warning_flags)),
         },
         "meta": {
             "status": "fresh" if not provider_notes else "mixed",
@@ -1256,6 +1293,8 @@ def _build_quality_overlay(
             "confidence": confidence,
             "fetched_at": fetched_at,
             "data_as_of": _latest_snapshot_date([freshness_summary]),
+            "source_strength_summary": source_strength_summary,
+            "source_warning_flags": sorted(set(source_warning_flags)),
             **availability_payload(
                 has_data=bool(freshness_summary),
                 coverage_score=coverage_score,

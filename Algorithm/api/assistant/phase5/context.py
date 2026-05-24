@@ -111,13 +111,29 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         )
         or "",
         "source_governance_summary": report.get("source_governance_summary") or "",
+        "data_provider_quality_summary": report.get("data_provider_quality_summary")
+        or "",
         "buyer_diligence_summary": report.get("buyer_diligence_summary") or "",
         "axiom_summary": report.get("axiom_summary") or "",
         "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis")
         or "",
+        "axiom_support_vs_drag_summary": report.get("axiom_support_vs_drag_summary")
+        or "",
         "axiom_why_now_summary": report.get("axiom_why_now_summary") or "",
         "axiom_unique_mispricing_summary": report.get(
             "axiom_unique_mispricing_summary"
+        )
+        or "",
+        "axiom_setup_character_summary": report.get(
+            "axiom_setup_character_summary"
+        )
+        or "",
+        "axiom_false_positive_risk_summary": report.get(
+            "axiom_false_positive_risk_summary"
+        )
+        or "",
+        "axiom_decision_hierarchy_summary": report.get(
+            "axiom_decision_hierarchy_summary"
         )
         or "",
         "axiom_exceptionality_summary": report.get(
@@ -502,6 +518,9 @@ def build_narrator_context(
         "source_governance_snapshot": {
             "source_governance_version": report.get("source_governance_version"),
             "source_profile": report.get("source_profile"),
+            "data_provider_quality_summary": report.get(
+                "data_provider_quality_summary"
+            ),
             "buyer_safe_profile_status": report.get("buyer_safe_profile_status"),
             "buyer_demo_suitability": report.get("buyer_demo_suitability"),
             "commercialization_risk_score": report.get(
@@ -529,6 +548,14 @@ def build_narrator_context(
             "portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
             "strongest_engine": ((report.get("axiom_explanation") or {}).get("strongest_engine")),
             "weakest_engine": ((report.get("axiom_explanation") or {}).get("weakest_engine")),
+            "support_vs_drag_summary": report.get("axiom_support_vs_drag_summary"),
+            "setup_character_summary": report.get("axiom_setup_character_summary"),
+            "false_positive_risk_summary": report.get(
+                "axiom_false_positive_risk_summary"
+            ),
+            "decision_hierarchy_summary": report.get(
+                "axiom_decision_hierarchy_summary"
+            ),
             "size_band_recommendation": report.get("axiom_size_band_recommendation"),
             "audience_type": report.get("axiom_audience_type"),
             "report_profile": report.get("axiom_report_profile"),

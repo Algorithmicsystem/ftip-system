@@ -45,6 +45,30 @@ def _engine_stack_summary(engine_scores: Dict[str, EngineScore]) -> str:
     )
 
 
+def _support_vs_drag_summary(engine_scores: Dict[str, EngineScore]) -> str:
+    support = _mean_defined(
+        [
+            _score_value(engine_scores["fundamental_reality"]),
+            _score_value(engine_scores["state_pricing"]),
+            _score_value(engine_scores["behavioral_distortion"]),
+            _score_value(engine_scores["flow_transmission"]),
+        ]
+    )
+    drag = _mean_defined(
+        [
+            _score_value(engine_scores["critical_fragility"]),
+            100.0 - _score_value(engine_scores["liquidity_convexity"]),
+            100.0 - _score_value(engine_scores["research_integrity"]),
+        ]
+    )
+    if support is None or drag is None:
+        return "Support-versus-drag decomposition is incomplete."
+    return (
+        f"Opportunity support averages {support:.1f} while monetization drag averages {drag:.1f}. "
+        "AXIOM treats that spread, rather than any single engine, as the real signature of whether a setup is ordinary, exceptional, or falsely attractive."
+    )
+
+
 def _why_now_summary(
     scorecard: AxiomScorecard,
     regime_decision: AxiomRegimeDecision,
@@ -57,7 +81,8 @@ def _why_now_summary(
         f"Why now: AXIOM sees {str(regime_decision.regime_label).replace('_', ' ')} conditions where "
         f"State Pricing {_score_value(state_pricing):.1f} and Flow Transmission {_score_value(flow):.1f} are strong enough "
         f"to convert the gross opportunity stack into validated edge {float(scorecard.validated_edge or 0.0):.1f}. "
-        f"Behavioral Distortion {_score_value(behavior):.1f} indicates whether the tape is merely noisy or meaningfully out of line."
+        f"Behavioral Distortion {_score_value(behavior):.1f} indicates whether the tape is merely noisy or meaningfully out of line, "
+        "so timing depends on whether current positioning is amplifying a real compensation gap rather than just price motion."
     )
 
 
@@ -76,8 +101,60 @@ def _unique_mispricing_summary(
     return (
         f"Unique mispricing: AXIOM believes {primary_gap}. Fundamental Reality {_score_value(fundamental):.1f}, "
         f"State Pricing {_score_value(state_pricing):.1f}, and Flow Transmission {_score_value(flow):.1f} imply the market is "
-        f"not fully compensating for the setup, but Critical Fragility {_score_value(fragility):.1f} caps how aggressively that gap can be monetized."
+        f"not fully compensating for the setup, but Critical Fragility {_score_value(fragility):.1f} caps how aggressively that gap can be monetized. "
+        "The proprietary edge is not that any one engine is high; it is that cross-engine agreement is high enough to isolate where the market is still underpricing compensation versus execution risk."
     )
+
+
+def _setup_character_summary(
+    scorecard: AxiomScorecard,
+    engine_scores: Dict[str, EngineScore],
+) -> str:
+    exceptionality = _exceptionality_label(scorecard)
+    fragility = _score_value(engine_scores["critical_fragility"])
+    research = _score_value(engine_scores["research_integrity"])
+    if exceptionality == "exceptional" and fragility <= 40.0 and research >= 60.0:
+        return "Setup character is exceptional: the opportunity stack is unusually broad, while fragility drag remains contained enough for real capital to participate."
+    if exceptionality in {"high_selectivity", "selective"} and fragility <= 55.0:
+        return "Setup character is selective rather than routine: several engines agree, but execution discipline still decides whether the edge becomes deployable."
+    return "Setup character is ordinary or constrained: the setup may still be directionally right, but the investable edge is not broad enough to treat it as a high-conviction outlier."
+
+
+def _false_positive_risk_summary(engine_scores: Dict[str, EngineScore]) -> str:
+    fundamental = _score_value(engine_scores["fundamental_reality"])
+    state_pricing = _score_value(engine_scores["state_pricing"])
+    behavior = _score_value(engine_scores["behavioral_distortion"])
+    flow = _score_value(engine_scores["flow_transmission"])
+    fragility = _score_value(engine_scores["critical_fragility"])
+    research = _score_value(engine_scores["research_integrity"])
+    if (behavior + flow) / 2.0 > (fundamental + state_pricing) / 2.0 and fragility >= 50.0:
+        return "False-positive risk is elevated because flow and behavioral support are outrunning the underlying reality stack while fragility remains high."
+    if research < 50.0:
+        return "False-positive risk is elevated because research integrity is too weak to trust the apparent edge at face value."
+    return "False-positive risk is contained because the reality, pricing, and implementation layers are not being overwhelmed by crowding, instability, or weak research support."
+
+
+def _decision_hierarchy_summary(
+    scorecard: AxiomScorecard,
+    engine_scores: Dict[str, EngineScore],
+    deployability_decision: AxiomDeployabilityDecision,
+) -> str:
+    strongest = _engine_strength(engine_scores, strongest=True)
+    weakest = _engine_strength(engine_scores, strongest=False)
+    return (
+        f"Decision hierarchy: gross opportunity {float(scorecard.gross_opportunity or 0.0):.1f} first establishes whether an idea is worth attention, "
+        f"validated edge {float(scorecard.validated_edge or 0.0):.1f} then tests whether that opportunity survives cross-engine confirmation, "
+        f"and deployable alpha utility {float(scorecard.deployable_alpha_utility or 0.0):.1f} finally decides whether the idea clears real-world friction. "
+        f"The current strongest engine is {str(strongest.get('engine') or 'unknown').replace('_', ' ')} and the weakest is {str(weakest.get('engine') or 'unknown').replace('_', ' ')}, "
+        f"which is why AXIOM lands on {deployability_decision.deployability_tier.replace('_', ' ')} rather than simply following directional enthusiasm."
+    )
+
+
+def _mean_defined(values: List[float]) -> float | None:
+    defined = [value for value in values if value is not None]
+    if not defined:
+        return None
+    return sum(defined) / len(defined)
 
 
 def _sorted_components(
@@ -169,9 +246,15 @@ def build_axiom_explanation(
         "deployability_reason": deployability_decision.rationale,
         "regime_reason": regime_decision.rationale,
         "proprietary_synthesis_summary": _engine_stack_summary(engine_scores),
+        "support_vs_drag_summary": _support_vs_drag_summary(engine_scores),
         "why_now_summary": _why_now_summary(scorecard, regime_decision, engine_scores),
         "unique_mispricing_summary": _unique_mispricing_summary(
             scorecard, engine_scores
+        ),
+        "setup_character_summary": _setup_character_summary(scorecard, engine_scores),
+        "false_positive_risk_summary": _false_positive_risk_summary(engine_scores),
+        "decision_hierarchy_summary": _decision_hierarchy_summary(
+            scorecard, engine_scores, deployability_decision
         ),
         "exceptionality_summary": (
             f"Exceptionality assessment is {exceptionality.replace('_', ' ')} because deployable alpha utility is "

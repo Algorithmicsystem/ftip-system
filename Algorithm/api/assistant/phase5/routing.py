@@ -201,6 +201,13 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "sections": (
             "axiom_summary",
             "axiom_summary_card",
+            "axiom_proprietary_synthesis",
+            "axiom_support_vs_drag_summary",
+            "axiom_why_now_summary",
+            "axiom_unique_mispricing_summary",
+            "axiom_setup_character_summary",
+            "axiom_false_positive_risk_summary",
+            "axiom_decision_hierarchy_summary",
             "axiom_historical_evidence_summary",
             "axiom_historical_evidence_summary_text",
             "axiom_calibration_summary_text",
@@ -350,6 +357,7 @@ _INTENT_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "sections": (
             "commercialization_readiness_summary",
             "source_governance_summary",
+            "data_provider_quality_summary",
             "buyer_diligence_summary",
             "evidence_provenance",
         ),

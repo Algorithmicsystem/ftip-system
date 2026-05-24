@@ -124,9 +124,10 @@ def _fetch_daily_stooq(
         )
     rows = _date_range_filter(rows, start, end)
     if not rows:
+        reason_code = "PROVIDER_PARSE_FAILURE" if "Date" in (resp.text or "") else "NO_DATA"
         raise SymbolNoData(
-            "NO_DATA",
-            "no daily bars returned",
+            reason_code,
+            "stooq daily bars could not be parsed" if reason_code == "PROVIDER_PARSE_FAILURE" else "no daily bars returned",
             provider_name="stooq",
             source_type="market_data",
         )
@@ -192,8 +193,8 @@ def _fetch_daily_massive(
             }
         )
     if not rows:
-        raise SymbolNoData(
-            "NO_DATA",
+        raise ProviderUnavailable(
+            "PROVIDER_PARSE_FAILURE",
             "massive/polygon bars could not be parsed",
             provider_name="massive_polygon",
             source_type="market_data",
@@ -243,6 +244,13 @@ def _fetch_daily_yfinance(
                 "volume": _int_scalar_or_none(row.get("Volume")),
                 "source": "yfinance",
             }
+        )
+    if not rows:
+        raise ProviderUnavailable(
+            "PROVIDER_PARSE_FAILURE",
+            "yfinance daily bars could not be parsed",
+            provider_name="yfinance",
+            source_type="market_data",
         )
     return _date_range_filter(rows, start, end)
 

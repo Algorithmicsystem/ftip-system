@@ -678,6 +678,72 @@ def _failure_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str, int]:
     return summary
 
 
+def _failure_stage_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str, int]:
+    summary: Dict[str, int] = {}
+    for failure in symbols_failed:
+        stage = str(failure.get("failure_stage") or "unknown")
+        summary[stage] = summary.get(stage, 0) + 1
+    return summary
+
+
+def _failure_cause_class(
+    reason_code: str,
+    *,
+    failure_stage: str,
+    reason_detail: str,
+) -> str:
+    if reason_code == "NO_DATA":
+        return "missing_price_history"
+    if reason_code == "INSUFFICIENT_BARS":
+        return "insufficient_bars"
+    if reason_code in {"PROVIDER_PARSE_FAILURE", "PARSE_FAILURE"}:
+        return "provider_parse_failure"
+    if failure_stage == "bar_normalization":
+        return "provider_parse_failure"
+    if failure_stage == "persist_outputs":
+        return "db_write_error"
+    if failure_stage == "feature_compute":
+        return "feature_compute_failure"
+    if failure_stage == "signal_compute":
+        return "signal_compute_failure"
+    if failure_stage == "strategy_graph":
+        return "strategy_graph_failure"
+    if reason_code in {"TIMEOUT", "NETWORK_ERROR", "UPSTREAM_5XX", "PROVIDER_UNAVAILABLE"}:
+        return "external_provider_error"
+    if reason_code == "VALIDATION_ERROR":
+        detail = reason_detail.lower()
+        if "symbol" in detail or "ticker" in detail or "metadata" in detail:
+            return "symbol_metadata_mismatch"
+        return "validation_failure"
+    return "unexpected_failure"
+
+
+def _top_failure_causes(symbols_failed: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    buckets: Dict[str, Dict[str, Any]] = {}
+    for failure in symbols_failed:
+        cause_class = str(failure.get("failure_cause_class") or "unexpected_failure")
+        bucket = buckets.setdefault(
+            cause_class,
+            {
+                "cause_class": cause_class,
+                "count": 0,
+                "reason_codes": {},
+                "failure_stages": {},
+                "symbols": [],
+            },
+        )
+        bucket["count"] += 1
+        reason_code = str(failure.get("reason_code") or "UNKNOWN")
+        failure_stage = str(failure.get("failure_stage") or "unknown")
+        bucket["reason_codes"][reason_code] = int(bucket["reason_codes"].get(reason_code, 0)) + 1
+        bucket["failure_stages"][failure_stage] = int(
+            bucket["failure_stages"].get(failure_stage, 0)
+        ) + 1
+        if len(bucket["symbols"]) < 6:
+            bucket["symbols"].append(str(failure.get("symbol") or ""))
+    return sorted(buckets.values(), key=lambda item: (-item["count"], item["cause_class"]))
+
+
 def _provider_failure_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str, Any]:
     failure_items: List[Dict[str, Any]] = []
     for failure in symbols_failed:
@@ -1035,10 +1101,13 @@ async def snapshot_run(
         bars_required = _bars_required(req.lookback)
         effective_as_of: Optional[dt.date] = None
         failure_stage = "provider_fetch"
+        recovery_stage: Optional[str] = None
         provider_context: Dict[str, Any] = {}
         attempts = 0
         while attempts < max_attempts:
             attempts += 1
+            failure_stage = "provider_fetch"
+            recovery_stage = None
             try:
                 ingest_result = ingest.ingest_bars(
                     sym, req.from_date, req.to_date, force_refresh=req.force_refresh
@@ -1074,6 +1143,7 @@ async def snapshot_run(
                     }
                 )
 
+                failure_stage = "bar_normalization"
                 candles = _candles_from_bars(bars)
                 failure_stage = "feature_compute"
                 feats, feat_meta, regime = _compute_features_payload(
@@ -1127,6 +1197,7 @@ async def snapshot_run(
                 )
                 break
             except Exception as exc:
+                root_failure_stage = failure_stage
                 failure_info = _classify_error(exc)
                 reason_code = str(failure_info.get("reason_code") or "UNEXPECTED_ERROR")
                 reason_detail = str(failure_info.get("reason_detail") or reason_code)
@@ -1137,7 +1208,7 @@ async def snapshot_run(
                 cached_recovered = False
                 if retryable:
                     try:
-                        failure_stage = "cache_recovery"
+                        recovery_stage = "cache_recovery"
                         recovered = _try_cached_bars_recovery(
                             sym,
                             req.from_date,
@@ -1159,19 +1230,24 @@ async def snapshot_run(
                                     "bar_count": len(bars),
                                 }
                             )
+                            failure_stage = "bar_normalization"
                             candles = _candles_from_bars(bars)
+                            failure_stage = "feature_compute"
                             feats, feat_meta, regime = _compute_features_payload(
                                 sym, effective_as_of, req.lookback, candles
                             )
+                            failure_stage = "signal_compute"
                             signal_payload = _compute_signal_payload(
                                 sym, effective_as_of, req.lookback, candles
                             )
                             strategy_rows = None
                             ensemble_row = None
                             if req.compute_strategy_graph:
+                                failure_stage = "strategy_graph"
                                 strategy_rows, ensemble_row = _compute_strategy_graph(
                                     sym, effective_as_of, req.lookback, candles
                                 )
+                            failure_stage = "persist_outputs"
                             written = _persist_symbol_outputs(
                                 sym,
                                 effective_as_of,
@@ -1199,6 +1275,12 @@ async def snapshot_run(
                                 {
                                     "symbol": sym,
                                     "degraded_mode": "db_cache_fallback",
+                                    "failure_cause_class": _failure_cause_class(
+                                        reason_code,
+                                        failure_stage=root_failure_stage,
+                                        reason_detail=reason_detail,
+                                    ),
+                                    "failure_stage": root_failure_stage,
                                     "provider_error_code": reason_code,
                                     "provider_error_detail": reason_detail,
                                     "provider_name": failure_provider_context.get(
@@ -1220,7 +1302,7 @@ async def snapshot_run(
                                 bars_returned=bars_returned,
                                 lock_owner=lock_owner,
                             )
-                            cached_recovered = True
+                        cached_recovered = True
                     except Exception:
                         cached_recovered = False
                 if cached_recovered:
@@ -1247,6 +1329,11 @@ async def snapshot_run(
                         if exc.bars_returned is not None
                         else bars_returned
                     )
+                cause_class = _failure_cause_class(
+                    reason_code,
+                    failure_stage=root_failure_stage,
+                    reason_detail=reason_detail,
+                )
                 symbols_failed.append(
                     {
                         "symbol": sym,
@@ -1260,7 +1347,9 @@ async def snapshot_run(
                         "reason_detail": reason_detail or reason_code,
                         "attempts": attempts,
                         "retryable": bool(retryable),
-                        "failure_stage": failure_stage,
+                        "failure_stage": root_failure_stage,
+                        "recovery_stage": recovery_stage,
+                        "failure_cause_class": cause_class,
                         "provider_name": failure_provider_context.get("provider_name")
                         or provider_context.get("provider_name")
                         or "unknown",
@@ -1303,6 +1392,8 @@ async def snapshot_run(
                     extra={
                         "symbol": sym,
                         "reason_code": reason_code,
+                        "failure_cause_class": cause_class,
+                        "failure_stage": root_failure_stage,
                         "reason_detail": reason_detail,
                         "duration_sec": time.time() - sym_start,
                         "trace_id": trace_id,
@@ -1331,10 +1422,20 @@ async def snapshot_run(
         "degraded_mode": bool(degraded_symbols),
         "summary_stats": summary_stats,
         "failure_summary": _failure_summary(symbols_failed),
+        "failure_stage_summary": _failure_stage_summary(symbols_failed),
+        "top_failure_causes": _top_failure_causes(symbols_failed),
         "provider_usage_summary": summarize_provider_usage(
             [
                 {
                     "provider_name": item.get("provider") or "unknown",
+                    "fallback_used": bool(
+                        (item.get("provider_context") or {}).get("fallback_used")
+                    )
+                    or str(item.get("provider") or "") == "db_cache_fallback",
+                    "response_quality": (
+                        (item.get("provider_context") or {}).get("response_quality")
+                        or ("degraded" if str(item.get("provider") or "") == "db_cache_fallback" else "complete")
+                    ),
                 }
                 for item in symbol_snapshots
             ]
@@ -1353,6 +1454,8 @@ async def snapshot_run(
             extra={
                 "trace_id": trace_id,
                 "failure_summary": result_payload.get("failure_summary"),
+                "failure_stage_summary": result_payload.get("failure_stage_summary"),
+                "top_failure_causes": result_payload.get("top_failure_causes"),
                 "provider_failure_summary": result_payload.get(
                     "provider_failure_summary"
                 ),

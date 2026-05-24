@@ -22,6 +22,9 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-copilot-message"' in html
     assert 'id="assistant-copilot-send"' in html
     assert 'id="assistant-copilot-response"' in html
+    assert 'id="assistant-copilot-title"' in html
+    assert 'id="assistant-copilot-inline-context"' in html
+    assert 'id="assistant-copilot-state"' in html
     assert 'id="assistant-analyze-report"' in html
     assert 'id="demo-mode-toggle"' in html
     assert 'id="assistant-dashboard-workflow"' in html
@@ -123,8 +126,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderNarratorPromptChips" in js
     assert "renderCopilotShell" in js
     assert "sendPersistentCopilotChat" in js
-    assert "Persistent Copilot" in html
+    assert "Platform Copilot" in html
     assert "What matters most on the" in js
+    assert "const formatPct" in js
+    assert "copilotCollapsed: true" in js
     assert "renderDashboardWorkflow" in js
     assert "renderDashboardTrustStrip" in js
     assert "renderRecentAnalyses" in js
@@ -248,6 +253,118 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "Pilot Package" in html
     assert "Bootstrap / Provisioning" in html
     assert "Demo Bundles" in html
+
+
+def test_platform_proof_renderer_has_percent_formatter_alias() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = textwrap.dedent(
+        """
+        const fs = require("fs");
+        const path = require("path");
+        const vm = require("vm");
+
+        const source = fs.readFileSync(
+          path.join(process.cwd(), "api/webapp/app.js"),
+          "utf8"
+        ) + "\\n;globalThis.__testExports = { renderPlatformProof, state };";
+
+        const elements = new Map();
+        const makeElement = () => ({
+          value: "",
+          textContent: "",
+          innerHTML: "",
+          disabled: false,
+          dataset: {},
+          style: {},
+          addEventListener() {},
+          removeEventListener() {},
+          focus() {},
+          closest() { return null; },
+          classList: { toggle() {}, add() {}, remove() {} },
+        });
+        const querySelector = (selector) => {
+          if (!elements.has(selector)) {
+            elements.set(selector, makeElement());
+          }
+          return elements.get(selector);
+        };
+
+        const context = {
+          console,
+          Date,
+          JSON,
+          Math,
+          Number,
+          String,
+          Boolean,
+          Array,
+          Object,
+          Promise,
+          Map,
+          Set,
+          window: {
+            localStorage: {
+              getItem() { return null; },
+              setItem() {},
+              removeItem() {},
+            },
+            crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000000" },
+          },
+          document: {
+            body: makeElement(),
+            querySelector,
+            querySelectorAll() { return []; },
+          },
+          fetch: async () => ({
+            ok: true,
+            async json() {
+              return { status: "ok", llm_enabled: true, db_enabled: true };
+            },
+          }),
+          setTimeout,
+          clearTimeout,
+        };
+        context.document.body.addEventListener = () => {};
+        context.globalThis = context;
+
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        context.__testExports.renderPlatformProof({
+          platform_proof_summary: {
+            tracked_recommendation_count: 8,
+            matured_tracking_count: 6,
+            supportive_count: 4,
+            mixed_count: 1,
+            weak_count: 1,
+            evidence_maturity_level: "emerging",
+            replay_consistency_label: "mixed",
+            top_regime_rows: [{ label: "trend", average_net_edge_return: 0.084 }],
+            top_tier_rows: [{ label: "paper_trade_only", average_net_edge_return: 0.031 }],
+          },
+          platform_proof_cycle_summary: "Proof summary attached.",
+          platform_model_credibility_snapshot: { status: "partial", buyer_summary: "Use with pilot caution." },
+          platform_model_credibility_summary: "Credibility remains sample constrained.",
+        });
+
+        const html = querySelector("#assistant-platform-proof").innerHTML;
+        if (!html.includes("8.40%") || !html.includes("3.10%")) {
+          throw new Error("formatPct alias did not render proof percentages");
+        }
+        console.log("ok");
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "-e", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "ok" in result.stdout
 
 
 def test_recent_report_persistence_quota_failure_does_not_break_analyze_flow() -> None:

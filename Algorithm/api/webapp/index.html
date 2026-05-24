@@ -1191,28 +1191,28 @@
 
     <section id="assistant-copilot-shell" class="assistant-copilot-shell">
       <div class="assistant-copilot-shell-head">
-        <div>
-          <div class="console-kicker">Persistent Copilot</div>
-          <h4>FTIP Platform Assistant</h4>
-          <p class="muted assistant-copilot-note">
-            Bottom-shell copilot grounded to the active workspace, dossier, analysis artifact,
-            and current console panel.
-          </p>
+        <div class="assistant-copilot-head-primary">
+          <div class="assistant-copilot-mini-kicker">Platform Copilot</div>
+          <div class="assistant-copilot-inline-summary">
+            <h4 id="assistant-copilot-title">FTIP Platform Copilot</h4>
+            <p id="assistant-copilot-inline-context" class="muted assistant-copilot-note">
+              dashboard · no active workflow · no recommendation state
+            </p>
+          </div>
         </div>
         <div class="assistant-copilot-head-actions">
-          <span class="legacy-badge">POST /assistant/chat</span>
+          <div id="assistant-copilot-context" class="active-analysis-meta compact assistant-copilot-chip-row">
+            <div class="active-chip">Page dashboard</div>
+            <div class="active-chip">Workspace n/a</div>
+            <div class="active-chip">Symbol n/a</div>
+          </div>
+          <span id="assistant-copilot-state" class="legacy-badge">Context live</span>
           <button id="assistant-copilot-toggle" class="secondary" type="button">
-            Collapse
+            Open
           </button>
         </div>
       </div>
       <div id="assistant-copilot-body" class="assistant-copilot-body">
-        <div id="assistant-copilot-context" class="active-analysis-meta compact">
-          <div class="active-chip">Page: dashboard</div>
-          <div class="active-chip">Workspace: n/a</div>
-          <div class="active-chip">Dossier: n/a</div>
-          <div class="active-chip">Artifact: n/a</div>
-        </div>
         <div id="assistant-copilot-prompts" class="narrator-prompt-row">
           <button type="button" class="prompt-chip">What matters most on this page?</button>
         </div>

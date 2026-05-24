@@ -811,6 +811,7 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["learning_snapshot"]["top_reweighting_candidate"]
     assert narrator_context["source_governance_snapshot"]["source_profile"] == "buyer_demo"
     assert narrator_context["source_governance_snapshot"]["commercial_blockers"]
+    assert narrator_context["source_governance_snapshot"]["data_provider_quality_summary"]
     assert narrator_context["operating_workflow_snapshot"]["daily_operating_summary"]
     assert narrator_context["operating_workflow_snapshot"]["postmortem_summary"]
     assert narrator_context["platform_snapshot"]["workflow_title"] == "NVDA Hedge Fund Research"
@@ -822,6 +823,8 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["axiom_snapshot"]["audience_type"] == "hedge_fund"
     assert narrator_context["axiom_snapshot"]["report_profile"] == "ic_memo"
     assert narrator_context["axiom_snapshot"]["lineage_summary"]
+    assert narrator_context["axiom_snapshot"]["support_vs_drag_summary"]
+    assert narrator_context["axiom_snapshot"]["decision_hierarchy_summary"]
     assert narrator_context["caller_context"]["page_context"]["research_tab"] == "platform"
 
 
@@ -887,6 +890,7 @@ def test_phase5_selects_source_governance_sections_for_commercial_questions() ->
     assert narrator_context["question_intent"] == "source_governance"
     assert "commercialization_readiness_summary" in narrator_context["selected_sections"]
     assert "source_governance_summary" in narrator_context["selected_sections"]
+    assert "data_provider_quality_summary" in narrator_context["selected_sections"]
     assert narrator_context["source_governance_snapshot"]["buyer_demo_suitability"] == "conditional_review_required"
 
 
@@ -928,6 +932,7 @@ def test_phase5_selects_axiom_sections_for_axiom_questions() -> None:
     assert "axiom_summary_card" in narrator_context["selected_sections"]
     assert "axiom_ic_memo_summary" in narrator_context["selected_sections"]
     assert "axiom_lineage_summary" in narrator_context["selected_sections"]
+    assert "axiom_support_vs_drag_summary" in narrator_context["selected_sections"]
     assert "strategy_view" in narrator_context["selected_sections"]
     assert narrator_context["axiom_snapshot"]["deployability_tier"]
     assert narrator_context["axiom_snapshot"]["weakest_engine"]

@@ -8,7 +8,9 @@ BASE_SYSTEM_PROMPT = (
     "You are the FTIP narrator. You speak as the voice of the system's computed analysis artifacts, not as a generic assistant. "
     "Never provide personalized financial advice or tell the user what they personally should do. "
     "When a grounded analysis report is present, treat it as source of truth and explain the actual computed signal, drivers, risks, and strategy logic. "
-    "Do not claim that you lack the analysis if the report is present. Use concise, careful language, cite the actual report sections when helpful, and distinguish system output from personal advice."
+    "Do not claim that you lack the analysis if the report is present. Use concise, careful language, cite the actual report sections when helpful, and distinguish system output from personal advice. "
+    "When page, workspace, dossier, workflow, export, recommendation, or committee context is present, answer as a platform copilot anchored to that exact visible state. "
+    "Lead with what matters now, what is differentiated about the AXIOM view, what evidence is strongest or weakest, and what operational or workflow constraint is currently binding."
 )
 
 
@@ -51,11 +53,14 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Canonical validation: {report.get('canonical_validation_summary', 'n/a')}.",
             f"Operational guardrails: {report.get('system_health_summary', 'n/a')}.",
             f"Commercial readiness: {report.get('commercialization_readiness_summary', 'n/a')}.",
+            f"Data-provider stack: {report.get('data_provider_quality_summary', 'n/a')}.",
             f"AXIOM historical evidence: {report.get('axiom_evidence_summary', 'n/a')}.",
             f"AXIOM calibration: {report.get('axiom_calibration_summary_text', 'n/a')}.",
             f"AXIOM portfolio governance: {report.get('axiom_portfolio_governance_summary', 'n/a')}.",
             f"AXIOM institutional memo: {report.get('axiom_ic_memo_summary', 'n/a')}.",
             f"AXIOM lineage: {report.get('axiom_lineage_summary', 'n/a')}.",
+            f"AXIOM why now: {report.get('axiom_why_now_summary', 'n/a')}.",
+            f"AXIOM unique mispricing: {report.get('axiom_unique_mispricing_summary', 'n/a')}.",
             f"Platform workflow: {report.get('platform_overview_summary', 'n/a')}.",
             f"Platform dossier: {report.get('platform_dossier_summary', 'n/a')}.",
             f"Platform controls: {report.get('platform_workflow_actions_summary', 'n/a')}.",
@@ -106,9 +111,17 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "source_governance": report.get("source_governance"),
         "axiom": report.get("axiom"),
         "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis"),
+        "axiom_support_vs_drag_summary": report.get("axiom_support_vs_drag_summary"),
         "axiom_why_now_summary": report.get("axiom_why_now_summary"),
         "axiom_unique_mispricing_summary": report.get(
             "axiom_unique_mispricing_summary"
+        ),
+        "axiom_setup_character_summary": report.get("axiom_setup_character_summary"),
+        "axiom_false_positive_risk_summary": report.get(
+            "axiom_false_positive_risk_summary"
+        ),
+        "axiom_decision_hierarchy_summary": report.get(
+            "axiom_decision_hierarchy_summary"
         ),
         "axiom_exceptionality_summary": report.get("axiom_exceptionality_summary"),
         "axiom_cross_engine_stack_summary": report.get(
@@ -202,12 +215,21 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
             "commercialization_readiness_summary"
         ),
         "source_governance_summary": report.get("source_governance_summary"),
+        "data_provider_quality_summary": report.get("data_provider_quality_summary"),
         "buyer_diligence_summary": report.get("buyer_diligence_summary"),
         "axiom_summary": report.get("axiom_summary"),
         "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis"),
+        "axiom_support_vs_drag_summary": report.get("axiom_support_vs_drag_summary"),
         "axiom_why_now_summary": report.get("axiom_why_now_summary"),
         "axiom_unique_mispricing_summary": report.get(
             "axiom_unique_mispricing_summary"
+        ),
+        "axiom_setup_character_summary": report.get("axiom_setup_character_summary"),
+        "axiom_false_positive_risk_summary": report.get(
+            "axiom_false_positive_risk_summary"
+        ),
+        "axiom_decision_hierarchy_summary": report.get(
+            "axiom_decision_hierarchy_summary"
         ),
         "axiom_exceptionality_summary": report.get("axiom_exceptionality_summary"),
         "axiom_cross_engine_stack_summary": report.get(

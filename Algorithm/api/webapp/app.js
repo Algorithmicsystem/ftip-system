@@ -14,7 +14,7 @@ const state = {
   demoMode: false,
   activeTab: "legacy",
   researchTab: "dashboard",
-  copilotCollapsed: false,
+  copilotCollapsed: true,
 };
 
 const ASSISTANT_CHAT_SESSION_STORAGE_KEY = "ftip.assistant.chat.session_id";
@@ -28,12 +28,37 @@ const ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY = "ftip.assistant.copilot.collapse
 const isoDate = (date) => date.toISOString().slice(0, 10);
 const formatJson = (value) => JSON.stringify(value ?? {}, null, 2);
 const normalizeSymbol = (value) => String(value ?? "").trim().toUpperCase();
-const formatScore = (value, digits = 1) =>
-  value == null || Number.isNaN(Number(value)) ? "n/a" : Number(value).toFixed(digits);
-const formatPercent = (value, digits = 1) =>
-  value == null || Number.isNaN(Number(value))
-    ? "n/a"
-    : `${Number(value * 100).toFixed(digits)}%`;
+const toFiniteNumber = (value) => {
+  if (value == null || value === "") {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+};
+const formatNumber = (value, digits = 1) => {
+  const numeric = toFiniteNumber(value);
+  return numeric == null ? "n/a" : numeric.toFixed(digits);
+};
+const formatScore = (value, digits = 1) => formatNumber(value, digits);
+const formatPercent = (value, digits = 1) => {
+  const numeric = toFiniteNumber(value);
+  if (numeric == null) {
+    return "n/a";
+  }
+  const scaled = Math.abs(numeric) <= 1.5 ? numeric * 100 : numeric;
+  return `${scaled.toFixed(digits)}%`;
+};
+const formatPct = (value, digits = 1) => formatPercent(value, digits);
+const formatDate = (value) => {
+  if (value == null || value === "") {
+    return "n/a";
+  }
+  const text = String(value);
+  return text.length >= 10 ? text.slice(0, 10) : text;
+};
+const formatTier = (value) =>
+  value == null || value === "" ? "n/a" : String(value).replaceAll("_", " ");
+const formatCoverage = (value, digits = 0) => formatPercent(value, digits);
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -671,6 +696,18 @@ const buildCopilotPageContext = () => {
     app_tab: state.activeTab || "legacy",
     research_tab: state.researchTab || "dashboard",
     page_label: researchTabLabel(),
+    page_focus:
+      state.researchTab === "platform"
+        ? "workflow_and_committee_console"
+        : state.researchTab === "portfolio"
+        ? "portfolio_fit_and_sizing"
+        : state.researchTab === "evaluation"
+        ? "proof_cycle_and_calibration"
+        : state.researchTab === "health"
+        ? "system_health_and_provider_integrity"
+        : state.researchTab === "chat"
+        ? "narrator_and_copilot"
+        : "analysis_and_monitoring",
     workspace_id: analysis.platform_workspace_id || workspace.workspace_id || null,
     workspace_name: workspace.name || null,
     workflow_id: analysis.platform_workflow_id || workflow.workflow_id || null,
@@ -692,16 +729,31 @@ const buildCopilotPageContext = () => {
       report.platform_recommendation_state?.state ||
       report.platform_dossier?.current_recommendation_state ||
       null,
+    report_format_date: formatDate(report.as_of_date),
+    current_view_summary:
+      report.platform_dashboard_summary ||
+      report.platform_dossier_summary ||
+      report.axiom_proprietary_synthesis ||
+      report.signal_summary ||
+      null,
   };
 };
 
 const buildCopilotPromptSet = () => {
-  const symbol = state.assistantActiveAnalysis?.symbol || state.assistantLatestReport?.symbol || "this setup";
+  const symbol =
+    state.assistantActiveAnalysis?.symbol ||
+    state.assistantLatestReport?.symbol ||
+    "this setup";
+  const recommendationState =
+    state.assistantLatestReport?.platform_recommendation_state?.state ||
+    state.assistantLatestReport?.platform_dossier?.current_recommendation_state ||
+    "draft";
   const base = [
     `What matters most on the ${researchTabLabel()} page right now?`,
     `Summarize the current workspace, dossier, and recommendation state for ${symbol}.`,
     `What is uniquely mispriced in ${symbol} right now?`,
     `What is the weakest evidence or biggest concern for ${symbol}?`,
+    `What would have to improve to move ${symbol} beyond ${recommendationState.replaceAll("_", " ")}?`,
   ];
   if (state.researchTab === "platform") {
     base.push(
@@ -727,29 +779,52 @@ const buildCopilotPromptSet = () => {
   return base;
 };
 
+const buildCopilotDockSummary = (pageContext) => {
+  const symbol = pageContext.symbol || "No symbol";
+  const page = pageContext.page_label || "dashboard";
+  const workflow = formatTier(pageContext.workflow_stage || "no_workflow");
+  const recommendation = formatTier(pageContext.recommendation_state || "no_recommendation");
+  return {
+    title: pageContext.symbol
+      ? `${symbol} · ${formatTier(pageContext.deployability_tier || "watch_only")}`
+      : "FTIP Platform Copilot",
+    subtitle: `${page} · ${workflow} · ${recommendation}`,
+    status: pageContext.workspace_name || pageContext.workspace_id ? "Context live" : "Awaiting context",
+  };
+};
+
 const renderCopilotShell = () => {
   const shell = qs("#assistant-copilot-shell");
   const contextEl = qs("#assistant-copilot-context");
   const promptsEl = qs("#assistant-copilot-prompts");
   const toggle = qs("#assistant-copilot-toggle");
-  if (!shell || !contextEl || !promptsEl || !toggle) {
+  const titleEl = qs("#assistant-copilot-title");
+  const inlineEl = qs("#assistant-copilot-inline-context");
+  const stateEl = qs("#assistant-copilot-state");
+  if (!shell || !contextEl || !promptsEl || !toggle || !titleEl || !inlineEl || !stateEl) {
     return;
   }
 
   shell.classList.toggle("collapsed", !!state.copilotCollapsed);
-  toggle.textContent = state.copilotCollapsed ? "Expand" : "Collapse";
+  toggle.textContent = state.copilotCollapsed ? "Open" : "Minimize";
 
   const pageContext = buildCopilotPageContext();
+  const dockSummary = buildCopilotDockSummary(pageContext);
+  titleEl.textContent = dockSummary.title;
+  inlineEl.textContent = dockSummary.subtitle;
+  stateEl.textContent = dockSummary.status;
+
   const contextChips = [
-    `Page: ${pageContext.page_label}`,
-    `Workspace: ${pageContext.workspace_name || pageContext.workspace_id || "n/a"}`,
-    `Dossier: ${pageContext.dossier_id || "n/a"}`,
-    `Workflow: ${pageContext.workflow_stage || "n/a"}`,
-    `Symbol: ${pageContext.symbol || "n/a"}`,
-    `Deployability: ${pageContext.deployability_tier || "unknown"}`,
-    `Exports: ${pageContext.export_count || 0}`,
+    `Page ${pageContext.page_label}`,
+    `Workspace ${pageContext.workspace_name || pageContext.workspace_id || "n/a"}`,
+    `Dossier ${pageContext.dossier_id || "n/a"}`,
+    `Workflow ${formatTier(pageContext.workflow_stage || "n/a")}`,
+    `Symbol ${pageContext.symbol || "n/a"}`,
+    `Recommendation ${formatTier(pageContext.recommendation_state || "n/a")}`,
+    `Exports ${pageContext.export_count || 0}`,
   ];
-  contextEl.innerHTML = contextChips
+  const visibleChips = state.copilotCollapsed ? contextChips.slice(0, 4) : contextChips;
+  contextEl.innerHTML = visibleChips
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");
   promptsEl.innerHTML = buildCopilotPromptSet()
@@ -1150,6 +1225,21 @@ const renderAxiomOverview = (report) => {
       <h5>Engine Scorecard</h5>
       ${renderBullets(engineLines, "No AXIOM engine scores available.")}
     </section>
+    <section class="drilldown-card">
+      <h5>Proprietary Readout</h5>
+      ${renderBullets(
+        [
+          report.axiom_proprietary_synthesis,
+          report.axiom_support_vs_drag_summary,
+          report.axiom_why_now_summary,
+          report.axiom_unique_mispricing_summary,
+          report.axiom_setup_character_summary,
+          report.axiom_false_positive_risk_summary,
+          report.axiom_decision_hierarchy_summary,
+        ].filter(Boolean),
+        "No proprietary AXIOM synthesis is available."
+      )}
+    </section>
   `;
 };
 
@@ -1212,6 +1302,8 @@ const renderAxiomReportPack = (report) => {
           `Regime ${summaryCard.regime_label || "indeterminate"} / family ${summaryCard.trade_family || "none"}`,
           `Deployability ${summaryCard.deployability_tier || "unknown"} / size ${summaryCard.size_band || "none"}`,
           `Strongest ${summaryCard.strongest_engine?.engine || "n/a"} / weakest ${summaryCard.weakest_engine?.engine || "n/a"}`,
+          report.axiom_exceptionality_summary,
+          report.axiom_decision_hierarchy_summary,
         ],
         "No AXIOM summary card is available."
       )}
@@ -1223,6 +1315,8 @@ const renderAxiomReportPack = (report) => {
           report.axiom_ic_memo_summary,
           icMemo.thesis,
           icMemo.market_pricing_view,
+          report.axiom_why_now_summary,
+          report.axiom_unique_mispricing_summary,
           (icMemo.recommended_action || {}).rationale,
         ].filter(Boolean),
         "No IC memo is available."
@@ -1234,6 +1328,7 @@ const renderAxiomReportPack = (report) => {
         [
           report.axiom_risk_deployability_memo_summary,
           riskMemo.memo_summary,
+          report.axiom_false_positive_risk_summary,
           ...(riskMemo.downgrade_triggers || []).slice(0, 3),
         ].filter(Boolean),
         "No risk and deployability memo is available."
@@ -2355,6 +2450,7 @@ const renderEvidenceSupport = (report) => {
       ${renderBullets(
         [
           report.axiom_lineage_summary,
+          report.data_provider_quality_summary,
           report.axiom_ic_memo_summary,
           report.axiom_risk_deployability_memo_summary,
           report.evidence_provenance,
@@ -5649,7 +5745,10 @@ qs("#assistant-copilot-prompts").addEventListener("click", (event) => {
   if (!button) {
     return;
   }
+  state.copilotCollapsed = false;
   qs("#assistant-copilot-message").value = button.dataset.copilotPrompt || "";
+  writeStorageValue(ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY, "0");
+  renderCopilotShell();
   qs("#assistant-copilot-message").focus();
 });
 qs("#assistant-copilot-message").addEventListener("keydown", (event) => {
@@ -5734,8 +5833,12 @@ qsa(".research-tab").forEach((tab) => {
 
 setDefaults();
 applyDemoMode(window.localStorage.getItem(FTIP_DEMO_MODE_STORAGE_KEY) === "1");
-state.copilotCollapsed =
-  window.localStorage.getItem(ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY) === "1";
+{
+  const storedCopilotState = window.localStorage.getItem(
+    ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY
+  );
+  state.copilotCollapsed = storedCopilotState == null ? true : storedCopilotState === "1";
+}
 persistAssistantSessionId(
   window.localStorage.getItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY) || generateUuid()
 );

@@ -48,6 +48,9 @@ def test_fetch_daily_bars_with_meta_tracks_fallback(monkeypatch: pytest.MonkeyPa
     assert metadata["attempt_count"] == 2
     assert metadata["attempts"][0]["status"] == "failed"
     assert metadata["attempts"][1]["status"] == "success"
+    assert "fallback_chain_used" in metadata["source_warning_flags"]
+    assert metadata["strength_label"] in {"weak", "mixed", "strong"}
+    assert metadata["source_strength_summary"]
 
 
 def test_scalar_helpers_handle_series_like_values() -> None:
@@ -98,3 +101,5 @@ def test_fetch_news_items_with_meta_surfaces_partial_result_status(
     assert metadata["provider_name"] == "google_news_rss"
     assert metadata["partial_result"] is True
     assert metadata["attempt_count"] >= 2
+    assert "partial_result" in metadata["source_warning_flags"]
+    assert metadata["source_strength_summary"]

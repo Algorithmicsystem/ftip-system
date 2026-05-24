@@ -247,10 +247,94 @@ async def test_snapshot_run_surfaces_provider_failure_context(
     assert payload["summary_stats"]["attempted"] == 1
     assert payload["summary_stats"]["failed"] == 1
     assert failure["provider_name"] == "yfinance"
-    assert failure["failure_stage"] == "cache_recovery"
+    assert failure["failure_stage"] == "provider_fetch"
+    assert failure["recovery_stage"] == "cache_recovery"
+    assert failure["failure_cause_class"] == "external_provider_error"
     assert failure["fallback_attempted"] is True
     assert len(failure["provider_path"]) == 2
     assert payload["provider_failure_summary"]["provider_count"] >= 1
+    assert payload["top_failure_causes"][0]["cause_class"] == "external_provider_error"
+    assert payload["failure_stage_summary"]["provider_fetch"] == 1
+
+
+@pytest.mark.anyio
+async def test_snapshot_run_classifies_db_write_failures(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_db_flags(monkeypatch)
+    monkeypatch.setattr(routes, "_require_db_enabled", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(ingest, "upsert_universe", lambda symbols: symbols)
+    monkeypatch.setattr(ingest, "ingest_bars", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        routes,
+        "_try_cached_bars_recovery",
+        lambda *args, **kwargs: {
+            "bars": [
+                {
+                    "date": dt.date(2024, 1, 1),
+                    "close": 100.0,
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.0,
+                    "volume": 1000,
+                }
+            ]
+            * 40,
+            "effective_as_of": dt.date(2024, 1, 3),
+            "bars_returned": 40,
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "_compute_features_payload",
+        lambda *args, **kwargs: ({}, {}, "trend"),
+    )
+    monkeypatch.setattr(routes, "_candles_from_bars", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        routes,
+        "_compute_signal_payload",
+        lambda *args, **kwargs: {
+            "score_mode": "single",
+            "signal_dict": {"score": 1.0, "signal": "BUY"},
+            "base_score": 1.0,
+            "stacked_score": None,
+            "thresholds": {},
+            "regime": "trend",
+            "confidence": 0.8,
+            "notes": [],
+            "features": {},
+            "meta": {},
+            "signal_hash": "hash",
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "_persist_symbol_outputs",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db write failed")),
+    )
+    monkeypatch.setattr(routes, "_log_symbol_coverage", lambda *args, **kwargs: None)
+
+    req = SnapshotRunRequest(
+        symbols=["AAPL"],
+        from_date=dt.date(2024, 1, 1),
+        to_date=dt.date(2024, 1, 2),
+        as_of_date=dt.date(2024, 1, 3),
+        lookback=30,
+        concurrency=1,
+        force_refresh=False,
+        compute_strategy_graph=False,
+    )
+
+    result = await routes.snapshot_run(
+        req, Request(scope={"type": "http"}), run_id="run-db", job_name="job-1"
+    )
+    failure = result["result"]["symbols_failed"][0]
+    assert failure["failure_stage"] == "persist_outputs"
+    assert failure["failure_cause_class"] == "db_write_error"
+    assert result["result"]["top_failure_causes"][0]["cause_class"] == "db_write_error"
 
 
 def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
