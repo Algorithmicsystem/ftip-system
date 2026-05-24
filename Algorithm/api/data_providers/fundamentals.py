@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Dict, List
+from typing import Any, Dict, List, Tuple
 
 import importlib.util
 
@@ -9,6 +9,7 @@ from api.source_governance import active_source_profile, source_allowed
 
 from .alphavantage import fetch_quarterly_fundamentals as fetch_alphavantage_quarterly
 from .errors import ProviderUnavailable, SymbolNoData
+from .quality import provider_attempt, provider_result_metadata
 from .symbols import canonical_symbol
 
 _yf_spec = importlib.util.find_spec("yfinance")
@@ -19,11 +20,54 @@ else:  # pragma: no cover - optional dependency
 
 
 def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
+    rows, _metadata = fetch_fundamentals_quarterly_with_meta(symbol)
+    return rows
+
+
+def fetch_fundamentals_quarterly_with_meta(
+    symbol: str,
+) -> Tuple[List[Dict[str, object]], Dict[str, Any]]:
+    attempts: List[Dict[str, Any]] = []
     if source_allowed("alphavantage"):
         try:
-            return fetch_alphavantage_quarterly(symbol)
-        except ProviderUnavailable:
-            pass
+            rows = fetch_alphavantage_quarterly(symbol)
+            attempts.append(
+                provider_attempt(
+                    "alphavantage",
+                    status="success",
+                    source_type="fundamentals",
+                    response_quality="complete" if rows else "partial",
+                )
+            )
+            latest_date = None
+            if rows:
+                latest_date = max(
+                    (
+                        row.get("report_date") or row.get("fiscal_period_end")
+                        for row in rows
+                        if row.get("report_date") or row.get("fiscal_period_end")
+                    ),
+                    default=None,
+                )
+            return rows, provider_result_metadata(
+                "alphavantage",
+                source_type="fundamentals",
+                end_date=latest_date,
+                response_quality="complete" if rows else "partial",
+                attempts=attempts,
+                capability="quarterly_fundamentals",
+            )
+        except ProviderUnavailable as exc:
+            attempts.append(
+                provider_attempt(
+                    "alphavantage",
+                    status="failed",
+                    source_type="fundamentals",
+                    reason_code=exc.reason_code,
+                    reason_detail=exc.reason_detail,
+                    response_quality="degraded",
+                )
+            )
         except SymbolNoData:
             raise
 
@@ -38,7 +82,12 @@ def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
     ticker = yf.Ticker(symbol)
     financials = ticker.quarterly_financials
     if financials is None or financials.empty:
-        raise SymbolNoData("NO_DATA", "no quarterly financials")
+        raise SymbolNoData(
+            "NO_DATA",
+            "no quarterly financials",
+            provider_name="yfinance",
+            source_type="fundamentals",
+        )
 
     results: List[Dict[str, object]] = []
     for col in financials.columns:
@@ -74,5 +123,28 @@ def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
         )
 
     if not results:
-        raise SymbolNoData("NO_DATA", "no quarterly rows parsed")
-    return results
+        raise SymbolNoData(
+            "NO_DATA",
+            "no quarterly rows parsed",
+            provider_name="yfinance",
+            source_type="fundamentals",
+        )
+    attempts.append(
+        provider_attempt(
+            "yfinance",
+            status="success",
+            source_type="fundamentals",
+            response_quality="complete",
+            fallback_used=bool(attempts),
+        )
+    )
+    latest_date = max((row.get("report_date") for row in results if row.get("report_date")), default=None)
+    return results, provider_result_metadata(
+        "yfinance",
+        source_type="fundamentals",
+        end_date=latest_date,
+        fallback_used=bool(attempts[:-1]),
+        response_quality="complete",
+        attempts=attempts,
+        capability="quarterly_fundamentals",
+    )

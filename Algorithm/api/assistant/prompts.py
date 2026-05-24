@@ -105,6 +105,15 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "operational_guardrails": report.get("operational_guardrails"),
         "source_governance": report.get("source_governance"),
         "axiom": report.get("axiom"),
+        "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis"),
+        "axiom_why_now_summary": report.get("axiom_why_now_summary"),
+        "axiom_unique_mispricing_summary": report.get(
+            "axiom_unique_mispricing_summary"
+        ),
+        "axiom_exceptionality_summary": report.get("axiom_exceptionality_summary"),
+        "axiom_cross_engine_stack_summary": report.get(
+            "axiom_cross_engine_stack_summary"
+        ),
         "axiom_history_record": report.get("axiom_history_record"),
         "axiom_lineage": report.get("axiom_lineage"),
         "axiom_institutional_reports": report.get("axiom_institutional_reports"),
@@ -195,6 +204,15 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "source_governance_summary": report.get("source_governance_summary"),
         "buyer_diligence_summary": report.get("buyer_diligence_summary"),
         "axiom_summary": report.get("axiom_summary"),
+        "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis"),
+        "axiom_why_now_summary": report.get("axiom_why_now_summary"),
+        "axiom_unique_mispricing_summary": report.get(
+            "axiom_unique_mispricing_summary"
+        ),
+        "axiom_exceptionality_summary": report.get("axiom_exceptionality_summary"),
+        "axiom_cross_engine_stack_summary": report.get(
+            "axiom_cross_engine_stack_summary"
+        ),
         "axiom_summary_card": report.get("axiom_summary_card_text"),
         "axiom_historical_evidence_summary": report.get("axiom_evidence_summary"),
         "axiom_historical_evidence_summary_text": report.get(
@@ -314,6 +332,7 @@ def build_grounded_chat_messages(
                 "risks/weaknesses/invalidators, and evidence provenance sections to explain the same decision."
                 " When the user asks for an IC memo, one-pager, lineage, direct versus derived evidence, audience-specific framing, or why evidence is weak, use the AXIOM institutional reports and lineage sections first."
                 " When the user asks about dossiers, workflows, workspace context, institutional review stages, dashboard analytics, export readiness, integration execution, or pilot readiness, use the platform workflow, analytics, export, integration, and demo-readiness sections directly."
+                " When caller context identifies the current page, workspace, dossier, export, or active artifact, anchor the answer to that visible platform context instead of answering generically."
             ),
         },
         {"role": "system", "content": _grounding_block(report, context)},

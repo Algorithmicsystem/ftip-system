@@ -113,6 +113,21 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         "source_governance_summary": report.get("source_governance_summary") or "",
         "buyer_diligence_summary": report.get("buyer_diligence_summary") or "",
         "axiom_summary": report.get("axiom_summary") or "",
+        "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis")
+        or "",
+        "axiom_why_now_summary": report.get("axiom_why_now_summary") or "",
+        "axiom_unique_mispricing_summary": report.get(
+            "axiom_unique_mispricing_summary"
+        )
+        or "",
+        "axiom_exceptionality_summary": report.get(
+            "axiom_exceptionality_summary"
+        )
+        or "",
+        "axiom_cross_engine_stack_summary": report.get(
+            "axiom_cross_engine_stack_summary"
+        )
+        or "",
         "axiom_summary_card": report.get("axiom_summary_card_text") or "",
         "axiom_deployability_analysis": report.get("deployment_permission_analysis")
         or "",

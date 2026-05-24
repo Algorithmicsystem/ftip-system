@@ -1994,7 +1994,13 @@ def _axiom_summary_text(axiom: Dict[str, Any]) -> str:
     explanation = axiom.get("explanation") or {}
     summary = explanation.get("summary")
     if summary:
-        return str(summary)
+        return _join_sentences(
+            [
+                str(summary),
+                explanation.get("why_now_summary"),
+                explanation.get("unique_mispricing_summary"),
+            ]
+        )
     deployability_tier = axiom.get("deployability_tier") or "unknown"
     regime_label = axiom.get("regime_label") or "indeterminate"
     validated_edge = axiom.get("validated_edge")
@@ -2298,6 +2304,19 @@ def attach_axiom_context(
     updated["axiom_diagnostics"] = axiom.get("diagnostics") or {}
     updated["axiom_strongest_engine"] = explanation.get("strongest_engine") or {}
     updated["axiom_weakest_engine"] = explanation.get("weakest_engine") or {}
+    updated["axiom_proprietary_synthesis"] = (
+        explanation.get("proprietary_synthesis_summary") or ""
+    )
+    updated["axiom_why_now_summary"] = explanation.get("why_now_summary") or ""
+    updated["axiom_unique_mispricing_summary"] = (
+        explanation.get("unique_mispricing_summary") or ""
+    )
+    updated["axiom_exceptionality_summary"] = (
+        explanation.get("exceptionality_summary") or ""
+    )
+    updated["axiom_cross_engine_stack_summary"] = (
+        explanation.get("cross_engine_stack_summary") or ""
+    )
     updated["axiom_size_band_recommendation"] = (
         (axiom.get("deployability_decision") or {}).get("size_band_recommendation")
     )
@@ -2311,6 +2330,12 @@ def attach_axiom_context(
         "axiom.scorecard",
         "axiom.regime_decision",
         "axiom.deployability_decision",
+    ]
+    evidence_map["axiom_proprietary_synthesis"] = [
+        "axiom.explanation.proprietary_synthesis_summary",
+        "axiom.explanation.why_now_summary",
+        "axiom.explanation.unique_mispricing_summary",
+        "axiom.explanation.cross_engine_stack_summary",
     ]
     updated["evidence_map"] = evidence_map
     if not prominent:
@@ -2326,12 +2351,16 @@ def attach_axiom_context(
         [
             updated.get("overall_analysis"),
             axiom_summary,
+            explanation.get("proprietary_synthesis_summary"),
+            explanation.get("exceptionality_summary"),
         ]
     )
     updated["strategy_view"] = _join_sentences(
         [
             updated.get("strategy_view"),
             f"AXIOM deployable alpha utility is {_fmt_num(axiom.get('deployable_alpha_utility'), digits=1, signed=False)} / 100 with size guidance {str(updated.get('axiom_size_band_recommendation') or 'none').replace('_', ' ')}.",
+            explanation.get("why_now_summary"),
+            explanation.get("unique_mispricing_summary"),
             explanation.get("deployability_rationale"),
         ]
     )
@@ -2341,6 +2370,7 @@ def attach_axiom_context(
             f"AXIOM Fundamental Reality is {_fmt_num(((engine_scores.get('fundamental_reality') or {}).get('score')), digits=1, signed=False)} / 100, and State Pricing is {_fmt_num(((engine_scores.get('state_pricing') or {}).get('score')), digits=1, signed=False)} / 100."
             if engine_scores.get("fundamental_reality")
             else None,
+            explanation.get("cross_engine_stack_summary"),
         ]
     )
     updated["risk_quality_analysis"] = _join_sentences(
@@ -2349,6 +2379,7 @@ def attach_axiom_context(
             f"AXIOM Critical Fragility is {_fmt_num(((engine_scores.get('critical_fragility') or {}).get('score')), digits=1, signed=False)} / 100, Liquidity and Convexity is {_fmt_num(((engine_scores.get('liquidity_convexity') or {}).get('score')), digits=1, signed=False)} / 100, and Research Integrity is {_fmt_num(((engine_scores.get('research_integrity') or {}).get('score')), digits=1, signed=False)} / 100."
             if engine_scores.get("critical_fragility")
             else None,
+            explanation.get("exceptionality_summary"),
         ]
     )
     updated["deployment_permission_analysis"] = _join_sentences(
@@ -2360,6 +2391,7 @@ def attach_axiom_context(
     updated["evidence_provenance"] = _join_sentences(
         [
             updated.get("evidence_provenance"),
+            explanation.get("proprietary_synthesis_summary"),
             "AXIOM-50 Phase 2 is mapped directly from the normalized bundle, the canonical core lineage, current feature-factor intelligence, strategy posture, validation context, and governance layers without creating a parallel data path.",
         ]
     )

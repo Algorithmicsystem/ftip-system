@@ -782,7 +782,14 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
         active_analysis=active_analysis,
         route=route,
         user_message="What is the bear case?",
-        caller_context={"active_analysis": active_analysis},
+        caller_context={
+            "active_analysis": active_analysis,
+            "page_context": {
+                "research_tab": "platform",
+                "workspace_id": "workspace-1",
+                "dossier_id": "dossier-1",
+            },
+        },
     )
 
     assert narrator_context["active_context"]["symbol"] == "NVDA"
@@ -815,6 +822,7 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["axiom_snapshot"]["audience_type"] == "hedge_fund"
     assert narrator_context["axiom_snapshot"]["report_profile"] == "ic_memo"
     assert narrator_context["axiom_snapshot"]["lineage_summary"]
+    assert narrator_context["caller_context"]["page_context"]["research_tab"] == "platform"
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:

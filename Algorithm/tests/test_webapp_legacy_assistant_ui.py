@@ -16,6 +16,12 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-chat-active-label"' in html
     assert 'id="assistant-chat-grounding-note"' in html
     assert 'id="assistant-chat-suggested-prompts"' in html
+    assert 'id="assistant-copilot-shell"' in html
+    assert 'id="assistant-copilot-context"' in html
+    assert 'id="assistant-copilot-prompts"' in html
+    assert 'id="assistant-copilot-message"' in html
+    assert 'id="assistant-copilot-send"' in html
+    assert 'id="assistant-copilot-response"' in html
     assert 'id="assistant-analyze-report"' in html
     assert 'id="demo-mode-toggle"' in html
     assert 'id="assistant-dashboard-workflow"' in html
@@ -104,15 +110,21 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "Learning Lab" in html
     assert "assistantActiveAnalysis" in js
     assert "ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY" in js
+    assert "ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY" in js
     assert "ASSISTANT_RECENT_REPORTS_STORAGE_KEY" in js
     assert "ASSISTANT_WATCHLIST_STORAGE_KEY" in js
     assert "FTIP_DEMO_MODE_STORAGE_KEY" in js
     assert "session_id: pendingSessionId" in js
     assert "active_analysis: state.assistantActiveAnalysis" in js
+    assert "page_context: buildCopilotPageContext()" in js
     assert "setResearchTab" in js
     assert "applyDemoMode" in js
     assert "buildNarratorPromptSet" in js
     assert "renderNarratorPromptChips" in js
+    assert "renderCopilotShell" in js
+    assert "sendPersistentCopilotChat" in js
+    assert "Persistent Copilot" in html
+    assert "What matters most on the" in js
     assert "renderDashboardWorkflow" in js
     assert "renderDashboardTrustStrip" in js
     assert "renderRecentAnalyses" in js

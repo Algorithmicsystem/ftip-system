@@ -13,6 +13,8 @@ import requests
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from api import config, db, security
+from api.data_providers.errors import ProviderError, ProviderUnavailable, SymbolNoData
+from api.data_providers.quality import summarize_provider_failures, summarize_provider_usage
 from api.ops import metrics_tracker
 from api.prosperity.constants import FEATURE_VERSION
 from api.prosperity import ingest, query
@@ -577,19 +579,91 @@ def _log_symbol_coverage(
         )
 
 
-def _classify_error(exc: Exception) -> Tuple[str, str, bool]:
+def _provider_context_from_ingest_result(result: Any) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    context = dict(result.get("provider_context") or {})
+    if not context:
+        provider_name = result.get("provider_name") or result.get("source")
+        if provider_name:
+            context = {
+                "provider_name": provider_name,
+                "fallback_used": bool(result.get("fallback_used")),
+                "response_quality": result.get("response_quality"),
+                "attempts": result.get("provider_attempts") or [],
+            }
+    return context
+
+
+def _classify_error(exc: Exception) -> Dict[str, Any]:
     if isinstance(exc, SymbolFailure):
-        return exc.reason_code, exc.reason_detail or exc.reason_code, False
+        return {
+            "reason_code": exc.reason_code,
+            "reason_detail": exc.reason_detail or exc.reason_code,
+            "retryable": False,
+            "provider_context": {},
+        }
+    if isinstance(exc, ProviderError):
+        return {
+            "reason_code": exc.reason_code,
+            "reason_detail": exc.reason_detail or exc.reason_code,
+            "retryable": isinstance(exc, ProviderUnavailable),
+            "provider_context": dict((exc.metadata or {}).get("provider_context") or {}),
+        }
     if isinstance(exc, HTTPException):
+        if isinstance(exc.detail, dict):
+            reason_code = str(
+                exc.detail.get("reason_code")
+                or exc.detail.get("error_code")
+                or ("UPSTREAM_5XX" if exc.status_code >= 500 else "VALIDATION_ERROR")
+            )
+            reason_detail = str(
+                exc.detail.get("reason_detail")
+                or exc.detail.get("detail")
+                or exc.detail.get("message")
+                or reason_code
+            )
+            retryable = bool(exc.detail.get("retryable")) if "retryable" in exc.detail else exc.status_code >= 500
+            return {
+                "reason_code": reason_code,
+                "reason_detail": reason_detail,
+                "retryable": retryable,
+                "provider_context": dict(exc.detail.get("provider_context") or {}),
+            }
         detail = str(exc.detail)
         if exc.status_code >= 500:
-            return "UPSTREAM_5XX", detail, True
-        return "VALIDATION_ERROR", detail, False
+            return {
+                "reason_code": "UPSTREAM_5XX",
+                "reason_detail": detail,
+                "retryable": True,
+                "provider_context": {},
+            }
+        return {
+            "reason_code": "VALIDATION_ERROR",
+            "reason_detail": detail,
+            "retryable": False,
+            "provider_context": {},
+        }
     if isinstance(exc, (TimeoutError, requests.exceptions.Timeout)):
-        return "TIMEOUT", str(exc), True
+        return {
+            "reason_code": "TIMEOUT",
+            "reason_detail": str(exc),
+            "retryable": True,
+            "provider_context": {},
+        }
     if isinstance(exc, requests.exceptions.RequestException):
-        return "NETWORK_ERROR", str(exc), True
-    return "UNEXPECTED_ERROR", str(exc), False
+        return {
+            "reason_code": "NETWORK_ERROR",
+            "reason_detail": str(exc),
+            "retryable": True,
+            "provider_context": {},
+        }
+    return {
+        "reason_code": "UNEXPECTED_ERROR",
+        "reason_detail": str(exc),
+        "retryable": False,
+        "provider_context": {},
+    }
 
 
 def _is_data_unavailable(reason_code: str) -> bool:
@@ -602,6 +676,24 @@ def _failure_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str, int]:
         reason = str(failure.get("reason_code") or "UNKNOWN")
         summary[reason] = summary.get(reason, 0) + 1
     return summary
+
+
+def _provider_failure_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str, Any]:
+    failure_items: List[Dict[str, Any]] = []
+    for failure in symbols_failed:
+        provider_path = list(failure.get("provider_path") or [])
+        if provider_path:
+            failure_items.extend(
+                attempt for attempt in provider_path if attempt.get("status") != "success"
+            )
+            continue
+        failure_items.append(
+            {
+                "provider_name": failure.get("provider_name") or "unknown",
+                "reason_code": failure.get("reason_code") or "UNKNOWN",
+            }
+        )
+    return summarize_provider_failures(failure_items)
 
 
 def _try_cached_bars_recovery(
@@ -924,8 +1016,8 @@ async def snapshot_run(
     rows_written = {"signals": 0, "features": 0}
     strategy_graph_rows = {"strategies": 0, "ensembles": 0}
     symbols_ok: List[str] = []
-    symbols_failed: List[Dict[str, str]] = []
-    degraded_symbols: List[Dict[str, str]] = []
+    symbols_failed: List[Dict[str, Any]] = []
+    degraded_symbols: List[Dict[str, Any]] = []
 
     t0 = time.time()
     symbol_snapshots: List[Dict[str, Any]] = []
@@ -942,6 +1034,8 @@ async def snapshot_run(
         bars_returned: Optional[int] = None
         bars_required = _bars_required(req.lookback)
         effective_as_of: Optional[dt.date] = None
+        failure_stage = "provider_fetch"
+        provider_context: Dict[str, Any] = {}
         attempts = 0
         while attempts < max_attempts:
             attempts += 1
@@ -949,6 +1043,8 @@ async def snapshot_run(
                 ingest_result = ingest.ingest_bars(
                     sym, req.from_date, req.to_date, force_refresh=req.force_refresh
                 )
+                provider_context = _provider_context_from_ingest_result(ingest_result)
+                failure_stage = "cache_recovery"
                 recovered = _try_cached_bars_recovery(
                     sym,
                     req.from_date,
@@ -963,7 +1059,9 @@ async def snapshot_run(
                 bar_start = _as_iso_date(bars[0]["date"]) if bars else ""
                 bar_end = _as_iso_date(bars[-1]["date"]) if bars else ""
                 provider_name = "unknown"
-                if isinstance(ingest_result, dict):
+                if provider_context:
+                    provider_name = str(provider_context.get("provider_name") or "unknown")
+                elif isinstance(ingest_result, dict):
                     provider_name = str(ingest_result.get("source") or "unknown")
                 symbol_snapshots.append(
                     {
@@ -972,23 +1070,28 @@ async def snapshot_run(
                         "to_date": bar_end,
                         "provider": provider_name,
                         "bar_count": len(bars),
+                        "provider_context": provider_context,
                     }
                 )
 
                 candles = _candles_from_bars(bars)
+                failure_stage = "feature_compute"
                 feats, feat_meta, regime = _compute_features_payload(
                     sym, effective_as_of, req.lookback, candles
                 )
+                failure_stage = "signal_compute"
                 signal_payload = _compute_signal_payload(
                     sym, effective_as_of, req.lookback, candles
                 )
                 strategy_rows = None
                 ensemble_row = None
                 if req.compute_strategy_graph:
+                    failure_stage = "strategy_graph"
                     strategy_rows, ensemble_row = _compute_strategy_graph(
                         sym, effective_as_of, req.lookback, candles
                     )
 
+                failure_stage = "persist_outputs"
                 written = _persist_symbol_outputs(
                     sym,
                     effective_as_of,
@@ -1024,10 +1127,17 @@ async def snapshot_run(
                 )
                 break
             except Exception as exc:
-                reason_code, reason_detail, retryable = _classify_error(exc)
+                failure_info = _classify_error(exc)
+                reason_code = str(failure_info.get("reason_code") or "UNEXPECTED_ERROR")
+                reason_detail = str(failure_info.get("reason_detail") or reason_code)
+                retryable = bool(failure_info.get("retryable"))
+                failure_provider_context = dict(
+                    failure_info.get("provider_context") or provider_context or {}
+                )
                 cached_recovered = False
                 if retryable:
                     try:
+                        failure_stage = "cache_recovery"
                         recovered = _try_cached_bars_recovery(
                             sym,
                             req.from_date,
@@ -1091,6 +1201,11 @@ async def snapshot_run(
                                     "degraded_mode": "db_cache_fallback",
                                     "provider_error_code": reason_code,
                                     "provider_error_detail": reason_detail,
+                                    "provider_name": failure_provider_context.get(
+                                        "provider_name"
+                                    ),
+                                    "provider_path": failure_provider_context.get("attempts")
+                                    or [],
                                 }
                             )
                             _log_symbol_coverage(
@@ -1145,6 +1260,24 @@ async def snapshot_run(
                         "reason_detail": reason_detail or reason_code,
                         "attempts": attempts,
                         "retryable": bool(retryable),
+                        "failure_stage": failure_stage,
+                        "provider_name": failure_provider_context.get("provider_name")
+                        or provider_context.get("provider_name")
+                        or "unknown",
+                        "provider_path": failure_provider_context.get("attempts") or [],
+                        "fallback_attempted": bool(
+                            (failure_provider_context.get("attempts") or [])
+                        )
+                        or bool(retryable),
+                        "fallback_used": bool(
+                            failure_provider_context.get("fallback_used")
+                        ),
+                        "response_quality": failure_provider_context.get(
+                            "response_quality"
+                        ),
+                        "provider_error_summary": failure_provider_context.get(
+                            "error_summary"
+                        ),
                         "required_bars": bars_required,
                         "available_bars": bars_returned,
                         "lookback_days": req.lookback,
@@ -1178,19 +1311,53 @@ async def snapshot_run(
                 break
 
     timings["total"] = time.time() - t0
+    summary_stats = {
+        "attempted": len(symbols),
+        "succeeded": len(symbols_ok),
+        "failed": len(symbols_failed),
+        "skipped": 0,
+        "fallback_used": sum(
+            1
+            for item in symbol_snapshots
+            if str(item.get("provider") or "") == "db_cache_fallback"
+            or bool((item.get("provider_context") or {}).get("fallback_used"))
+        ),
+    }
 
     result_payload = {
         "symbols_ok": symbols_ok,
         "symbols_failed": symbols_failed,
         "symbols_degraded": degraded_symbols,
         "degraded_mode": bool(degraded_symbols),
+        "summary_stats": summary_stats,
         "failure_summary": _failure_summary(symbols_failed),
+        "provider_usage_summary": summarize_provider_usage(
+            [
+                {
+                    "provider_name": item.get("provider") or "unknown",
+                }
+                for item in symbol_snapshots
+            ]
+        ),
+        "provider_failure_summary": _provider_failure_summary(symbols_failed),
         "rows_written": rows_written,
         "dataset_fingerprint": _dataset_fingerprint(symbol_snapshots),
         "feature_version": FEATURE_VERSION,
     }
     if req.compute_strategy_graph:
         result_payload["strategy_graph_rows"] = strategy_graph_rows
+
+    if symbols_failed:
+        logger.warning(
+            "jobs.prosperity.daily_snapshot.failure_clusters",
+            extra={
+                "trace_id": trace_id,
+                "failure_summary": result_payload.get("failure_summary"),
+                "provider_failure_summary": result_payload.get(
+                    "provider_failure_summary"
+                ),
+            },
+        )
 
     status = "ok" if not symbols_failed else "partial"
     metrics_tracker.record_run(

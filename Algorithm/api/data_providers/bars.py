@@ -4,7 +4,7 @@ import csv
 import datetime as dt
 import io
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import importlib.util
 import requests
@@ -14,6 +14,7 @@ from api.source_governance import active_source_profile, source_allowed
 
 from .alphavantage import fetch_daily_adjusted_bars
 from .errors import ProviderError, ProviderUnavailable, SymbolNoData
+from .quality import provider_attempt, provider_result_metadata
 from .symbols import canonical_symbol, detect_country_exchange, provider_symbol
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,58 @@ if _yf_spec:
     import yfinance as yf
 else:  # pragma: no cover - optional dependency
     yf = None
+
+
+def _unwrap_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if hasattr(value, "item"):
+        try:
+            return value.item()
+        except Exception:
+            pass
+    if hasattr(value, "iloc"):
+        try:
+            if len(value) == 1:
+                return value.iloc[0]
+        except Exception:
+            pass
+    if isinstance(value, (list, tuple)) and len(value) == 1:
+        return value[0]
+    return value
+
+
+def _float_scalar_or_none(value: Any) -> Optional[float]:
+    scalar = _unwrap_scalar(value)
+    if scalar in (None, ""):
+        return None
+    try:
+        return float(scalar)
+    except (TypeError, ValueError):
+        return None
+
+
+def _int_scalar_or_none(value: Any) -> Optional[int]:
+    scalar = _unwrap_scalar(value)
+    if scalar in (None, ""):
+        return None
+    try:
+        return int(float(scalar))
+    except (TypeError, ValueError):
+        return None
+
+
+def _daily_provider_attempts() -> List[Tuple[str, Any]]:
+    attempts: List[Tuple[str, Any]] = []
+    if source_allowed("massive_polygon"):
+        attempts.append(("massive_polygon", _fetch_daily_massive))
+    if source_allowed("alphavantage"):
+        attempts.append(("alphavantage", fetch_daily_adjusted_bars))
+    if config.stooq_enabled() and source_allowed("stooq"):
+        attempts.append(("stooq", _fetch_daily_stooq))
+    if source_allowed("yfinance"):
+        attempts.append(("yfinance", _fetch_daily_yfinance))
+    return attempts
 
 def _date_range_filter(
     rows: List[Dict[str, object]], start: dt.date, end: dt.date
@@ -43,7 +96,10 @@ def _fetch_daily_stooq(
     resp = requests.get(url, timeout=15)
     if resp.status_code != 200:
         raise ProviderUnavailable(
-            "PROVIDER_UNAVAILABLE", f"stooq HTTP {resp.status_code}"
+            "PROVIDER_UNAVAILABLE",
+            f"stooq HTTP {resp.status_code}",
+            provider_name="stooq",
+            source_type="market_data",
         )
     reader = csv.DictReader(io.StringIO(resp.text))
     rows: List[Dict[str, object]] = []
@@ -68,7 +124,12 @@ def _fetch_daily_stooq(
         )
     rows = _date_range_filter(rows, start, end)
     if not rows:
-        raise SymbolNoData("NO_DATA", "no daily bars returned")
+        raise SymbolNoData(
+            "NO_DATA",
+            "no daily bars returned",
+            provider_name="stooq",
+            source_type="market_data",
+        )
     return rows
 
 
@@ -77,7 +138,12 @@ def _fetch_daily_massive(
 ) -> List[Dict[str, object]]:
     api_key = config.massive_api_key()
     if not api_key:
-        raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "MASSIVE_API_KEY not set")
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            "MASSIVE_API_KEY not set",
+            provider_name="massive_polygon",
+            source_type="market_data",
+        )
     base_url = config.massive_base_url().rstrip("/")
     url = f"{base_url}/v2/aggs/ticker/{canonical_symbol(symbol)}/range/1/day/{start.isoformat()}/{end.isoformat()}"
     resp = requests.get(
@@ -92,12 +158,20 @@ def _fetch_daily_massive(
     )
     if resp.status_code != 200:
         raise ProviderUnavailable(
-            "PROVIDER_UNAVAILABLE", f"massive/polygon HTTP {resp.status_code}"
+            "PROVIDER_UNAVAILABLE",
+            f"massive/polygon HTTP {resp.status_code}",
+            provider_name="massive_polygon",
+            source_type="market_data",
         )
     payload = resp.json()
     results = payload.get("results") or []
     if not isinstance(results, list) or not results:
-        raise SymbolNoData("NO_DATA", "massive/polygon returned no daily bars")
+        raise SymbolNoData(
+            "NO_DATA",
+            "massive/polygon returned no daily bars",
+            provider_name="massive_polygon",
+            source_type="market_data",
+        )
     rows: List[Dict[str, object]] = []
     for row in results:
         timestamp = row.get("t")
@@ -118,7 +192,12 @@ def _fetch_daily_massive(
             }
         )
     if not rows:
-        raise SymbolNoData("NO_DATA", "massive/polygon bars could not be parsed")
+        raise SymbolNoData(
+            "NO_DATA",
+            "massive/polygon bars could not be parsed",
+            provider_name="massive_polygon",
+            source_type="market_data",
+        )
     return rows
 
 
@@ -126,7 +205,12 @@ def _fetch_daily_yfinance(
     symbol: str, start: dt.date, end: dt.date
 ) -> List[Dict[str, object]]:
     if yf is None:
-        raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "yfinance not installed")
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            "yfinance not installed",
+            provider_name="yfinance",
+            source_type="market_data",
+        )
     y_symbol = provider_symbol(symbol, "yfinance")
     df = yf.download(
         y_symbol,
@@ -137,7 +221,12 @@ def _fetch_daily_yfinance(
         auto_adjust=False,
     )
     if df is None or df.empty:
-        raise SymbolNoData("NO_DATA", "no daily bars returned")
+        raise SymbolNoData(
+            "NO_DATA",
+            "no daily bars returned",
+            provider_name="yfinance",
+            source_type="market_data",
+        )
     rows = []
     for idx, row in df.iterrows():
         as_of = (
@@ -147,15 +236,11 @@ def _fetch_daily_yfinance(
             {
                 "symbol": canonical_symbol(symbol),
                 "as_of_date": as_of,
-                "open": float(row.get("Open")) if row.get("Open") is not None else None,
-                "high": float(row.get("High")) if row.get("High") is not None else None,
-                "low": float(row.get("Low")) if row.get("Low") is not None else None,
-                "close": (
-                    float(row.get("Close")) if row.get("Close") is not None else None
-                ),
-                "volume": (
-                    int(row.get("Volume")) if row.get("Volume") is not None else None
-                ),
+                "open": _float_scalar_or_none(row.get("Open")),
+                "high": _float_scalar_or_none(row.get("High")),
+                "low": _float_scalar_or_none(row.get("Low")),
+                "close": _float_scalar_or_none(row.get("Close")),
+                "volume": _int_scalar_or_none(row.get("Volume")),
                 "source": "yfinance",
             }
         )
@@ -165,41 +250,113 @@ def _fetch_daily_yfinance(
 def fetch_daily_bars(
     symbol: str, start_date: dt.date, end_date: dt.date
 ) -> List[Dict[str, object]]:
-    attempts = []
-    if source_allowed("massive_polygon"):
-        attempts.append(("massive_polygon", _fetch_daily_massive))
-    if source_allowed("alphavantage"):
-        attempts.append(("alphavantage", fetch_daily_adjusted_bars))
-    if config.stooq_enabled() and source_allowed("stooq"):
-        attempts.append(("stooq", _fetch_daily_stooq))
-    if not attempts and not source_allowed("yfinance"):
+    rows, _metadata = fetch_daily_bars_with_meta(symbol, start_date, end_date)
+    return rows
+
+
+def fetch_daily_bars_with_meta(
+    symbol: str, start_date: dt.date, end_date: dt.date
+) -> Tuple[List[Dict[str, object]], Dict[str, Any]]:
+    attempts = _daily_provider_attempts()
+    if not attempts:
         raise ProviderUnavailable(
             "PROVIDER_UNAVAILABLE",
             f"no daily-bar providers are allowed under source profile {active_source_profile()}",
+            provider_name="daily_bars",
+            source_type="market_data",
         )
-    for provider_name, fetcher in attempts:
+
+    attempt_log: List[Dict[str, Any]] = []
+    last_error: Optional[ProviderError] = None
+    for index, (provider_name, fetcher) in enumerate(attempts):
+        fallback_used = index > 0
         try:
-            return fetcher(symbol, start_date, end_date)
-        except ProviderUnavailable as exc:
+            rows = fetcher(symbol, start_date, end_date)
+            attempt_log.append(
+                provider_attempt(
+                    provider_name,
+                    status="success",
+                    source_type="market_data",
+                    response_quality="complete",
+                    fallback_used=fallback_used,
+                )
+            )
+            return rows, provider_result_metadata(
+                provider_name,
+                source_type="market_data",
+                end_date=end_date,
+                fallback_used=fallback_used,
+                response_quality="complete",
+                attempts=attempt_log,
+                capability="daily_bars",
+            )
+        except ProviderError as exc:
+            last_error = exc
+            attempt_log.append(
+                provider_attempt(
+                    provider_name,
+                    status="failed",
+                    source_type="market_data",
+                    reason_code=exc.reason_code,
+                    reason_detail=exc.reason_detail,
+                    response_quality="degraded",
+                    fallback_used=fallback_used,
+                )
+            )
             logger.info(
                 "%s daily failed, falling back",
                 provider_name,
                 extra={"symbol": symbol, "reason": exc.reason_detail},
             )
-        except SymbolNoData:
-            raise
+            continue
         except Exception as exc:  # pragma: no cover - defensive
+            last_error = ProviderUnavailable(
+                "PROVIDER_UNAVAILABLE",
+                str(exc),
+                provider_name=provider_name,
+                source_type="market_data",
+            )
+            attempt_log.append(
+                provider_attempt(
+                    provider_name,
+                    status="failed",
+                    source_type="market_data",
+                    reason_code="PROVIDER_UNAVAILABLE",
+                    reason_detail=str(exc),
+                    response_quality="degraded",
+                    fallback_used=fallback_used,
+                )
+            )
             logger.info(
                 "%s daily unexpected error",
                 provider_name,
                 extra={"symbol": symbol, "error": str(exc)},
             )
-    if not source_allowed("yfinance"):
+
+    if last_error is None:
         raise ProviderUnavailable(
             "PROVIDER_UNAVAILABLE",
-            f"yfinance fallback is blocked by source profile {active_source_profile()}",
+            "daily bars unavailable",
+            provider_name="daily_bars",
+            source_type="market_data",
+            metadata={"attempts": attempt_log},
         )
-    return _fetch_daily_yfinance(symbol, start_date, end_date)
+
+    last_error.metadata = {
+        **dict(last_error.metadata or {}),
+        "attempts": attempt_log,
+        "provider_context": provider_result_metadata(
+            last_error.provider_name or "unknown",
+            source_type="market_data",
+            end_date=end_date,
+            fallback_used=bool(attempt_log[:-1]),
+            response_quality="degraded",
+            error_summary=last_error.reason_detail,
+            attempts=attempt_log,
+            capability="daily_bars",
+        ),
+    }
+    raise last_error
 
 
 def fetch_reference_bars(
@@ -238,7 +395,12 @@ def fetch_intraday_bars(
     timeframe: str = "5m",
 ) -> List[Dict[str, object]]:
     if yf is None:
-        raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "yfinance not installed")
+        raise ProviderUnavailable(
+            "PROVIDER_UNAVAILABLE",
+            "yfinance not installed",
+            provider_name="yfinance",
+            source_type="market_data",
+        )
     y_symbol = provider_symbol(symbol, "yfinance")
     df = yf.download(
         y_symbol,
@@ -249,7 +411,12 @@ def fetch_intraday_bars(
         auto_adjust=False,
     )
     if df is None or df.empty:
-        raise SymbolNoData("NO_DATA", "no intraday bars returned")
+        raise SymbolNoData(
+            "NO_DATA",
+            "no intraday bars returned",
+            provider_name="yfinance",
+            source_type="market_data",
+        )
 
     rows: List[Dict[str, object]] = []
     for idx, row in df.iterrows():
@@ -259,15 +426,11 @@ def fetch_intraday_bars(
                 "symbol": canonical_symbol(symbol),
                 "ts": ts,
                 "timeframe": timeframe,
-                "open": float(row.get("Open")) if row.get("Open") is not None else None,
-                "high": float(row.get("High")) if row.get("High") is not None else None,
-                "low": float(row.get("Low")) if row.get("Low") is not None else None,
-                "close": (
-                    float(row.get("Close")) if row.get("Close") is not None else None
-                ),
-                "volume": (
-                    int(row.get("Volume")) if row.get("Volume") is not None else None
-                ),
+                "open": _float_scalar_or_none(row.get("Open")),
+                "high": _float_scalar_or_none(row.get("High")),
+                "low": _float_scalar_or_none(row.get("Low")),
+                "close": _float_scalar_or_none(row.get("Close")),
+                "volume": _int_scalar_or_none(row.get("Volume")),
                 "source": "yfinance",
             }
         )

@@ -83,7 +83,7 @@ header h1 {
 }
 
 main {
-  padding: 22px 28px 40px;
+  padding: 22px 28px 240px;
   max-width: 1480px;
   margin: 0 auto;
 }
@@ -381,6 +381,60 @@ textarea {
 
 .prompt-chip:hover {
   border-color: rgba(132, 210, 255, 0.42);
+}
+
+.assistant-copilot-shell {
+  position: fixed;
+  left: 20px;
+  right: 20px;
+  bottom: 18px;
+  z-index: 40;
+  border: 1px solid rgba(78, 161, 255, 0.22);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(78, 161, 255, 0.12), transparent 35%),
+    linear-gradient(180deg, rgba(18, 29, 44, 0.98), rgba(8, 14, 21, 0.99));
+  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(10px);
+}
+
+.assistant-copilot-shell.collapsed .assistant-copilot-body {
+  display: none;
+}
+
+.assistant-copilot-shell-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 16px 18px 14px;
+}
+
+.assistant-copilot-shell-head h4 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.assistant-copilot-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.assistant-copilot-note {
+  margin-top: 8px;
+  max-width: 720px;
+}
+
+.assistant-copilot-body {
+  display: grid;
+  gap: 12px;
+  padding: 0 18px 18px;
+}
+
+.assistant-copilot-body textarea {
+  min-height: 82px;
 }
 
 .research-shell {
@@ -836,6 +890,11 @@ body.demo-mode .active-analysis-banner {
     flex-direction: column;
     align-items: flex-start;
   }
+
+  .assistant-copilot-shell-head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 @media (max-width: 720px) {
@@ -843,6 +902,10 @@ body.demo-mode .active-analysis-banner {
   main {
     padding-left: 16px;
     padding-right: 16px;
+  }
+
+  main {
+    padding-bottom: 280px;
   }
 
   .panel,
@@ -854,5 +917,11 @@ body.demo-mode .active-analysis-banner {
   .summary-grid,
   .factor-grid {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  }
+
+  .assistant-copilot-shell {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
   }
 }

@@ -503,6 +503,12 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["axiom"]["engine_scores"]["research_integrity"]["score"] is not None
     assert result["axiom_explanation"]["strongest_engine"]
     assert result["axiom_explanation"]["weakest_engine"]
+    assert result["axiom_explanation"]["why_now_summary"]
+    assert result["axiom_explanation"]["unique_mispricing_summary"]
+    assert result["axiom_proprietary_synthesis"]
+    assert result["axiom_why_now_summary"]
+    assert result["axiom_unique_mispricing_summary"]
+    assert result["axiom_exceptionality_summary"]
     assert result["axiom_size_band_recommendation"] in {"large", "medium", "small", "none"}
     assert set(result["strategy"]["scenario_matrix"].keys()) == {"base", "bull", "bear", "stress"}
     assert result["strategy"]["execution_posture"]["preferred_posture"]

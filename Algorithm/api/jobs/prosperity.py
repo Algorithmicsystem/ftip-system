@@ -35,6 +35,18 @@ SP500_SAMPLE_UNIVERSE = (
 )
 
 SYMBOLS_MODES = {"core10", "core5", "sp500_sample"}
+RETENTION_TABLE_DATE_COLUMNS = {
+    "prosperity_features_daily": "as_of",
+    "prosperity_signals_daily": "as_of",
+    "prosperity_strategy_signals_daily": "as_of_date",
+    "prosperity_ensemble_signals_daily": "as_of_date",
+}
+RETENTION_DATE_COLUMN_CANDIDATES = (
+    "as_of",
+    "as_of_date",
+    "date",
+    "created_at",
+)
 
 
 class CronSnapshotParams(BaseModel):
@@ -84,29 +96,87 @@ def _delete_older_than(table: str, cutoff: dt.date) -> int:
     check = db.safe_fetchone("SELECT to_regclass(%s)", (table,))
     if not check or check[0] is None:
         return 0
+    date_column = _resolve_retention_date_column(table)
+    if not date_column:
+        raise ValueError(f"no retention date column available for {table}")
     rows = db.safe_fetchall(
-        f"DELETE FROM {table} WHERE as_of < %s RETURNING 1", (cutoff,)
+        f"DELETE FROM {table} WHERE {date_column} < %s RETURNING 1", (cutoff,)
     )
     deleted = len(rows)
     if deleted:
         logger.info(
             "[prosperity.retention] deleted rows",
-            extra={"table": table, "deleted": deleted},
+            extra={"table": table, "date_column": date_column, "deleted": deleted},
         )
     return deleted
 
 
+def _retention_table_columns(table: str) -> List[str]:
+    rows = db.safe_fetchall(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = %s
+        ORDER BY ordinal_position
+        """,
+        (table,),
+    )
+    return [str(row[0]) for row in rows if row and row[0]]
+
+
+def _resolve_retention_date_column(table: str) -> Optional[str]:
+    columns = set(_retention_table_columns(table))
+    if not columns:
+        return None
+    mapped = RETENTION_TABLE_DATE_COLUMNS.get(table)
+    if mapped and mapped in columns:
+        return mapped
+    for candidate in RETENTION_DATE_COLUMN_CANDIDATES:
+        if candidate in columns:
+            return candidate
+    return None
+
+
 def cleanup_retention(as_of_date: dt.date, retention_days: int) -> Dict[str, int]:
+    return cleanup_retention_report(as_of_date, retention_days)["deleted"]
+
+
+def cleanup_retention_report(
+    as_of_date: dt.date, retention_days: int
+) -> Dict[str, object]:
     cutoff = as_of_date - dt.timedelta(days=retention_days)
     deleted: Dict[str, int] = {}
+    skipped: Dict[str, str] = {}
+    warnings: List[str] = []
     for table in (
         "prosperity_features_daily",
         "prosperity_signals_daily",
         "prosperity_strategy_signals_daily",
         "prosperity_ensemble_signals_daily",
     ):
-        deleted[table] = _delete_older_than(table, cutoff)
-    return deleted
+        try:
+            deleted[table] = _delete_older_than(table, cutoff)
+        except ValueError as exc:
+            warning = (
+                f"Skipped retention cleanup for {table}: {exc}. "
+                f"Supported date columns are {', '.join(RETENTION_DATE_COLUMN_CANDIDATES)}."
+            )
+            skipped[table] = str(exc)
+            warnings.append(warning)
+            logger.warning(
+                "jobs.prosperity.retention.skipped",
+                extra={"table": table, "warning": warning},
+            )
+        except Exception as exc:
+            warning = f"Skipped retention cleanup for {table}: {exc}"
+            skipped[table] = str(exc)
+            warnings.append(warning)
+            logger.warning(
+                "jobs.prosperity.retention.failed",
+                extra={"table": table, "warning": warning},
+            )
+    return {"deleted": deleted, "skipped": skipped, "warnings": warnings}
 
 
 def _cleanup_stale_job_runs(cur, job_name: str, ttl_seconds: int) -> List[str]:
@@ -474,22 +544,34 @@ async def _run_daily_snapshot(
         )
         result_payload = result.get("result", {}) if isinstance(result, dict) else {}
 
-        retention_info: Dict[str, int] = {}
+        retention_info: Dict[str, object] = {}
         retention_days = _retention_days()
         if retention_days:
-            retention_info = cleanup_retention(as_of_date, retention_days)
+            retention_info = cleanup_retention_report(as_of_date, retention_days)
 
         summary = {
             "symbols_ok": result_payload.get("symbols_ok", []),
             "symbols_failed": result_payload.get("symbols_failed", []),
+            "symbols_degraded": result_payload.get("symbols_degraded", []),
+            "summary_stats": result_payload.get("summary_stats", {}),
+            "failure_summary": result_payload.get("failure_summary", {}),
+            "provider_usage_summary": result_payload.get("provider_usage_summary", {}),
+            "provider_failure_summary": result_payload.get(
+                "provider_failure_summary", {}
+            ),
             "rows_written": result_payload.get("rows_written", {}),
+            "strategy_graph_rows": result_payload.get("strategy_graph_rows", {}),
             "timings": result.get("timings", {}),
             "dataset_fingerprint": result.get("dataset_fingerprint"),
             "feature_version": result.get("feature_version"),
         }
 
         if retention_info:
-            summary["retention_deleted"] = retention_info
+            summary["retention_deleted"] = retention_info.get("deleted", {})
+            if retention_info.get("skipped"):
+                summary["retention_skipped"] = retention_info.get("skipped")
+            if retention_info.get("warnings"):
+                summary["retention_warnings"] = retention_info.get("warnings")
 
         status = _result_status(summary)
         response_body = {

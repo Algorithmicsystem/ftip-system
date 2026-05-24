@@ -40,24 +40,25 @@ def test_compute_features_uses_as_of(monkeypatch):
 
     monkeypatch.setattr(db, "safe_fetchall", fake_fetch)
 
-    def fake_compute(candles):
-        calls["candles"] = candles
-        return {
-            "mom_5": 0.0,
-            "mom_21": 0.0,
-            "mom_63": 0.0,
-            "trend_sma20_50": 0.0,
-            "volatility_ann": 0.0,
-            "rsi14": 50.0,
-            "volume_z20": 0.0,
-            "last_close": candles[-1].close,
-        }
+    def fake_snapshot_builder(symbol, as_of_date, lookback, bars, **kwargs):
+        calls["bars"] = bars
+        return {"symbol": symbol, "as_of_date": as_of_date.isoformat(), "bars": bars}
 
-    def fake_regime(_):
-        return "TEST"
-
-    monkeypatch.setattr("api.main.compute_features", fake_compute)
-    monkeypatch.setattr("api.main.detect_regime", fake_regime)
+    monkeypatch.setattr(
+        "api.prosperity.ingest.build_research_snapshot_from_bars",
+        fake_snapshot_builder,
+    )
+    monkeypatch.setattr(
+        "api.prosperity.ingest.build_canonical_features",
+        lambda snapshot: {
+            "features": {"signal_regime": "TEST", "last_close": snapshot["bars"][-1]["close"]},
+            "meta": {},
+            "snapshot_id": "snap-1",
+            "snapshot_version": "v1",
+            "effective_lookback": 2,
+            "feature_schema_version": "schema-v1",
+        },
+    )
 
     def _record_sql(sql: str, params=None):
         recorded_sql.append(sql)
@@ -66,7 +67,7 @@ def test_compute_features_uses_as_of(monkeypatch):
 
     res = ingest.compute_and_store_features("AAPL", dt.date(2024, 1, 3), 2)
     assert res["stored"] is True
-    assert calls["candles"][-1].timestamp == "2024-01-03"
+    assert calls["bars"][-1]["date"] == "2024-01-03"
     assert any("as_of" in stmt for stmt in recorded_sql)
 
 

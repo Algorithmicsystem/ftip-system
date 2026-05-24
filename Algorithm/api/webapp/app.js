@@ -12,7 +12,9 @@ const state = {
   assistantCompareSymbol: "",
   assistantHealth: null,
   demoMode: false,
+  activeTab: "legacy",
   researchTab: "dashboard",
+  copilotCollapsed: false,
 };
 
 const ASSISTANT_CHAT_SESSION_STORAGE_KEY = "ftip.assistant.chat.session_id";
@@ -21,6 +23,7 @@ const ASSISTANT_RECENT_REPORTS_STORAGE_KEY = "ftip.assistant.recent_reports";
 const ASSISTANT_WATCHLIST_STORAGE_KEY = "ftip.assistant.watchlist";
 const ASSISTANT_COMPARE_SYMBOL_STORAGE_KEY = "ftip.assistant.compare_symbol";
 const FTIP_DEMO_MODE_STORAGE_KEY = "ftip.demo_mode";
+const ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY = "ftip.assistant.copilot.collapsed";
 
 const isoDate = (date) => date.toISOString().slice(0, 10);
 const formatJson = (value) => JSON.stringify(value ?? {}, null, 2);
@@ -89,8 +92,10 @@ const setStatus = (text, isError = false) => {
 };
 
 const setActiveTab = (tabId) => {
+  state.activeTab = tabId;
   qsa(".tab").forEach((btn) => btn.classList.toggle("active", btn.dataset.tab === tabId));
   qsa(".tab-panel").forEach((panel) => panel.classList.toggle("hidden", panel.id !== tabId));
+  renderCopilotShell();
 };
 
 const setResearchTab = (tabId) => {
@@ -101,6 +106,7 @@ const setResearchTab = (tabId) => {
   qsa("[data-research-panel]").forEach((panel) =>
     panel.classList.toggle("hidden", panel.dataset.researchPanel !== tabId)
   );
+  renderCopilotShell();
 };
 
 const getHeaders = () => {
@@ -637,6 +643,123 @@ const renderNarratorPromptChips = () => {
     .join("");
 };
 
+const researchTabLabel = () => {
+  const labels = {
+    dashboard: "dashboard",
+    strategy: "strategy",
+    portfolio: "portfolio",
+    evaluation: "evaluation",
+    compare: "compare",
+    watchlist: "watchlist",
+    chat: "narrator",
+    platform: "platform console",
+    research: "learning lab",
+    health: "system health",
+  };
+  return labels[state.researchTab] || state.researchTab || "dashboard";
+};
+
+const buildCopilotPageContext = () => {
+  const analysis = state.assistantActiveAnalysis || {};
+  const report = state.assistantLatestReport || {};
+  const workspace = report.platform_workspace || {};
+  const dossier = report.platform_dossier || {};
+  const workflow = report.platform_workflow || {};
+  const axiomCard = report.axiom_summary_card || {};
+  const storedExports = report.platform_stored_exports || [];
+  return {
+    app_tab: state.activeTab || "legacy",
+    research_tab: state.researchTab || "dashboard",
+    page_label: researchTabLabel(),
+    workspace_id: analysis.platform_workspace_id || workspace.workspace_id || null,
+    workspace_name: workspace.name || null,
+    workflow_id: analysis.platform_workflow_id || workflow.workflow_id || null,
+    workflow_stage: analysis.platform_workflow_stage || workflow.stage || null,
+    dossier_id: analysis.platform_dossier_id || dossier.dossier_id || null,
+    dossier_type: analysis.platform_dossier_type || dossier.dossier_type || null,
+    dossier_status: analysis.platform_dossier_status || dossier.evidence_status || null,
+    symbol: analysis.symbol || report.symbol || null,
+    axiom_artifact_id: report.axiom_artifact_id || null,
+    report_id: report.report_id || null,
+    export_count: storedExports.length,
+    active_pack_types: storedExports.slice(0, 3).map((item) => item.pack_type).filter(Boolean),
+    deployability_tier:
+      analysis.axiom_evidence_backed_deployability_tier ||
+      analysis.axiom_deployability_tier ||
+      axiomCard.deployability_tier ||
+      null,
+    recommendation_state:
+      report.platform_recommendation_state?.state ||
+      report.platform_dossier?.current_recommendation_state ||
+      null,
+  };
+};
+
+const buildCopilotPromptSet = () => {
+  const symbol = state.assistantActiveAnalysis?.symbol || state.assistantLatestReport?.symbol || "this setup";
+  const base = [
+    `What matters most on the ${researchTabLabel()} page right now?`,
+    `Summarize the current workspace, dossier, and recommendation state for ${symbol}.`,
+    `What is uniquely mispriced in ${symbol} right now?`,
+    `What is the weakest evidence or biggest concern for ${symbol}?`,
+  ];
+  if (state.researchTab === "platform") {
+    base.push(
+      `Which workflow or committee item needs review first?`,
+      `Which export pack is most presentation-ready for ${symbol}?`
+    );
+  } else if (state.researchTab === "portfolio") {
+    base.push(
+      `How should ${symbol} be sized versus the rest of the book?`,
+      `Where is overlap or hidden redundancy highest right now?`
+    );
+  } else if (state.researchTab === "evaluation") {
+    base.push(
+      `What is calibration saying about setups like ${symbol}?`,
+      `Is the current proof cycle supportive, mixed, or weak?`
+    );
+  } else if (state.researchTab === "health") {
+    base.push(
+      `What is the biggest system-health blocker right now?`,
+      `Which provider or pipeline path looks weakest today?`
+    );
+  }
+  return base;
+};
+
+const renderCopilotShell = () => {
+  const shell = qs("#assistant-copilot-shell");
+  const contextEl = qs("#assistant-copilot-context");
+  const promptsEl = qs("#assistant-copilot-prompts");
+  const toggle = qs("#assistant-copilot-toggle");
+  if (!shell || !contextEl || !promptsEl || !toggle) {
+    return;
+  }
+
+  shell.classList.toggle("collapsed", !!state.copilotCollapsed);
+  toggle.textContent = state.copilotCollapsed ? "Expand" : "Collapse";
+
+  const pageContext = buildCopilotPageContext();
+  const contextChips = [
+    `Page: ${pageContext.page_label}`,
+    `Workspace: ${pageContext.workspace_name || pageContext.workspace_id || "n/a"}`,
+    `Dossier: ${pageContext.dossier_id || "n/a"}`,
+    `Workflow: ${pageContext.workflow_stage || "n/a"}`,
+    `Symbol: ${pageContext.symbol || "n/a"}`,
+    `Deployability: ${pageContext.deployability_tier || "unknown"}`,
+    `Exports: ${pageContext.export_count || 0}`,
+  ];
+  contextEl.innerHTML = contextChips
+    .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
+    .join("");
+  promptsEl.innerHTML = buildCopilotPromptSet()
+    .map(
+      (prompt) =>
+        `<button type="button" class="prompt-chip" data-copilot-prompt="${escapeHtml(prompt)}">${escapeHtml(prompt)}</button>`
+    )
+    .join("");
+};
+
 const formatActiveAnalysisLabel = (analysis) => {
   if (!analysis?.symbol) {
     return "Active analysis: none yet.";
@@ -699,6 +822,7 @@ const renderActiveAnalysisLabels = () => {
     qs("#assistant-compare-active-symbol").value = analysis?.symbol || "";
   }
   renderNarratorPromptChips();
+  renderCopilotShell();
 };
 
 const persistActiveAnalysis = (analysis) => {
@@ -5067,6 +5191,10 @@ const renderAssistantReport = (report) => {
 const renderAssistantChatTranscript = () => {
   if (!state.assistantChatTranscript.length) {
     qs("#assistant-chat-response").textContent = "No grounded narrator messages yet.";
+    if (qs("#assistant-copilot-response")) {
+      qs("#assistant-copilot-response").textContent =
+        "Persistent copilot is ready. Run Assistant Analyze or open a dossier-rich platform view for deeper grounded answers.";
+    }
     return;
   }
 
@@ -5077,7 +5205,11 @@ const renderAssistantChatTranscript = () => {
     }
     return lines.join("\n");
   });
-  qs("#assistant-chat-response").textContent = blocks.join("\n\n");
+  const transcript = blocks.join("\n\n");
+  qs("#assistant-chat-response").textContent = transcript;
+  if (qs("#assistant-copilot-response")) {
+    qs("#assistant-copilot-response").textContent = transcript;
+  }
 };
 
 const renderSystemHealth = (health, report = state.assistantReport) => {
@@ -5286,18 +5418,22 @@ const runAssistantAnalyze = async () => {
   }
 };
 
-const sendAssistantChat = async () => {
-  const message = getAssistantChatMessage();
+const submitAssistantChatMessage = async ({
+  message,
+  inputSelector,
+  buttonSelector,
+  statusSelector,
+}) => {
   if (!message) {
-    setLegacyStatus("#assistant-chat-status", "Message is required.", "error");
+    setLegacyStatus(statusSelector, "Message is required.", "error");
     return;
   }
 
   const pendingSessionId = state.assistantChatSessionId || generateUuid();
   persistAssistantSessionId(pendingSessionId);
 
-  setButtonLoading("#assistant-chat-btn", true, "Sending...");
-  setLegacyStatus("#assistant-chat-status", "Sending grounded narrator request...");
+  setButtonLoading(buttonSelector, true, "Sending...");
+  setLegacyStatus(statusSelector, "Sending grounded narrator request...");
   try {
     const data = await callJson("/assistant/chat", {
       method: "POST",
@@ -5307,6 +5443,14 @@ const sendAssistantChat = async () => {
         message,
         context: {
           active_analysis: state.assistantActiveAnalysis,
+          page_context: buildCopilotPageContext(),
+          report_context: {
+            report_id: state.assistantLatestReport?.report_id || null,
+            axiom_artifact_id: state.assistantLatestReport?.axiom_artifact_id || null,
+            export_count: (state.assistantLatestReport?.platform_stored_exports || []).length,
+            workflow_stage: state.assistantLatestReport?.platform_workflow?.stage || null,
+            dossier_id: state.assistantLatestReport?.platform_dossier?.dossier_id || null,
+          },
         },
       }),
     });
@@ -5325,15 +5469,33 @@ const sendAssistantChat = async () => {
       citations: data.citations || [],
     });
     renderAssistantChatTranscript();
-    qs("#assistant-chat-message").value = "";
-    setLegacyStatus("#assistant-chat-status", "Assistant reply received.", "success");
+    if (qs(inputSelector)) {
+      qs(inputSelector).value = "";
+    }
+    setLegacyStatus(statusSelector, "Assistant reply received.", "success");
   } catch (err) {
-    setLegacyStatus("#assistant-chat-status", `Chat failed: ${err.message}`, "error");
+    setLegacyStatus(statusSelector, `Chat failed: ${err.message}`, "error");
   } finally {
-    setButtonLoading("#assistant-chat-btn", false, "Sending...");
+    setButtonLoading(buttonSelector, false, "Sending...");
     renderActiveAnalysisLabels();
   }
 };
+
+const sendAssistantChat = async () =>
+  submitAssistantChatMessage({
+    message: getAssistantChatMessage(),
+    inputSelector: "#assistant-chat-message",
+    buttonSelector: "#assistant-chat-btn",
+    statusSelector: "#assistant-chat-status",
+  });
+
+const sendPersistentCopilotChat = async () =>
+  submitAssistantChatMessage({
+    message: qs("#assistant-copilot-message").value.trim(),
+    inputSelector: "#assistant-copilot-message",
+    buttonSelector: "#assistant-copilot-send",
+    statusSelector: "#assistant-copilot-status",
+  });
 
 const refreshOfficialLatest = async () => {
   const { symbol, lookback } = getInputs();
@@ -5473,6 +5635,30 @@ qs("#assistant-chat-message").addEventListener("keydown", (event) => {
   }
 });
 
+qs("#assistant-copilot-send").addEventListener("click", sendPersistentCopilotChat);
+qs("#assistant-copilot-toggle").addEventListener("click", () => {
+  state.copilotCollapsed = !state.copilotCollapsed;
+  writeStorageValue(
+    ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY,
+    state.copilotCollapsed ? "1" : "0"
+  );
+  renderCopilotShell();
+});
+qs("#assistant-copilot-prompts").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-copilot-prompt]");
+  if (!button) {
+    return;
+  }
+  qs("#assistant-copilot-message").value = button.dataset.copilotPrompt || "";
+  qs("#assistant-copilot-message").focus();
+});
+qs("#assistant-copilot-message").addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    event.preventDefault();
+    sendPersistentCopilotChat();
+  }
+});
+
 qs("#symbol-input").addEventListener("input", (event) => {
   const legacySymbol = qs("#assistant-analyze-symbol");
   if (!legacySymbol.value.trim()) {
@@ -5548,6 +5734,8 @@ qsa(".research-tab").forEach((tab) => {
 
 setDefaults();
 applyDemoMode(window.localStorage.getItem(FTIP_DEMO_MODE_STORAGE_KEY) === "1");
+state.copilotCollapsed =
+  window.localStorage.getItem(ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY) === "1";
 persistAssistantSessionId(
   window.localStorage.getItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY) || generateUuid()
 );
@@ -5564,6 +5752,7 @@ renderWatchlistWorkspace();
 renderCompareWorkspace();
 renderAssistantChatTranscript();
 renderSystemHealth(null);
+renderCopilotShell();
 setResearchTab("dashboard");
 setActiveTab(state.demoMode ? "legacy" : "signal");
 refreshAssistantSystemHealth();

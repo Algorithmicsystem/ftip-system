@@ -1189,6 +1189,50 @@
       </div>
     </main>
 
+    <section id="assistant-copilot-shell" class="assistant-copilot-shell">
+      <div class="assistant-copilot-shell-head">
+        <div>
+          <div class="console-kicker">Persistent Copilot</div>
+          <h4>FTIP Platform Assistant</h4>
+          <p class="muted assistant-copilot-note">
+            Bottom-shell copilot grounded to the active workspace, dossier, analysis artifact,
+            and current console panel.
+          </p>
+        </div>
+        <div class="assistant-copilot-head-actions">
+          <span class="legacy-badge">POST /assistant/chat</span>
+          <button id="assistant-copilot-toggle" class="secondary" type="button">
+            Collapse
+          </button>
+        </div>
+      </div>
+      <div id="assistant-copilot-body" class="assistant-copilot-body">
+        <div id="assistant-copilot-context" class="active-analysis-meta compact">
+          <div class="active-chip">Page: dashboard</div>
+          <div class="active-chip">Workspace: n/a</div>
+          <div class="active-chip">Dossier: n/a</div>
+          <div class="active-chip">Artifact: n/a</div>
+        </div>
+        <div id="assistant-copilot-prompts" class="narrator-prompt-row">
+          <button type="button" class="prompt-chip">What matters most on this page?</button>
+        </div>
+        <textarea
+          id="assistant-copilot-message"
+          rows="3"
+          placeholder="Ask the copilot about the current workspace, dossier, export, workflow, or AXIOM artifact..."
+        ></textarea>
+        <div class="actions-row">
+          <button id="assistant-copilot-send" class="secondary" type="button">
+            Ask Copilot
+          </button>
+        </div>
+        <p class="muted legacy-status" id="assistant-copilot-status">Ready.</p>
+        <pre id="assistant-copilot-response" class="json-block response-block">
+Persistent copilot is ready. Run Assistant Analyze or open a dossier-rich platform view for deeper grounded answers.
+        </pre>
+      </div>
+    </section>
+
     <script src="/app/static/app.js"></script>
   </body>
 </html>

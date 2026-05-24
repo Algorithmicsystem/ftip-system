@@ -2,6 +2,7 @@ import datetime as dt
 from typing import Any, Dict, List
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -174,6 +175,82 @@ async def test_failure_shape_contains_reason_code_attempts_retryable(
     assert failure["reason_code"] == "INSUFFICIENT_BARS"
     assert failure["attempts"] == 1
     assert failure["retryable"] is False
+
+
+@pytest.mark.anyio
+async def test_snapshot_run_surfaces_provider_failure_context(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_db_flags(monkeypatch)
+    monkeypatch.setattr(routes, "_require_db_enabled", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(ingest, "upsert_universe", lambda symbols: symbols)
+    monkeypatch.setattr(
+        ingest,
+        "ingest_bars",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            HTTPException(
+                status_code=502,
+                detail={
+                    "reason_code": "PROVIDER_UNAVAILABLE",
+                    "reason_detail": "all market-data providers failed",
+                    "retryable": True,
+                    "provider_context": {
+                        "provider_name": "yfinance",
+                        "fallback_used": True,
+                        "response_quality": "degraded",
+                        "attempts": [
+                            {
+                                "provider_name": "massive_polygon",
+                                "status": "failed",
+                                "reason_code": "PROVIDER_UNAVAILABLE",
+                            },
+                            {
+                                "provider_name": "yfinance",
+                                "status": "failed",
+                                "reason_code": "NO_DATA",
+                            },
+                        ],
+                    },
+                },
+            )
+        ),
+    )
+    monkeypatch.setattr(routes, "_log_symbol_coverage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes,
+        "_try_cached_bars_recovery",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            routes.SymbolFailure("NO_DATA", "no cached recovery available")
+        ),
+    )
+
+    req = SnapshotRunRequest(
+        symbols=["AAPL"],
+        from_date=dt.date(2024, 1, 1),
+        to_date=dt.date(2024, 1, 2),
+        as_of_date=dt.date(2024, 1, 3),
+        lookback=10,
+        concurrency=1,
+        force_refresh=False,
+        compute_strategy_graph=False,
+    )
+
+    result = await routes.snapshot_run(
+        req, Request(scope={"type": "http"}), run_id="run-3", job_name="job-1"
+    )
+    payload = result["result"]
+    failure = payload["symbols_failed"][0]
+
+    assert payload["summary_stats"]["attempted"] == 1
+    assert payload["summary_stats"]["failed"] == 1
+    assert failure["provider_name"] == "yfinance"
+    assert failure["failure_stage"] == "cache_recovery"
+    assert failure["fallback_attempted"] is True
+    assert len(failure["provider_path"]) == 2
+    assert payload["provider_failure_summary"]["provider_count"] >= 1
 
 
 def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):

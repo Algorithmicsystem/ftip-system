@@ -9,6 +9,9 @@ from fastapi import HTTPException
 
 from api import db
 from api.alpha import CANONICAL_FEATURE_VERSION, build_canonical_features
+from api.data_providers.bars import fetch_daily_bars_with_meta
+from api.data_providers.errors import ProviderError
+from api.data_providers.quality import provider_attempt, provider_result_metadata
 from api.research import build_research_snapshot_from_bars
 
 
@@ -66,6 +69,42 @@ def _existing_bars(symbol: str, from_date: dt.date, to_date: dt.date) -> List[dt
     return [r[0] for r in rows]
 
 
+def _bar_date_from_payload(payload: Any) -> dt.date:
+    if isinstance(payload, dict):
+        date_value = payload.get("as_of_date") or payload.get("date")
+    else:
+        date_value = getattr(payload, "timestamp", None)
+    if isinstance(date_value, dt.date):
+        return date_value
+    return dt.date.fromisoformat(str(date_value)[:10])
+
+
+def _normalize_bar_payload(payload: Any, *, default_source: str) -> Dict[str, Any]:
+    if isinstance(payload, dict):
+        return {
+            "date": _bar_date_from_payload(payload),
+            "open": payload.get("open"),
+            "high": payload.get("high"),
+            "low": payload.get("low"),
+            "close": payload.get("close"),
+            "adj_close": payload.get("adj_close") or payload.get("close"),
+            "volume": payload.get("volume"),
+            "source": payload.get("source") or default_source,
+            "raw": payload,
+        }
+    return {
+        "date": _bar_date_from_payload(payload),
+        "open": getattr(payload, "open", None),
+        "high": getattr(payload, "high", None),
+        "low": getattr(payload, "low", None),
+        "close": getattr(payload, "close", None),
+        "adj_close": getattr(payload, "adj_close", None),
+        "volume": getattr(payload, "volume", None),
+        "source": default_source,
+        "raw": payload.__dict__,
+    }
+
+
 def ingest_bars(
     symbol: str,
     from_date: dt.date,
@@ -93,14 +132,121 @@ def ingest_bars(
             missing.append(cur)
             cur += dt.timedelta(days=1)
 
-    from api.main import massive_fetch_daily_bars  # type: ignore
-
     inserted = 0
     updated = 0
+    provider_context = provider_result_metadata(
+        "massive_polygon",
+        source_type="market_data",
+        end_date=to_date,
+        response_quality="complete",
+        attempts=[],
+        capability="daily_bars",
+    )
     if missing:
-        bars = massive_fetch_daily_bars(sym, from_date.isoformat(), to_date.isoformat())
-        for b in bars:
-            day = dt.date.fromisoformat(b.timestamp)
+        missing_set = set(missing)
+        normalized_bars: List[Dict[str, Any]] = []
+        try:
+            from api.main import massive_fetch_daily_bars  # type: ignore
+
+            bars = massive_fetch_daily_bars(sym, from_date.isoformat(), to_date.isoformat())
+            provider_context = provider_result_metadata(
+                "massive_polygon",
+                source_type="market_data",
+                end_date=to_date,
+                response_quality="complete",
+                attempts=[
+                    provider_attempt(
+                        "massive_polygon",
+                        status="success",
+                        source_type="market_data",
+                        response_quality="complete",
+                    )
+                ],
+                capability="daily_bars",
+            )
+            normalized_bars = [
+                _normalize_bar_payload(bar, default_source="massive_polygon")
+                for bar in bars
+            ]
+        except HTTPException as exc:
+            try:
+                fallback_rows, provider_context = fetch_daily_bars_with_meta(
+                    sym, from_date, to_date
+                )
+                normalized_bars = [
+                    _normalize_bar_payload(
+                        row,
+                        default_source=str(
+                            provider_context.get("provider_name") or source or "unknown"
+                        ),
+                    )
+                    for row in fallback_rows
+                ]
+            except ProviderError as provider_exc:
+                provider_context = (
+                    (provider_exc.metadata or {}).get("provider_context")
+                    or provider_result_metadata(
+                        provider_exc.provider_name or "unknown",
+                        source_type=provider_exc.source_type or "market_data",
+                        end_date=to_date,
+                        response_quality="degraded",
+                        error_summary=provider_exc.reason_detail,
+                        attempts=(provider_exc.metadata or {}).get("attempts") or [],
+                        capability="daily_bars",
+                    )
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "reason_code": provider_exc.reason_code,
+                        "reason_detail": provider_exc.reason_detail,
+                        "retryable": provider_exc.reason_code
+                        in {"PROVIDER_UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR"},
+                        "provider_context": provider_context,
+                        "upstream_status_code": exc.status_code,
+                    },
+                ) from provider_exc
+        except Exception as exc:
+            try:
+                fallback_rows, provider_context = fetch_daily_bars_with_meta(
+                    sym, from_date, to_date
+                )
+                normalized_bars = [
+                    _normalize_bar_payload(
+                        row,
+                        default_source=str(
+                            provider_context.get("provider_name") or source or "unknown"
+                        ),
+                    )
+                    for row in fallback_rows
+                ]
+            except ProviderError as provider_exc:
+                provider_context = (
+                    (provider_exc.metadata or {}).get("provider_context")
+                    or provider_result_metadata(
+                        provider_exc.provider_name or "unknown",
+                        source_type=provider_exc.source_type or "market_data",
+                        end_date=to_date,
+                        response_quality="degraded",
+                        error_summary=provider_exc.reason_detail,
+                        attempts=(provider_exc.metadata or {}).get("attempts") or [],
+                        capability="daily_bars",
+                    )
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail={
+                        "reason_code": provider_exc.reason_code,
+                        "reason_detail": provider_exc.reason_detail,
+                        "retryable": provider_exc.reason_code
+                        in {"PROVIDER_UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR"},
+                        "provider_context": provider_context,
+                        "upstream_error": str(exc),
+                    },
+                ) from provider_exc
+
+        for payload in normalized_bars:
+            day = payload["date"]
             db.safe_execute(
                 """
                 INSERT INTO prosperity_daily_bars(symbol, date, open, high, low, close, adj_close, volume, source, raw)
@@ -119,17 +265,17 @@ def ingest_bars(
                 (
                     sym,
                     day,
-                    getattr(b, "open", None),
-                    getattr(b, "high", None),
-                    getattr(b, "low", None),
-                    b.close,
-                    getattr(b, "adj_close", None),
-                    getattr(b, "volume", None),
-                    source,
-                    json.dumps(b.__dict__),
+                    payload.get("open"),
+                    payload.get("high"),
+                    payload.get("low"),
+                    payload.get("close"),
+                    payload.get("adj_close"),
+                    payload.get("volume"),
+                    payload.get("source") or source,
+                    json.dumps(payload.get("raw") or {}),
                 ),
             )
-            if day in missing:
+            if day in missing_set:
                 inserted += 1
             else:
                 updated += 1
@@ -139,7 +285,13 @@ def ingest_bars(
         "to_date": to_date.isoformat(),
         "inserted": inserted,
         "updated": updated,
-        "source": source,
+        "source": provider_context.get("provider_name") or source,
+        "requested_source": source,
+        "provider_context": provider_context,
+        "provider_name": provider_context.get("provider_name") or source,
+        "provider_attempts": provider_context.get("attempts") or [],
+        "fallback_used": bool(provider_context.get("fallback_used")),
+        "response_quality": provider_context.get("response_quality"),
     }
 
 

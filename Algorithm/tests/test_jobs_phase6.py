@@ -124,11 +124,15 @@ def test_daily_snapshot_invokes_retention(monkeypatch: pytest.MonkeyPatch):
 
     def fake_cleanup(as_of_date, retention_days):
         called["args"] = (as_of_date, retention_days)
-        return {"prosperity_features_daily": 5}
+        return {
+            "deleted": {"prosperity_features_daily": 5},
+            "skipped": {},
+            "warnings": [],
+        }
 
     monkeypatch.setattr("api.jobs.prosperity._utc_today", lambda: dt.date(2024, 5, 20))
     monkeypatch.setattr("api.jobs.prosperity.snapshot_run", fake_snapshot)
-    monkeypatch.setattr("api.jobs.prosperity.cleanup_retention", fake_cleanup)
+    monkeypatch.setattr("api.jobs.prosperity.cleanup_retention_report", fake_cleanup)
 
     client = TestClient(app)
     resp = client.post(
@@ -170,3 +174,51 @@ def test_cleanup_retention_targets_v1_strategy_tables(
         "prosperity_strategy_signals_daily": 0,
         "prosperity_ensemble_signals_daily": 0,
     }
+
+
+def test_delete_older_than_uses_schema_aware_date_column(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    recorded: Dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        "api.jobs.prosperity.db.safe_fetchone",
+        lambda sql, params: ("prosperity_strategy_signals_daily",),
+    )
+    monkeypatch.setattr(
+        "api.jobs.prosperity._retention_table_columns",
+        lambda table: ["symbol", "as_of_date", "lookback"],
+    )
+
+    def fake_fetchall(sql, params):
+        recorded["sql"] = sql
+        recorded["params"] = params
+        return []
+
+    monkeypatch.setattr("api.jobs.prosperity.db.safe_fetchall", fake_fetchall)
+
+    deleted = prosperity._delete_older_than(
+        "prosperity_strategy_signals_daily", dt.date(2024, 4, 1)
+    )
+
+    assert deleted == 0
+    assert "as_of_date" in recorded["sql"]
+
+
+def test_cleanup_retention_report_skips_missing_retention_column(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    def fake_delete(table: str, cutoff: dt.date) -> int:
+        if table == "prosperity_strategy_signals_daily":
+            raise ValueError("no retention date column available for prosperity_strategy_signals_daily")
+        return 0
+
+    monkeypatch.setattr("api.jobs.prosperity._delete_older_than", fake_delete)
+
+    report = prosperity.cleanup_retention_report(dt.date(2024, 5, 19), 30)
+
+    assert report["deleted"]["prosperity_features_daily"] == 0
+    assert (
+        "prosperity_strategy_signals_daily" in report["skipped"]
+    )
+    assert report["warnings"]

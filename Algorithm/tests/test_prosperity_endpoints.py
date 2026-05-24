@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from api import db
 from api import migrations
+from api import security
 from api.prosperity import ingest, query, routes
 from api.main import SignalResponse, app
 
@@ -39,6 +40,9 @@ def _weekday_bars(end_date: dt.date, count: int) -> List[Dict[str, float]]:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
     # Avoid touching a real database in unit tests
+    for key in ["FTIP_API_KEY", "FTIP_API_KEYS"]:
+        monkeypatch.delenv(key, raising=False)
+    security._API_KEYS = None
     monkeypatch.setattr(db, "ensure_schema", lambda: None)
     monkeypatch.setattr(migrations, "ensure_schema", lambda: [])
     with TestClient(app) as client:
