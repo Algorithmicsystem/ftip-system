@@ -941,6 +941,304 @@ class RecommendationChangeRecord(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class TrackingStatus(BaseModel):
+    status: str = "active"
+    evidence_mode: str = "paper_tracked"
+    matured_horizons: List[str] = Field(default_factory=list)
+    pending_horizons: List[str] = Field(default_factory=list)
+    evidence_status: str = "pending"
+    last_refreshed_at: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class RecommendationTrack(BaseModel):
+    track_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    entity_id: Optional[str] = None
+    symbol: str
+    axiom_artifact_id: Optional[str] = None
+    axiom_history_artifact_id: Optional[str] = None
+    report_id: Optional[str] = None
+    session_id: Optional[str] = None
+    recommendation_state_at_start: str
+    deployability_tier_at_start: Optional[str] = None
+    size_band_at_start: Optional[str] = None
+    regime_label: Optional[str] = None
+    trade_family: Optional[str] = None
+    strongest_engine_at_start: Optional[str] = None
+    weakest_engine_at_start: Optional[str] = None
+    signal_action_at_start: Optional[str] = None
+    evidence_status_at_start: Optional[str] = None
+    start_deployable_alpha_utility: Optional[float] = None
+    start_validated_edge: Optional[float] = None
+    start_overall_coverage: Optional[float] = None
+    start_overall_confidence: Optional[float] = None
+    start_engine_scores: Dict[str, Any] = Field(default_factory=dict)
+    start_source_context: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    tracking_start_at: Optional[str] = None
+    tracking_end_at: Optional[str] = None
+    tracking_status: TrackingStatus = Field(default_factory=TrackingStatus)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class OutcomeWindow(BaseModel):
+    horizon_label: str
+    horizon_days: int
+    status: str = "pending"
+    matured: bool = False
+    entry_date: Optional[str] = None
+    exit_date: Optional[str] = None
+    entry_price: Optional[float] = None
+    exit_price: Optional[float] = None
+    warnings: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class HorizonOutcome(OutcomeWindow):
+    forward_return: Optional[float] = None
+    gross_edge_return: Optional[float] = None
+    net_edge_return: Optional[float] = None
+    gross_trade_return: Optional[float] = None
+    net_trade_return: Optional[float] = None
+    final_signal_correct: Optional[bool] = None
+    raw_signal_correct: Optional[bool] = None
+    mae: Optional[float] = None
+    mfe: Optional[float] = None
+    invalidation_triggered: Optional[bool] = None
+    benchmark_forward_return: Optional[float] = None
+    excess_return_vs_hold: Optional[float] = None
+
+
+class PaperTradeRecord(BaseModel):
+    paper_trade_id: str
+    track_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    symbol: str
+    entry_reference_date: str
+    entry_price: Optional[float] = None
+    thesis_state_at_entry: Dict[str, Any] = Field(default_factory=dict)
+    tracked_horizons: List[str] = Field(default_factory=list)
+    current_status: str = "active"
+    outcome_summary: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class OutcomeEvidenceStatus(BaseModel):
+    status: str = "insufficient_sample"
+    label: str = "insufficient_sample"
+    sample_size: int = 0
+    warnings: List[str] = Field(default_factory=list)
+    rationale: Optional[str] = None
+
+
+class RecommendationOutcomeAssessment(BaseModel):
+    assessment_status: str = "mixed"
+    hindsight_label: str = "mixed"
+    aligned_in_hindsight: Optional[bool] = None
+    deployability_justified: Optional[bool] = None
+    supportive_horizons: List[str] = Field(default_factory=list)
+    contradicted_horizons: List[str] = Field(default_factory=list)
+    strongest_horizon: Optional[str] = None
+    weakest_horizon: Optional[str] = None
+    supportive_window_count: int = 0
+    contradictory_window_count: int = 0
+    summary: str
+    rationale: Optional[str] = None
+    evidence_status: str = "partial"
+
+
+class OutcomeSnapshot(BaseModel):
+    snapshot_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    track_id: str
+    paper_trade_id: str
+    symbol: str
+    snapshot_date: Optional[str] = None
+    evidence_mode: str = "paper_tracked"
+    tracking_status: TrackingStatus = Field(default_factory=TrackingStatus)
+    windows: Dict[str, HorizonOutcome] = Field(default_factory=dict)
+    assessment: RecommendationOutcomeAssessment
+    evidence_status: OutcomeEvidenceStatus
+    benchmark_comparison: Dict[str, Any] = Field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class OutcomeAttribution(BaseModel):
+    attribution_id: str
+    organization_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    workflow_id: str
+    dossier_id: str
+    track_id: str
+    paper_trade_id: str
+    symbol: str
+    recommendation_state_at_start: Optional[str] = None
+    deployability_tier_at_start: Optional[str] = None
+    size_band_at_start: Optional[str] = None
+    regime_label: Optional[str] = None
+    trade_family: Optional[str] = None
+    strongest_engine_at_start: Optional[str] = None
+    weakest_engine_at_start: Optional[str] = None
+    source_label: str = "paper_tracked"
+    snapshot: OutcomeSnapshot
+    benchmark_comparison: Dict[str, Any] = Field(default_factory=dict)
+    summary: str
+    created_at: Optional[str] = None
+
+
+class BucketPerformanceSummary(BaseModel):
+    label: str
+    bucket: Optional[int] = None
+    sample_count: int = 0
+    matured_count: int = 0
+    average_net_edge_return: Optional[float] = None
+    average_forward_return: Optional[float] = None
+    average_mae: Optional[float] = None
+    average_mfe: Optional[float] = None
+    hit_rate: Optional[float] = None
+    excess_vs_hold: Optional[float] = None
+    evidence_status: str = "insufficient_sample"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StabilityAssessment(BaseModel):
+    dimension: str
+    label: str
+    status: str = "insufficient_sample"
+    older_sample_count: int = 0
+    recent_sample_count: int = 0
+    older_average_net_edge_return: Optional[float] = None
+    recent_average_net_edge_return: Optional[float] = None
+    delta: Optional[float] = None
+    summary: str
+    warnings: List[str] = Field(default_factory=list)
+
+
+class DriftEvidenceSummary(BaseModel):
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    status: str = "insufficient_sample"
+    sample_count: int = 0
+    matured_count: int = 0
+    stability_assessments: List[StabilityAssessment] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    summary: str
+
+
+class CalibrationHardeningSummary(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    horizon_label: str = "21d"
+    status: str = "insufficient_sample"
+    evidence_status: str = "insufficient_sample"
+    tracked_recommendation_count: int = 0
+    paper_trade_count: int = 0
+    sample_count: int = 0
+    matured_count: int = 0
+    dau_bucket_realized_outcomes: Dict[str, Any] = Field(default_factory=dict)
+    validated_edge_bucket_realized_outcomes: Dict[str, Any] = Field(default_factory=dict)
+    deployability_tier_realized_outcomes: List[Dict[str, Any]] = Field(default_factory=list)
+    regime_realized_outcomes: List[Dict[str, Any]] = Field(default_factory=list)
+    trade_family_realized_outcomes: List[Dict[str, Any]] = Field(default_factory=list)
+    recommendation_state_realized_outcomes: List[Dict[str, Any]] = Field(default_factory=list)
+    paper_trade_hit_rate: Optional[float] = None
+    downside_rate: Optional[float] = None
+    drift_summary: Optional[DriftEvidenceSummary] = None
+    warnings: List[str] = Field(default_factory=list)
+    summary: str
+
+
+class CohortBenchmarkRow(BaseModel):
+    dimension: str
+    label: str
+    matured_count: int = 0
+    average_net_edge_return: Optional[float] = None
+    average_forward_return: Optional[float] = None
+    hit_rate: Optional[float] = None
+    average_mae: Optional[float] = None
+    average_mfe: Optional[float] = None
+    excess_vs_hold: Optional[float] = None
+    evidence_status: str = "insufficient_sample"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class BenchmarkComparisonSummary(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    horizon_label: str = "21d"
+    status: str = "insufficient_sample"
+    cohorts: Dict[str, List[CohortBenchmarkRow]] = Field(default_factory=dict)
+    dau_quantile_comparison: Dict[str, Any] = Field(default_factory=dict)
+    strongest_cohorts: List[Dict[str, Any]] = Field(default_factory=list)
+    weakest_cohorts: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    summary: str
+
+
+class RecommendationEvidenceSummary(BaseModel):
+    dossier_id: str
+    track_id: str
+    paper_trade_id: str
+    symbol: str
+    evidence_status: str = "insufficient_sample"
+    tracking_status: str = "active"
+    supportive_horizons: List[str] = Field(default_factory=list)
+    contradicted_horizons: List[str] = Field(default_factory=list)
+    summary: str
+    warnings: List[str] = Field(default_factory=list)
+
+
+class WorkspaceProofSummary(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    tracked_recommendation_count: int = 0
+    active_tracking_count: int = 0
+    matured_tracking_count: int = 0
+    supportive_count: int = 0
+    mixed_count: int = 0
+    weak_count: int = 0
+    insufficient_count: int = 0
+    evidence_maturity_level: str = "limited"
+    replay_consistency_label: str = "partial"
+    top_regime_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    top_tier_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    top_trade_family_rows: List[Dict[str, Any]] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    summary: str
+
+
+class ModelCredibilitySnapshot(BaseModel):
+    platform_version: str
+    workspace_id: Optional[str] = None
+    organization_id: Optional[str] = None
+    status: str = "partial"
+    tracked_recommendation_count: int = 0
+    replay_evidence_status: str = "partial"
+    paper_evidence_status: str = "partial"
+    calibration_status: str = "partial"
+    drift_status: str = "partial"
+    buyer_summary: str
+    warnings: List[str] = Field(default_factory=list)
+
+
 class CreateOrganizationRequest(BaseModel):
     name: str
     organization_type: str = "research_team"
@@ -978,6 +1276,12 @@ class ApplyDemoBundleRequest(BaseModel):
     workflow_template_id: Optional[str] = None
     include_exports: bool = True
     include_integrations: bool = False
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class StartTrackingRequest(BaseModel):
+    tracking_start_at: Optional[str] = None
+    tracked_horizons: List[str] = Field(default_factory=lambda: ["5d", "21d", "63d"])
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 

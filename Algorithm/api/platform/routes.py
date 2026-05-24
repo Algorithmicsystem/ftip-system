@@ -20,6 +20,7 @@ from api.platform.contracts import (
     ResolveCommentRequest,
     ReviewCommentRequest,
     RecommendationStateRequest,
+    StartTrackingRequest,
     StoreExportRequest,
     WorkflowActionRequest,
     WorkflowApprovalRequestPayload,
@@ -345,6 +346,38 @@ def attach_analysis(
     )
 
 
+@router.post("/dossiers/{dossier_id}/start-tracking")
+def start_dossier_tracking(
+    dossier_id: str,
+    payload: StartTrackingRequest,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.start_dossier_tracking_service(
+        dossier_id,
+        payload.model_dump(mode="python"),
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/dossiers/{dossier_id}/tracking")
+def get_dossier_tracking(dossier_id: str, request: Request) -> Dict[str, Any]:
+    return service.get_dossier_tracking_service(
+        dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/dossiers/{dossier_id}/outcomes")
+def get_dossier_outcomes(dossier_id: str, request: Request) -> Dict[str, Any]:
+    return service.get_dossier_outcomes_service(
+        dossier_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
 @router.post("/dossiers/{dossier_id}/export")
 def dossier_export(
     dossier_id: str,
@@ -530,6 +563,60 @@ def workspace_analytics(workspace_id: str, request: Request) -> Dict[str, Any]:
         workspace_id,
         user_context=_user_context(request),
         store=platform_store,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/proof")
+def workspace_proof(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.build_workspace_proof_service(
+        workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+        emit_audit=True,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/calibration-hardening")
+def workspace_calibration_hardening(
+    workspace_id: str,
+    request: Request,
+) -> Dict[str, Any]:
+    return service.build_workspace_calibration_hardening_service(
+        workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/drift")
+def workspace_drift(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.build_workspace_drift_service(
+        workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+        emit_audit=True,
+    )
+
+
+@router.get("/workspaces/{workspace_id}/benchmarks")
+def workspace_benchmarks(workspace_id: str, request: Request) -> Dict[str, Any]:
+    return service.build_workspace_benchmarks_service(
+        workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+    )
+
+
+@router.get("/proof/summary")
+def platform_proof_summary(
+    request: Request,
+    workspace_id: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    return service.build_proof_summary_service(
+        workspace_id=workspace_id,
+        user_context=_user_context(request),
+        store=platform_store,
+        emit_audit=True,
     )
 
 

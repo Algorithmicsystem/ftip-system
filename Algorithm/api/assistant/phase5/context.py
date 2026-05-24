@@ -175,6 +175,22 @@ def _section_catalog(report: Dict[str, Any]) -> Dict[str, str]:
         or "",
         "platform_demo_bundle_summary": report.get("platform_demo_bundle_summary")
         or "",
+        "platform_proof_cycle_summary": report.get("platform_proof_cycle_summary")
+        or "",
+        "platform_tracking_summary": report.get("platform_tracking_summary") or "",
+        "platform_outcome_summary": report.get("platform_outcome_summary") or "",
+        "platform_calibration_hardening_summary": report.get(
+            "platform_calibration_hardening_summary"
+        )
+        or "",
+        "platform_drift_summary_text": report.get("platform_drift_summary_text")
+        or "",
+        "platform_benchmark_summary": report.get("platform_benchmark_summary")
+        or "",
+        "platform_model_credibility_summary": report.get(
+            "platform_model_credibility_summary"
+        )
+        or "",
         "daily_operating_summary": report.get("daily_operating_summary") or "",
         "weekly_operating_summary": report.get("weekly_operating_summary") or "",
         "monthly_operating_summary": report.get("monthly_operating_summary") or "",

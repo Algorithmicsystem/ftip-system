@@ -2679,6 +2679,20 @@ def attach_platform_context(
     committee_decision = dict(platform_context.get("committee_decision") or {})
     recommendation_state = dict(platform_context.get("recommendation_state") or {})
     recommendation_history = list(platform_context.get("recommendation_history") or [])
+    tracking = dict(platform_context.get("tracking") or {})
+    paper_trade = dict(platform_context.get("paper_trade") or {})
+    outcome_snapshot = dict(platform_context.get("outcome_snapshot") or {})
+    recommendation_evidence_summary = dict(
+        platform_context.get("recommendation_evidence_summary") or {}
+    )
+    outcome_attribution = dict(platform_context.get("outcome_attribution") or {})
+    proof_summary = dict(platform_context.get("proof_summary") or {})
+    calibration_hardening = dict(platform_context.get("calibration_hardening") or {})
+    drift_summary = dict(platform_context.get("drift_summary") or {})
+    benchmarks = dict(platform_context.get("benchmarks") or {})
+    model_credibility_snapshot = dict(
+        platform_context.get("model_credibility_snapshot") or {}
+    )
 
     overview_summary = (
         f"Workspace {workspace.get('name') or 'n/a'} is running "
@@ -2819,6 +2833,51 @@ def attach_platform_context(
         if demo_bundles
         else "No demo bundle catalog is attached."
     )
+    proof_cycle_summary = (
+        f"Proof cycle tracks {proof_summary.get('tracked_recommendation_count', 0)} recommendation(s) with "
+        f"{proof_summary.get('supportive_count', 0)} supportive, {proof_summary.get('mixed_count', 0)} mixed, and "
+        f"{proof_summary.get('weak_count', 0)} weak tracked evidence set(s)."
+        if proof_summary
+        else "No proof-cycle summary is attached."
+    )
+    tracking_summary = (
+        f"Latest tracking state is {((tracking.get('tracking_status') or {}).get('status')) or 'inactive'} "
+        f"from {paper_trade.get('entry_reference_date') or 'n/a'} across horizons "
+        f"{_fmt_list(paper_trade.get('tracked_horizons') or [])}."
+        if tracking or paper_trade
+        else "No paper-tracked recommendation is attached."
+    )
+    outcome_summary = (
+        f"Outcome attribution is {((outcome_snapshot.get('assessment') or {}).get('assessment_status')) or 'pending'} "
+        f"with summary {outcome_attribution.get('summary') or recommendation_evidence_summary.get('summary') or 'n/a'}."
+        if outcome_snapshot or outcome_attribution or recommendation_evidence_summary
+        else "No realized outcome attribution is attached."
+    )
+    calibration_hardening_summary = (
+        f"Calibration hardening is {calibration_hardening.get('status') or 'partial'} with evidence "
+        f"{calibration_hardening.get('evidence_status') or 'partial'} across "
+        f"{calibration_hardening.get('matured_count', 0)} matured tracked recommendation(s)."
+        if calibration_hardening
+        else "No calibration hardening summary is attached."
+    )
+    drift_summary_text = (
+        f"Drift status is {drift_summary.get('status') or 'partial'} with summary "
+        f"{drift_summary.get('summary') or 'n/a'}."
+        if drift_summary
+        else "No drift summary is attached."
+    )
+    benchmark_summary_text = (
+        f"Benchmark status is {benchmarks.get('status') or 'partial'} and strongest cohorts include "
+        f"{_fmt_list([item.get('label') for item in (benchmarks.get('strongest_cohorts') or [])[:4]])}."
+        if benchmarks
+        else "No cohort benchmark summary is attached."
+    )
+    credibility_summary = (
+        f"Model credibility is {model_credibility_snapshot.get('status') or 'partial'} with buyer summary "
+        f"{model_credibility_snapshot.get('buyer_summary') or 'n/a'}."
+        if model_credibility_snapshot
+        else "No model credibility snapshot is attached."
+    )
 
     updated["report_version"] = "2.18"
     updated["platform_foundation_version"] = platform_context.get(
@@ -2871,6 +2930,22 @@ def attach_platform_context(
     updated["platform_committee_decision"] = sanitize_payload(committee_decision)
     updated["platform_recommendation_state"] = sanitize_payload(recommendation_state)
     updated["platform_recommendation_history"] = sanitize_payload(recommendation_history)
+    updated["platform_tracking"] = sanitize_payload(tracking)
+    updated["platform_paper_trade"] = sanitize_payload(paper_trade)
+    updated["platform_outcome_snapshot"] = sanitize_payload(outcome_snapshot)
+    updated["platform_recommendation_evidence_summary"] = sanitize_payload(
+        recommendation_evidence_summary
+    )
+    updated["platform_outcome_attribution"] = sanitize_payload(outcome_attribution)
+    updated["platform_proof_summary"] = sanitize_payload(proof_summary)
+    updated["platform_calibration_hardening"] = sanitize_payload(
+        calibration_hardening
+    )
+    updated["platform_drift_summary"] = sanitize_payload(drift_summary)
+    updated["platform_benchmarks"] = sanitize_payload(benchmarks)
+    updated["platform_model_credibility_snapshot"] = sanitize_payload(
+        model_credibility_snapshot
+    )
     updated["platform_overview_summary"] = overview_summary
     updated["platform_dossier_summary"] = dossier_summary
     updated["platform_monitoring_summary"] = monitoring_summary
@@ -2892,6 +2967,13 @@ def attach_platform_context(
     updated["platform_collaboration_summary"] = collaboration_summary
     updated["platform_committee_summary"] = committee_summary
     updated["platform_assignment_summary_text"] = assignment_summary_text
+    updated["platform_proof_cycle_summary"] = proof_cycle_summary
+    updated["platform_tracking_summary"] = tracking_summary
+    updated["platform_outcome_summary"] = outcome_summary
+    updated["platform_calibration_hardening_summary"] = calibration_hardening_summary
+    updated["platform_drift_summary_text"] = drift_summary_text
+    updated["platform_benchmark_summary"] = benchmark_summary_text
+    updated["platform_model_credibility_summary"] = credibility_summary
     updated["overall_analysis"] = _join_sentences(
         [
             updated.get("overall_analysis"),
@@ -2902,6 +2984,8 @@ def attach_platform_context(
             bootstrap_summary_text,
             readiness_report_summary,
             collaboration_summary,
+            proof_cycle_summary,
+            outcome_summary,
             workflow_actions_summary,
             dashboard_summary,
         ]
@@ -2916,6 +3000,8 @@ def attach_platform_context(
             analytics_summary,
             demo_readiness_summary,
             pilot_package_summary,
+            benchmark_summary_text,
+            drift_summary_text,
         ]
     )
     updated["evidence_provenance"] = _join_sentences(
@@ -2928,6 +3014,9 @@ def attach_platform_context(
             export_rendering_summary,
             integration_health_summary,
             demo_bundle_summary,
+            tracking_summary,
+            calibration_hardening_summary,
+            credibility_summary,
         ]
     )
     evidence_map = dict(updated.get("evidence_map") or {})
@@ -2995,6 +3084,26 @@ def attach_platform_context(
         "platform.pilot_package",
         "platform.workspace_analytics",
         "platform.stored_exports",
+    ]
+    evidence_map["platform_proof_cycle_summary"] = [
+        "platform.proof_summary",
+        "platform.outcome_snapshots",
+        "platform.recommendation_tracks",
+    ]
+    evidence_map["platform_outcome_summary"] = [
+        "platform.outcome_attribution",
+        "platform.outcome_snapshot",
+        "platform.recommendation_evidence_summary",
+    ]
+    evidence_map["platform_calibration_hardening_summary"] = [
+        "platform.calibration_hardening",
+        "platform.drift_summary",
+        "platform.benchmarks",
+    ]
+    evidence_map["platform_model_credibility_summary"] = [
+        "platform.model_credibility_snapshot",
+        "platform.proof_summary",
+        "platform.calibration_hardening",
     ]
     updated["evidence_map"] = evidence_map
     return sanitize_payload(updated)

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from api.assistant.reports import sanitize_payload
+from api.platform import outcomes as platform_outcomes_module
 from api.platform.access import (
     build_access_summary,
     require_access,
@@ -33,6 +34,7 @@ from api.platform.approvals import (
     build_approval_request,
 )
 from api.platform.audit import audit_event_to_timeline, build_audit_event
+from api.platform.benchmarks import build_benchmark_comparison_summary
 from api.platform.comments import build_review_comment, resolve_review_comment
 from api.platform.committee import build_committee_decision_snapshot
 from api.platform.contracts import (
@@ -48,6 +50,13 @@ from api.platform.dossiers import (
     build_analysis_link,
     dossier_preview,
     refresh_dossier_record,
+)
+from api.platform.evidence import (
+    build_calibration_hardening_summary,
+    build_drift_evidence_summary,
+    build_model_credibility_snapshot,
+    build_recommendation_evidence_summary,
+    build_workspace_proof_summary,
 )
 from api.platform.entities import build_coverage_entity
 from api.platform.export_integrity import build_export_integrity_result
@@ -97,10 +106,17 @@ from api.platform.reviews import build_review_summary, build_role_assignment_sum
 from api.platform.security import normalize_user_context
 from api.platform.tenant import build_tenancy_summary
 from api.platform.templates import get_workflow_template, list_workflow_templates
+from api.platform.tracking import (
+    TRACKING_HORIZON_DAYS,
+    build_paper_trade_record,
+    build_recommendation_track,
+    normalize_horizons,
+)
+from api.platform.outcomes import build_outcome_attribution, build_outcome_snapshot
 from api.platform.workflows import build_workflow_instance
 
 
-PLATFORM_FOUNDATION_VERSION = "platform_phase8d_pilot_bootstrap_v1"
+PLATFORM_FOUNDATION_VERSION = "platform_phase9a_proof_cycle_v1"
 
 
 def _now_utc() -> str:
@@ -444,6 +460,123 @@ def _build_collaboration_bundle(
     }
 
 
+def _coerce_date(value: Any) -> Optional[dt.date]:
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value.date()
+    if isinstance(value, dt.date):
+        return value
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _latest_report_snapshot_for_dossier(dossier: Dict[str, Any]) -> Dict[str, Any]:
+    return sanitize_payload(
+        ((dossier.get("metadata") or {}).get("latest_report_snapshot") or {})
+    )
+
+
+def _tracking_entry_price(report: Dict[str, Any]) -> Optional[float]:
+    data_bundle = dict(report.get("data_bundle") or {})
+    market_price_volume = dict(data_bundle.get("market_price_volume") or {})
+    candidates = [
+        market_price_volume.get("latest_close"),
+        market_price_volume.get("close"),
+        market_price_volume.get("reference_price"),
+        (report.get("signal") or {}).get("entry_reference_price"),
+    ]
+    for candidate in candidates:
+        try:
+            if candidate is None:
+                continue
+            return float(candidate)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _build_dossier_proof_bundle(
+    *,
+    workflow: Optional[Dict[str, Any]],
+    dossier: Optional[Dict[str, Any]],
+    store: PlatformStore,
+    organization_ids: Optional[List[str]] = None,
+    workspace_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    if not workflow or not dossier:
+        return {
+            "tracks": [],
+            "latest_track": None,
+            "paper_trades": [],
+            "latest_paper_trade": None,
+            "snapshots": [],
+            "latest_snapshot": None,
+            "recommendation_evidence_summary": {},
+            "outcome_attribution": {},
+        }
+    tracks = store.list_recommendation_tracks(
+        workflow_id=str(workflow.get("workflow_id") or ""),
+        dossier_id=str(dossier.get("dossier_id") or ""),
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    latest_track = tracks[0] if tracks else None
+    paper_trades = (
+        store.list_paper_trades(
+            track_id=str(latest_track.get("track_id") or ""),
+            dossier_id=str(dossier.get("dossier_id") or ""),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        if latest_track
+        else []
+    )
+    latest_paper_trade = paper_trades[0] if paper_trades else None
+    snapshots = (
+        store.list_outcome_snapshots(
+            track_id=str(latest_track.get("track_id") or ""),
+            dossier_id=str(dossier.get("dossier_id") or ""),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        if latest_track
+        else []
+    )
+    latest_snapshot = snapshots[0] if snapshots else None
+    recommendation_evidence_summary = (
+        build_recommendation_evidence_summary(
+            dossier_id=str(dossier.get("dossier_id") or ""),
+            track=latest_track or {},
+            paper_trade=latest_paper_trade or {},
+            snapshot=latest_snapshot,
+        )
+        if latest_track and latest_paper_trade
+        else {}
+    )
+    outcome_attribution = (
+        build_outcome_attribution(
+            track=latest_track or {},
+            paper_trade=latest_paper_trade or {},
+            snapshot=latest_snapshot or {},
+        ).model_dump(mode="python")
+        if latest_track and latest_paper_trade and latest_snapshot
+        else {}
+    )
+    return {
+        "tracks": tracks,
+        "latest_track": latest_track,
+        "paper_trades": paper_trades,
+        "latest_paper_trade": latest_paper_trade,
+        "snapshots": snapshots,
+        "latest_snapshot": latest_snapshot,
+        "recommendation_evidence_summary": recommendation_evidence_summary,
+        "outcome_attribution": outcome_attribution,
+    }
+
+
 def _refresh_dossier_collaboration_state(
     dossier: Optional[Dict[str, Any]],
     *,
@@ -466,6 +599,20 @@ def _refresh_dossier_collaboration_state(
     committee_decision = collaboration["committee_decision"]
     recommendation_state = collaboration["recommendation_state"]
     recommendation_history = collaboration["recommendation_history"]
+    proof_bundle = _build_dossier_proof_bundle(
+        workflow=workflow,
+        dossier=dossier,
+        store=store,
+        organization_ids=organization_ids,
+        workspace_ids=workspace_ids,
+    )
+    latest_track = proof_bundle["latest_track"] or {}
+    latest_paper_trade = proof_bundle["latest_paper_trade"] or {}
+    latest_snapshot = proof_bundle["latest_snapshot"] or {}
+    recommendation_evidence_summary = (
+        proof_bundle["recommendation_evidence_summary"] or {}
+    )
+    outcome_attribution = proof_bundle["outcome_attribution"] or {}
 
     current_summary = sanitize_payload(dossier.get("current_summary") or {})
     current_summary.update(
@@ -479,6 +626,11 @@ def _refresh_dossier_collaboration_state(
             "review_comment_count": int(
                 ((review_summary.get("thread_summary") or {}).get("total_comments") or 0)
             ),
+            "tracking_status": ((latest_track.get("tracking_status") or {}).get("status")),
+            "tracking_evidence_status": recommendation_evidence_summary.get(
+                "evidence_status"
+            ),
+            "tracked_recommendation_count": len(proof_bundle["tracks"]),
         }
     )
     metadata = sanitize_payload(dossier.get("metadata") or {})
@@ -496,6 +648,18 @@ def _refresh_dossier_collaboration_state(
             "unresolved_concern_count": int(
                 review_summary.get("unresolved_concern_count") or 0
             ),
+            "latest_recommendation_track": latest_track,
+            "latest_paper_trade": latest_paper_trade,
+            "latest_outcome_snapshot": latest_snapshot,
+            "recommendation_evidence_summary": recommendation_evidence_summary,
+            "latest_outcome_attribution": outcome_attribution,
+            "tracking_history_summary": {
+                "track_count": len(proof_bundle["tracks"]),
+                "snapshot_count": len(proof_bundle["snapshots"]),
+                "latest_track_id": latest_track.get("track_id"),
+                "latest_paper_trade_id": latest_paper_trade.get("paper_trade_id"),
+                "latest_snapshot_id": latest_snapshot.get("snapshot_id"),
+            },
         }
     )
     sections = [sanitize_payload(item) for item in list(dossier.get("sections") or [])]
@@ -546,6 +710,33 @@ def _refresh_dossier_collaboration_state(
             "history": _recommendation_history_summary(recommendation_history),
         },
     )
+    sections = _upsert_section(
+        sections,
+        section_key="proof_summary",
+        title="Proof Summary",
+        summary=(
+            recommendation_evidence_summary.get("summary")
+            or "No paper-tracked recommendation evidence is attached yet."
+        ),
+        payload={
+            "recommendation_evidence_summary": recommendation_evidence_summary,
+            "latest_track": latest_track,
+            "latest_paper_trade": latest_paper_trade,
+            "latest_snapshot": latest_snapshot,
+        },
+        status="available" if latest_track else "partial",
+    )
+    sections = _upsert_section(
+        sections,
+        section_key="outcome_attribution",
+        title="Outcome Attribution",
+        summary=(
+            outcome_attribution.get("summary")
+            or "No realized paper-tracked outcome attribution is attached yet."
+        ),
+        payload=outcome_attribution,
+        status="available" if outcome_attribution else "partial",
+    )
     return store.update_dossier(
         str(dossier.get("dossier_id") or ""),
         {
@@ -574,6 +765,9 @@ def _workspace_scope_bundle(
             "rendered_exports": [],
             "stored_exports": [],
             "integration_bindings": [],
+            "recommendation_tracks": [],
+            "paper_trades": [],
+            "outcome_snapshots": [],
         }
     workspaces = (
         [
@@ -608,6 +802,9 @@ def _workspace_scope_bundle(
     exports: List[Dict[str, Any]] = []
     rendered_exports: List[Dict[str, Any]] = []
     stored_exports: List[Dict[str, Any]] = []
+    recommendation_tracks: List[Dict[str, Any]] = []
+    paper_trades: List[Dict[str, Any]] = []
+    outcome_snapshots: List[Dict[str, Any]] = []
     for workflow in workflows:
         approvals.extend(store.list_approval_requests(workflow_id=workflow.get("workflow_id")))
     for dossier in dossiers:
@@ -632,6 +829,27 @@ def _workspace_scope_bundle(
                 workspace_ids=workspace_ids,
             )
         )
+        dossier_tracks = store.list_recommendation_tracks(
+            dossier_id=dossier.get("dossier_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        recommendation_tracks.extend(dossier_tracks)
+        for track in dossier_tracks:
+            paper_trades.extend(
+                store.list_paper_trades(
+                    track_id=track.get("track_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            )
+            outcome_snapshots.extend(
+                store.list_outcome_snapshots(
+                    track_id=track.get("track_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            )
     integrations = (
         store.list_integration_bindings(
             workspace_id=workspace_id,
@@ -653,6 +871,9 @@ def _workspace_scope_bundle(
         "rendered_exports": rendered_exports,
         "stored_exports": stored_exports,
         "integration_bindings": integrations,
+        "recommendation_tracks": recommendation_tracks,
+        "paper_trades": paper_trades,
+        "outcome_snapshots": outcome_snapshots,
     }
 
 
@@ -1186,7 +1407,410 @@ def get_dossier_view(
         "committee_decision": collaboration["committee_decision"],
         "recommendation_state": collaboration["recommendation_state"],
         "recommendation_history": collaboration["recommendation_history"],
+        "tracking": ((dossier.get("metadata") or {}).get("latest_recommendation_track") or {}),
+        "paper_trade": ((dossier.get("metadata") or {}).get("latest_paper_trade") or {}),
+        "outcome_snapshot": ((dossier.get("metadata") or {}).get("latest_outcome_snapshot") or {}),
+        "recommendation_evidence_summary": (
+            (dossier.get("metadata") or {}).get("recommendation_evidence_summary") or {}
+        ),
+        "outcome_attribution": (
+            (dossier.get("metadata") or {}).get("latest_outcome_attribution") or {}
+        ),
         "timeline": timeline.get("timeline") or [],
+    }
+
+
+def _refresh_track_outcome_state(
+    *,
+    track: Dict[str, Any],
+    paper_trade: Dict[str, Any],
+    evaluation_as_of_date: Optional[dt.date] = None,
+    store: PlatformStore,
+) -> Dict[str, Any]:
+    snapshot_date = (evaluation_as_of_date or dt.date.today()).isoformat()
+    existing = store.get_latest_outcome_snapshot(
+        track_id=str(track.get("track_id") or ""),
+    )
+    snapshot = build_outcome_snapshot(
+        track=track,
+        paper_trade=paper_trade,
+        evaluation_as_of_date=evaluation_as_of_date or dt.date.today(),
+        bar_fetcher=platform_outcomes_module.default_ohlc_bar_fetcher,
+        snapshot_id=(
+            str(existing.get("snapshot_id") or "")
+            if existing and str(existing.get("snapshot_date") or "") == snapshot_date
+            else None
+        )
+        or None,
+    )
+    persisted_snapshot = store.create_outcome_snapshot(snapshot.model_dump(mode="python"))
+    persisted_trade = store.update_paper_trade(
+        str(paper_trade.get("paper_trade_id") or ""),
+        {
+            "current_status": str(
+                ((persisted_snapshot.get("tracking_status") or {}).get("status"))
+                or "active"
+            ),
+            "outcome_summary": {
+                "snapshot_id": persisted_snapshot.get("snapshot_id"),
+                "snapshot_date": persisted_snapshot.get("snapshot_date"),
+                "assessment": persisted_snapshot.get("assessment") or {},
+                "evidence_status": persisted_snapshot.get("evidence_status") or {},
+            },
+            "updated_at": _now_utc(),
+        },
+    )
+    track_status = dict(persisted_snapshot.get("tracking_status") or {})
+    persisted_track = store.update_recommendation_track(
+        str(track.get("track_id") or ""),
+        {
+            "tracking_status": track_status,
+            "tracking_end_at": (
+                snapshot_date if str(track_status.get("status") or "") == "complete" else None
+            ),
+        },
+    )
+    attribution = build_outcome_attribution(
+        track=persisted_track,
+        paper_trade=persisted_trade,
+        snapshot=persisted_snapshot,
+    ).model_dump(mode="python")
+    return {
+        "track": persisted_track,
+        "paper_trade": persisted_trade,
+        "snapshot": persisted_snapshot,
+        "outcome_attribution": attribution,
+    }
+
+
+def start_dossier_tracking_service(
+    dossier_id: str,
+    payload: Dict[str, Any],
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier_view = get_dossier_view(dossier_id, user_context=user_context, store=store)
+    dossier = dossier_view["dossier"]
+    workflow = dossier_view["workflow"]
+    workspace = dossier_view["workspace"]
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    require_access(
+        permission="update_dossier",
+        user_context=normalized,
+        resource=_dossier_resource(dossier, workspace),
+        store=store,
+    )
+    report = _latest_report_snapshot_for_dossier(dossier)
+    symbol = _normalize_symbol(
+        report.get("symbol")
+        or (dossier.get("current_summary") or {}).get("symbol")
+        or (dossier_view.get("entity") or {}).get("symbol")
+    )
+    if not symbol or not report:
+        raise HTTPException(
+            status_code=400,
+            detail="tracking requires a dossier with an attached AXIOM analysis report",
+        )
+    tracking_start_at = str(
+        payload.get("tracking_start_at") or report.get("as_of_date") or dt.date.today().isoformat()
+    )
+    analysis_links = list(dossier_view.get("analysis_links") or [])
+    latest_link = analysis_links[0] if analysis_links else {}
+    track = build_recommendation_track(
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+        workflow_id=str((workflow or {}).get("workflow_id") or ""),
+        dossier_id=dossier_id,
+        entity_id=dossier.get("entity_id"),
+        symbol=symbol,
+        axiom_artifact_id=latest_link.get("axiom_artifact_id") or report.get("axiom_artifact_id"),
+        axiom_history_artifact_id=latest_link.get("axiom_history_artifact_id")
+        or report.get("axiom_history_artifact_id"),
+        report_id=latest_link.get("report_id") or (dossier.get("metadata") or {}).get("latest_report_id"),
+        session_id=latest_link.get("session_id") or (dossier.get("metadata") or {}).get("latest_session_id"),
+        recommendation_state_at_start=(
+            (dossier_view.get("recommendation_state") or {}).get("state")
+            or "draft"
+        ),
+        deployability_tier_at_start=report.get("axiom_evidence_backed_deployability_tier")
+        or report.get("axiom_deployability_tier"),
+        size_band_at_start=report.get("axiom_final_size_band")
+        or report.get("axiom_size_band_recommendation"),
+        regime_label=report.get("axiom_regime_label"),
+        trade_family=report.get("axiom_trade_family"),
+        strongest_engine_at_start=((report.get("axiom_explanation") or {}).get("strongest_engine") or {}).get("engine"),
+        weakest_engine_at_start=((report.get("axiom_explanation") or {}).get("weakest_engine") or {}).get("engine"),
+        signal_action_at_start=((report.get("signal") or {}).get("action"))
+        or ((report.get("strategy") or {}).get("final_signal"))
+        or "BUY",
+        evidence_status_at_start=((report.get("axiom_summary_card") or {}).get("evidence_status"))
+        or report.get("axiom_evidence_status"),
+        start_deployable_alpha_utility=report.get("axiom_deployable_alpha_utility")
+        or ((report.get("axiom_summary_card") or {}).get("deployable_alpha_utility")),
+        start_validated_edge=report.get("axiom_validated_edge")
+        or ((report.get("axiom_summary_card") or {}).get("validated_edge")),
+        start_overall_coverage=((report.get("axiom") or {}).get("overall_coverage")),
+        start_overall_confidence=((report.get("axiom") or {}).get("overall_confidence")),
+        start_engine_scores=((report.get("axiom") or {}).get("engine_scores")) or {},
+        start_source_context={
+            "data_bundle": report.get("data_bundle") or {},
+            "feature_vector": report.get("key_features") or {},
+            "quality": report.get("quality") or {},
+        },
+        metadata={
+            **dict(payload.get("metadata") or {}),
+            "created_from": "platform_phase9a_tracking",
+        },
+        tracking_start_at=tracking_start_at,
+    )
+    persisted_track = store.create_recommendation_track(track.model_dump(mode="python"))
+    paper_trade = build_paper_trade_record(
+        track=persisted_track,
+        entry_reference_date=str(tracking_start_at)[:10],
+        entry_price=_tracking_entry_price(report),
+        tracked_horizons=normalize_horizons(payload.get("tracked_horizons") or []),
+        thesis_state_at_entry={
+            "recommendation_state": persisted_track.get("recommendation_state_at_start"),
+            "deployability_tier": persisted_track.get("deployability_tier_at_start"),
+            "size_band": persisted_track.get("size_band_at_start"),
+            "regime_label": persisted_track.get("regime_label"),
+            "trade_family": persisted_track.get("trade_family"),
+            "summary": report.get("axiom_summary") or report.get("overall_analysis"),
+        },
+        metadata={
+            **dict(payload.get("metadata") or {}),
+            "created_from": "platform_phase9a_tracking",
+        },
+    )
+    persisted_paper_trade = store.create_paper_trade(paper_trade.model_dump(mode="python"))
+    refreshed = _refresh_track_outcome_state(
+        track=persisted_track,
+        paper_trade=persisted_paper_trade,
+        evaluation_as_of_date=_coerce_date(tracking_start_at) or dt.date.today(),
+        store=store,
+    )
+    dossier = (
+        _refresh_dossier_collaboration_state(
+            dossier,
+            workflow=workflow,
+            store=store,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        or dossier
+    )
+    tracking_audit = _create_audit_event(
+        event_type="tracking_started",
+        resource=_dossier_resource(dossier, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": (workflow or {}).get("workflow_id"),
+            "dossier_id": dossier_id,
+            "track_id": refreshed["track"].get("track_id"),
+            "paper_trade_id": refreshed["paper_trade"].get("paper_trade_id"),
+            "recommendation_state_at_start": refreshed["track"].get(
+                "recommendation_state_at_start"
+            ),
+            "deployability_tier_at_start": refreshed["track"].get(
+                "deployability_tier_at_start"
+            ),
+        },
+        rationale="Paper-tracked recommendation started.",
+        metadata={
+            "tracked_horizons": refreshed["paper_trade"].get("tracked_horizons") or [],
+        },
+        store=store,
+    )
+    snapshot_audit = _create_audit_event(
+        event_type="outcome_snapshot_generated",
+        resource=_dossier_resource(dossier, workspace),
+        user_context=normalized,
+        payload={
+            "workflow_id": (workflow or {}).get("workflow_id"),
+            "dossier_id": dossier_id,
+            "track_id": refreshed["track"].get("track_id"),
+            "paper_trade_id": refreshed["paper_trade"].get("paper_trade_id"),
+            "snapshot_id": refreshed["snapshot"].get("snapshot_id"),
+            "evidence_status": ((refreshed["snapshot"].get("evidence_status") or {}).get("status")),
+        },
+        rationale="Initial paper-tracked outcome snapshot generated.",
+        metadata={
+            "snapshot_date": refreshed["snapshot"].get("snapshot_date"),
+        },
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossier": dossier,
+        "workflow": workflow,
+        "workspace": workspace,
+        "track": refreshed["track"],
+        "paper_trade": refreshed["paper_trade"],
+        "outcome_snapshot": refreshed["snapshot"],
+        "recommendation_evidence_summary": build_recommendation_evidence_summary(
+            dossier_id=dossier_id,
+            track=refreshed["track"],
+            paper_trade=refreshed["paper_trade"],
+            snapshot=refreshed["snapshot"],
+        ),
+        "outcome_attribution": refreshed["outcome_attribution"],
+        "audit_events": [tracking_audit, snapshot_audit],
+    }
+
+
+def get_dossier_tracking_service(
+    dossier_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    dossier_view = get_dossier_view(dossier_id, user_context=user_context, store=store)
+    dossier = dossier_view["dossier"]
+    workflow = dossier_view["workflow"]
+    workspace = dossier_view["workspace"]
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(workspace or {}).get("organization_id"),
+        workspace_id=(workspace or {}).get("workspace_id"),
+    )
+    tracks = store.list_recommendation_tracks(
+        workflow_id=(workflow or {}).get("workflow_id"),
+        dossier_id=dossier_id,
+        organization_ids=None if normalized.is_system else normalized.organization_ids,
+        workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+    )
+    latest_track = tracks[0] if tracks else None
+    paper_trades = (
+        store.list_paper_trades(
+            track_id=(latest_track or {}).get("track_id"),
+            dossier_id=dossier_id,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        if latest_track
+        else []
+    )
+    latest_paper_trade = paper_trades[0] if paper_trades else None
+    snapshots = (
+        store.list_outcome_snapshots(
+            track_id=(latest_track or {}).get("track_id"),
+            dossier_id=dossier_id,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        if latest_track
+        else []
+    )
+    latest_snapshot = snapshots[0] if snapshots else None
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossier": dossier,
+        "workflow": workflow,
+        "workspace": workspace,
+        "tracks": tracks,
+        "track": latest_track,
+        "paper_trades": paper_trades,
+        "paper_trade": latest_paper_trade,
+        "outcome_snapshots": snapshots,
+        "outcome_snapshot": latest_snapshot,
+        "recommendation_evidence_summary": build_recommendation_evidence_summary(
+            dossier_id=dossier_id,
+            track=latest_track or {},
+            paper_trade=latest_paper_trade or {},
+            snapshot=latest_snapshot,
+        )
+        if latest_track and latest_paper_trade
+        else {},
+    }
+
+
+def get_dossier_outcomes_service(
+    dossier_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    tracking = get_dossier_tracking_service(
+        dossier_id,
+        user_context=user_context,
+        store=store,
+    )
+    track = tracking.get("track") or {}
+    paper_trade = tracking.get("paper_trade") or {}
+    if not track or not paper_trade:
+        raise HTTPException(status_code=404, detail="paper tracking has not started for this dossier")
+    refreshed = _refresh_track_outcome_state(
+        track=track,
+        paper_trade=paper_trade,
+        evaluation_as_of_date=dt.date.today(),
+        store=store,
+    )
+    normalized = normalize_user_context(
+        user_context,
+        organization_id=(tracking.get("workspace") or {}).get("organization_id"),
+        workspace_id=(tracking.get("workspace") or {}).get("workspace_id"),
+    )
+    dossier = (
+        _refresh_dossier_collaboration_state(
+            tracking["dossier"],
+            workflow=tracking["workflow"],
+            store=store,
+            organization_ids=None if normalized.is_system else normalized.organization_ids,
+            workspace_ids=None if normalized.is_system else normalized.workspace_ids,
+        )
+        or tracking["dossier"]
+    )
+    refresh_audit = _create_audit_event(
+        event_type="tracking_refreshed",
+        resource=_dossier_resource(dossier, tracking.get("workspace")),
+        user_context=normalized,
+        payload={
+            "workflow_id": (tracking.get("workflow") or {}).get("workflow_id"),
+            "dossier_id": dossier_id,
+            "track_id": refreshed["track"].get("track_id"),
+            "paper_trade_id": refreshed["paper_trade"].get("paper_trade_id"),
+            "snapshot_id": refreshed["snapshot"].get("snapshot_id"),
+        },
+        rationale="Paper-tracked outcomes refreshed.",
+        metadata={"snapshot_date": refreshed["snapshot"].get("snapshot_date")},
+        store=store,
+    )
+    snapshot_audit = _create_audit_event(
+        event_type="outcome_snapshot_generated",
+        resource=_dossier_resource(dossier, tracking.get("workspace")),
+        user_context=normalized,
+        payload={
+            "workflow_id": (tracking.get("workflow") or {}).get("workflow_id"),
+            "dossier_id": dossier_id,
+            "track_id": refreshed["track"].get("track_id"),
+            "snapshot_id": refreshed["snapshot"].get("snapshot_id"),
+            "evidence_status": ((refreshed["snapshot"].get("evidence_status") or {}).get("status")),
+        },
+        rationale="Paper-tracked outcome snapshot refreshed.",
+        metadata={"snapshot_date": refreshed["snapshot"].get("snapshot_date")},
+        store=store,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "dossier": dossier,
+        "workflow": tracking.get("workflow"),
+        "workspace": tracking.get("workspace"),
+        "track": refreshed["track"],
+        "paper_trade": refreshed["paper_trade"],
+        "outcome_snapshot": refreshed["snapshot"],
+        "outcome_attribution": refreshed["outcome_attribution"],
+        "recommendation_evidence_summary": build_recommendation_evidence_summary(
+            dossier_id=dossier_id,
+            track=refreshed["track"],
+            paper_trade=refreshed["paper_trade"],
+            snapshot=refreshed["snapshot"],
+        ),
+        "audit_events": [refresh_audit, snapshot_audit],
     }
 
 
@@ -3964,6 +4588,268 @@ def build_workspace_analytics_service(
     }
 
 
+def build_workspace_proof_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    scope = _resolve_scope(user_context=user_context, workspace_id=workspace_id, store=store)
+    workspace = store.get_workspace(
+        workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+    )
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    normalized = scope["user_context"]
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(workspace),
+        store=store,
+    )
+    scope_bundle = _workspace_scope_bundle(
+        workspace_id=workspace_id,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+        store=store,
+    )
+    calibration_hardening = build_calibration_hardening_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=workspace_id,
+        organization_id=workspace.get("organization_id"),
+        tracks=scope_bundle["recommendation_tracks"],
+        paper_trades=scope_bundle["paper_trades"],
+        snapshots=scope_bundle["outcome_snapshots"],
+    )
+    benchmarks = build_benchmark_comparison_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=workspace_id,
+        organization_id=workspace.get("organization_id"),
+        tracks=scope_bundle["recommendation_tracks"],
+        snapshots=scope_bundle["outcome_snapshots"],
+    )
+    proof_summary = build_workspace_proof_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=workspace_id,
+        organization_id=workspace.get("organization_id"),
+        tracks=scope_bundle["recommendation_tracks"],
+        snapshots=scope_bundle["outcome_snapshots"],
+        calibration_hardening=calibration_hardening,
+        benchmark_summary=benchmarks,
+    )
+    drift_summary = calibration_hardening.get("drift_summary") or build_drift_evidence_summary(
+        workspace_id=workspace_id,
+        organization_id=workspace.get("organization_id"),
+        records=[],
+    )
+    credibility = build_model_credibility_snapshot(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=workspace_id,
+        organization_id=workspace.get("organization_id"),
+        proof_summary=proof_summary,
+        calibration_hardening=calibration_hardening,
+        drift_summary=drift_summary,
+    )
+    if emit_audit:
+        _create_audit_event(
+            event_type="proof_summary_generated",
+            resource=_workspace_resource(workspace),
+            user_context=normalized,
+            payload={
+                "workspace_id": workspace_id,
+                "tracked_recommendation_count": proof_summary.get("tracked_recommendation_count"),
+                "matured_tracking_count": proof_summary.get("matured_tracking_count"),
+                "evidence_maturity_level": proof_summary.get("evidence_maturity_level"),
+            },
+            rationale="Workspace proof summary generated.",
+            metadata={"proof_status": proof_summary.get("replay_consistency_label")},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": workspace,
+        "proof_summary": proof_summary,
+        "calibration_hardening": calibration_hardening,
+        "drift_summary": drift_summary,
+        "benchmarks": benchmarks,
+        "model_credibility_snapshot": credibility,
+        "tracks": scope_bundle["recommendation_tracks"],
+        "paper_trades": scope_bundle["paper_trades"],
+        "outcome_snapshots": scope_bundle["outcome_snapshots"],
+    }
+
+
+def build_workspace_calibration_hardening_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    payload = build_workspace_proof_service(
+        workspace_id,
+        user_context=user_context,
+        store=store,
+        emit_audit=False,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": payload["workspace"],
+        "calibration_hardening": payload["calibration_hardening"],
+        "model_credibility_snapshot": payload["model_credibility_snapshot"],
+    }
+
+
+def build_workspace_drift_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    payload = build_workspace_proof_service(
+        workspace_id,
+        user_context=user_context,
+        store=store,
+        emit_audit=False,
+    )
+    if emit_audit and str((payload["drift_summary"] or {}).get("status") or "") == "degrading":
+        _create_audit_event(
+            event_type="calibration_drift_flagged",
+            resource=_workspace_resource(payload["workspace"]),
+            user_context=normalize_user_context(
+                user_context,
+                organization_id=(payload["workspace"] or {}).get("organization_id"),
+                workspace_id=(payload["workspace"] or {}).get("workspace_id"),
+            ),
+            payload={
+                "workspace_id": workspace_id,
+                "status": (payload["drift_summary"] or {}).get("status"),
+                "summary": (payload["drift_summary"] or {}).get("summary"),
+            },
+            rationale="Calibration drift flagged from recent paper-tracked evidence.",
+            metadata={"matured_count": (payload["drift_summary"] or {}).get("matured_count")},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": payload["workspace"],
+        "drift_summary": payload["drift_summary"],
+    }
+
+
+def build_workspace_benchmarks_service(
+    workspace_id: str,
+    *,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+) -> Dict[str, Any]:
+    payload = build_workspace_proof_service(
+        workspace_id,
+        user_context=user_context,
+        store=store,
+        emit_audit=False,
+    )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "workspace": payload["workspace"],
+        "benchmarks": payload["benchmarks"],
+    }
+
+
+def build_proof_summary_service(
+    *,
+    workspace_id: Optional[str] = None,
+    user_context: Optional[Dict[str, Any]] = None,
+    store: PlatformStore = platform_store,
+    emit_audit: bool = False,
+) -> Dict[str, Any]:
+    if workspace_id:
+        return build_workspace_proof_service(
+            workspace_id,
+            user_context=user_context,
+            store=store,
+            emit_audit=emit_audit,
+        )
+    scope = _resolve_scope(user_context=user_context, workspace_id=None, store=store)
+    normalized = scope["user_context"]
+    require_access(
+        permission="view_workspace",
+        user_context=normalized,
+        resource=_workspace_resource(None),
+        store=store,
+    )
+    scope_bundle = _workspace_scope_bundle(
+        workspace_id=None,
+        organization_ids=scope["organization_ids"],
+        workspace_ids=scope["workspace_ids"],
+        store=store,
+    )
+    workspaces = scope_bundle["workspaces"]
+    proof_summary = build_workspace_proof_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=None,
+        organization_id=None,
+        tracks=scope_bundle["recommendation_tracks"],
+        snapshots=scope_bundle["outcome_snapshots"],
+    )
+    calibration_hardening = build_calibration_hardening_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=None,
+        organization_id=None,
+        tracks=scope_bundle["recommendation_tracks"],
+        paper_trades=scope_bundle["paper_trades"],
+        snapshots=scope_bundle["outcome_snapshots"],
+    )
+    drift_summary = calibration_hardening.get("drift_summary") or build_drift_evidence_summary(
+        workspace_id=None,
+        organization_id=None,
+        records=[],
+    )
+    benchmarks = build_benchmark_comparison_summary(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=None,
+        organization_id=None,
+        tracks=scope_bundle["recommendation_tracks"],
+        snapshots=scope_bundle["outcome_snapshots"],
+    )
+    credibility = build_model_credibility_snapshot(
+        platform_version=PLATFORM_FOUNDATION_VERSION,
+        workspace_id=None,
+        organization_id=None,
+        proof_summary=proof_summary,
+        calibration_hardening=calibration_hardening,
+        drift_summary=drift_summary,
+    )
+    if emit_audit:
+        _create_audit_event(
+            event_type="proof_summary_generated",
+            resource=ResourceRef(
+                resource_type="platform_proof",
+                resource_id="global-proof-summary",
+            ),
+            user_context=normalized,
+            payload={
+                "workspace_count": len(workspaces),
+                "tracked_recommendation_count": proof_summary.get("tracked_recommendation_count"),
+            },
+            rationale="Cross-workspace proof summary generated.",
+            metadata={"maturity_level": proof_summary.get("evidence_maturity_level")},
+            store=store,
+        )
+    return {
+        "platform_version": PLATFORM_FOUNDATION_VERSION,
+        "proof_summary": proof_summary,
+        "calibration_hardening": calibration_hardening,
+        "drift_summary": drift_summary,
+        "benchmarks": benchmarks,
+        "model_credibility_snapshot": credibility,
+        "workspaces": workspaces,
+    }
+
+
 def build_platform_analytics_service(
     *,
     workspace_id: Optional[str] = None,
@@ -5361,6 +6247,22 @@ def sync_analysis_into_platform(
         if workspace
         else {}
     )
+    proof_payload = (
+        build_workspace_proof_service(
+            workspace["workspace_id"],
+            user_context=platform_user_context,
+            store=store,
+            emit_audit=False,
+        )
+        if workspace
+        else {
+            "proof_summary": {},
+            "calibration_hardening": {},
+            "drift_summary": {},
+            "benchmarks": {},
+            "model_credibility_snapshot": {},
+        }
+    )
     platform_analytics = build_platform_analytics_service(
         workspace_id=None,
         user_context=platform_user_context,
@@ -5413,6 +6315,19 @@ def sync_analysis_into_platform(
         "committee_decision": collaboration["committee_decision"],
         "recommendation_state": collaboration["recommendation_state"],
         "recommendation_history": collaboration["recommendation_history"],
+        "tracking": ((dossier or {}).get("metadata") or {}).get("latest_recommendation_track")
+        or {},
+        "paper_trade": ((dossier or {}).get("metadata") or {}).get("latest_paper_trade")
+        or {},
+        "outcome_snapshot": ((dossier or {}).get("metadata") or {}).get("latest_outcome_snapshot")
+        or {},
+        "recommendation_evidence_summary": (
+            ((dossier or {}).get("metadata") or {}).get("recommendation_evidence_summary")
+            or {}
+        ),
+        "outcome_attribution": (
+            ((dossier or {}).get("metadata") or {}).get("latest_outcome_attribution") or {}
+        ),
         "exports": exports,
         "rendered_exports": rendered_exports,
         "stored_exports": stored_exports,
@@ -5421,6 +6336,12 @@ def sync_analysis_into_platform(
         "integration_bindings": integrations,
         "health_summary": health,
         "workspace_analytics": workspace_analytics,
+        "proof_summary": proof_payload.get("proof_summary") or {},
+        "calibration_hardening": proof_payload.get("calibration_hardening") or {},
+        "drift_summary": proof_payload.get("drift_summary") or {},
+        "benchmarks": proof_payload.get("benchmarks") or {},
+        "model_credibility_snapshot": proof_payload.get("model_credibility_snapshot")
+        or {},
         "platform_analytics": platform_analytics,
         "dashboard": dashboard,
         "bootstrap_summary": ((workspace or {}).get("settings") or {}).get(

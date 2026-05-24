@@ -67,6 +67,13 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Platform bootstrap: {report.get('platform_bootstrap_summary_text', 'n/a')}.",
             f"Platform readiness report: {report.get('platform_readiness_report_summary', 'n/a')}.",
             f"Platform pilot package: {report.get('platform_pilot_package_summary', 'n/a')}.",
+            f"Platform proof cycle: {report.get('platform_proof_cycle_summary', 'n/a')}.",
+            f"Platform tracking: {report.get('platform_tracking_summary', 'n/a')}.",
+            f"Platform outcomes: {report.get('platform_outcome_summary', 'n/a')}.",
+            f"Platform calibration hardening: {report.get('platform_calibration_hardening_summary', 'n/a')}.",
+            f"Platform drift: {report.get('platform_drift_summary_text', 'n/a')}.",
+            f"Platform benchmarks: {report.get('platform_benchmark_summary', 'n/a')}.",
+            f"Platform model credibility: {report.get('platform_model_credibility_summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -124,6 +131,22 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "platform_readiness_snapshot": report.get("platform_readiness_snapshot"),
         "platform_readiness_report": report.get("platform_readiness_report"),
         "platform_pilot_package": report.get("platform_pilot_package"),
+        "platform_tracking": report.get("platform_tracking"),
+        "platform_paper_trade": report.get("platform_paper_trade"),
+        "platform_outcome_snapshot": report.get("platform_outcome_snapshot"),
+        "platform_recommendation_evidence_summary": report.get(
+            "platform_recommendation_evidence_summary"
+        ),
+        "platform_outcome_attribution": report.get("platform_outcome_attribution"),
+        "platform_proof_summary": report.get("platform_proof_summary"),
+        "platform_calibration_hardening": report.get(
+            "platform_calibration_hardening"
+        ),
+        "platform_drift_summary": report.get("platform_drift_summary"),
+        "platform_benchmarks": report.get("platform_benchmarks"),
+        "platform_model_credibility_snapshot": report.get(
+            "platform_model_credibility_snapshot"
+        ),
         "operating_workflow": report.get("operating_workflow"),
     }
     section_context = {
@@ -220,6 +243,17 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
             "platform_pilot_package_summary"
         ),
         "platform_demo_bundle_summary": report.get("platform_demo_bundle_summary"),
+        "platform_proof_cycle_summary": report.get("platform_proof_cycle_summary"),
+        "platform_tracking_summary": report.get("platform_tracking_summary"),
+        "platform_outcome_summary": report.get("platform_outcome_summary"),
+        "platform_calibration_hardening_summary": report.get(
+            "platform_calibration_hardening_summary"
+        ),
+        "platform_drift_summary_text": report.get("platform_drift_summary_text"),
+        "platform_benchmark_summary": report.get("platform_benchmark_summary"),
+        "platform_model_credibility_summary": report.get(
+            "platform_model_credibility_summary"
+        ),
         "daily_operating_summary": report.get("daily_operating_summary"),
         "weekly_operating_summary": report.get("weekly_operating_summary"),
         "monthly_operating_summary": report.get("monthly_operating_summary"),

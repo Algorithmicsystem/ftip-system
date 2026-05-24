@@ -603,6 +603,11 @@ def _migration_platform_phase8c_collaboration(cur: Any) -> None:
     cur.execute(sql_path.read_text())
 
 
+def _migration_platform_phase9a_proof_cycle(cur: Any) -> None:
+    sql_path = Path(__file__).with_name("033_platform_phase9a_proof_cycle.sql")
+    cur.execute(sql_path.read_text())
+
+
 MIGRATIONS: List[tuple[str, Migration]] = [
     ("001_assistant", _migration_assistant),
     ("001_prosperity_core", _migration_prosperity_core),
@@ -670,6 +675,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
     (
         "032_platform_phase8c_collaboration",
         _migration_platform_phase8c_collaboration,
+    ),
+    (
+        "033_platform_phase9a_proof_cycle",
+        _migration_platform_phase9a_proof_cycle,
     ),
 ]
 

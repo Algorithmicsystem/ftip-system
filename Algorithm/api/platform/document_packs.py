@@ -98,6 +98,50 @@ def _collaboration_sections(dossier: Dict[str, Any]) -> List[ExportSection]:
     return sections
 
 
+def _proof_sections(dossier: Dict[str, Any]) -> List[ExportSection]:
+    metadata = dossier.get("metadata") or {}
+    evidence_summary = metadata.get("recommendation_evidence_summary") or {}
+    outcome_attribution = metadata.get("latest_outcome_attribution") or {}
+    latest_snapshot = metadata.get("latest_outcome_snapshot") or {}
+    latest_track = metadata.get("latest_recommendation_track") or {}
+    sections: List[ExportSection] = []
+    if evidence_summary:
+        sections.append(
+            _section(
+                "proof_summary",
+                "Proof / Evidence Summary",
+                evidence_summary.get("summary"),
+                evidence_summary,
+            )
+        )
+    if outcome_attribution:
+        sections.append(
+            _section(
+                "outcome_attribution",
+                "Outcome Attribution",
+                outcome_attribution.get("summary"),
+                outcome_attribution,
+            )
+        )
+    if latest_track or latest_snapshot:
+        sections.append(
+            _section(
+                "tracking_status",
+                "Tracking Status",
+                (
+                    f"Track {latest_track.get('track_id') or 'n/a'} / "
+                    f"{((latest_track.get('tracking_status') or {}).get('status')) or 'inactive'} / "
+                    f"evidence {((latest_snapshot.get('evidence_status') or {}).get('status')) or 'pending'}"
+                ),
+                {
+                    "latest_track": latest_track,
+                    "latest_snapshot": latest_snapshot,
+                },
+            )
+        )
+    return sections
+
+
 def build_export_sections(
     *,
     pack_type: str,
@@ -133,11 +177,13 @@ def build_export_sections(
             _section("market_pricing", "What the Market Is Pricing", (report.get("axiom_ic_memo") or {}).get("market_pricing_view") or report.get("strategy_view")),
             _section("mispricing", "What AXIOM Believes Is Mispriced or Compensated", report.get("axiom_summary")),
             _section("evidence", "Evidence Quality and Calibration Summary", report.get("axiom_calibration_summary_text"), report.get("axiom_calibration_summary") or {}),
+            _section("proof_cycle", "Proof / Tracked Evidence", report.get("platform_proof_cycle_summary"), report.get("platform_proof_summary") or {}),
             _section("fragility", "Fragility / Path-Risk Analysis", report.get("risk_quality_analysis"), risk_memo.get("fragility_engine") or {}),
             _section("liquidity", "Liquidity / Implementation Notes", report.get("execution_quality_analysis"), risk_memo.get("liquidity_convexity_engine") or {}),
             _section("portfolio", "Portfolio Fit", report.get("axiom_portfolio_governance_summary"), report.get("axiom_portfolio_governance") or {}),
             _section("action", "Recommended Action", report.get("deployment_permission_analysis"), {"tier": report.get("axiom_evidence_backed_deployability_tier")}),
             *_collaboration_sections(dossier),
+            *_proof_sections(dossier)[:2],
             _section("escalation", "Conditions Required for Escalation or Downgrade", report.get("platform_monitoring_summary"), dossier.get("monitoring_state") or {}),
         ]
     if pack_type == "risk_deployability_pack":
@@ -150,10 +196,19 @@ def build_export_sections(
             _section("monitoring", "Downgrade / Scenario Triggers", report.get("platform_monitoring_summary"), dossier.get("monitoring_state") or {}),
         ]
     if pack_type == "historical_evidence_pack":
+        recent_symbol_evidence = historical.get("recent_symbol_evidence") or []
         return [
             _section("historical_summary", "Historical Evidence Summary", report.get("axiom_historical_evidence_summary_text"), historical),
             _section("calibration", "Calibration Summary", report.get("axiom_calibration_summary_text"), report.get("axiom_calibration_summary") or {}),
-            _section("symbol_evidence", "Recent Symbol-Specific Evidence", report.get("axiom_historical_evidence_summary_text"), historical.get("recent_symbol_evidence") or {}),
+            _section(
+                "symbol_evidence",
+                "Recent Symbol-Specific Evidence",
+                "\n".join(str(item) for item in recent_symbol_evidence)
+                if isinstance(recent_symbol_evidence, list)
+                else recent_symbol_evidence,
+                {"recent_symbol_evidence": recent_symbol_evidence},
+            ),
+            *_proof_sections(dossier),
         ]
     sections: List[ExportSection] = [
         _section("executive_summary", "Executive Summary", report.get("overall_analysis"), dossier.get("current_summary") or {}),
@@ -169,6 +224,10 @@ def build_export_sections(
         )
     existing_keys = {str(item.section_key) for item in sections}
     for item in _collaboration_sections(dossier):
+        if str(item.section_key) not in existing_keys:
+            sections.append(item)
+    existing_keys = {str(item.section_key) for item in sections}
+    for item in _proof_sections(dossier):
         if str(item.section_key) not in existing_keys:
             sections.append(item)
     sections.append(_section("lineage", "Lineage Summary", report.get("axiom_lineage_summary"), lineage))

@@ -3513,6 +3513,234 @@ const renderPlatformApprovals = (report) => {
   ].join("");
 };
 
+const renderPlatformProof = (report) => {
+  const container = qs("#assistant-platform-proof");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Tracked recommendation counts, supportive vs mixed evidence, and buyer-grade proof summaries render here."
+    );
+    return;
+  }
+  const proof = report.platform_proof_summary || {};
+  const credibility = report.platform_model_credibility_snapshot || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Proof Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_proof_cycle_summary,
+          `Tracked ${proof.tracked_recommendation_count ?? 0}`,
+          `Matured ${proof.matured_tracking_count ?? 0}`,
+          `Supportive ${proof.supportive_count ?? 0} / mixed ${proof.mixed_count ?? 0} / weak ${
+            proof.weak_count ?? 0
+          }`,
+          `Evidence maturity ${proof.evidence_maturity_level || "limited"}`,
+        ].filter(Boolean),
+        "No proof summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Replay Consistency / Credibility</h5>
+      ${renderBullets(
+        [
+          `Replay consistency ${proof.replay_consistency_label || "partial"}`,
+          `Credibility ${credibility.status || "partial"}`,
+          credibility.buyer_summary,
+          report.platform_model_credibility_summary,
+        ].filter(Boolean),
+        "No model credibility snapshot is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Top Evidence Rows</h5>
+      ${renderBullets(
+        [
+          ...((proof.top_regime_rows || []).slice(0, 3).map(
+            (item) => `Regime ${item.label || "unknown"} / avg edge ${formatPct(item.average_net_edge_return, 2)}`
+          )),
+          ...((proof.top_tier_rows || []).slice(0, 3).map(
+            (item) => `Tier ${item.label || "unknown"} / avg edge ${formatPct(item.average_net_edge_return, 2)}`
+          )),
+        ],
+        "No matured proof rows are attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformOutcomes = (report) => {
+  const container = qs("#assistant-platform-outcomes");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Horizon outcomes, favorable/adverse excursion, and recommendation assessments render here."
+    );
+    return;
+  }
+  const snapshot = report.platform_outcome_snapshot || {};
+  const attribution = report.platform_outcome_attribution || {};
+  const evidence = report.platform_recommendation_evidence_summary || {};
+  const windows = snapshot.windows || {};
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Assessment</h5>
+      ${renderBullets(
+        [
+          report.platform_tracking_summary,
+          report.platform_outcome_summary,
+          `Evidence ${evidence.evidence_status || "pending"}`,
+          `Assessment ${((snapshot.assessment || {}).assessment_status) || "pending"}`,
+          attribution.summary,
+        ].filter(Boolean),
+        "No outcome attribution is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Horizon Windows</h5>
+      ${renderBullets(
+        Object.entries(windows)
+          .slice(0, 6)
+          .map(
+            ([label, item]) =>
+              `${label} / ${item.status || "pending"} / net edge ${formatPct(
+                item.net_edge_return,
+                2
+              )} / MAE ${formatPct(item.mae, 2)} / MFE ${formatPct(item.mfe, 2)}`
+          ),
+        "No tracked horizon windows are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Supportive vs Contradictory</h5>
+      ${renderBullets(
+        [
+          `Supportive ${(snapshot.assessment || {}).supportive_window_count ?? 0}`,
+          `Contradictory ${(snapshot.assessment || {}).contradictory_window_count ?? 0}`,
+          ...((evidence.supportive_horizons || []).slice(0, 4).map((item) => `Supportive: ${item}`)),
+          ...((evidence.contradicted_horizons || []).slice(0, 4).map((item) => `Contradicted: ${item}`)),
+        ],
+        "No supportive/contradictory horizon breakdown is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformCalibration = (report) => {
+  const container = qs("#assistant-platform-calibration");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Calibration hardening, drift warnings, and sample-quality notes render here."
+    );
+    return;
+  }
+  const calibration = report.platform_calibration_hardening || {};
+  const drift = report.platform_drift_summary || {};
+  const dauBuckets = (calibration.dau_bucket_realized_outcomes || {}).buckets || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Calibration Hardening</h5>
+      ${renderBullets(
+        [
+          report.platform_calibration_hardening_summary,
+          `Tracked ${calibration.tracked_recommendation_count ?? 0}`,
+          `Matured ${calibration.matured_count ?? 0}`,
+          `Paper hit rate ${formatPct(calibration.paper_trade_hit_rate, 1)}`,
+          `Downside rate ${formatPct(calibration.downside_rate, 1)}`,
+        ].filter(Boolean),
+        "No calibration hardening summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>DAU Buckets</h5>
+      ${renderBullets(
+        dauBuckets.slice(0, 5).map(
+          (item) =>
+            `${item.label || "bucket"} / avg edge ${formatPct(
+              item.average_net_edge_return,
+              2
+            )} / hit ${formatPct(item.hit_rate, 1)}`
+        ),
+        "No DAU bucket behavior is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Drift / Warnings</h5>
+      ${renderBullets(
+        [
+          report.platform_drift_summary_text,
+          `Drift ${drift.status || "partial"}`,
+          ...(drift.warnings || []).slice(0, 4),
+          ...(calibration.warnings || []).slice(0, 4),
+        ].filter(Boolean),
+        "No drift or calibration warning state is attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
+const renderPlatformBenchmarks = (report) => {
+  const container = qs("#assistant-platform-benchmarks");
+  if (!container) {
+    return;
+  }
+  if (!report) {
+    container.innerHTML = emptyStateCard(
+      "Regime, trade-family, tier, and recommendation-state cohort comparisons render here."
+    );
+    return;
+  }
+  const benchmarks = report.platform_benchmarks || {};
+  const strongest = benchmarks.strongest_cohorts || [];
+  const weakest = benchmarks.weakest_cohorts || [];
+  container.innerHTML = [
+    `<section class="drilldown-card">
+      <h5>Benchmark Summary</h5>
+      ${renderBullets(
+        [
+          report.platform_benchmark_summary,
+          `Status ${benchmarks.status || "partial"}`,
+          `Horizon ${benchmarks.horizon_label || "21d"}`,
+        ].filter(Boolean),
+        "No benchmark summary is attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Strongest Cohorts</h5>
+      ${renderBullets(
+        strongest.slice(0, 6).map(
+          (item) =>
+            `${item.dimension || "dimension"} / ${item.label || "label"} / avg edge ${formatPct(
+              item.average_net_edge_return,
+              2
+            )}`
+        ),
+        "No strongest cohort rows are attached."
+      )}
+    </section>`,
+    `<section class="drilldown-card">
+      <h5>Weakest Cohorts</h5>
+      ${renderBullets(
+        weakest.slice(0, 6).map(
+          (item) =>
+            `${item.dimension || "dimension"} / ${item.label || "label"} / avg edge ${formatPct(
+              item.average_net_edge_return,
+              2
+            )}`
+        ),
+        "No weakest cohort rows are attached."
+      )}
+    </section>`,
+  ].join("");
+};
+
 const renderPlatformReviews = (report) => {
   const container = qs("#assistant-platform-reviews");
   if (!container) {
@@ -4501,6 +4729,10 @@ const renderAssistantReport = (report) => {
     renderPlatformDossiers(null);
     renderPlatformDossierDetail(null);
     renderPlatformMonitoring(null);
+    renderPlatformProof(null);
+    renderPlatformOutcomes(null);
+    renderPlatformCalibration(null);
+    renderPlatformBenchmarks(null);
     renderPlatformControls(null);
     renderPlatformApprovals(null);
     renderPlatformReviews(null);
@@ -4807,6 +5039,10 @@ const renderAssistantReport = (report) => {
   renderPlatformDossiers(report);
   renderPlatformDossierDetail(report);
   renderPlatformMonitoring(report);
+  renderPlatformProof(report);
+  renderPlatformOutcomes(report);
+  renderPlatformCalibration(report);
+  renderPlatformBenchmarks(report);
   renderPlatformControls(report);
   renderPlatformApprovals(report);
   renderPlatformReviews(report);

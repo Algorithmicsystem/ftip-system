@@ -33,6 +33,12 @@ def _reset_platform_store(store: PlatformStore) -> None:
         store._committee_decisions.clear()
     if hasattr(store, "_recommendation_changes"):
         store._recommendation_changes.clear()
+    if hasattr(store, "_recommendation_tracks"):
+        store._recommendation_tracks.clear()
+    if hasattr(store, "_paper_trades"):
+        store._paper_trades.clear()
+    if hasattr(store, "_outcome_snapshots"):
+        store._outcome_snapshots.clear()
     if hasattr(store, "_export_manifests"):
         store._export_manifests.clear()
     if hasattr(store, "_rendered_exports"):
@@ -52,6 +58,8 @@ def _sample_platform_report(symbol: str = "NVDA") -> dict[str, Any]:
         "as_of_date": "2024-01-02",
         "overall_analysis": f"{symbol} remains constructive but still governed by disciplined deployability controls.",
         "signal_summary": f"{symbol} remains a constructive but still gated opportunity.",
+        "signal": {"action": "BUY", "score": 0.64, "confidence": 0.58},
+        "strategy": {"final_signal": "BUY", "confidence": 0.58},
         "strategy_view": "The workflow still prefers evidence review before wider deployment.",
         "risk_quality_analysis": "Critical fragility remains contained but still requires monitoring.",
         "execution_quality_analysis": "Liquidity and execution quality are adequate for controlled institutional review.",
@@ -62,7 +70,10 @@ def _sample_platform_report(symbol: str = "NVDA") -> dict[str, Any]:
             "Macro alignment deteriorates materially.",
             "Price confirms with stronger volume.",
         ],
-        "data_bundle": {"symbol_meta": {"sector": "Technology"}},
+        "data_bundle": {
+            "symbol_meta": {"sector": "Technology"},
+            "market_price_volume": {"latest_close": 105.0},
+        },
         "axiom_summary": "AXIOM sees a constructive convergence setup with measured deployability.",
         "axiom_summary_card_text": "Constructive convergence setup with measured deployability and controlled size.",
         "axiom_summary_card": {

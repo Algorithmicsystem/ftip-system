@@ -26,6 +26,9 @@ from api.platform.contracts import (
     IntegrationExecutionRecord,
     MembershipRecord,
     OrganizationProfile,
+    OutcomeSnapshot,
+    PaperTradeRecord,
+    RecommendationTrack,
     RecommendationChangeRecord,
     RenderedExportResult,
     ReviewComment,
@@ -70,6 +73,9 @@ class PlatformStore:
         self._assignments: Dict[str, Dict[str, Any]] = {}
         self._committee_decisions: Dict[str, Dict[str, Any]] = {}
         self._recommendation_changes: Dict[str, Dict[str, Any]] = {}
+        self._recommendation_tracks: Dict[str, Dict[str, Any]] = {}
+        self._paper_trades: Dict[str, Dict[str, Any]] = {}
+        self._outcome_snapshots: Dict[str, Dict[str, Any]] = {}
         self._export_manifests: Dict[str, Dict[str, Any]] = {}
         self._rendered_exports: Dict[str, Dict[str, Any]] = {}
         self._stored_exports: Dict[str, Dict[str, Any]] = {}
@@ -2799,6 +2805,712 @@ class PlatformStore:
                 workspace_ids=workspace_ids,
             )
         ]
+
+    def _row_to_recommendation_track(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "track_id": str(row[0]),
+            "organization_id": str(row[1]) if row[1] is not None else None,
+            "workspace_id": str(row[2]) if row[2] is not None else None,
+            "workflow_id": str(row[3]),
+            "dossier_id": str(row[4]),
+            "entity_id": str(row[5]) if row[5] is not None else None,
+            "symbol": row[6],
+            "axiom_artifact_id": row[7],
+            "axiom_history_artifact_id": row[8],
+            "report_id": row[9],
+            "session_id": row[10],
+            "recommendation_state_at_start": row[11],
+            "deployability_tier_at_start": row[12],
+            "size_band_at_start": row[13],
+            "regime_label": row[14],
+            "trade_family": row[15],
+            "strongest_engine_at_start": row[16],
+            "weakest_engine_at_start": row[17],
+            "signal_action_at_start": row[18],
+            "evidence_status_at_start": row[19],
+            "start_deployable_alpha_utility": row[20],
+            "start_validated_edge": row[21],
+            "start_overall_coverage": row[22],
+            "start_overall_confidence": row[23],
+            "start_engine_scores": sanitize_payload(row[24]) if row[24] is not None else {},
+            "start_source_context": sanitize_payload(row[25]) if row[25] is not None else {},
+            "created_at": row[26],
+            "tracking_start_at": row[27],
+            "tracking_end_at": row[28],
+            "tracking_status": sanitize_payload(row[29]) if row[29] is not None else {},
+            "metadata": sanitize_payload(row[30]) if row[30] is not None else {},
+        }
+
+    def create_recommendation_track(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = RecommendationTrack.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            record["tracking_start_at"] = (
+                record.get("tracking_start_at") or record["created_at"]
+            )
+            self._recommendation_tracks[record["track_id"]] = sanitize_payload(record)
+            return self._recommendation_tracks[record["track_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_recommendation_tracks (
+                track_id, organization_id, workspace_id, workflow_id, dossier_id, entity_id, symbol,
+                axiom_artifact_id, axiom_history_artifact_id, report_id, session_id,
+                recommendation_state_at_start, deployability_tier_at_start, size_band_at_start,
+                regime_label, trade_family, strongest_engine_at_start, weakest_engine_at_start,
+                signal_action_at_start, evidence_status_at_start, start_deployable_alpha_utility,
+                start_validated_edge, start_overall_coverage, start_overall_confidence,
+                start_engine_scores, start_source_context, created_at, tracking_start_at,
+                tracking_end_at, tracking_status, metadata
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s,
+                %s::jsonb, %s::jsonb, COALESCE(%s::timestamptz, now()),
+                COALESCE(%s::timestamptz, now()), %s::timestamptz, %s::jsonb, %s::jsonb
+            )
+            ON CONFLICT (track_id)
+            DO UPDATE SET
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                entity_id = EXCLUDED.entity_id,
+                symbol = EXCLUDED.symbol,
+                axiom_artifact_id = EXCLUDED.axiom_artifact_id,
+                axiom_history_artifact_id = EXCLUDED.axiom_history_artifact_id,
+                report_id = EXCLUDED.report_id,
+                session_id = EXCLUDED.session_id,
+                recommendation_state_at_start = EXCLUDED.recommendation_state_at_start,
+                deployability_tier_at_start = EXCLUDED.deployability_tier_at_start,
+                size_band_at_start = EXCLUDED.size_band_at_start,
+                regime_label = EXCLUDED.regime_label,
+                trade_family = EXCLUDED.trade_family,
+                strongest_engine_at_start = EXCLUDED.strongest_engine_at_start,
+                weakest_engine_at_start = EXCLUDED.weakest_engine_at_start,
+                signal_action_at_start = EXCLUDED.signal_action_at_start,
+                evidence_status_at_start = EXCLUDED.evidence_status_at_start,
+                start_deployable_alpha_utility = EXCLUDED.start_deployable_alpha_utility,
+                start_validated_edge = EXCLUDED.start_validated_edge,
+                start_overall_coverage = EXCLUDED.start_overall_coverage,
+                start_overall_confidence = EXCLUDED.start_overall_confidence,
+                start_engine_scores = EXCLUDED.start_engine_scores,
+                start_source_context = EXCLUDED.start_source_context,
+                created_at = EXCLUDED.created_at,
+                tracking_start_at = EXCLUDED.tracking_start_at,
+                tracking_end_at = EXCLUDED.tracking_end_at,
+                tracking_status = EXCLUDED.tracking_status,
+                metadata = EXCLUDED.metadata
+            RETURNING track_id, organization_id, workspace_id, workflow_id, dossier_id, entity_id, symbol,
+                axiom_artifact_id, axiom_history_artifact_id, report_id, session_id,
+                recommendation_state_at_start, deployability_tier_at_start, size_band_at_start,
+                regime_label, trade_family, strongest_engine_at_start, weakest_engine_at_start,
+                signal_action_at_start, evidence_status_at_start, start_deployable_alpha_utility,
+                start_validated_edge, start_overall_coverage, start_overall_confidence,
+                start_engine_scores, start_source_context, created_at, tracking_start_at,
+                tracking_end_at, tracking_status, metadata
+            """,
+            (
+                record["track_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record["dossier_id"],
+                record.get("entity_id"),
+                record["symbol"],
+                record.get("axiom_artifact_id"),
+                record.get("axiom_history_artifact_id"),
+                record.get("report_id"),
+                record.get("session_id"),
+                record["recommendation_state_at_start"],
+                record.get("deployability_tier_at_start"),
+                record.get("size_band_at_start"),
+                record.get("regime_label"),
+                record.get("trade_family"),
+                record.get("strongest_engine_at_start"),
+                record.get("weakest_engine_at_start"),
+                record.get("signal_action_at_start"),
+                record.get("evidence_status_at_start"),
+                record.get("start_deployable_alpha_utility"),
+                record.get("start_validated_edge"),
+                record.get("start_overall_coverage"),
+                record.get("start_overall_confidence"),
+                Json(sanitize_payload(record.get("start_engine_scores") or {})),
+                Json(sanitize_payload(record.get("start_source_context") or {})),
+                record.get("created_at"),
+                record.get("tracking_start_at"),
+                record.get("tracking_end_at"),
+                Json(sanitize_payload(record.get("tracking_status") or {})),
+                Json(sanitize_payload(record.get("metadata") or {})),
+            ),
+        )
+        return self._row_to_recommendation_track(row)
+
+    def update_recommendation_track(
+        self,
+        track_id: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        current = self.get_recommendation_track(track_id)
+        if current is None:
+            raise KeyError(track_id)
+        merged = {**current, **sanitize_payload(payload), "track_id": track_id}
+        return self.create_recommendation_track(merged)
+
+    def get_recommendation_track(
+        self,
+        track_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            item = self._recommendation_tracks.get(str(track_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return sanitize_payload(item)
+            return None
+        row = db.safe_fetchone(
+            """
+            SELECT track_id, organization_id, workspace_id, workflow_id, dossier_id, entity_id, symbol,
+                   axiom_artifact_id, axiom_history_artifact_id, report_id, session_id,
+                   recommendation_state_at_start, deployability_tier_at_start, size_band_at_start,
+                   regime_label, trade_family, strongest_engine_at_start, weakest_engine_at_start,
+                   signal_action_at_start, evidence_status_at_start, start_deployable_alpha_utility,
+                   start_validated_edge, start_overall_coverage, start_overall_confidence,
+                   start_engine_scores, start_source_context, created_at, tracking_start_at,
+                   tracking_end_at, tracking_status, metadata
+            FROM platform_recommendation_tracks
+            WHERE track_id=%s
+            """,
+            (track_id,),
+        )
+        if not row:
+            return None
+        result = self._row_to_recommendation_track(row)
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
+
+    def list_recommendation_tracks(
+        self,
+        *,
+        workspace_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._recommendation_tracks.values())
+            if workspace_id is not None:
+                rows = [item for item in rows if str(item.get("workspace_id")) == str(workspace_id)]
+            if workflow_id is not None:
+                rows = [item for item in rows if str(item.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [item for item in rows if str(item.get("dossier_id")) == str(dossier_id)]
+            rows = [
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: str(item.get("tracking_start_at") or item.get("created_at") or ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if workspace_id is not None:
+            clauses.append("workspace_id=%s")
+            params.append(workspace_id)
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT track_id, organization_id, workspace_id, workflow_id, dossier_id, entity_id, symbol,
+                   axiom_artifact_id, axiom_history_artifact_id, report_id, session_id,
+                   recommendation_state_at_start, deployability_tier_at_start, size_band_at_start,
+                   regime_label, trade_family, strongest_engine_at_start, weakest_engine_at_start,
+                   signal_action_at_start, evidence_status_at_start, start_deployable_alpha_utility,
+                   start_validated_edge, start_overall_coverage, start_overall_confidence,
+                   start_engine_scores, start_source_context, created_at, tracking_start_at,
+                   tracking_end_at, tracking_status, metadata
+            FROM platform_recommendation_tracks
+            WHERE {' AND '.join(clauses)}
+            ORDER BY tracking_start_at DESC, created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_recommendation_track(row) for row in rows]
+
+    def get_latest_recommendation_track(
+        self,
+        *,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        rows = self.list_recommendation_tracks(
+            workflow_id=workflow_id,
+            dossier_id=dossier_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        return rows[0] if rows else None
+
+    def _row_to_paper_trade(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "paper_trade_id": str(row[0]),
+            "track_id": str(row[1]),
+            "organization_id": str(row[2]) if row[2] is not None else None,
+            "workspace_id": str(row[3]) if row[3] is not None else None,
+            "workflow_id": str(row[4]),
+            "dossier_id": str(row[5]),
+            "symbol": row[6],
+            "entry_reference_date": row[7],
+            "entry_price": row[8],
+            "thesis_state_at_entry": sanitize_payload(row[9]) if row[9] is not None else {},
+            "tracked_horizons": sanitize_payload(row[10]) if row[10] is not None else [],
+            "current_status": row[11],
+            "outcome_summary": sanitize_payload(row[12]) if row[12] is not None else {},
+            "metadata": sanitize_payload(row[13]) if row[13] is not None else {},
+            "created_at": row[14],
+            "updated_at": row[15],
+        }
+
+    def create_paper_trade(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = PaperTradeRecord.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            record["updated_at"] = record.get("updated_at") or record["created_at"]
+            self._paper_trades[record["paper_trade_id"]] = sanitize_payload(record)
+            return self._paper_trades[record["paper_trade_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_paper_trades (
+                paper_trade_id, track_id, organization_id, workspace_id, workflow_id, dossier_id,
+                symbol, entry_reference_date, entry_price, thesis_state_at_entry,
+                tracked_horizons, current_status, outcome_summary, metadata, created_at, updated_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s::jsonb,
+                %s::jsonb, %s, %s::jsonb, %s::jsonb,
+                COALESCE(%s::timestamptz, now()), COALESCE(%s::timestamptz, now())
+            )
+            ON CONFLICT (paper_trade_id)
+            DO UPDATE SET
+                track_id = EXCLUDED.track_id,
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                symbol = EXCLUDED.symbol,
+                entry_reference_date = EXCLUDED.entry_reference_date,
+                entry_price = EXCLUDED.entry_price,
+                thesis_state_at_entry = EXCLUDED.thesis_state_at_entry,
+                tracked_horizons = EXCLUDED.tracked_horizons,
+                current_status = EXCLUDED.current_status,
+                outcome_summary = EXCLUDED.outcome_summary,
+                metadata = EXCLUDED.metadata,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
+            RETURNING paper_trade_id, track_id, organization_id, workspace_id, workflow_id, dossier_id,
+                symbol, entry_reference_date, entry_price, thesis_state_at_entry,
+                tracked_horizons, current_status, outcome_summary, metadata, created_at, updated_at
+            """,
+            (
+                record["paper_trade_id"],
+                record["track_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record["dossier_id"],
+                record["symbol"],
+                record["entry_reference_date"],
+                record.get("entry_price"),
+                Json(sanitize_payload(record.get("thesis_state_at_entry") or {})),
+                Json(sanitize_payload(record.get("tracked_horizons") or [])),
+                record.get("current_status"),
+                Json(sanitize_payload(record.get("outcome_summary") or {})),
+                Json(sanitize_payload(record.get("metadata") or {})),
+                record.get("created_at"),
+                record.get("updated_at"),
+            ),
+        )
+        return self._row_to_paper_trade(row)
+
+    def update_paper_trade(self, paper_trade_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        current = self.get_paper_trade(paper_trade_id)
+        if current is None:
+            raise KeyError(paper_trade_id)
+        merged = {
+            **current,
+            **sanitize_payload(payload),
+            "paper_trade_id": paper_trade_id,
+            "updated_at": payload.get("updated_at") or self._now_iso(),
+        }
+        return self.create_paper_trade(merged)
+
+    def get_paper_trade(
+        self,
+        paper_trade_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            item = self._paper_trades.get(str(paper_trade_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return sanitize_payload(item)
+            return None
+        row = db.safe_fetchone(
+            """
+            SELECT paper_trade_id, track_id, organization_id, workspace_id, workflow_id, dossier_id,
+                   symbol, entry_reference_date, entry_price, thesis_state_at_entry,
+                   tracked_horizons, current_status, outcome_summary, metadata, created_at, updated_at
+            FROM platform_paper_trades
+            WHERE paper_trade_id=%s
+            """,
+            (paper_trade_id,),
+        )
+        if not row:
+            return None
+        result = self._row_to_paper_trade(row)
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
+
+    def list_paper_trades(
+        self,
+        *,
+        track_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._paper_trades.values())
+            if track_id is not None:
+                rows = [item for item in rows if str(item.get("track_id")) == str(track_id)]
+            if workspace_id is not None:
+                rows = [item for item in rows if str(item.get("workspace_id")) == str(workspace_id)]
+            if workflow_id is not None:
+                rows = [item for item in rows if str(item.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [item for item in rows if str(item.get("dossier_id")) == str(dossier_id)]
+            rows = [
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: str(item.get("entry_reference_date") or item.get("created_at") or ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if track_id is not None:
+            clauses.append("track_id=%s")
+            params.append(track_id)
+        if workspace_id is not None:
+            clauses.append("workspace_id=%s")
+            params.append(workspace_id)
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT paper_trade_id, track_id, organization_id, workspace_id, workflow_id, dossier_id,
+                   symbol, entry_reference_date, entry_price, thesis_state_at_entry,
+                   tracked_horizons, current_status, outcome_summary, metadata, created_at, updated_at
+            FROM platform_paper_trades
+            WHERE {' AND '.join(clauses)}
+            ORDER BY entry_reference_date DESC, created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_paper_trade(row) for row in rows]
+
+    def get_latest_paper_trade(
+        self,
+        *,
+        track_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        rows = self.list_paper_trades(
+            track_id=track_id,
+            dossier_id=dossier_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        return rows[0] if rows else None
+
+    def _row_to_outcome_snapshot(self, row: Sequence[Any]) -> Dict[str, Any]:
+        return {
+            "snapshot_id": str(row[0]),
+            "organization_id": str(row[1]) if row[1] is not None else None,
+            "workspace_id": str(row[2]) if row[2] is not None else None,
+            "workflow_id": str(row[3]),
+            "dossier_id": str(row[4]),
+            "track_id": str(row[5]),
+            "paper_trade_id": str(row[6]),
+            "symbol": row[7],
+            "snapshot_date": row[8],
+            "evidence_mode": row[9],
+            "tracking_status": sanitize_payload(row[10]) if row[10] is not None else {},
+            "windows": sanitize_payload(row[11]) if row[11] is not None else {},
+            "assessment": sanitize_payload(row[12]) if row[12] is not None else {},
+            "evidence_status": sanitize_payload(row[13]) if row[13] is not None else {},
+            "benchmark_comparison": sanitize_payload(row[14]) if row[14] is not None else {},
+            "metadata": sanitize_payload(row[15]) if row[15] is not None else {},
+            "created_at": row[16],
+            "updated_at": row[17],
+        }
+
+    def create_outcome_snapshot(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        record = OutcomeSnapshot.model_validate(payload).model_dump(mode="python")
+        if self.use_memory:
+            record["created_at"] = record.get("created_at") or self._now_iso()
+            record["updated_at"] = record.get("updated_at") or record["created_at"]
+            self._outcome_snapshots[record["snapshot_id"]] = sanitize_payload(record)
+            return self._outcome_snapshots[record["snapshot_id"]]
+        row = db.exec1(
+            """
+            INSERT INTO platform_outcome_snapshots (
+                snapshot_id, organization_id, workspace_id, workflow_id, dossier_id, track_id,
+                paper_trade_id, symbol, snapshot_date, evidence_mode, tracking_status, windows,
+                assessment, evidence_status, benchmark_comparison, metadata, created_at, updated_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s::jsonb, %s::jsonb,
+                %s::jsonb, %s::jsonb, %s::jsonb, %s::jsonb,
+                COALESCE(%s::timestamptz, now()), COALESCE(%s::timestamptz, now())
+            )
+            ON CONFLICT (snapshot_id)
+            DO UPDATE SET
+                organization_id = EXCLUDED.organization_id,
+                workspace_id = EXCLUDED.workspace_id,
+                workflow_id = EXCLUDED.workflow_id,
+                dossier_id = EXCLUDED.dossier_id,
+                track_id = EXCLUDED.track_id,
+                paper_trade_id = EXCLUDED.paper_trade_id,
+                symbol = EXCLUDED.symbol,
+                snapshot_date = EXCLUDED.snapshot_date,
+                evidence_mode = EXCLUDED.evidence_mode,
+                tracking_status = EXCLUDED.tracking_status,
+                windows = EXCLUDED.windows,
+                assessment = EXCLUDED.assessment,
+                evidence_status = EXCLUDED.evidence_status,
+                benchmark_comparison = EXCLUDED.benchmark_comparison,
+                metadata = EXCLUDED.metadata,
+                created_at = EXCLUDED.created_at,
+                updated_at = EXCLUDED.updated_at
+            RETURNING snapshot_id, organization_id, workspace_id, workflow_id, dossier_id, track_id,
+                paper_trade_id, symbol, snapshot_date, evidence_mode, tracking_status, windows,
+                assessment, evidence_status, benchmark_comparison, metadata, created_at, updated_at
+            """,
+            (
+                record["snapshot_id"],
+                record.get("organization_id"),
+                record.get("workspace_id"),
+                record["workflow_id"],
+                record["dossier_id"],
+                record["track_id"],
+                record["paper_trade_id"],
+                record["symbol"],
+                record.get("snapshot_date"),
+                record.get("evidence_mode"),
+                Json(sanitize_payload(record.get("tracking_status") or {})),
+                Json(sanitize_payload(record.get("windows") or {})),
+                Json(sanitize_payload(record.get("assessment") or {})),
+                Json(sanitize_payload(record.get("evidence_status") or {})),
+                Json(sanitize_payload(record.get("benchmark_comparison") or {})),
+                Json(sanitize_payload(record.get("metadata") or {})),
+                record.get("created_at"),
+                record.get("updated_at"),
+            ),
+        )
+        return self._row_to_outcome_snapshot(row)
+
+    def get_outcome_snapshot(
+        self,
+        snapshot_id: str,
+        *,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if self.use_memory:
+            item = self._outcome_snapshots.get(str(snapshot_id))
+            if item and self._matches_scope(
+                organization_id=item.get("organization_id"),
+                workspace_id=item.get("workspace_id"),
+                organization_ids=organization_ids,
+                workspace_ids=workspace_ids,
+            ):
+                return sanitize_payload(item)
+            return None
+        row = db.safe_fetchone(
+            """
+            SELECT snapshot_id, organization_id, workspace_id, workflow_id, dossier_id, track_id,
+                   paper_trade_id, symbol, snapshot_date, evidence_mode, tracking_status, windows,
+                   assessment, evidence_status, benchmark_comparison, metadata, created_at, updated_at
+            FROM platform_outcome_snapshots
+            WHERE snapshot_id=%s
+            """,
+            (snapshot_id,),
+        )
+        if not row:
+            return None
+        result = self._row_to_outcome_snapshot(row)
+        if not self._matches_scope(
+            organization_id=result.get("organization_id"),
+            workspace_id=result.get("workspace_id"),
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        ):
+            return None
+        return result
+
+    def list_outcome_snapshots(
+        self,
+        *,
+        track_id: Optional[str] = None,
+        paper_trade_id: Optional[str] = None,
+        workspace_id: Optional[str] = None,
+        workflow_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        if self.use_memory:
+            rows = list(self._outcome_snapshots.values())
+            if track_id is not None:
+                rows = [item for item in rows if str(item.get("track_id")) == str(track_id)]
+            if paper_trade_id is not None:
+                rows = [item for item in rows if str(item.get("paper_trade_id")) == str(paper_trade_id)]
+            if workspace_id is not None:
+                rows = [item for item in rows if str(item.get("workspace_id")) == str(workspace_id)]
+            if workflow_id is not None:
+                rows = [item for item in rows if str(item.get("workflow_id")) == str(workflow_id)]
+            if dossier_id is not None:
+                rows = [item for item in rows if str(item.get("dossier_id")) == str(dossier_id)]
+            rows = [
+                item
+                for item in rows
+                if self._matches_scope(
+                    organization_id=item.get("organization_id"),
+                    workspace_id=item.get("workspace_id"),
+                    organization_ids=organization_ids,
+                    workspace_ids=workspace_ids,
+                )
+            ]
+            rows.sort(key=lambda item: str(item.get("snapshot_date") or item.get("created_at") or ""), reverse=True)
+            return [sanitize_payload(item) for item in rows]
+        clauses = ["1=1"]
+        params: List[Any] = []
+        if track_id is not None:
+            clauses.append("track_id=%s")
+            params.append(track_id)
+        if paper_trade_id is not None:
+            clauses.append("paper_trade_id=%s")
+            params.append(paper_trade_id)
+        if workspace_id is not None:
+            clauses.append("workspace_id=%s")
+            params.append(workspace_id)
+        if workflow_id is not None:
+            clauses.append("workflow_id=%s")
+            params.append(workflow_id)
+        if dossier_id is not None:
+            clauses.append("dossier_id=%s")
+            params.append(dossier_id)
+        if organization_ids:
+            clauses.append("organization_id = ANY(%s)")
+            params.append(list(organization_ids))
+        if workspace_ids:
+            clauses.append("workspace_id = ANY(%s)")
+            params.append(list(workspace_ids))
+        rows = db.safe_fetchall(
+            f"""
+            SELECT snapshot_id, organization_id, workspace_id, workflow_id, dossier_id, track_id,
+                   paper_trade_id, symbol, snapshot_date, evidence_mode, tracking_status, windows,
+                   assessment, evidence_status, benchmark_comparison, metadata, created_at, updated_at
+            FROM platform_outcome_snapshots
+            WHERE {' AND '.join(clauses)}
+            ORDER BY snapshot_date DESC, created_at DESC
+            """,
+            params,
+        )
+        return [self._row_to_outcome_snapshot(row) for row in rows]
+
+    def get_latest_outcome_snapshot(
+        self,
+        *,
+        track_id: Optional[str] = None,
+        paper_trade_id: Optional[str] = None,
+        dossier_id: Optional[str] = None,
+        organization_ids: Optional[Sequence[str]] = None,
+        workspace_ids: Optional[Sequence[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        rows = self.list_outcome_snapshots(
+            track_id=track_id,
+            paper_trade_id=paper_trade_id,
+            dossier_id=dossier_id,
+            organization_ids=organization_ids,
+            workspace_ids=workspace_ids,
+        )
+        return rows[0] if rows else None
 
     def create_integration_binding(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         record = IntegrationBinding.model_validate(payload).model_dump(mode="python")

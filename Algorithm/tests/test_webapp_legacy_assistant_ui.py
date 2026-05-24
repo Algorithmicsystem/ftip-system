@@ -92,6 +92,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert 'id="assistant-platform-exports"' in html
     assert 'id="assistant-platform-integrations"' in html
     assert 'id="assistant-platform-analytics"' in html
+    assert 'id="assistant-platform-proof"' in html
+    assert 'id="assistant-platform-outcomes"' in html
+    assert 'id="assistant-platform-calibration"' in html
+    assert 'id="assistant-platform-benchmarks"' in html
     assert 'id="assistant-learning-metrics"' in html
     assert 'id="assistant-learning-regimes"' in html
     assert 'id="assistant-learning-adaptations"' in html
@@ -171,6 +175,10 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "renderPlatformExports" in js
     assert "renderPlatformIntegrations" in js
     assert "renderPlatformAnalytics" in js
+    assert "renderPlatformProof" in js
+    assert "renderPlatformOutcomes" in js
+    assert "renderPlatformCalibration" in js
+    assert "renderPlatformBenchmarks" in js
     assert "platform_access_control_summary" in js
     assert "platform_workflow_actions_summary" in js
     assert "platform_audit_timeline_summary" in js
@@ -182,6 +190,13 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "platform_integration_health_summary" in js
     assert "platform_dashboard_summary" in js
     assert "platform_analytics_summary" in js
+    assert "platform_proof_cycle_summary" in js
+    assert "platform_tracking_summary" in js
+    assert "platform_outcome_summary" in js
+    assert "platform_calibration_hardening_summary" in js
+    assert "platform_drift_summary_text" in js
+    assert "platform_benchmark_summary" in js
+    assert "platform_model_credibility_summary" in js
     assert "platform_demo_readiness_summary" in js
     assert "platform_bootstrap_summary_text" in js
     assert "platform_readiness_report_summary" in js
