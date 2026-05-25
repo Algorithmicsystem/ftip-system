@@ -1417,6 +1417,31 @@ def _build_domain_availability_map(data_bundle: Dict[str, Any]) -> Dict[str, Dic
     return availability
 
 
+def _overlay_stored_breadth(breadth_domain: Dict[str, Any], as_of_date: Any) -> None:
+    """Fill None fields in breadth_domain from market_breadth_daily (best-effort)."""
+    if not as_of_date:
+        return
+    try:
+        from api import db as _db
+        if not _db.db_read_enabled():
+            return
+        from api.jobs.breadth import load_market_breadth
+        stored = load_market_breadth(as_of_date)
+        if stored:
+            for key in (
+                "breadth_confirmation_score", "participation_breadth_score",
+                "breadth_thrust_proxy", "cross_sectional_dispersion_proxy",
+                "leadership_concentration_score", "internal_market_divergence_score",
+                "leader_strength_score", "laggard_pressure_score",
+                "narrow_leadership_warning", "broad_participation_confirmation",
+                "breadth_state",
+            ):
+                if breadth_domain.get(key) is None and stored.get(key) is not None:
+                    breadth_domain[key] = stored[key]
+    except Exception:
+        pass
+
+
 def _canonical_depth_domains(job_context: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
     canonical = {
         "lineage": job_context.get("canonical_lineage") or {},
@@ -1523,6 +1548,8 @@ def _canonical_depth_domains(job_context: Dict[str, Any]) -> Dict[str, Dict[str,
             else "Breadth and market-internals context is currently unavailable.",
         ),
     }
+
+    _overlay_stored_breadth(breadth_domain, job_context.get("as_of_date"))
 
     cross_asset_present = any(
         features.get(key) is not None
