@@ -1,6 +1,53 @@
 const qs = (sel) => document.querySelector(sel);
 const qsa = (sel) => Array.from(document.querySelectorAll(sel));
 
+// ---------------------------------------------------------------------------
+// Chart.js helpers
+// ---------------------------------------------------------------------------
+const _charts = {};
+
+const destroyChart = (id) => {
+  if (_charts[id]) { _charts[id].destroy(); delete _charts[id]; }
+};
+
+const _chartBaseOptions = (axisMin, axisMax) => ({
+  indexAxis: "y",
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 250 },
+  plugins: { legend: { display: false }, tooltip: { enabled: true } },
+  scales: {
+    x: {
+      min: axisMin, max: axisMax,
+      ticks: { color: "#aab7cb", font: { size: 10 } },
+      grid: { color: "#26364b" },
+    },
+    y: {
+      ticks: { color: "#edf3ff", font: { size: 10 } },
+      grid: { display: false },
+    },
+  },
+});
+
+const makeChart = (id, labels, values, colors, axisMin, axisMax) => {
+  destroyChart(id);
+  const canvas = document.getElementById(id);
+  if (!canvas) return;
+  _charts[id] = new Chart(canvas.getContext("2d"), {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        borderRadius: 3,
+        barThickness: 14,
+      }],
+    },
+    options: _chartBaseOptions(axisMin, axisMax),
+  });
+};
+
 const state = {
   apiKey: "",
   assistantChatSessionId: "",
@@ -670,6 +717,30 @@ const renderSignal = (signal) => {
   qs("#signal-confidence").textContent = signal?.confidence ?? "N/A";
   qs("#signal-regime").textContent = signal?.regime || "N/A";
   qs("#signal-json").textContent = formatJson(signal || {});
+
+  const wrap = qs("#signal-chart-wrap");
+  const score = signal?.score ?? null;
+  const conf = signal?.confidence ?? null;
+  if (score == null && conf == null) {
+    if (wrap) wrap.style.display = "none";
+    destroyChart("signal-score-chart");
+    return;
+  }
+  if (wrap) wrap.style.display = "";
+  const labels = [];
+  const values = [];
+  const colors = [];
+  if (score != null) {
+    labels.push("Score");
+    values.push(Number(score));
+    colors.push(Number(score) >= 0 ? "#93e6b0" : "#ff9d9d");
+  }
+  if (conf != null) {
+    labels.push("Confidence");
+    values.push(Number(conf));
+    colors.push("#4ea1ff");
+  }
+  makeChart("signal-score-chart", labels, values, colors, -1, 1);
 };
 
 const renderFeatures = (features) => {
@@ -1414,6 +1485,7 @@ const renderAxiomOverview = (report) => {
     return;
   }
   if (!report) {
+    destroyChart("axiom-engine-chart");
     container.innerHTML = emptyStateCard(
       "AXIOM regime, deployability, evidence status, and engine scorecard will render here."
     );
@@ -1466,14 +1538,9 @@ const renderAxiomOverview = (report) => {
       note: report.axiom_lineage_summary || "lineage pending",
     },
   ];
-  const engineLines = Object.entries(engineScores)
-    .map(([name, payload]) => {
-      const score = payload?.score == null ? "n/a" : Number(payload.score).toFixed(1);
-      return `${name.replaceAll("_", " ")}: ${score} / cov ${formatScore(
-        payload?.coverage
-      )} / conf ${formatScore(payload?.confidence)}`;
-    })
-    .slice(0, 7);
+  const engineEntries = Object.entries(engineScores).slice(0, 8);
+  const hasEngineScores = engineEntries.some(([, p]) => p?.score != null);
+  const engineChartId = "axiom-engine-chart";
   container.innerHTML = `
     <section class="drilldown-card">
       <h5>AXIOM Overview</h5>
@@ -1493,7 +1560,9 @@ const renderAxiomOverview = (report) => {
     </section>
     <section class="drilldown-card">
       <h5>Engine Scorecard</h5>
-      ${renderBullets(engineLines, "No AXIOM engine scores available.")}
+      ${hasEngineScores
+        ? `<div class="chart-wrap" style="height:${Math.max(80, engineEntries.length * 26)}px"><canvas id="${engineChartId}"></canvas></div>`
+        : renderBullets([], "No AXIOM engine scores available.")}
     </section>
     <section class="drilldown-card">
       <h5>Proprietary Readout</h5>
@@ -1511,6 +1580,12 @@ const renderAxiomOverview = (report) => {
       )}
     </section>
   `;
+  if (hasEngineScores) {
+    const labels = engineEntries.map(([n]) => n.replaceAll("_", " "));
+    const values = engineEntries.map(([, p]) => p?.score != null ? Number(p.score) : null);
+    const colors = values.map((v) => v == null ? "#26364b" : v >= 0.6 ? "#93e6b0" : v >= 0.4 ? "#f5d17c" : "#ff9d9d");
+    makeChart(engineChartId, labels, values.map((v) => v ?? 0), colors, 0, 1);
+  }
 };
 
 const renderWhySignal = (report) => {
@@ -2837,6 +2912,7 @@ const renderArtifactLedger = (report) => {
 const renderResearchDrilldown = (report) => {
   const container = qs("#assistant-research-drilldown");
   if (!report) {
+    destroyChart("research-composite-chart");
     container.innerHTML = emptyStateCard(
       "Strategy components, factor attribution, and diagnostic drilldowns will render here."
     );
@@ -2852,14 +2928,17 @@ const renderResearchDrilldown = (report) => {
           2
         )}`
     );
-  const scores = [
-    `Opportunity Quality: ${formatScore(compositeScore(report, "Opportunity Quality Score"))}`,
-    `Cross-Domain Conviction: ${formatScore(
-      compositeScore(report, "Cross-Domain Conviction Score")
-    )}`,
-    `Signal Fragility: ${formatScore(compositeScore(report, "Signal Fragility Index"))}`,
-    `Narrative Crowding: ${formatScore(compositeScore(report, "Narrative Crowding Index"))}`,
+  const compositeLabels = [
+    "Opportunity Quality Score",
+    "Cross-Domain Conviction Score",
+    "Signal Fragility Index",
+    "Narrative Crowding Index",
+    "Macro Alignment Score",
+    "Regime Stability Score",
   ];
+  const compositeValues = compositeLabels.map((lbl) => compositeScore(report, lbl) ?? null);
+  const hasComposites = compositeValues.some((v) => v != null);
+  const compositeChartId = "research-composite-chart";
   container.innerHTML = [
     `<section class="drilldown-card">
       <h5>Strategy Components</h5>
@@ -2867,9 +2946,23 @@ const renderResearchDrilldown = (report) => {
     </section>`,
     `<section class="drilldown-card">
       <h5>Composite Scores</h5>
-      ${renderBullets(scores, "No composite score detail available.")}
+      ${hasComposites
+        ? `<div class="chart-wrap" style="height:${Math.max(80, compositeLabels.length * 26)}px"><canvas id="${compositeChartId}"></canvas></div>`
+        : renderBullets([], "No composite score detail available.")}
     </section>`,
   ].join("");
+  if (hasComposites) {
+    const colors = compositeValues.map((v) =>
+      v == null ? "#26364b" : v >= 0.6 ? "#93e6b0" : v >= 0.35 ? "#4ea1ff" : "#ff9d9d"
+    );
+    makeChart(
+      compositeChartId,
+      compositeLabels.map((l) => l.replace(" Score", "").replace(" Index", "")),
+      compositeValues.map((v) => v ?? 0),
+      colors,
+      0, 1
+    );
+  }
 };
 
 const renderLearningMetrics = (report) => {

@@ -61,6 +61,9 @@
           <div>Confidence: <strong id="signal-confidence">N/A</strong></div>
           <div>Regime: <strong id="signal-regime">N/A</strong></div>
         </div>
+        <div class="chart-wrap" id="signal-chart-wrap" style="display:none">
+          <canvas id="signal-score-chart" height="80"></canvas>
+        </div>
         <pre id="signal-json" class="json-block">{}</pre>
       </div>
 
@@ -1233,6 +1236,7 @@ Persistent copilot is ready. Run Assistant Analyze or open a dossier-rich platfo
       </div>
     </section>
 
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <script src="/app/static/app.js"></script>
   </body>
 </html>

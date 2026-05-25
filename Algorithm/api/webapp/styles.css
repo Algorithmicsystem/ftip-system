@@ -979,3 +979,22 @@ body.demo-mode .active-analysis-banner {
     white-space: normal;
   }
 }
+
+/* Chart panels */
+.chart-wrap {
+  position: relative;
+  margin: 12px 0 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.chart-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
