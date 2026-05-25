@@ -688,6 +688,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "035_signal_ic_daily",
         lambda cur: cur.execute(Path(__file__).with_name("035_signal_ic_daily.sql").read_text()),
     ),
+    (
+        "036_signal_alerts",
+        lambda cur: cur.execute(Path(__file__).with_name("036_signal_alerts.sql").read_text()),
+    ),
 ]
 
 
