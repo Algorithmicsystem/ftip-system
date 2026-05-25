@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
@@ -634,8 +634,8 @@ def massive_fetch_daily_bars(symbol: str, from_date: str, to_date: str) -> List[
     for attempt in range(max_retries + 1):
         backoff = min(base_sleep * (2**attempt), max_backoff_sec)
         try:
-            resp = requests.get(url, params=params, timeout=request_timeout_sec)
-        except requests.exceptions.Timeout as e:
+            resp = httpx.get(url, params=params, timeout=request_timeout_sec)
+        except httpx.TimeoutException as e:
             last_err = f"Market data timeout ({request_timeout_sec:.1f}s): {e}"
             if attempt >= max_retries:
                 break

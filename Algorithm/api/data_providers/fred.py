@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List, Optional
 
-import requests
+import httpx
 
 from api import config
 
@@ -33,7 +33,7 @@ def fetch_series(
         params["observation_start"] = start_date.isoformat()
     if end_date is not None:
         params["observation_end"] = end_date.isoformat()
-    response = requests.get(
+    response = httpx.get(
         BASE_URL,
         params=params,
         timeout=config.data_fabric_timeout_seconds(),

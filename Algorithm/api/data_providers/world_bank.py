@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-import requests
+import httpx
 
 from api import config
 
@@ -19,7 +19,7 @@ def fetch_indicator(
 ) -> Dict[str, Any]:
     if not config.world_bank_enabled():
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "World Bank is disabled")
-    response = requests.get(
+    response = httpx.get(
         BASE_URL.format(country=country, indicator=indicator),
         params={
             "format": "json",

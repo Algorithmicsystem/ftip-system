@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import importlib.util
-import requests
+import httpx
 
 from api import config
 from api.source_governance import active_source_profile, source_allowed
@@ -165,7 +165,7 @@ def _fetch_daily_stooq(
 ) -> List[Dict[str, object]]:
     stooq_symbol = provider_symbol(symbol, "stooq")
     url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
-    resp = requests.get(url, timeout=15)
+    resp = httpx.get(url, timeout=15)
     if resp.status_code != 200:
         raise ProviderUnavailable(
             "PROVIDER_UNAVAILABLE",
@@ -270,7 +270,7 @@ def _fetch_daily_massive(
         )
     base_url = config.massive_base_url().rstrip("/")
     url = f"{base_url}/v2/aggs/ticker/{canonical_symbol(symbol)}/range/1/day/{start.isoformat()}/{end.isoformat()}"
-    resp = requests.get(
+    resp = httpx.get(
         url,
         params={
             "adjusted": "true",

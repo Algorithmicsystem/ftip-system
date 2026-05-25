@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List
 
-import requests
+import httpx
 
 from api import config
 
@@ -22,7 +22,7 @@ def search_news(
     api_key = config.gnews_api_key()
     if not api_key:
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "GNEWS_API_KEY not set")
-    response = requests.get(
+    response = httpx.get(
         BASE_URL,
         params={
             "q": query,

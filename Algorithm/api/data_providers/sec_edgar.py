@@ -7,7 +7,7 @@ import statistics
 from functools import lru_cache
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-import requests
+import httpx
 
 from api import config
 
@@ -154,7 +154,7 @@ def fetch_company_filing_profile(
 
 @lru_cache(maxsize=1)
 def _ticker_records() -> List[Dict[str, str]]:
-    response = requests.get(
+    response = httpx.get(
         _TICKER_MAP_URL,
         headers=_headers(),
         timeout=config.data_fabric_timeout_seconds(),
@@ -276,7 +276,7 @@ def resolve_cik(symbol: str, company_name: Optional[str] = None) -> str:
 
 
 def fetch_submissions(cik: str) -> Dict[str, Any]:
-    response = requests.get(
+    response = httpx.get(
         f"{BASE_URL}/submissions/CIK{str(cik).zfill(10)}.json",
         headers=_headers(),
         timeout=config.data_fabric_timeout_seconds(),
@@ -293,7 +293,7 @@ def fetch_submissions(cik: str) -> Dict[str, Any]:
 
 
 def fetch_companyfacts(cik: str) -> Dict[str, Any]:
-    response = requests.get(
+    response = httpx.get(
         f"{BASE_URL}/api/xbrl/companyfacts/CIK{str(cik).zfill(10)}.json",
         headers=_headers(),
         timeout=config.data_fabric_timeout_seconds(),

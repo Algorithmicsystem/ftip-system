@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
 from fastapi import HTTPException
@@ -436,12 +437,18 @@ def ingest_bars_bulk(
 ) -> Dict[str, Any]:
     ok = 0
     errors: Dict[str, str] = {}
-    for sym in symbols:
-        try:
-            ingest_bars(sym, from_date, to_date, force_refresh=force_refresh)
-            ok += 1
-        except Exception as e:  # pragma: no cover - passthrough
-            errors[sym] = str(e)
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
+        futures = {
+            executor.submit(ingest_bars, sym, from_date, to_date, force_refresh=force_refresh): sym
+            for sym in symbols
+        }
+        for future in as_completed(futures):
+            sym = futures[future]
+            try:
+                future.result()
+                ok += 1
+            except Exception as exc:
+                errors[sym] = str(exc)
     return {"ok": ok, "errors": errors}
 
 

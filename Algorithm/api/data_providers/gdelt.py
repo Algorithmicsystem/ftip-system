@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List
 
-import requests
+import httpx
 
 from api import config
 
@@ -21,7 +21,7 @@ def search_articles(
 ) -> List[Dict[str, object]]:
     if not config.gdelt_enabled():
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "GDELT is disabled")
-    response = requests.get(
+    response = httpx.get(
         BASE_URL,
         params={
             "query": query,

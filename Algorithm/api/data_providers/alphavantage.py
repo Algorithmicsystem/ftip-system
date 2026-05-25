@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List, Optional
 
-import requests
+import httpx
 
 from api import config
 
@@ -17,7 +17,7 @@ def _request(params: Dict[str, Any]) -> Dict[str, Any]:
     api_key = config.alphavantage_api_key()
     if not api_key:
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "ALPHAVANTAGE_API_KEY not set")
-    response = requests.get(
+    response = httpx.get(
         BASE_URL,
         params={**params, "apikey": api_key},
         timeout=config.data_fabric_timeout_seconds(),

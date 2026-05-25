@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, List, Optional
 
-import requests
+import httpx
 
 from api import config
 
@@ -17,7 +17,7 @@ def _request(path: str, params: Dict[str, Any]) -> Any:
     api_key = config.finnhub_api_key()
     if not api_key:
         raise ProviderUnavailable("PROVIDER_UNAVAILABLE", "FINNHUB_API_KEY not set")
-    response = requests.get(
+    response = httpx.get(
         f"{BASE_URL}{path}",
         params={**params, "token": api_key},
         timeout=config.data_fabric_timeout_seconds(),

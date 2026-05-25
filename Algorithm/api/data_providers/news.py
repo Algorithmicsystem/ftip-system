@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
 from typing import Any, Dict, List, Tuple
 
-import requests
+import httpx
 
 from api import config
 from api.source_governance import source_allowed
@@ -183,8 +183,8 @@ def _fetch_google_rss(
 ) -> List[Dict[str, object]]:
     url = _rss_url_for_symbol(symbol)
     try:
-        resp = requests.get(url, timeout=config.data_fabric_timeout_seconds())
-    except requests.RequestException as exc:
+        resp = httpx.get(url, timeout=config.data_fabric_timeout_seconds())
+    except httpx.RequestError as exc:
         raise NewsProviderError("PROVIDER_UNAVAILABLE", str(exc)) from exc
 
     if resp.status_code != 200:
