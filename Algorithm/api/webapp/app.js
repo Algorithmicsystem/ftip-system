@@ -6513,6 +6513,92 @@ qs("#sector-breadth-load-btn").addEventListener("click", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Session 17: Daily Pipeline Orchestrator
+// ---------------------------------------------------------------------------
+
+const _STAGE_STATUS_COLOR = {
+  ok:    "rgba(52,211,153,0.85)",
+  error: "rgba(239,68,68,0.85)",
+};
+
+const renderDailyDigest = (data) => {
+  const resultWrap = qs("#daily-run-result");
+  const headlineEl = qs("#daily-run-headline");
+  const stagesEl   = qs("#daily-run-stages");
+  const oppsWrap   = qs("#daily-run-opps-wrap");
+  const oppsBody   = qs("#daily-run-opps-body");
+
+  headlineEl.textContent = data.headline || "";
+  resultWrap.style.display = "";
+
+  // Stage pills
+  stagesEl.innerHTML = "";
+  const stages = data.stages || {};
+  const stageNames = ["market_breadth", "sector_breadth", "ic_snapshot", "alerts", "screen"];
+  stageNames.forEach((name) => {
+    const s = stages[name] || {};
+    const status = s.status || "unknown";
+    const color = _STAGE_STATUS_COLOR[status] || "rgba(100,116,139,0.6)";
+    const label = name.replace(/_/g, " ");
+    const pill = document.createElement("div");
+    pill.style.cssText = `padding:6px 10px;border-radius:6px;background:${color};color:#fff;font-size:0.78rem;font-weight:600`;
+    const ms = s.duration_ms != null ? ` (${s.duration_ms}ms)` : "";
+    const detail = status === "error" ? ` — ${s.error || ""}` : "";
+    pill.textContent = `${label}: ${status}${ms}${detail}`;
+    stagesEl.appendChild(pill);
+  });
+
+  // Top opportunities table
+  const opps = data.top_opportunities || [];
+  if (opps.length) {
+    oppsBody.innerHTML = "";
+    opps.forEach((r, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${i + 1}</td>
+        <td><strong>${r.symbol || ""}</strong></td>
+        <td>${r.signal_label || ""}</td>
+        <td>${r.dau != null ? r.dau.toFixed(1) : "—"}</td>
+        <td>${r.conviction_score != null ? r.conviction_score.toFixed(1) : "—"}</td>
+        <td>${r.suggested_weight_pct || "—"}</td>
+        <td style="font-size:0.78rem">${(r.regime_label || "").replace(/_/g, " ")}</td>
+      `;
+      oppsBody.appendChild(tr);
+    });
+    oppsWrap.style.display = "";
+  } else {
+    oppsWrap.style.display = "none";
+  }
+};
+
+qs("#daily-run-btn").addEventListener("click", async () => {
+  const dateVal = qs("#daily-run-date").value;
+  setButtonLoading("#daily-run-btn", true, "Running...");
+  setLegacyStatus("#daily-run-status", "Running daily pipeline...");
+  try {
+    const body = {};
+    if (dateVal) body.as_of_date = dateVal;
+    const data = await callJson("/jobs/daily-run", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    renderDailyDigest(data);
+    const okCount = Object.values(data.stages || {}).filter(s => s.status === "ok").length;
+    const total   = Object.keys(data.stages || {}).length;
+    setLegacyStatus(
+      "#daily-run-status",
+      `Pipeline ${data.status} — ${okCount}/${total} stages ok — ${data.as_of_date}`,
+      data.status === "ok" ? "ok" : "warn"
+    );
+  } catch (err) {
+    setLegacyStatus("#daily-run-status", `Pipeline failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#daily-run-btn", false, "Run Daily Pipeline");
+  }
+});
+
 setDefaults();
 applyDemoMode(window.localStorage.getItem(FTIP_DEMO_MODE_STORAGE_KEY) === "1");
 {
