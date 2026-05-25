@@ -6514,6 +6514,158 @@ qs("#sector-breadth-load-btn").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Session 19: Portfolio Risk Overlay
+// ---------------------------------------------------------------------------
+
+const _RISK_STATE_STYLE = {
+  LOW:      { bg: "rgba(52,211,153,0.85)",  text: "#fff" },
+  MODERATE: { bg: "rgba(251,191,36,0.85)",  text: "#1e293b" },
+  HIGH:     { bg: "rgba(249,115,22,0.85)",  text: "#fff" },
+  CRITICAL: { bg: "rgba(239,68,68,0.85)",   text: "#fff" },
+};
+
+const _CONC_STATE_COLOR = {
+  LOW: "#34d399", MILD: "#a3e635", MODERATE: "#fbbf24",
+  HIGH: "#f97316", UNKNOWN: "#94a3b8",
+};
+
+const parsePortfolioText = (text) =>
+  text.split("\n")
+    .map(l => l.trim()).filter(l => l && l.includes(":"))
+    .map(l => { const [s, w] = l.split(":"); return { symbol: (s||"").trim().toUpperCase(), weight: parseFloat(w) || 0 }; })
+    .filter(p => p.symbol && p.weight > 0);
+
+const renderRiskOverlay = (data) => {
+  const resultWrap = qs("#risk-result");
+  resultWrap.style.display = "";
+
+  // Risk state badge
+  const badge = qs("#risk-state-badge");
+  const style = _RISK_STATE_STYLE[data.risk_state] || _RISK_STATE_STYLE.MODERATE;
+  badge.style.cssText = `display:inline-block;padding:6px 16px;border-radius:8px;font-weight:700;font-size:1rem;background:${style.bg};color:${style.text}`;
+  badge.textContent = `${data.risk_state} RISK — Score: ${data.risk_score}  |  IC: ${data.ic_state}  |  Breadth: ${data.breadth_state}`;
+
+  // Concentration grid
+  const concGrid = qs("#risk-concentration-grid");
+  concGrid.innerHTML = "";
+  const conc = data.concentration || {};
+  const concColor = _CONC_STATE_COLOR[conc.concentration_state] || "#94a3b8";
+  [
+    ["HHI", conc.hhi != null ? conc.hhi.toFixed(4) : "—"],
+    ["Effective N", conc.effective_n != null ? conc.effective_n.toFixed(1) : "—"],
+    ["Top-3 Weight", conc.top3_weight != null ? `${(conc.top3_weight * 100).toFixed(1)}%` : "—"],
+    ["Max Position", conc.max_single_weight != null ? `${(conc.max_single_weight * 100).toFixed(1)}%` : "—"],
+    ["Conc. State", conc.concentration_state || "—"],
+  ].forEach(([label, value]) => {
+    const el = document.createElement("div");
+    el.style.cssText = "padding:6px 10px;border-radius:6px;background:rgba(59,130,246,0.12);font-size:0.82rem";
+    el.innerHTML = `<span style="color:var(--text-muted)">${label}:</span> <strong style="color:${label === "Conc. State" ? concColor : "inherit"}">${value}</strong>`;
+    concGrid.appendChild(el);
+  });
+
+  // Sector exposure pills
+  const sectGrid = qs("#risk-sector-grid");
+  sectGrid.innerHTML = "";
+  Object.entries(data.sector_exposure || {}).slice(0, 8).forEach(([sector, w]) => {
+    const pill = document.createElement("div");
+    const pct = (w * 100).toFixed(1);
+    const isHigh = w > 0.40;
+    pill.style.cssText = `padding:5px 10px;border-radius:6px;background:${isHigh ? "rgba(249,115,22,0.2)" : "rgba(100,116,139,0.15)"};font-size:0.78rem`;
+    pill.textContent = `${sector}: ${pct}%`;
+    sectGrid.appendChild(pill);
+  });
+
+  // Risk flags
+  const flagsWrap = qs("#risk-flags-wrap");
+  const flagsList = qs("#risk-flags-list");
+  const flags = data.risk_flags || [];
+  if (flags.length) {
+    flagsList.innerHTML = "";
+    flags.forEach(f => {
+      const d = document.createElement("div");
+      d.style.cssText = "padding:4px 10px;border-radius:4px;background:rgba(239,68,68,0.12);font-size:0.80rem;margin:3px 0";
+      const sym = f.symbol ? `<strong>${f.symbol}</strong> — ` : "";
+      d.innerHTML = `${sym}${f.flag}: ${f.detail || ""}${f.weight != null ? ` (${(f.weight * 100).toFixed(1)}%)` : ""}`;
+      flagsList.appendChild(d);
+    });
+    flagsWrap.style.display = "";
+  } else {
+    flagsWrap.style.display = "none";
+  }
+
+  // Regime flips
+  const flipsWrap = qs("#risk-flips-wrap");
+  const flipsList = qs("#risk-flips-list");
+  const flips = data.regime_flips || [];
+  if (flips.length) {
+    flipsList.innerHTML = "";
+    flips.forEach(f => {
+      const d = document.createElement("div");
+      d.style.cssText = "padding:4px 10px;border-radius:4px;background:rgba(251,191,36,0.15);font-size:0.80rem;margin:3px 0";
+      d.innerHTML = `<strong>${f.symbol}</strong>: ${(f.prev_regime||"").replace(/_/g," ")} → ${(f.curr_regime||"").replace(/_/g," ")}${f.days_ago != null ? ` (${f.days_ago}d ago)` : ""}`;
+      flipsList.appendChild(d);
+    });
+    flipsWrap.style.display = "";
+  } else {
+    flipsWrap.style.display = "none";
+  }
+
+  // Per-symbol table
+  const tbody = qs("#risk-per-symbol-body");
+  const perSym = data.per_symbol || [];
+  if (perSym.length) {
+    tbody.innerHTML = "";
+    perSym.forEach(r => {
+      const regimeColor = r.regime_veto ? "#f87171" : r.regime_aligned ? "#34d399" : "#94a3b8";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${r.symbol}</strong></td>
+        <td>${r.weight != null ? (r.weight * 100).toFixed(1) + "%" : "—"}</td>
+        <td style="color:${regimeColor};font-size:0.78rem">${(r.regime_label||"").replace(/_/g," ")}</td>
+        <td>${r.dau != null ? r.dau.toFixed(1) : "—"}</td>
+        <td>${r.fragility_score != null ? r.fragility_score.toFixed(1) : "—"}</td>
+        <td style="font-size:0.78rem">${(r.deployability_tier||"—").replace(/_/g," ")}</td>
+        <td style="font-size:0.75rem;color:#f87171">${(r.flags||[]).join(", ") || ""}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+    qs("#risk-per-symbol-wrap").style.display = "";
+  } else {
+    qs("#risk-per-symbol-wrap").style.display = "none";
+  }
+};
+
+qs("#risk-run-btn").addEventListener("click", async () => {
+  const text    = qs("#risk-portfolio-input").value;
+  const dateVal = qs("#risk-date").value;
+  const portfolio = parsePortfolioText(text);
+  if (!portfolio.length) {
+    setLegacyStatus("#risk-status", "Enter at least one position (SYMBOL:WEIGHT).", "error");
+    return;
+  }
+  setButtonLoading("#risk-run-btn", true, "Analysing...");
+  setLegacyStatus("#risk-status", "Running risk overlay...");
+  try {
+    const body = { portfolio };
+    if (dateVal) body.as_of_date = dateVal;
+    const data = await callJson("/jobs/risk/overlay", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    renderRiskOverlay(data);
+    setLegacyStatus(
+      "#risk-status",
+      `Risk overlay complete — ${data.risk_state} (score ${data.risk_score}) · ${data.portfolio_size} positions · ${data.risk_flags?.length || 0} flags`
+    );
+  } catch (err) {
+    setLegacyStatus("#risk-status", `Risk check failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#risk-run-btn", false, "Run Risk Check");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Session 18: P&L Attribution tracker
 // ---------------------------------------------------------------------------
 
