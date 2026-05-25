@@ -32,7 +32,11 @@ from api.prosperity.models import (
     SnapshotRunRequest,
     UniverseUpsertRequest,
 )
-from ftip.risk import correlation_guard_stub, volatility_targeting
+from ftip.risk import (
+    correlation_guard,
+    compute_return_correlation_matrix,
+    volatility_targeting,
+)
 
 router = APIRouter(dependencies=[Depends(security.require_prosperity_api_key)])
 logger = logging.getLogger(__name__)
@@ -939,21 +943,25 @@ def _dataset_fingerprint(symbol_snapshots: List[Dict[str, Any]]) -> str:
 def _sample_bars(
     symbol: str, from_date: dt.date, to_date: dt.date
 ) -> List[Dict[str, Any]]:
+    # Symbol-seeded random walk so each ticker has a distinct, decorrelated
+    # price path while remaining fully deterministic.
+    rng = random.Random(sum(ord(ch) * (i + 1) for i, ch in enumerate(symbol)))
     bars: List[Dict[str, Any]] = []
+    close = 100.0 + float(sum(ord(ch) for ch in symbol) % 17)
     day = from_date
-    base = 100.0 + float(sum(ord(ch) for ch in symbol) % 17)
     idx = 0
     while day <= to_date:
         if day.weekday() < 5:
-            close = base + (0.15 * idx) + (0.75 if idx % 9 == 0 else 0.0)
+            daily_ret = rng.gauss(0.0003, 0.012)  # slight upward drift, ~19% vol
+            close = max(close * (1.0 + daily_ret), 1.0)
             bars.append(
                 {
                     "date": day.isoformat(),
-                    "open": close - 0.25,
-                    "high": close + 0.40,
-                    "low": close - 0.40,
-                    "close": close,
-                    "adj_close": close,
+                    "open": round(close * (1.0 - 0.002), 4),
+                    "high": round(close * (1.0 + 0.004), 4),
+                    "low": round(close * (1.0 - 0.004), 4),
+                    "close": round(close, 4),
+                    "adj_close": round(close, 4),
                     "volume": 1_000_000 + (idx * 100),
                     "source": "in_memory",
                 }
@@ -1050,6 +1058,7 @@ async def backtest(req: ProsperityBacktestRequest):
     if symbol_payloads:
         base_weights = {symbol: 1.0 for symbol in symbol_payloads.keys()}
         vol_estimates: Dict[str, float] = {}
+        returns_by_sym: Dict[str, List[float]] = {}
         for symbol, payload in symbol_payloads.items():
             in_window = payload["in_window"]
             returns: List[float] = []
@@ -1060,6 +1069,7 @@ async def backtest(req: ProsperityBacktestRequest):
                     continue
                 returns.append((close_cur / close_prev) - 1.0)
 
+            returns_by_sym[symbol] = returns
             if len(returns) > 1:
                 mean_r = sum(returns) / float(len(returns))
                 var_r = sum((r - mean_r) ** 2 for r in returns) / float(
@@ -1075,7 +1085,8 @@ async def backtest(req: ProsperityBacktestRequest):
             target_vol=target_vol,
             max_weight=max_weight,
         )
-        final_weights = correlation_guard_stub(final_weights)
+        corr_matrix = compute_return_correlation_matrix(returns_by_sym)
+        final_weights = correlation_guard(final_weights, correlation_matrix=corr_matrix)
 
     for symbol in symbols:
         if symbol not in symbol_payloads:
