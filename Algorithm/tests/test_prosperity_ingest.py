@@ -51,7 +51,7 @@ def test_compute_and_store_signal_passes_all_candles(
         )
 
     monkeypatch.setattr(
-        "api.main.compute_signal_for_symbol_from_candles", _fake_compute
+        "api.alpha.signal_runner.compute_signal_for_symbol_from_candles", _fake_compute
     )
 
     result = ingest.compute_and_store_signal("aapl", as_of_date, lookback)
@@ -123,8 +123,8 @@ def test_compute_and_store_signal_persists_score_mode(
             calibration_meta={"score_mode": "stacked", "base_score": 1.5},
         )
 
-    monkeypatch.setattr("api.main.compute_signal_for_symbol_from_candles", _fake_signal)
-    monkeypatch.setattr("api.main._score_mode", lambda: _score_mode() or "stacked")
+    monkeypatch.setattr("api.alpha.signal_runner.compute_signal_for_symbol_from_candles", _fake_signal)
+    monkeypatch.setattr("api.alpha.signal_runner._score_mode", lambda: _score_mode() or "stacked")
 
     ingest.compute_and_store_signal(symbol, as_of, lookback)
 

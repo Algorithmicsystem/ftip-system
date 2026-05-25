@@ -131,20 +131,18 @@ def _sma(closes: Sequence[float], window: int) -> Optional[float]:
 def _rsi(closes: Sequence[float], window: int = 14) -> Optional[float]:
     if len(closes) < window + 1:
         return None
-    gains: List[float] = []
-    losses: List[float] = []
-    for idx in range(len(closes) - window, len(closes)):
-        delta = closes[idx] - closes[idx - 1]
-        if delta >= 0:
-            gains.append(delta)
-            losses.append(0.0)
-        else:
-            gains.append(0.0)
-            losses.append(abs(delta))
-    avg_gain = _mean(gains) or 0.0
-    avg_loss = _mean(losses) or 0.0
+    deltas = [closes[i] - closes[i - 1] for i in range(1, len(closes))]
+    gains = [max(d, 0.0) for d in deltas]
+    losses = [max(-d, 0.0) for d in deltas]
+    # Seed Wilder's EMA with SMA of first window bars
+    avg_gain = sum(gains[:window]) / window
+    avg_loss = sum(losses[:window]) / window
+    # Apply Wilder's smoothing for all subsequent bars
+    for i in range(window, len(deltas)):
+        avg_gain = avg_gain * (window - 1) / window + gains[i] / window
+        avg_loss = avg_loss * (window - 1) / window + losses[i] / window
     if avg_loss == 0:
-        return 70.0
+        return 100.0
     rs = avg_gain / avg_loss
     return float(max(0.0, min(100.0, 100.0 - (100.0 / (1.0 + rs)))))
 

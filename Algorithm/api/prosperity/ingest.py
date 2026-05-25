@@ -339,7 +339,7 @@ def compute_and_store_signal(
         """,
         (sym, as_of_date),
     )
-    from api.main import Candle, compute_signal_for_symbol_from_candles, _score_mode  # type: ignore
+    from api.alpha.signal_runner import Candle, compute_signal_for_symbol_from_candles, _score_mode
 
     candles_all = [
         Candle(

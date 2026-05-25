@@ -127,7 +127,7 @@ def test_snapshot_run_and_latest(monkeypatch: pytest.MonkeyPatch, client: TestCl
     bars = _weekday_bars(dt.date(2024, 1, 5), 260)
 
     monkeypatch.setattr(
-        "api.main.compute_signal_for_symbol_from_candles",
+        "api.alpha.signal_runner.compute_signal_for_symbol_from_candles",
         lambda *args, **kwargs: SignalResponse(
             symbol="AAPL",
             as_of="2024-01-05",
@@ -283,7 +283,7 @@ def test_snapshot_run_provider_failure_uses_db_cache_fallback(
     bars = _weekday_bars(dt.date(2024, 1, 5), 300)
     monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
     monkeypatch.setattr(
-        "api.main.compute_signal_for_symbol_from_candles",
+        "api.alpha.signal_runner.compute_signal_for_symbol_from_candles",
         lambda *args, **kwargs: SignalResponse(
             symbol="AAPL",
             as_of="2024-01-05",
@@ -347,7 +347,7 @@ def test_snapshot_run_uses_latest_trading_day(
 
     monkeypatch.setattr(query, "fetch_bars", lambda *args, **kwargs: bars)
     monkeypatch.setattr(
-        "api.main.compute_signal_for_symbol_from_candles",
+        "api.alpha.signal_runner.compute_signal_for_symbol_from_candles",
         lambda *args, **kwargs: SignalResponse(
             symbol="AAPL",
             as_of=friday.isoformat(),
@@ -505,7 +505,7 @@ def test_snapshot_run_round_trip_with_db(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(ingest, "ingest_bars", _fake_bars)
     monkeypatch.setattr(ingest, "compute_and_store_features", _fake_features)
     monkeypatch.setattr(
-        "api.main.compute_signal_for_symbol_from_candles",
+        "api.alpha.signal_runner.compute_signal_for_symbol_from_candles",
         lambda *args, **kwargs: SignalResponse(
             symbol=kwargs.get("symbol") or args[0],
             as_of=kwargs.get("as_of") or args[1],

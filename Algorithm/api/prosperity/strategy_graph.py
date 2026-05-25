@@ -98,7 +98,7 @@ async def run_strategy_graph(req: StrategyGraphRunRequest, request: Request):
                 if db.db_enabled()
                 else []
             )
-            from api.main import Candle
+            from api.alpha.signal_runner import Candle
 
             candles: List[Candle] = [
                 Candle(

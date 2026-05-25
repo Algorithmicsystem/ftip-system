@@ -214,7 +214,7 @@ def _validate_bars(
 
 
 def _candles_from_bars(bars: List[Dict[str, Any]]):
-    from api.main import Candle  # type: ignore
+    from api.alpha.signal_runner import Candle
 
     candles = [
         Candle(
@@ -268,7 +268,7 @@ def _compute_features_payload(symbol: str, as_of_date: dt.date, lookback: int, c
 def _compute_signal_payload(
     symbol: str, as_of_date: dt.date, lookback: int, candles_all
 ):
-    from api.main import compute_signal_for_symbol_from_candles, _score_mode  # type: ignore
+    from api.alpha.signal_runner import compute_signal_for_symbol_from_candles, _score_mode
 
     signal_payload = compute_signal_for_symbol_from_candles(
         symbol, as_of_date.isoformat(), lookback, candles_all
@@ -320,7 +320,7 @@ def _compute_signal_payload(
 
 
 def _compute_strategy_graph(symbol: str, as_of_date: dt.date, lookback: int, candles):
-    from api.main import Candle  # type: ignore  # noqa: F401
+    from api.alpha.signal_runner import Candle  # noqa: F401
     from ftip.strategy_graph import compute_strategy_graph
 
     res = compute_strategy_graph(symbol, as_of_date, lookback, candles)

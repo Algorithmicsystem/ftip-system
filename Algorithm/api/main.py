@@ -410,19 +410,14 @@ def _load_calibration_single() -> Tuple[bool, Optional[Dict[str, Any]]]:
 # Models
 # =============================================================================
 
-
-class Candle(BaseModel):
-    timestamp: str  # ISO date "YYYY-MM-DD" (daily)
-    close: float
-    open: Optional[float] = None
-    high: Optional[float] = None
-    low: Optional[float] = None
-    volume: Optional[float] = None
-
-    # optional extra features (supported for future use)
-    fundamental: Optional[float] = None
-    sentiment: Optional[float] = None
-    crowd: Optional[float] = None
+# Candle and SignalResponse live in signal_runner to avoid circular imports
+# with api.prosperity.  They are re-exported here for backward compatibility.
+from api.alpha.signal_runner import (  # noqa: E402
+    Candle,
+    SignalResponse,
+    _score_mode,
+    compute_signal_for_symbol_from_candles,
+)
 
 
 class BacktestRequest(BaseModel):
@@ -446,50 +441,6 @@ class BacktestSummary(BaseModel):
 
     equity_curve: Optional[Dict[str, float]] = None
     returns: Optional[Dict[str, float]] = None
-
-
-class SignalResponse(BaseModel):
-    symbol: str
-    as_of: str
-    lookback: int
-    effective_lookback: int
-    regime: str
-    thresholds: Dict[str, float]
-    score: float
-    signal: str
-    confidence: float
-    features: Dict[str, float]
-    notes: List[str] = Field(default_factory=list)
-
-    # scoring diagnostics
-    score_mode: str = "stacked"  # "base" or "stacked"
-    base_score: Optional[float] = None
-    stacked_score: Optional[float] = None
-    stacked_meta: Optional[Dict[str, Any]] = None
-
-    # calibration diagnostics
-    calibration_loaded: bool = False
-    calibration_meta: Optional[Dict[str, Any]] = None
-    reason_codes: List[str] = Field(default_factory=list)
-    reason_details: Dict[str, Any] = Field(default_factory=dict)
-    suppression_flags: List[str] = Field(default_factory=list)
-    environment_penalties: Dict[str, Any] = Field(default_factory=dict)
-    event_penalties: Dict[str, Any] = Field(default_factory=dict)
-    liquidity_penalties: Dict[str, Any] = Field(default_factory=dict)
-    breadth_penalties: Dict[str, Any] = Field(default_factory=dict)
-    cross_asset_penalties: Dict[str, Any] = Field(default_factory=dict)
-    stress_penalties: Dict[str, Any] = Field(default_factory=dict)
-    adjusted_confidence_notes: List[str] = Field(default_factory=list)
-    entry_low: Optional[float] = None
-    entry_high: Optional[float] = None
-    stop_loss: Optional[float] = None
-    take_profit_1: Optional[float] = None
-    take_profit_2: Optional[float] = None
-    meta: Optional[Dict[str, Any]] = None
-    snapshot_id: Optional[str] = None
-    snapshot_version: Optional[str] = None
-    feature_version: Optional[str] = None
-    signal_version: Optional[str] = None
 
 
 class SignalsRequest(BaseModel):
@@ -1042,11 +993,6 @@ def _thresholds_for_regime(
     return defaults.get(regime, {"buy": 0.3, "sell": -0.3})
 
 
-def _score_mode() -> str:
-    mode = (_env("FTIP_SCORE_MODE", "stacked") or "stacked").strip().lower()
-    return mode if mode in ("base", "stacked") else "stacked"
-
-
 # =============================================================================
 # Core backtest engine (simple buy-and-hold placeholder for /run_backtest)
 # =============================================================================
@@ -1096,94 +1042,12 @@ def run_backtest_core(
 # =============================================================================
 
 
-def _filter_upto(candles: List[Candle], as_of: str) -> List[Candle]:
-    cutoff = _parse_date(as_of)
-    out: List[Candle] = []
-    for c in candles:
-        try:
-            d = _parse_date(c.timestamp)
-        except Exception:
-            continue
-        if d <= cutoff:
-            out.append(c)
-    return out
-
-
 def compute_signal_for_symbol(symbol: str, as_of: str, lookback: int) -> SignalResponse:
     as_of_d = _parse_date(as_of)
     from_guess = (as_of_d - dt.timedelta(days=900)).isoformat()
 
     candles_all = massive_fetch_daily_bars_cached(symbol, from_guess, as_of)
     return compute_signal_for_symbol_from_candles(symbol, as_of, lookback, candles_all)
-
-
-def compute_signal_for_symbol_from_candles(
-    symbol: str,
-    as_of: str,
-    lookback: int,
-    candles_all: List[Candle],
-) -> SignalResponse:
-    from api.alpha import build_canonical_features, build_canonical_signal
-    from api.research import build_research_snapshot_from_candles
-
-    candles_upto = _filter_upto(candles_all, as_of)
-
-    if len(candles_upto) < 30:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Not enough data to compute signal. Need at least 30 bars <= {as_of}, got {len(candles_upto)}.",
-        )
-
-    snapshot = build_research_snapshot_from_candles(
-        symbol,
-        _parse_date(as_of),
-        lookback,
-        candles_upto,
-        source_hint="provided_market_bars",
-        include_reference_context=True,
-    )
-    feature_payload = build_canonical_features(snapshot)
-    signal_payload = build_canonical_signal(snapshot, feature_payload)
-
-    return SignalResponse(
-        symbol=(symbol or "").strip().upper(),
-        as_of=as_of,
-        lookback=int(lookback),
-        effective_lookback=int(signal_payload.get("effective_lookback") or len(candles_upto)),
-        regime=str(signal_payload.get("regime") or "CHOPPY"),
-        thresholds=dict(signal_payload.get("thresholds") or {}),
-        score=float(signal_payload.get("score") or 0.0),
-        signal=str(signal_payload.get("signal") or "HOLD"),
-        confidence=float(signal_payload.get("confidence") or 0.0),
-        features={k: float(v) for k, v in (signal_payload.get("features") or {}).items()},
-        notes=list(signal_payload.get("notes") or []),
-        score_mode=str(signal_payload.get("score_mode") or "stacked"),
-        base_score=_safe_float(signal_payload.get("base_score")),
-        stacked_score=_safe_float(signal_payload.get("stacked_score")),
-        stacked_meta=dict(signal_payload.get("stacked_meta") or {}),
-        calibration_loaded=bool(signal_payload.get("calibration_loaded")),
-        calibration_meta=signal_payload.get("calibration_meta"),
-        reason_codes=list(signal_payload.get("reason_codes") or []),
-        reason_details=dict(signal_payload.get("reason_details") or {}),
-        suppression_flags=list(signal_payload.get("suppression_flags") or []),
-        environment_penalties=dict(signal_payload.get("environment_penalties") or {}),
-        event_penalties=dict(signal_payload.get("event_penalties") or {}),
-        liquidity_penalties=dict(signal_payload.get("liquidity_penalties") or {}),
-        breadth_penalties=dict(signal_payload.get("breadth_penalties") or {}),
-        cross_asset_penalties=dict(signal_payload.get("cross_asset_penalties") or {}),
-        stress_penalties=dict(signal_payload.get("stress_penalties") or {}),
-        adjusted_confidence_notes=list(signal_payload.get("adjusted_confidence_notes") or []),
-        entry_low=_safe_float(signal_payload.get("entry_low")),
-        entry_high=_safe_float(signal_payload.get("entry_high")),
-        stop_loss=_safe_float(signal_payload.get("stop_loss")),
-        take_profit_1=_safe_float(signal_payload.get("take_profit_1")),
-        take_profit_2=_safe_float(signal_payload.get("take_profit_2")),
-        meta=dict(signal_payload.get("meta") or {}),
-        snapshot_id=(signal_payload.get("meta") or {}).get("snapshot_id"),
-        snapshot_version=(signal_payload.get("meta") or {}).get("snapshot_version"),
-        feature_version=(signal_payload.get("meta") or {}).get("feature_version"),
-        signal_version=(signal_payload.get("meta") or {}).get("signal_version"),
-    )
 
 
 # =============================================================================
