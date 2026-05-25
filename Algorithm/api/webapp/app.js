@@ -908,6 +908,7 @@ const researchTabLabel = () => {
     research: "learning lab",
     health: "system health",
     markets: "sector breadth heatmap",
+    screen: "universe screener",
   };
   return labels[state.researchTab] || state.researchTab || "dashboard";
 };
@@ -6229,6 +6230,97 @@ qsa(".tab").forEach((tab) => {
 });
 qsa(".research-tab").forEach((tab) => {
   tab.addEventListener("click", () => setResearchTab(tab.dataset.researchTab));
+});
+
+// ---------------------------------------------------------------------------
+// Universe Screener (Session 16)
+// ---------------------------------------------------------------------------
+
+const _SIGNAL_BADGE_COLOR = { BUY: "#34d399", SELL: "#ef4444", HOLD: "#94a3b8" };
+const _SCREEN_TIER_COLOR  = { HIGH: "#34d399", MODERATE: "#60a5fa", LOW: "#fbbf24", INSUFFICIENT: "#ef4444" };
+
+const renderScreenResults = (data) => {
+  const results = data.results || [];
+  const statusEl = qs("#screen-status");
+
+  if (data.status === "db_disabled") {
+    statusEl.textContent = "DB is disabled — no data available.";
+    qs("#screen-table-wrap").style.display = "none";
+    qs("#screen-summary").style.display = "none";
+    return;
+  }
+
+  statusEl.textContent = results.length
+    ? `${data.count} of ${data.total_screened} symbols as of ${data.as_of_date}.`
+    : `No symbols matched the filters for ${data.as_of_date || "—"}.`;
+
+  qs("#screen-summary").style.display = results.length ? "" : "none";
+  qs("#screen-summary").innerHTML = [
+    ["Screened",  data.total_screened ?? "—"],
+    ["Returned",  data.count ?? "—"],
+    ["IC State",  data.ic_state || "—"],
+    ["Breadth",   data.breadth_state || "—"],
+    ["As of",     data.as_of_date || "—"],
+  ].map(([k, v]) =>
+    `<div class="metric-chip"><span class="metric-label">${k}</span><span class="metric-value">${v}</span></div>`
+  ).join("");
+
+  if (!results.length) { qs("#screen-table-wrap").style.display = "none"; return; }
+
+  qs("#screen-table-body").innerHTML = results.map((r) => {
+    const sigColor = _SIGNAL_BADGE_COLOR[r.signal_label] || "#94a3b8";
+    const tierColor = _SCREEN_TIER_COLOR[r.conviction_tier] || "#94a3b8";
+    return `<tr style="cursor:pointer" data-screen-symbol="${r.symbol}">
+      <td>${r.rank}</td>
+      <td><strong>${r.symbol}</strong></td>
+      <td><span style="color:${sigColor};font-weight:600">${r.signal_label}</span></td>
+      <td><span style="color:${tierColor}">${r.conviction_tier}</span>
+          <span style="color:#94a3b8;font-size:0.85em"> (${r.conviction_score.toFixed(1)})</span></td>
+      <td>${r.dau.toFixed(1)}</td>
+      <td>${r.suggested_weight_pct}</td>
+      <td>${r.size_band}</td>
+      <td>${r.regime_label || "—"}</td>
+      <td>${r.breadth_state || "—"}</td>
+      <td>${r.deployability_tier || "—"}</td>
+    </tr>`;
+  }).join("");
+  qs("#screen-table-wrap").style.display = "";
+};
+
+qs("#screen-table-body").addEventListener("click", (e) => {
+  const row = e.target.closest("[data-screen-symbol]");
+  if (row) {
+    qs("#assistant-analyze-symbol").value = row.dataset.screenSymbol;
+    setResearchTab("analyze");
+  }
+});
+
+qs("#screen-run-btn").addEventListener("click", async () => {
+  const dateVal  = qs("#screen-date").value;
+  const minDau   = parseFloat(qs("#screen-min-dau").value) || 0;
+  const sigVal   = qs("#screen-signal-filter").value;
+  const minConv  = parseFloat(qs("#screen-min-conviction").value) || 0;
+  const limitVal = parseInt(qs("#screen-limit").value, 10) || 50;
+
+  setButtonLoading("#screen-run-btn", true, "Screening...");
+  setLegacyStatus("#screen-status", "Running universe screen...");
+
+  try {
+    const body = { min_dau: minDau, min_conviction: minConv, limit: limitVal };
+    if (dateVal)  body.as_of_date    = dateVal;
+    if (sigVal)   body.signal_filter = [sigVal];
+
+    const data = await callJson("/axiom/screen", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    renderScreenResults(data);
+  } catch (err) {
+    setLegacyStatus("#screen-status", `Screen failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#screen-run-btn", false, "Screening...");
+  }
 });
 
 // ---------------------------------------------------------------------------

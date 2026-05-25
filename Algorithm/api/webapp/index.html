@@ -194,6 +194,7 @@
                 Dashboard
               </button>
               <button class="research-tab" data-research-tab="analyze">Analyze</button>
+              <button class="research-tab" data-research-tab="screen">Screen</button>
               <button class="research-tab" data-research-tab="strategy">Strategy</button>
               <button class="research-tab" data-research-tab="portfolio">Portfolio</button>
               <button class="research-tab" data-research-tab="markets">Markets</button>
@@ -473,6 +474,52 @@
                         <summary style="cursor:pointer;color:#94a3b8;font-size:0.85em">Full memo JSON</summary>
                         <pre id="memo-json" class="json-block" style="max-height:320px;overflow:auto">{}</pre>
                       </details>
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="screen">
+                <div class="workspace-grid">
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Universe Screener</h4>
+                      <span class="legacy-badge">Conviction-ranked</span>
+                      <span class="legacy-badge">All systems</span>
+                    </div>
+                    <div class="input-row" style="margin-bottom:8px">
+                      <input id="screen-date" type="date" placeholder="As-of date (blank = today)" />
+                      <input id="screen-min-dau" type="number" min="0" max="100" value="0" placeholder="Min DAU" style="width:90px" />
+                      <select id="screen-signal-filter">
+                        <option value="">All signals</option>
+                        <option value="BUY">BUY only</option>
+                        <option value="SELL">SELL only</option>
+                        <option value="HOLD">HOLD only</option>
+                      </select>
+                      <input id="screen-min-conviction" type="number" min="0" max="100" value="0" placeholder="Min conviction" style="width:120px" />
+                      <input id="screen-limit" type="number" min="1" max="200" value="50" placeholder="Limit" style="width:70px" />
+                      <button id="screen-run-btn">Run Screen</button>
+                    </div>
+                    <p class="muted" id="screen-status">No screen run yet.</p>
+                    <div class="summary-grid" id="screen-summary" style="display:none;margin:8px 0"></div>
+                    <div id="screen-table-wrap" style="display:none">
+                      <table class="workspace-table">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Symbol</th>
+                            <th>Signal</th>
+                            <th>Conviction</th>
+                            <th>DAU</th>
+                            <th>Weight</th>
+                            <th>Band</th>
+                            <th>Regime</th>
+                            <th>Breadth</th>
+                            <th>Tier</th>
+                          </tr>
+                        </thead>
+                        <tbody id="screen-table-body"></tbody>
+                      </table>
                     </div>
                   </section>
                 </div>

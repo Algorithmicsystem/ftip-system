@@ -26,6 +26,7 @@ from api.axiom.memo import (
     load_memo_by_id,
     load_memo_by_hash,
 )
+from api.axiom.screener import screen_universe
 
 router = APIRouter(
     prefix="/axiom",
@@ -516,3 +517,50 @@ def axiom_memo_by_id(memo_id: str) -> Dict[str, Any]:
     if not row:
         raise HTTPException(status_code=404, detail="memo_not_found")
     return {"status": "ok", "memo": row}
+
+
+# ---------------------------------------------------------------------------
+# Screener endpoint
+# ---------------------------------------------------------------------------
+
+class ScreenRequest(BaseModel):
+    as_of_date: Optional[str] = None
+    min_dau: float = Field(default=0.0, ge=0.0, le=100.0)
+    signal_filter: Optional[list] = None     # e.g. ["BUY"] or ["BUY","HOLD"]
+    min_conviction: float = Field(default=0.0, ge=0.0, le=100.0)
+    max_weight: float = Field(default=0.10, ge=0.001, le=1.0)
+    fractional_kelly: float = Field(default=0.5, gt=0.0, le=1.0)
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+@router.post("/screen")
+def axiom_screen(req: ScreenRequest) -> Dict[str, Any]:
+    as_of_date_str = req.as_of_date or dt.date.today().isoformat()
+    try:
+        as_of_date = dt.date.fromisoformat(as_of_date_str)
+    except ValueError:
+        as_of_date = dt.date.today()
+
+    signal_filter = (
+        [s.upper() for s in req.signal_filter if s]
+        if req.signal_filter
+        else None
+    )
+
+    result = screen_universe(
+        as_of_date,
+        min_dau=req.min_dau,
+        signal_filter=signal_filter,
+        min_conviction=req.min_conviction,
+        max_weight=req.max_weight,
+        fractional_kelly=req.fractional_kelly,
+        limit=req.limit,
+    )
+
+    logger.info(
+        "axiom.screen date=%s screened=%d returned=%d ic=%s breadth=%s",
+        as_of_date, result.get("total_screened", 0), result.get("count", 0),
+        result.get("ic_state"), result.get("breadth_state"),
+    )
+
+    return result
