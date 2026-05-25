@@ -281,6 +281,34 @@
 
                   <section class="legacy-card dashboard-wide">
                     <div class="legacy-card-head">
+                      <h4>P&amp;L Attribution</h4>
+                      <span class="legacy-badge">Forward-return tracking</span>
+                    </div>
+                    <div class="input-row" style="margin-bottom:8px">
+                      <input id="pnl-date" type="date" placeholder="As-of date (blank = yesterday)" />
+                      <button id="pnl-compute-btn">Compute P&amp;L</button>
+                      <button id="pnl-summary-btn" class="secondary">Load Summary</button>
+                    </div>
+                    <p class="muted" id="pnl-status">No P&amp;L data loaded.</p>
+                    <div id="pnl-result" style="display:none">
+                      <div id="pnl-horizon-grid" class="summary-grid" style="margin:8px 0"></div>
+                      <div id="pnl-signal-grid" class="summary-grid" style="margin:4px 0 8px"></div>
+                      <div id="pnl-ic-line" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px"></div>
+                      <div id="pnl-recent-wrap" style="display:none">
+                        <p style="font-weight:600;margin:8px 0 4px">Recent Outcomes</p>
+                        <table class="workspace-table" style="width:100%">
+                          <thead><tr>
+                            <th>Symbol</th><th>Signal</th><th>Date</th>
+                            <th>Horizon</th><th>Return</th><th>Hit</th>
+                          </tr></thead>
+                          <tbody id="pnl-recent-body"></tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section class="legacy-card dashboard-wide">
+                    <div class="legacy-card-head">
                       <h4>Daily Pipeline</h4>
                       <span class="legacy-badge">Orchestrator</span>
                     </div>

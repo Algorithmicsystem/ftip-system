@@ -700,6 +700,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "038_axiom_memos",
         lambda cur: cur.execute(Path(__file__).with_name("038_axiom_memos.sql").read_text()),
     ),
+    (
+        "039_signal_pnl_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("039_signal_pnl_daily.sql").read_text()),
+    ),
 ]
 
 

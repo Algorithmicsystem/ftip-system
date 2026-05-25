@@ -1,0 +1,356 @@
+"""Session 18: Realized signal P&L tracker.
+
+Computes forward-return attribution per signal/date by pairing stored signals
+from prosperity_signals_daily with prices from prosperity_daily_bars.
+
+POST /jobs/pnl/compute  — compute & store P&L rows for a given as_of_date
+GET  /jobs/pnl/summary  — load aggregate attribution stats
+"""
+from __future__ import annotations
+
+import datetime as dt
+import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel, Field
+
+from api import db, security
+
+router = APIRouter(
+    prefix="/jobs",
+    tags=["jobs"],
+    dependencies=[Depends(security.require_prosperity_api_key)],
+)
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_HORIZONS: List[int] = [5, 21, 63]
+
+
+# ---------------------------------------------------------------------------
+# P&L computation
+# ---------------------------------------------------------------------------
+
+def compute_signal_pnl(
+    as_of_date: dt.date,
+    horizons: List[int] = DEFAULT_HORIZONS,
+) -> List[Dict[str, Any]]:
+    """
+    For each horizon H, pairs signals from (as_of_date - H calendar days)
+    with prices on both the signal date and as_of_date.
+
+    Returns a list of dicts ready for upsert into signal_pnl_daily.
+    Rows with missing price data still appear (return_pct=None) so the
+    hit-rate denominator stays honest.
+    """
+    if not db.db_read_enabled():
+        return []
+
+    rows: List[Dict[str, Any]] = []
+
+    for h in horizons:
+        signal_date = as_of_date - dt.timedelta(days=h)
+
+        signals = db.safe_fetchall(
+            """
+            SELECT
+                psd.symbol,
+                psd.signal,
+                psd.score,
+                COALESCE(psd.lookback, 252)       AS lookback,
+                asd.deployable_alpha_utility,
+                asd.regime_label,
+                asd.overall_confidence
+            FROM prosperity_signals_daily psd
+            LEFT JOIN axiom_scores_daily asd
+                ON  asd.symbol     = psd.symbol
+                AND asd.as_of_date = psd.as_of
+            WHERE psd.as_of = %s
+            """,
+            (signal_date,),
+        )
+        if not signals:
+            continue
+
+        symbols = list({r[0] for r in signals})
+
+        bars = db.safe_fetchall(
+            """
+            SELECT symbol, date, close
+            FROM prosperity_daily_bars
+            WHERE symbol = ANY(%s) AND date IN (%s, %s)
+            """,
+            (symbols, signal_date, as_of_date),
+        )
+
+        price_map: Dict[str, Dict[Any, float]] = {}
+        for sym, date, close in bars:
+            price_map.setdefault(sym, {})[date] = float(close)
+
+        for sym, signal, score, lookback, dau, regime, _conf in signals:
+            p0 = price_map.get(sym, {}).get(signal_date)
+            p1 = price_map.get(sym, {}).get(as_of_date)
+
+            ret_pct: Optional[float] = None
+            hit: Optional[bool] = None
+            if p0 and p1 and p0 > 0:
+                ret_pct = round(((p1 / p0) - 1.0) * 100.0, 4)
+                if signal == "BUY":
+                    hit = ret_pct > 0
+                elif signal == "SELL":
+                    hit = ret_pct < 0
+
+            rows.append(
+                {
+                    "symbol": sym,
+                    "signal_date": signal_date,
+                    "horizon_days": h,
+                    "lookback": int(lookback or 252),
+                    "signal_label": signal,
+                    "signal_score": float(score) if score is not None else None,
+                    "dau": float(dau) if dau is not None else None,
+                    "regime_label": regime,
+                    "price_at_signal": p0,
+                    "horizon_date": as_of_date,
+                    "price_at_horizon": p1,
+                    "return_pct": ret_pct,
+                    "hit": hit,
+                    "computed_at": as_of_date,
+                }
+            )
+
+    return rows
+
+
+def store_signal_pnl(rows: List[Dict[str, Any]]) -> int:
+    """Upsert P&L rows; returns number of rows written."""
+    if not db.db_write_enabled() or not rows:
+        return 0
+
+    written = 0
+    for r in rows:
+        try:
+            db.exec1(
+                """
+                INSERT INTO signal_pnl_daily (
+                    symbol, signal_date, horizon_days, lookback, signal_label,
+                    signal_score, dau, regime_label, price_at_signal,
+                    horizon_date, price_at_horizon, return_pct, hit,
+                    computed_at, updated_at
+                )
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                ON CONFLICT (symbol, signal_date, horizon_days)
+                DO UPDATE SET
+                    price_at_signal  = EXCLUDED.price_at_signal,
+                    price_at_horizon = EXCLUDED.price_at_horizon,
+                    horizon_date     = EXCLUDED.horizon_date,
+                    return_pct       = EXCLUDED.return_pct,
+                    hit              = EXCLUDED.hit,
+                    computed_at      = EXCLUDED.computed_at,
+                    updated_at       = now()
+                """,
+                (
+                    r["symbol"], r["signal_date"], r["horizon_days"], r["lookback"],
+                    r["signal_label"], r["signal_score"], r["dau"], r["regime_label"],
+                    r["price_at_signal"], r["horizon_date"], r["price_at_horizon"],
+                    r["return_pct"], r["hit"], r["computed_at"],
+                ),
+            )
+            written += 1
+        except Exception as exc:
+            logger.warning("pnl.store_failed symbol=%s error=%s", r.get("symbol"), exc)
+
+    return written
+
+
+# ---------------------------------------------------------------------------
+# Pure-Python Spearman rank correlation
+# ---------------------------------------------------------------------------
+
+def _rank(values: List[float]) -> List[float]:
+    indexed = sorted(enumerate(values), key=lambda x: x[1])
+    ranks = [0.0] * len(values)
+    for rank_pos, (orig_idx, _) in enumerate(indexed, 1):
+        ranks[orig_idx] = float(rank_pos)
+    return ranks
+
+
+def _pearson(xs: List[float], ys: List[float]) -> float:
+    n = len(xs)
+    if n < 3:
+        return 0.0
+    mx = sum(xs) / n
+    my = sum(ys) / n
+    cov = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+    vx = sum((x - mx) ** 2 for x in xs)
+    vy = sum((y - my) ** 2 for y in ys)
+    denom = (vx * vy) ** 0.5
+    return float(cov / denom) if denom > 0 else 0.0
+
+
+def spearman_ic(scores: List[float], returns: List[float]) -> float:
+    return _pearson(_rank(scores), _rank(returns))
+
+
+# ---------------------------------------------------------------------------
+# Summary / analytics
+# ---------------------------------------------------------------------------
+
+def load_pnl_summary(
+    as_of_date: dt.date,
+    lookback_days: int = 90,
+) -> Dict[str, Any]:
+    """Return attribution stats over the last `lookback_days` calendar days."""
+    if not db.db_read_enabled():
+        return {"status": "db_disabled"}
+
+    since = as_of_date - dt.timedelta(days=lookback_days)
+
+    rows = db.safe_fetchall(
+        """
+        SELECT
+            symbol, signal_date, horizon_days, signal_label,
+            signal_score, dau, regime_label,
+            return_pct, hit, computed_at
+        FROM signal_pnl_daily
+        WHERE signal_date >= %s
+        ORDER BY signal_date DESC, symbol
+        """,
+        (since,),
+    )
+
+    total = len(rows)
+    rated = [r for r in rows if r[7] is not None]
+
+    empty = {
+        "n": 0,
+        "avg_return_pct": None,
+        "hit_rate": None,
+        "win_pct": None,
+    }
+
+    def _stats(subset) -> Dict[str, Any]:
+        if not subset:
+            return dict(empty)
+        rets = [float(r[7]) for r in subset]
+        hits = [r[8] for r in subset if r[8] is not None]
+        hr = sum(1 for x in hits if x) / len(hits) if hits else None
+        return {
+            "n": len(subset),
+            "avg_return_pct": round(sum(rets) / len(rets), 3),
+            "hit_rate": round(hr, 3) if hr is not None else None,
+            "win_pct": round(hr * 100, 1) if hr is not None else None,
+        }
+
+    by_horizon: Dict[str, Any] = {}
+    for h in DEFAULT_HORIZONS:
+        h_rows = [r for r in rated if r[2] == h]
+        if h_rows:
+            by_horizon[str(h)] = _stats(h_rows)
+
+    by_signal: Dict[str, Any] = {}
+    for label in ("BUY", "SELL", "HOLD"):
+        s_rows = [r for r in rated if r[3] == label]
+        if s_rows:
+            by_signal[label] = _stats(s_rows)
+
+    # Spearman IC: sign-adjusted score vs. return (BUY/SELL only)
+    ic_candidates = [r for r in rated if r[3] in ("BUY", "SELL") and r[4] is not None]
+    ic: Optional[float] = None
+    if len(ic_candidates) >= 5:
+        # Flip SELL scores so higher score always predicts positive return
+        adj_scores = [
+            float(r[4]) if r[3] == "BUY" else -float(r[4])
+            for r in ic_candidates
+        ]
+        rets = [float(r[7]) for r in ic_candidates]
+        ic = round(spearman_ic(adj_scores, rets), 4)
+
+    recent = [
+        {
+            "symbol": r[0],
+            "signal_date": r[1].isoformat() if hasattr(r[1], "isoformat") else str(r[1]),
+            "horizon_days": r[2],
+            "signal_label": r[3],
+            "return_pct": round(float(r[7]), 2),
+            "hit": r[8],
+            "regime_label": r[6],
+        }
+        for r in rated[:20]
+    ]
+
+    return {
+        "status": "ok",
+        "as_of_date": as_of_date.isoformat(),
+        "lookback_days": lookback_days,
+        "total_rows": total,
+        "rows_with_return": len(rated),
+        "by_horizon": by_horizon,
+        "by_signal": by_signal,
+        "spearman_ic": ic,
+        "recent": recent,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+class PnLComputeRequest(BaseModel):
+    as_of_date: Optional[str] = None
+    horizons: List[int] = Field(default_factory=lambda: list(DEFAULT_HORIZONS))
+    store: bool = True
+
+
+class PnLSummaryRequest(BaseModel):
+    as_of_date: Optional[str] = None
+    lookback_days: int = Field(default=90, ge=7, le=365)
+
+
+def _resolve_date(raw: Optional[str]) -> dt.date:
+    if raw:
+        try:
+            return dt.date.fromisoformat(raw)
+        except ValueError:
+            pass
+    return dt.date.today() - dt.timedelta(days=1)
+
+
+@router.post("/pnl/compute")
+def pnl_compute(req: PnLComputeRequest) -> Dict[str, Any]:
+    as_of = _resolve_date(req.as_of_date)
+    horizons = [h for h in req.horizons if 1 <= h <= 252]
+    if not horizons:
+        horizons = list(DEFAULT_HORIZONS)
+
+    rows = compute_signal_pnl(as_of, horizons)
+    stored = store_signal_pnl(rows) if req.store and db.db_write_enabled() else 0
+
+    with_return = sum(1 for r in rows if r["return_pct"] is not None)
+    hits = sum(1 for r in rows if r.get("hit") is True)
+
+    logger.info(
+        "pnl.compute as_of=%s rows=%d with_return=%d hits=%d stored=%d",
+        as_of, len(rows), with_return, hits, stored,
+    )
+
+    return {
+        "status": "ok",
+        "as_of_date": as_of.isoformat(),
+        "horizons": horizons,
+        "total_rows": len(rows),
+        "rows_with_return": with_return,
+        "hits": hits,
+        "stored": stored,
+        "rows": rows,
+    }
+
+
+@router.get("/pnl/summary")
+def pnl_summary(
+    as_of_date: Optional[str] = Query(default=None),
+    lookback_days: int = Query(default=90, ge=7, le=365),
+) -> Dict[str, Any]:
+    as_of = _resolve_date(as_of_date)
+    return load_pnl_summary(as_of, lookback_days)

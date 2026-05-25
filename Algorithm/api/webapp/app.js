@@ -6514,6 +6514,132 @@ qs("#sector-breadth-load-btn").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Session 18: P&L Attribution tracker
+// ---------------------------------------------------------------------------
+
+const _PNL_HIT_COLOR  = "rgba(52,211,153,0.85)";
+const _PNL_MISS_COLOR = "rgba(239,68,68,0.75)";
+const _PNL_NA_COLOR   = "rgba(100,116,139,0.5)";
+
+const renderPnLSummary = (data) => {
+  const resultWrap  = qs("#pnl-result");
+  const horizonGrid = qs("#pnl-horizon-grid");
+  const signalGrid  = qs("#pnl-signal-grid");
+  const icLine      = qs("#pnl-ic-line");
+  const recentWrap  = qs("#pnl-recent-wrap");
+  const recentBody  = qs("#pnl-recent-body");
+
+  resultWrap.style.display = "";
+
+  // Horizon breakdown pills
+  horizonGrid.innerHTML = "";
+  const horizonLabels = { "5": "5d", "21": "21d", "63": "63d" };
+  Object.entries(data.by_horizon || {}).forEach(([h, s]) => {
+    const pill = document.createElement("div");
+    const wr = s.win_pct != null ? `${s.win_pct}% win` : "n/a";
+    const avg = s.avg_return_pct != null ? `${s.avg_return_pct > 0 ? "+" : ""}${s.avg_return_pct.toFixed(2)}%` : "";
+    pill.style.cssText = `padding:6px 10px;border-radius:6px;background:rgba(59,130,246,0.15);font-size:0.78rem`;
+    pill.innerHTML = `<strong>${horizonLabels[h] || h + "d"}</strong>: ${wr} &middot; avg ${avg} &middot; n=${s.n}`;
+    horizonGrid.appendChild(pill);
+  });
+
+  // Signal breakdown pills
+  signalGrid.innerHTML = "";
+  const sigColors = { BUY: "rgba(52,211,153,0.2)", SELL: "rgba(239,68,68,0.2)", HOLD: "rgba(100,116,139,0.15)" };
+  Object.entries(data.by_signal || {}).forEach(([label, s]) => {
+    const pill = document.createElement("div");
+    const wr = s.win_pct != null ? `${s.win_pct}% win` : "n/a";
+    const avg = s.avg_return_pct != null ? `${s.avg_return_pct > 0 ? "+" : ""}${s.avg_return_pct.toFixed(2)}%` : "";
+    pill.style.cssText = `padding:6px 10px;border-radius:6px;background:${sigColors[label] || "rgba(100,116,139,0.15)"};font-size:0.78rem`;
+    pill.innerHTML = `<strong>${label}</strong>: ${wr} &middot; avg ${avg} &middot; n=${s.n}`;
+    signalGrid.appendChild(pill);
+  });
+
+  // Spearman IC line
+  if (data.spearman_ic != null) {
+    icLine.textContent = `Spearman IC (score vs. return): ${data.spearman_ic.toFixed(4)}  —  ${data.rows_with_return} signals with realized return`;
+  } else {
+    icLine.textContent = `${data.rows_with_return || 0} signals with realized return (IC requires ≥5)`;
+  }
+
+  // Recent outcomes table
+  const recent = data.recent || [];
+  if (recent.length) {
+    recentBody.innerHTML = "";
+    recent.forEach((r) => {
+      const retStr = r.return_pct != null ? `${r.return_pct > 0 ? "+" : ""}${r.return_pct.toFixed(2)}%` : "—";
+      const hitColor = r.hit === true ? _PNL_HIT_COLOR : r.hit === false ? _PNL_MISS_COLOR : _PNL_NA_COLOR;
+      const hitLabel = r.hit === true ? "HIT" : r.hit === false ? "MISS" : "—";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${r.symbol}</strong></td>
+        <td>${r.signal_label || ""}</td>
+        <td style="font-size:0.78rem">${r.signal_date || ""}</td>
+        <td>${r.horizon_days}d</td>
+        <td style="font-weight:600;color:${r.return_pct > 0 ? "#34d399" : r.return_pct < 0 ? "#f87171" : "inherit"}">${retStr}</td>
+        <td><span style="padding:2px 8px;border-radius:4px;background:${hitColor};color:#fff;font-size:0.75rem;font-weight:700">${hitLabel}</span></td>
+      `;
+      recentBody.appendChild(tr);
+    });
+    recentWrap.style.display = "";
+  } else {
+    recentWrap.style.display = "none";
+  }
+};
+
+qs("#pnl-compute-btn").addEventListener("click", async () => {
+  const dateVal = qs("#pnl-date").value;
+  setButtonLoading("#pnl-compute-btn", true, "Computing...");
+  setLegacyStatus("#pnl-status", "Computing P&L attribution...");
+  try {
+    const body = {};
+    if (dateVal) body.as_of_date = dateVal;
+    const data = await callJson("/jobs/pnl/compute", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setLegacyStatus(
+      "#pnl-status",
+      `Computed ${data.total_rows} rows (${data.rows_with_return} with return, ${data.hits} hits) — stored ${data.stored}`
+    );
+    // Auto-load summary after compute
+    const summary = await callJson(
+      `/jobs/pnl/summary?as_of_date=${data.as_of_date}`,
+      { headers: getHeaders() }
+    );
+    renderPnLSummary(summary);
+  } catch (err) {
+    setLegacyStatus("#pnl-status", `Compute failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#pnl-compute-btn", false, "Compute P&L");
+  }
+});
+
+qs("#pnl-summary-btn").addEventListener("click", async () => {
+  const dateVal = qs("#pnl-date").value;
+  setButtonLoading("#pnl-summary-btn", true, "Loading...");
+  setLegacyStatus("#pnl-status", "Loading P&L summary...");
+  try {
+    const qs_param = dateVal ? `?as_of_date=${dateVal}` : "";
+    const data = await callJson(`/jobs/pnl/summary${qs_param}`, { headers: getHeaders() });
+    if (data.status === "db_disabled") {
+      setLegacyStatus("#pnl-status", "DB disabled — no P&L data available.", "error");
+      return;
+    }
+    renderPnLSummary(data);
+    setLegacyStatus(
+      "#pnl-status",
+      `P&L summary loaded — ${data.total_rows} rows, ${data.rows_with_return} with return`
+    );
+  } catch (err) {
+    setLegacyStatus("#pnl-status", `Load failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#pnl-summary-btn", false, "Load Summary");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Session 17: Daily Pipeline Orchestrator
 // ---------------------------------------------------------------------------
 
