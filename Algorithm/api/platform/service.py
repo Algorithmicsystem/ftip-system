@@ -67,6 +67,7 @@ from api.platform.export_layouts import (
 from api.platform.execution import (
     execute_internal_sink,
     execute_local_archive,
+    execute_premium_connector_probe,
     execute_webhook_outbox,
 )
 from api.platform.export_renderers import render_export_manifest
@@ -112,6 +113,7 @@ from api.platform.tracking import (
     build_recommendation_track,
     normalize_horizons,
 )
+from api.data_providers.premium import build_premium_connector_overview
 from api.platform.outcomes import build_outcome_attribution, build_outcome_snapshot
 from api.platform.workflows import build_workflow_instance
 
@@ -4148,13 +4150,18 @@ def list_integrations_service(
             }
         )
         enriched_bindings.append(enriched)
+    premium_connector_overview = build_premium_connector_overview(execute_live=False)
     return {
         "platform_version": PLATFORM_FOUNDATION_VERSION,
         "integration_definitions": [
             item.model_dump(mode="python") for item in list_integration_definitions()
         ],
         "bindings": enriched_bindings,
-        "health_summary": integration_health_summary(enriched_bindings),
+        "premium_connectors": premium_connector_overview.get("connectors") or [],
+        "health_summary": integration_health_summary(
+            enriched_bindings,
+            premium_connector_overview=premium_connector_overview,
+        ),
     }
 
 
@@ -4293,6 +4300,7 @@ def execute_integration_service(
     dossier_id = payload.get("dossier_id")
     export_id = payload.get("export_id")
     render_id = payload.get("render_id")
+    integration_type = str(binding.get("integration_type") or "custom")
     rendered_export = (
         store.get_rendered_export(str(render_id))
         if render_id
@@ -4320,7 +4328,6 @@ def execute_integration_service(
         render_id = (rendered_export or {}).get("render_id")
 
     try:
-        integration_type = str(binding.get("integration_type") or "custom")
         if integration_type == "local_archive":
             if rendered_export is None:
                 raise HTTPException(
@@ -4352,25 +4359,50 @@ def execute_integration_service(
                 event_type=payload.get("event_type") or "platform_sink_event",
                 metadata=payload.get("metadata") or {},
             )
+        elif integration_type in {
+            "premium_market_data",
+            "premium_news_intel",
+            "filings_intel",
+            "estimates_or_earnings_intel",
+        }:
+            execution = execute_premium_connector_probe(
+                binding=binding,
+                sample_symbol=payload.get("sample_symbol") or payload.get("symbol") or "NVDA",
+                execute_live=bool(payload.get("execute_live")),
+                metadata=payload.get("metadata") or {},
+            )
         else:
             raise HTTPException(
                 status_code=400,
                 detail=f"integration type {integration_type} is not executable in Phase 7",
             )
         persisted = store.create_integration_execution(execution)
+        execution_status = str(persisted.get("status") or "unknown")
+        health_status = (
+            "healthy"
+            if execution_status in {"completed", "queued"}
+            else "configured"
+            if execution_status in {"configured", "blocked"}
+            else "degraded"
+        )
+        warning_text = (
+            persisted.get("error_summary")
+            or (((persisted.get("output_summary") or {}).get("data_quality_summary")))
+            or "integration execution requires attention"
+        )
         binding = store.update_integration_binding(
             binding_id,
             {
                 "health": {
                     **dict(binding.get("health") or {}),
-                    "status": "healthy" if persisted.get("status") in {"completed", "queued"} else "degraded",
+                    "status": health_status,
                     "checked_at": _now_utc(),
                     "warnings": []
-                    if persisted.get("status") in {"completed", "queued"}
-                    else [persisted.get("error_summary") or "integration execution failed"],
+                    if execution_status in {"completed", "queued"}
+                    else [warning_text],
                     "details": {
                         **dict((binding.get("health") or {}).get("details") or {}),
-                        "last_execution_status": persisted.get("status"),
+                        "last_execution_status": execution_status,
                         "last_execution_at": persisted.get("completed_at"),
                         "last_execution_id": persisted.get("execution_id"),
                     },
@@ -4509,6 +4541,7 @@ def build_platform_health_service(
         else []
     )
     integration_bindings = scope_bundle["integration_bindings"]
+    premium_connector_overview = build_premium_connector_overview(execute_live=False)
     rendered_exports = scope_bundle["rendered_exports"]
     integration_execution_count = sum(
         len(
@@ -4532,6 +4565,7 @@ def build_platform_health_service(
         stored_exports=stored_exports,
         audit_events=audit_events,
         integration_bindings=integration_bindings,
+        premium_connector_overview=premium_connector_overview,
     )
     health["rendered_export_count"] = len(rendered_exports)
     health["stored_export_count"] = len(stored_exports)

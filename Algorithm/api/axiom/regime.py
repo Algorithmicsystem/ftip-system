@@ -37,6 +37,14 @@ def classify_axiom_regime(
     false_positive = float(scorecard.false_positive_penalty or 0.0)
     mispricing = float(scorecard.mispricing_readiness or 0.0)
     maturity = float(scorecard.setup_maturity or 0.0)
+    event_support = float(scorecard.event_overhang_support or 0.0)
+    catalyst_quality = float(scorecard.catalyst_quality or 0.0)
+    source_penalty = float(scorecard.source_strength_penalty or 0.0)
+    recency_quality = float(scorecard.evidence_recency_quality or 0.0)
+    has_event_support = support.event_overhang_support_or_penalty is not None
+    has_catalyst_quality = support.catalyst_quality is not None
+    has_source_penalty = support.source_strength_penalty is not None
+    has_recency_quality = support.evidence_recency_quality is not None
 
     if (
         false_positive >= 72.0
@@ -64,11 +72,13 @@ def classify_axiom_regime(
         and alignment >= 66.0
         and mispricing >= 60.0
         and false_positive <= 42.0
+        and (not has_catalyst_quality or catalyst_quality >= 54.0)
+        and (not has_source_penalty or source_penalty <= 42.0)
     ):
         label = "fundamental_convergence"
         trade_family = "convergence"
-        rationale = "Fundamental reality, current pricing, and implementation quality are converging at the same time, so AXIOM treats the setup as a true convergence regime rather than a loose directional idea."
-        flags.extend(["quality_supported", "cross_engine_alignment_high"])
+        rationale = "Fundamental reality, current pricing, and implementation quality are converging at the same time, with event and filing evidence staying supportive enough that AXIOM treats the setup as a true convergence regime rather than a loose directional idea."
+        flags.extend(["quality_supported", "cross_engine_alignment_high", "catalyst_supported"])
     elif (
         (state_pricing.score or 0.0) >= 66.0
         and (fundamental.score or 0.0) >= 55.0
@@ -90,11 +100,13 @@ def classify_axiom_regime(
         and timing >= 62.0
         and maturity >= 58.0
         and false_positive <= 48.0
+        and (not has_event_support or event_support >= 48.0)
+        and (not has_source_penalty or source_penalty <= 58.0)
     ):
         label = "behavioral_continuation"
         trade_family = "transmission"
-        rationale = "Timing, flow transmission, and cleaner behavioral participation all remain supportive, so AXIOM sees a usable behavioral continuation rather than a late crowded chase."
-        flags.extend(["trend_supported", "timing_supported"])
+        rationale = "Timing, flow transmission, and cleaner behavioral participation all remain supportive, with the event stack not yet overwhelming the path, so AXIOM sees a usable behavioral continuation rather than a late crowded chase."
+        flags.extend(["trend_supported", "timing_supported", "event_stack_contained"])
     elif (
         (liquidity.score or 0.0) >= 58.0
         and (support.negative_news_resilient_price_divergence or 0.0) >= 55.0
@@ -102,11 +114,12 @@ def classify_axiom_regime(
         and (support.live_readiness_score or 0.0) >= 45.0
         and path >= 56.0
         and mispricing >= 50.0
+        and (not has_recency_quality or recency_quality >= 50.0)
     ):
         label = "convexity_opportunity"
         trade_family = "convexity"
-        rationale = "The setup preserves asymmetry through adequate liquidity and path survivability, so AXIOM classifies it as a convexity opportunity rather than a simple bounce."
-        flags.extend(["asymmetry_supported", "path_survivability_supported"])
+        rationale = "The setup preserves asymmetry through adequate liquidity, path survivability, and sufficiently recent supporting evidence, so AXIOM classifies it as a convexity opportunity rather than a simple bounce."
+        flags.extend(["asymmetry_supported", "path_survivability_supported", "recency_supported"])
     elif (
         (fragility_input.maxdd_63d or 0.0) <= -0.15
         and (fundamental.score or 0.0) >= 55.0

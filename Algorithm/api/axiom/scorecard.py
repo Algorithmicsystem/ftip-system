@@ -189,6 +189,46 @@ def build_axiom_scorecard(
         100.0,
     )
     support_drag_spread = safe_float(fusion.get("support_drag_spread")) or 0.0
+    event_overhang_support = clamp(
+        safe_float(fusion.get("event_overhang_support")) or 0.0,
+        0.0,
+        100.0,
+    )
+    filings_change_signal = clamp(
+        safe_float(fusion.get("filings_change_signal")) or 0.0,
+        0.0,
+        100.0,
+    )
+    catalyst_quality = clamp(
+        safe_float(fusion.get("catalyst_quality")) or 0.0,
+        0.0,
+        100.0,
+    )
+    estimate_revision_support = clamp(
+        safe_float(fusion.get("estimate_revision_support")) or 0.0,
+        0.0,
+        100.0,
+    )
+    source_strength_support = clamp(
+        safe_float(fusion.get("source_strength_support")) or 0.0,
+        0.0,
+        100.0,
+    )
+    source_strength_penalty = clamp(
+        safe_float(fusion.get("source_strength_penalty")) or 0.0,
+        0.0,
+        100.0,
+    )
+    premium_evidence_bonus = clamp(
+        safe_float(fusion.get("premium_evidence_bonus")) or 0.0,
+        0.0,
+        100.0,
+    )
+    evidence_recency_quality = clamp(
+        safe_float(fusion.get("evidence_recency_quality")) or 0.0,
+        0.0,
+        100.0,
+    )
     raw_validated_edge = weighted_average(
         [
             (gross_opportunity, 0.18),
@@ -198,6 +238,12 @@ def build_axiom_scorecard(
             (evidence_readiness, 0.12),
             (path_survivability, 0.12),
             (setup_maturity, 0.06),
+            (event_overhang_support, 0.05),
+            (catalyst_quality, 0.05),
+            (evidence_recency_quality, 0.04),
+            (source_strength_support, 0.04),
+            (filings_change_signal, 0.03),
+            (estimate_revision_support, 0.02),
             (bounded_score(support.signal_score, low=-1.0, high=1.0), 0.03),
             (clamp(50.0 + (support_drag_spread * 0.9), 0.0, 100.0), 0.03),
         ]
@@ -208,6 +254,9 @@ def build_axiom_scorecard(
         - max(55.0 - evidence_readiness, 0.0) * 0.16
         - max(55.0 - path_survivability, 0.0) * 0.18
         - max((regime_conflict_penalty or 0.0) - 50.0, 0.0) * 0.12
+        - max(source_strength_penalty - 52.0, 0.0) * 0.14
+        - max(52.0 - catalyst_quality, 0.0) * 0.08
+        - max(50.0 - evidence_recency_quality, 0.0) * 0.08
         + max(exceptional_opportunity - 72.0, 0.0) * 0.05,
         0.0,
         100.0,
@@ -221,6 +270,10 @@ def build_axiom_scorecard(
                 (timing_support, 0.1),
                 (cross_engine_alignment, 0.1),
                 (exceptional_opportunity, 0.08),
+                (event_overhang_support, 0.06),
+                (catalyst_quality, 0.05),
+                (source_strength_support, 0.05),
+                (evidence_recency_quality, 0.04),
                 (research.score, 0.04),
                 (liquidity.score, 0.04),
             ]
@@ -238,7 +291,10 @@ def build_axiom_scorecard(
         - max(58.0 - evidence_readiness, 0.0) * 0.18
         - max(false_positive_penalty - 48.0, 0.0) * 0.26
         - max((regime_conflict_penalty or 0.0) - 52.0, 0.0) * 0.16
-        - max(45.0 - cross_engine_alignment, 0.0) * 0.12,
+        - max(45.0 - cross_engine_alignment, 0.0) * 0.12
+        - max(source_strength_penalty - 50.0, 0.0) * 0.18
+        - max(52.0 - event_overhang_support, 0.0) * 0.12
+        - max(52.0 - catalyst_quality, 0.0) * 0.08,
         0.0,
         100.0,
     )
@@ -247,7 +303,9 @@ def build_axiom_scorecard(
         f"validated edge {validated_edge:.1f}, and deployable alpha utility {deployable_alpha_utility:.1f}. "
         f"Cross-engine alignment is {cross_engine_alignment:.1f}, timing support is {timing_support:.1f}, "
         f"mispricing readiness is {mispricing_readiness:.1f}, evidence readiness is {evidence_readiness:.1f}, "
-        f"path survivability is {path_survivability:.1f}, and false-positive penalty is {false_positive_penalty:.1f}. "
+        f"path survivability is {path_survivability:.1f}, false-positive penalty is {false_positive_penalty:.1f}, "
+        f"catalyst quality is {catalyst_quality:.1f}, source-strength support is {source_strength_support:.1f}, "
+        f"and evidence recency quality is {evidence_recency_quality:.1f}. "
         f"Coverage is {coverage_strength:.1f} / 100, confidence is {confidence_strength:.1f} / 100, "
         f"and regime weighting profile is {regime_profile.replace('_', ' ')}."
     )
@@ -265,6 +323,14 @@ def build_axiom_scorecard(
         false_positive_penalty=round(false_positive_penalty, 2),
         exceptional_opportunity=round(exceptional_opportunity, 2),
         support_drag_spread=round(support_drag_spread, 2),
+        event_overhang_support=round(event_overhang_support, 2),
+        filings_change_signal=round(filings_change_signal, 2),
+        catalyst_quality=round(catalyst_quality, 2),
+        estimate_revision_support=round(estimate_revision_support, 2),
+        source_strength_support=round(source_strength_support, 2),
+        source_strength_penalty=round(source_strength_penalty, 2),
+        premium_evidence_bonus=round(premium_evidence_bonus, 2),
+        evidence_recency_quality=round(evidence_recency_quality, 2),
         regime_weighting_profile=regime_profile,
         overall_coverage=round(coverage_strength, 2),
         overall_confidence=round(confidence_strength, 2),
@@ -304,6 +370,14 @@ def build_axiom_scorecard(
             "false_positive_penalty": round(false_positive_penalty, 2),
             "exceptional_opportunity": round(exceptional_opportunity, 2),
             "support_drag_spread": round(support_drag_spread, 2),
+            "event_overhang_support": round(event_overhang_support, 2),
+            "filings_change_signal": round(filings_change_signal, 2),
+            "catalyst_quality": round(catalyst_quality, 2),
+            "estimate_revision_support": round(estimate_revision_support, 2),
+            "source_strength_support": round(source_strength_support, 2),
+            "source_strength_penalty": round(source_strength_penalty, 2),
+            "premium_evidence_bonus": round(premium_evidence_bonus, 2),
+            "evidence_recency_quality": round(evidence_recency_quality, 2),
         },
         summary=summary,
     )

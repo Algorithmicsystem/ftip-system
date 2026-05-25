@@ -143,6 +143,14 @@ class AxiomSupportContext(BaseModel):
     positive_news_weak_price_divergence: Optional[float] = None
     negative_news_resilient_price_divergence: Optional[float] = None
     event_pressure_score: Optional[float] = None
+    event_overhang_support_or_penalty: Optional[float] = None
+    filings_change_signal: Optional[float] = None
+    catalyst_quality: Optional[float] = None
+    estimate_revision_support: Optional[float] = None
+    source_strength_support: Optional[float] = None
+    source_strength_penalty: Optional[float] = None
+    premium_evidence_bonus: Optional[float] = None
+    evidence_recency_quality: Optional[float] = None
     strategy_posture: Optional[str] = None
     conviction_tier: Optional[str] = None
     fragility_tier: Optional[str] = None
@@ -230,6 +238,14 @@ class AxiomScorecard(BaseModel):
     false_positive_penalty: float = 0.0
     exceptional_opportunity: float = 0.0
     support_drag_spread: float = 0.0
+    event_overhang_support: float = 0.0
+    filings_change_signal: float = 0.0
+    catalyst_quality: float = 0.0
+    estimate_revision_support: float = 0.0
+    source_strength_support: float = 0.0
+    source_strength_penalty: float = 0.0
+    premium_evidence_bonus: float = 0.0
+    evidence_recency_quality: float = 0.0
     regime_weighting_profile: str = "base_balance"
     overall_coverage: float
     overall_confidence: float

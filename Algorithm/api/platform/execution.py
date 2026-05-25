@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from api.assistant.reports import sanitize_payload
+from api.data_providers.premium import probe_premium_connector
 from api.platform.contracts import IntegrationExecutionRecord, RenderedExportResult
 from api.platform.serializers import content_hash, stable_json_dumps
 
@@ -180,4 +181,61 @@ def execute_internal_sink(
         "sink_path": str(sink_path),
         "event_checksum": content_hash(envelope),
     }
+    return sanitize_payload(payload)
+
+
+def execute_premium_connector_probe(
+    *,
+    binding: Dict[str, Any],
+    sample_symbol: Optional[str] = None,
+    execute_live: bool = False,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    connector_type = str(binding.get("integration_type") or "")
+    result = probe_premium_connector(
+        connector_type,
+        sample_symbol=str(sample_symbol or "NVDA"),
+        execute_live=execute_live,
+    )
+    readiness_status = str(result.get("readiness_status") or "unknown")
+    live_probe_status = str(result.get("live_probe_status") or "not_attempted")
+    if live_probe_status == "probe_failed":
+        status = "failed"
+    elif readiness_status in {"missing_credentials", "misconfigured"} or live_probe_status == "blocked_missing_credentials":
+        status = "blocked"
+    elif live_probe_status == "probe_succeeded":
+        status = "completed"
+    else:
+        status = "configured"
+    payload = _base_execution_payload(
+        binding=binding,
+        action_type="connector_probe",
+        dossier_id=None,
+        export_id=None,
+        render_id=None,
+        workspace_id=binding.get("workspace_id"),
+        organization_id=binding.get("organization_id"),
+        metadata=metadata,
+    )
+    payload["status"] = status
+    payload["payload_summary"] = sanitize_payload(
+        {
+            "connector_type": connector_type,
+            "sample_symbol": result.get("sample_symbol"),
+            "execute_live": bool(execute_live),
+        }
+    )
+    payload["output_summary"] = sanitize_payload(
+        {
+            "readiness_status": readiness_status,
+            "live_probe_status": live_probe_status,
+            "configured_vendors": result.get("configured_vendors") or [],
+            "capabilities": result.get("capabilities") or [],
+            "data_quality_summary": result.get("data_quality_summary"),
+            "last_execution_result": result.get("last_execution_result") or {},
+            "failure_reason_classification": result.get("failure_reason_classification"),
+            "checked_at": result.get("checked_at"),
+        }
+    )
+    payload["error_summary"] = result.get("error_summary")
     return sanitize_payload(payload)

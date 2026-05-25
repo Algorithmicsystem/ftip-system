@@ -29,6 +29,12 @@ def _consistency_score(values: Iterable[Optional[float]]) -> float:
     return clamp(100.0 - (dispersion * 3.0), 0.0, 100.0)
 
 
+def _premium_bonus_score(value: Optional[float]) -> float:
+    if value is None:
+        return 50.0
+    return clamp(50.0 + float(value) * 4.0, 0.0, 100.0)
+
+
 def _regime_weighting_profile(engine_input: AxiomEngineInput) -> Dict[str, Any]:
     regime_hint = str(engine_input.support.regime_label or "").strip().lower()
     posture = str(engine_input.support.strategy_posture or "").strip().lower()
@@ -120,6 +126,47 @@ def build_fusion_metrics(
     fragility = _engine_value(engine_scores["critical_fragility"])
     research = _engine_value(engine_scores["research_integrity"])
     profile = _regime_weighting_profile(engine_input)
+    event_overhang_support = clamp(
+        safe_float(support.event_overhang_support_or_penalty) or 50.0,
+        0.0,
+        100.0,
+    )
+    filings_change_signal = clamp(
+        safe_float(support.filings_change_signal) or 50.0,
+        0.0,
+        100.0,
+    )
+    catalyst_quality = clamp(
+        safe_float(support.catalyst_quality) or 50.0,
+        0.0,
+        100.0,
+    )
+    estimate_revision_support = clamp(
+        safe_float(support.estimate_revision_support) or 50.0,
+        0.0,
+        100.0,
+    )
+    source_strength_support = clamp(
+        safe_float(support.source_strength_support) or 50.0,
+        0.0,
+        100.0,
+    )
+    source_strength_penalty = clamp(
+        safe_float(support.source_strength_penalty) or 50.0,
+        0.0,
+        100.0,
+    )
+    premium_evidence_bonus = clamp(
+        safe_float(support.premium_evidence_bonus) or 0.0,
+        0.0,
+        100.0,
+    )
+    premium_bonus_score = _premium_bonus_score(safe_float(support.premium_evidence_bonus))
+    evidence_recency_quality = clamp(
+        safe_float(support.evidence_recency_quality) or 50.0,
+        0.0,
+        100.0,
+    )
 
     opportunity_stack = _average_defined(
         [fundamental, state_pricing, behavioral, flow]
@@ -166,6 +213,10 @@ def build_fusion_metrics(
                 (safe_float(support.macro_alignment_score), 0.08),
                 (safe_float(support.sector_confirmation_score), 0.04),
                 (safe_float(support.benchmark_relative_strength_score), 0.04),
+                (event_overhang_support, 0.08),
+                (catalyst_quality, 0.08),
+                (evidence_recency_quality, 0.04),
+                (estimate_revision_support, 0.03),
                 (inverse_score(safe_float(support.reversal_pressure_score)), 0.04),
                 (inverse_score(safe_float(support.trend_exhaustion_score)), 0.04),
                 (inverse_score(safe_float(support.contradiction_score)), 0.02),
@@ -190,6 +241,10 @@ def build_fusion_metrics(
                 (safe_float(support.fundamental_durability_score), 0.08),
                 (safe_float(support.execution_quality_score), 0.06),
                 (safe_float(support.live_readiness_score), 0.05),
+                (catalyst_quality, 0.05),
+                (evidence_recency_quality, 0.04),
+                (source_strength_support, 0.04),
+                (premium_bonus_score, 0.02),
                 ((safe_float(support.readiness_bucket_quality) or 0.0) * 100.0, 0.03),
             ]
         )
@@ -208,6 +263,11 @@ def build_fusion_metrics(
                 (safe_float(support.domain_agreement_score), 0.08),
                 (inverse_score(safe_float(support.domain_conflict_score)), 0.08),
                 (safe_float(support.fundamental_durability_score), 0.08),
+                (filings_change_signal, 0.08),
+                (catalyst_quality, 0.06),
+                (source_strength_support, 0.04),
+                (inverse_score(source_strength_penalty), 0.04),
+                (premium_bonus_score, 0.02),
                 (bounded_score(safe_float(support.signal_score), low=-1.0, high=1.0), 0.06),
                 (safe_float(support.negative_news_resilient_price_divergence), 0.04),
                 (inverse_score(safe_float(support.hype_to_price_divergence_score)), 0.02),
@@ -255,6 +315,9 @@ def build_fusion_metrics(
                 (research, 0.14),
                 (safe_float(support.quality_score), 0.08),
                 (safe_float(engine_input.fundamental.reporting_completeness_score), 0.08),
+                (evidence_recency_quality, 0.08),
+                (source_strength_support, 0.07),
+                (premium_bonus_score, 0.05),
                 (safe_float(engine_input.fundamental.provider_confidence), 0.04),
                 (safe_float(engine_input.fragility.provider_confidence), 0.04),
             ]
@@ -272,6 +335,9 @@ def build_fusion_metrics(
                 (safe_float(fragility_input.execution_cleanliness_score), 0.1),
                 (safe_float(support.execution_quality_score), 0.08),
                 (safe_float(support.live_readiness_score), 0.08),
+                (event_overhang_support, 0.08),
+                (evidence_recency_quality, 0.06),
+                (inverse_score(source_strength_penalty), 0.04),
                 (inverse_score(safe_float(fragility_input.market_stress_score)), 0.06),
                 (inverse_score(safe_float(fragility_input.implementation_fragility_score)), 0.06),
                 (inverse_score(safe_float(fragility_input.friction_proxy_score)), 0.04),
@@ -304,6 +370,10 @@ def build_fusion_metrics(
                 (safe_float(support.hype_to_price_divergence_score), 0.06),
                 (safe_float(support.contradiction_score), 0.04),
                 (safe_float(support.positive_news_weak_price_divergence), 0.04),
+                (source_strength_penalty, 0.08),
+                (inverse_score(event_overhang_support), 0.06),
+                (inverse_score(catalyst_quality), 0.05),
+                (inverse_score(evidence_recency_quality), 0.05),
                 (momentum_outrun_penalty, 0.04),
             ]
         )
@@ -339,6 +409,14 @@ def build_fusion_metrics(
         "false_positive_penalty": round(false_positive_penalty, 2),
         "exceptional_opportunity": round(exceptional_opportunity, 2),
         "support_drag_spread": round(support_drag_spread, 2),
+        "event_overhang_support": round(event_overhang_support, 2),
+        "filings_change_signal": round(filings_change_signal, 2),
+        "catalyst_quality": round(catalyst_quality, 2),
+        "estimate_revision_support": round(estimate_revision_support, 2),
+        "source_strength_support": round(source_strength_support, 2),
+        "source_strength_penalty": round(source_strength_penalty, 2),
+        "premium_evidence_bonus": round(premium_evidence_bonus, 2),
+        "evidence_recency_quality": round(evidence_recency_quality, 2),
         "spread_score": round(spread_score, 2),
         "opportunity_stack": round(opportunity_stack, 2),
         "drag_stack": round(drag_stack, 2),

@@ -61,6 +61,13 @@ def _caller_page_snapshot(caller_context: Optional[Dict[str, Any]]) -> Dict[str,
         "recommendation_state": page_context.get("recommendation_state"),
         "committee_state": page_context.get("committee_state"),
         "review_state": page_context.get("review_state"),
+        "continuity_scope_id": page_context.get("continuity_scope_id"),
+        "workspace_continuity": page_context.get("workspace_continuity") or {},
+        "unresolved_concern_count": page_context.get("unresolved_concern_count"),
+        "pending_approval_count": page_context.get("pending_approval_count"),
+        "provider_health_status": page_context.get("provider_health_status"),
+        "proof_maturity_level": page_context.get("proof_maturity_level"),
+        "calibration_status": page_context.get("calibration_status"),
         "export_count": page_context.get("export_count"),
         "active_pack_types": list(page_context.get("active_pack_types") or []),
         "current_view_summary": page_context.get("current_view_summary"),
@@ -305,6 +312,10 @@ def build_narrator_context(
     fragility = report.get("fragility_intelligence") or {}
     agreement = report.get("domain_agreement") or {}
     invalidators = report.get("invalidators") or {}
+    data_bundle = report.get("data_bundle") or {}
+    event_overlay = data_bundle.get("event_catalyst_risk") or {}
+    quality_provenance = data_bundle.get("quality_provenance") or {}
+    premium_connector_summary = quality_provenance.get("premium_connector_summary") or {}
     sections = _section_catalog(report)
     selected_sections = {
         name: sections.get(name)
@@ -510,11 +521,21 @@ def build_narrator_context(
             ),
         },
         "market_depth_snapshot": {
-            "event_risk_classification": (report.get("data_bundle") or {}).get("event_catalyst_risk", {}).get("event_risk_classification"),
-            "implementation_fragility_score": (report.get("data_bundle") or {}).get("liquidity_execution_fragility", {}).get("implementation_fragility_score"),
-            "breadth_state": (report.get("data_bundle") or {}).get("market_breadth_internals", {}).get("breadth_state"),
-            "cross_asset_conflict_score": (report.get("data_bundle") or {}).get("cross_asset_confirmation", {}).get("cross_asset_conflict_score"),
-            "market_stress_score": (report.get("data_bundle") or {}).get("stress_spillover_conditions", {}).get("market_stress_score"),
+            "event_risk_classification": event_overlay.get("event_risk_classification"),
+            "event_freshness": event_overlay.get("event_freshness"),
+            "event_relevance": event_overlay.get("event_relevance"),
+            "catalyst_quality": event_overlay.get("catalyst_quality"),
+            "filings_change_signal": event_overlay.get("filings_change_signal"),
+            "estimate_revision_support": event_overlay.get("estimate_revision_support"),
+            "source_strength_support": event_overlay.get("source_strength_support"),
+            "source_strength_penalty": event_overlay.get("source_strength_penalty"),
+            "premium_evidence_bonus": event_overlay.get("premium_evidence_bonus"),
+            "evidence_recency_quality": event_overlay.get("evidence_recency_quality"),
+            "source_confidence": event_overlay.get("source_confidence"),
+            "implementation_fragility_score": data_bundle.get("liquidity_execution_fragility", {}).get("implementation_fragility_score"),
+            "breadth_state": data_bundle.get("market_breadth_internals", {}).get("breadth_state"),
+            "cross_asset_conflict_score": data_bundle.get("cross_asset_confirmation", {}).get("cross_asset_conflict_score"),
+            "market_stress_score": data_bundle.get("stress_spillover_conditions", {}).get("market_stress_score"),
             "suppression_flags": _compact_list(report.get("suppression_flags") or []),
             "adjusted_confidence_notes": _compact_list(report.get("adjusted_confidence_notes") or []),
         },
@@ -560,6 +581,18 @@ def build_narrator_context(
             "data_provider_quality_summary": report.get(
                 "data_provider_quality_summary"
             ),
+            "provider_stack_summary": quality_provenance.get("provider_stack_summary"),
+            "source_strength_summary": quality_provenance.get("source_strength_summary"),
+            "source_warning_flags": _compact_list(
+                quality_provenance.get("source_warning_flags") or []
+            ),
+            "fallback_domains": _compact_list(
+                quality_provenance.get("fallback_domains") or []
+            ),
+            "weak_source_domains": _compact_list(
+                quality_provenance.get("weak_source_domains") or []
+            ),
+            "premium_connector_summary": premium_connector_summary,
             "buyer_safe_profile_status": report.get("buyer_safe_profile_status"),
             "buyer_demo_suitability": report.get("buyer_demo_suitability"),
             "commercialization_risk_score": report.get(
@@ -590,6 +623,18 @@ def build_narrator_context(
             "path_survivability": report.get("axiom_path_survivability"),
             "false_positive_penalty": report.get("axiom_false_positive_penalty"),
             "exceptional_opportunity": report.get("axiom_exceptional_opportunity"),
+            "event_overhang_support": report.get("axiom_event_overhang_support"),
+            "filings_change_signal": report.get("axiom_filings_change_signal"),
+            "catalyst_quality": report.get("axiom_catalyst_quality"),
+            "estimate_revision_support": report.get(
+                "axiom_estimate_revision_support"
+            ),
+            "source_strength_support": report.get("axiom_source_strength_support"),
+            "source_strength_penalty": report.get("axiom_source_strength_penalty"),
+            "premium_evidence_bonus": report.get("axiom_premium_evidence_bonus"),
+            "evidence_recency_quality": report.get(
+                "axiom_evidence_recency_quality"
+            ),
             "regime_weighting_profile": report.get("axiom_regime_weighting_profile"),
             "calibration_status": report.get("axiom_calibration_status"),
             "portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
@@ -648,6 +693,9 @@ def build_narrator_context(
             "export_capabilities": report.get("platform_export_capabilities"),
             "health_summary": report.get("platform_health_summary"),
             "proof_summary": report.get("platform_proof_summary"),
+            "calibration_hardening": report.get("platform_calibration_hardening"),
+            "drift_summary": report.get("platform_drift_summary"),
+            "premium_connectors": premium_connector_summary.get("connectors"),
         },
         "operating_workflow_snapshot": {
             "operating_workflow_version": report.get("operating_workflow_version"),

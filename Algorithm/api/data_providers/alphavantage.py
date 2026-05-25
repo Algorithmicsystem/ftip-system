@@ -114,6 +114,91 @@ def fetch_company_overview(symbol: str) -> Dict[str, Any]:
     }
 
 
+def fetch_earnings_intelligence(symbol: str) -> Dict[str, Any]:
+    payload = _request({"function": "EARNINGS", "symbol": canonical_symbol(symbol)})
+    quarterly = payload.get("quarterlyEarnings") or []
+    if not isinstance(quarterly, list) or not quarterly:
+        raise SymbolNoData("NO_DATA", "Alpha Vantage returned no earnings history")
+
+    quarters: List[Dict[str, Any]] = []
+    for item in quarterly[:12]:
+        fiscal_date_text = str(item.get("fiscalDateEnding") or "").strip()
+        reported_date_text = str(item.get("reportedDate") or "").strip()
+        try:
+            fiscal_period_end = dt.date.fromisoformat(fiscal_date_text)
+        except Exception:
+            continue
+        reported_date = None
+        if reported_date_text:
+            try:
+                reported_date = dt.date.fromisoformat(reported_date_text)
+            except Exception:
+                reported_date = None
+        surprise_pct = _surprise_pct_or_none(item.get("surprisePercentage"))
+        surprise = _float_or_none(item.get("surprise"))
+        reported_eps = _float_or_none(item.get("reportedEPS"))
+        estimated_eps = _float_or_none(item.get("estimatedEPS"))
+        quarters.append(
+            {
+                "symbol": canonical_symbol(symbol),
+                "fiscal_period_end": fiscal_period_end,
+                "reported_date": reported_date,
+                "reported_eps": reported_eps,
+                "estimated_eps": estimated_eps,
+                "surprise": surprise,
+                "surprise_pct": surprise_pct,
+                "surprise_direction": (
+                    "beat"
+                    if surprise is not None and surprise > 0
+                    else "miss"
+                    if surprise is not None and surprise < 0
+                    else "inline"
+                ),
+                "source": "alphavantage",
+            }
+        )
+    if not quarters:
+        raise SymbolNoData("NO_DATA", "Alpha Vantage earnings history could not be parsed")
+
+    latest = quarters[0]
+    recent = quarters[:4]
+    beat_count = sum(1 for item in recent if item.get("surprise_direction") == "beat")
+    miss_count = sum(1 for item in recent if item.get("surprise_direction") == "miss")
+    average_surprise_pct = _mean(
+        [item.get("surprise_pct") for item in recent if item.get("surprise_pct") is not None]
+    )
+    estimate_revision_support = _estimate_revision_support(
+        average_surprise_pct=average_surprise_pct,
+        beat_count=beat_count,
+        miss_count=miss_count,
+        sample_size=len(recent),
+    )
+    freshness_status = _earnings_freshness_status(latest.get("reported_date"))
+    return {
+        "symbol": canonical_symbol(symbol),
+        "recent_quarters": quarters[:8],
+        "latest_quarter": latest,
+        "beat_rate_4q": beat_count / max(len(recent), 1),
+        "miss_rate_4q": miss_count / max(len(recent), 1),
+        "average_surprise_pct_4q": average_surprise_pct,
+        "estimate_revision_support": estimate_revision_support,
+        "freshness_status": freshness_status,
+        "source": "alphavantage",
+        "meta": {
+            "sources": ["alphavantage"],
+            "primary_source": "alphavantage",
+            "coverage_score": 1.0 if quarters else 0.0,
+            "confidence": 78.0 if quarters else 0.0,
+            "latest_reported_date": (
+                latest.get("reported_date").isoformat()
+                if isinstance(latest.get("reported_date"), dt.date)
+                else None
+            ),
+            "status": freshness_status,
+        },
+    }
+
+
 def fetch_quarterly_fundamentals(symbol: str) -> List[Dict[str, object]]:
     income = _request({"function": "INCOME_STATEMENT", "symbol": canonical_symbol(symbol)})
     cashflow = _request({"function": "CASH_FLOW", "symbol": canonical_symbol(symbol)})
@@ -181,6 +266,50 @@ def fetch_quarterly_fundamentals(symbol: str) -> List[Dict[str, object]]:
     if not rows:
         raise SymbolNoData("NO_DATA", "Alpha Vantage quarterly fundamentals could not be parsed")
     return rows
+
+
+def _mean(values: List[Optional[float]]) -> Optional[float]:
+    defined = [float(value) for value in values if value is not None]
+    if not defined:
+        return None
+    return float(sum(defined) / len(defined))
+
+
+def _surprise_pct_or_none(value: Any) -> Optional[float]:
+    raw = _float_or_none(value)
+    if raw is None:
+        return None
+    if abs(raw) <= 1.0:
+        return raw * 100.0
+    return raw
+
+
+def _estimate_revision_support(
+    *,
+    average_surprise_pct: Optional[float],
+    beat_count: int,
+    miss_count: int,
+    sample_size: int,
+) -> Optional[float]:
+    if sample_size <= 0:
+        return None
+    surprise_component = 0.0 if average_surprise_pct is None else max(
+        min(average_surprise_pct, 20.0),
+        -20.0,
+    )
+    beat_component = ((beat_count - miss_count) / sample_size) * 18.0
+    return round(max(min(50.0 + surprise_component * 1.2 + beat_component, 100.0), 0.0), 2)
+
+
+def _earnings_freshness_status(reported_date: Any) -> str:
+    if not isinstance(reported_date, dt.date):
+        return "unknown"
+    age_days = max((dt.datetime.now(dt.timezone.utc).date() - reported_date).days, 0)
+    if age_days <= 45:
+        return "fresh"
+    if age_days <= 120:
+        return "recent"
+    return "historical"
 
 
 def _float_or_none(value: Any) -> Optional[float]:

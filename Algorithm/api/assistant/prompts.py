@@ -11,7 +11,8 @@ BASE_SYSTEM_PROMPT = (
     "Do not claim that you lack the analysis if the report is present. Use concise, careful language, cite the actual report sections when helpful, and distinguish system output from personal advice. "
     "When page, workspace, dossier, workflow, export, recommendation, or committee context is present, answer as a platform copilot anchored to that exact visible state. "
     "Lead with what matters now, what is differentiated about the AXIOM view, what evidence is strongest or weakest, and what operational or workflow constraint is currently binding. "
-    "When provider-health, proof-cycle, recommendation-state, or committee context is present, treat those as live platform constraints rather than background color."
+    "When provider-health, proof-cycle, recommendation-state, or committee context is present, treat those as live platform constraints rather than background color. "
+    "When bounded workspace continuity is present, use it as recent operating context across pages without implying long-term memory beyond what the platform is actually providing."
 )
 
 
@@ -39,6 +40,9 @@ def build_chat_messages(
 
 def summarize_analysis_report(report: Dict[str, Any]) -> str:
     strategy = report.get("strategy") or {}
+    event_overlay = ((report.get("data_bundle") or {}).get("event_catalyst_risk") or {})
+    quality_provenance = ((report.get("data_bundle") or {}).get("quality_provenance") or {})
+    premium_connector_summary = quality_provenance.get("premium_connector_summary") or {}
     return " ".join(
         [
             f"Analysis report for {report.get('symbol', '?')} as of {report.get('as_of_date', '?')}.",
@@ -64,6 +68,9 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"AXIOM unique mispricing: {report.get('axiom_unique_mispricing_summary', 'n/a')}.",
             f"AXIOM timing support / evidence readiness / path survivability: {report.get('axiom_timing_support', 'n/a')} / {report.get('axiom_evidence_readiness', 'n/a')} / {report.get('axiom_path_survivability', 'n/a')}.",
             f"AXIOM false-positive penalty / exceptionality: {report.get('axiom_false_positive_penalty', 'n/a')} / {report.get('axiom_exceptional_opportunity', 'n/a')}.",
+            f"AXIOM event overhang / catalyst quality / estimate revision support: {report.get('axiom_event_overhang_support', 'n/a')} / {report.get('axiom_catalyst_quality', 'n/a')} / {report.get('axiom_estimate_revision_support', 'n/a')}.",
+            f"AXIOM source-strength support / penalty / premium bonus / evidence recency: {report.get('axiom_source_strength_support', 'n/a')} / {report.get('axiom_source_strength_penalty', 'n/a')} / {report.get('axiom_premium_evidence_bonus', 'n/a')} / {report.get('axiom_evidence_recency_quality', 'n/a')}.",
+            f"Event intelligence: risk {event_overlay.get('event_risk_classification', 'n/a')} with catalyst quality {event_overlay.get('catalyst_quality', 'n/a')}, filings change {event_overlay.get('filings_change_signal', 'n/a')}, estimate revision support {event_overlay.get('estimate_revision_support', 'n/a')}, and premium evidence bonus {event_overlay.get('premium_evidence_bonus', 'n/a')}.",
             f"Platform workflow: {report.get('platform_overview_summary', 'n/a')}.",
             f"Platform dossier: {report.get('platform_dossier_summary', 'n/a')}.",
             f"Platform controls: {report.get('platform_workflow_actions_summary', 'n/a')}.",
@@ -82,6 +89,7 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"Platform drift: {report.get('platform_drift_summary_text', 'n/a')}.",
             f"Platform benchmarks: {report.get('platform_benchmark_summary', 'n/a')}.",
             f"Platform model credibility: {report.get('platform_model_credibility_summary', 'n/a')}.",
+            f"Premium connector readiness: {premium_connector_summary.get('summary', 'n/a')}.",
             f"Operating workflow: {report.get('daily_operating_summary', 'n/a')} {report.get('weekly_operating_summary', '')} {report.get('monthly_operating_summary', '')}".strip(),
             f"Overall view: {report.get('overall_analysis', '')}",
         ]
@@ -89,6 +97,8 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
 
 
 def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) -> str:
+    data_bundle = report.get("data_bundle") or {}
+    quality_provenance = data_bundle.get("quality_provenance") or {}
     machine_context = {
         "symbol": report.get("symbol"),
         "as_of_date": report.get("as_of_date"),
@@ -112,12 +122,33 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "continuous_learning": report.get("continuous_learning"),
         "operational_guardrails": report.get("operational_guardrails"),
         "source_governance": report.get("source_governance"),
+        "event_intelligence": data_bundle.get("event_catalyst_risk"),
+        "provider_quality_provenance": quality_provenance,
+        "premium_connector_summary": quality_provenance.get(
+            "premium_connector_summary"
+        ),
         "axiom": report.get("axiom"),
         "axiom_proprietary_synthesis": report.get("axiom_proprietary_synthesis"),
         "axiom_support_vs_drag_summary": report.get("axiom_support_vs_drag_summary"),
         "axiom_why_now_summary": report.get("axiom_why_now_summary"),
         "axiom_unique_mispricing_summary": report.get(
             "axiom_unique_mispricing_summary"
+        ),
+        "axiom_event_overhang_support": report.get("axiom_event_overhang_support"),
+        "axiom_filings_change_signal": report.get("axiom_filings_change_signal"),
+        "axiom_catalyst_quality": report.get("axiom_catalyst_quality"),
+        "axiom_estimate_revision_support": report.get(
+            "axiom_estimate_revision_support"
+        ),
+        "axiom_source_strength_support": report.get(
+            "axiom_source_strength_support"
+        ),
+        "axiom_source_strength_penalty": report.get(
+            "axiom_source_strength_penalty"
+        ),
+        "axiom_premium_evidence_bonus": report.get("axiom_premium_evidence_bonus"),
+        "axiom_evidence_recency_quality": report.get(
+            "axiom_evidence_recency_quality"
         ),
         "axiom_setup_character_summary": report.get("axiom_setup_character_summary"),
         "axiom_false_positive_risk_summary": report.get(
@@ -181,6 +212,7 @@ def _grounding_block(report: Dict[str, Any], context: Optional[Dict[str, Any]]) 
         "statistical_analysis": report.get("statistical_analysis"),
         "sentiment_analysis": report.get("sentiment_analysis"),
         "macro_geopolitical_analysis": report.get("macro_geopolitical_analysis"),
+        "event_catalyst_risk_analysis": report.get("event_catalyst_risk_analysis"),
         "risk_quality_analysis": report.get("risk_quality_analysis"),
         "overall_analysis": report.get("overall_analysis"),
         "strategy_view": report.get("strategy_view"),

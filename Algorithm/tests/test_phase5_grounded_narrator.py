@@ -788,6 +788,15 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
                 "research_tab": "platform",
                 "workspace_id": "workspace-1",
                 "dossier_id": "dossier-1",
+                "workflow_stage": "evidence_review",
+                "provider_health_status": "warning",
+                "proof_maturity_level": "emerging",
+                "calibration_status": "partial",
+                "workspace_continuity": {
+                    "recent_symbols": ["NVDA", "AAPL"],
+                    "recent_prompts": ["What changed since the last workspace question?"],
+                    "recent_export_pack_types": ["ic_memo_pack"],
+                },
             },
         },
     )
@@ -828,9 +837,15 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["axiom_snapshot"]["cross_engine_alignment"] is not None
     assert narrator_context["axiom_snapshot"]["timing_support"] is not None
     assert narrator_context["axiom_snapshot"]["path_survivability"] is not None
+    assert narrator_context["axiom_snapshot"]["event_overhang_support"] is not None
+    assert narrator_context["axiom_snapshot"]["catalyst_quality"] is not None
+    assert narrator_context["axiom_snapshot"]["source_strength_penalty"] is not None
     assert narrator_context["caller_page_snapshot"]["page_label"] == "platform"
     assert narrator_context["caller_page_snapshot"]["workspace_id"] == "workspace-1"
+    assert narrator_context["caller_page_snapshot"]["provider_health_status"] == "warning"
+    assert narrator_context["caller_page_snapshot"]["workspace_continuity"]["recent_symbols"] == ["NVDA", "AAPL"]
     assert narrator_context["caller_context"]["page_context"]["research_tab"] == "platform"
+    assert narrator_context["source_governance_snapshot"]["premium_connector_summary"] == {}
 
 
 def test_phase5_selects_portfolio_sections_for_portfolio_questions() -> None:

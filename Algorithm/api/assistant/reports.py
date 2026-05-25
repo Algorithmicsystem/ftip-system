@@ -597,13 +597,23 @@ def _event_catalyst_risk_text(
     signal_payload: Dict[str, Any],
 ) -> str:
     meta = event_domain.get("meta") or {}
-    classification = str(event_domain.get("event_risk_classification") or "unknown").replace("_", " ")
+    classification = str(
+        event_domain.get("event_risk_classification")
+        or event_domain.get("event_relevance")
+        or "unknown"
+    ).replace("_", " ")
     titles = event_domain.get("major_event_titles") or []
     return _join_sentences(
         [
-            f"Event posture currently reads as {classification}, with event overhang {_fmt_num(event_domain.get('event_overhang_score'), digits=1, signed=False)} / 100, uncertainty {_fmt_num(event_domain.get('event_uncertainty_score'), digits=1, signed=False)} / 100, and catalyst burst {_fmt_num(event_domain.get('catalyst_burst_score'), digits=1, signed=False)} / 100."
+            f"Event posture currently reads as {classification}, with event support / penalty {_fmt_num(_first_available(event_domain.get('event_overhang_support_or_penalty'), event_domain.get('event_overhang_score')), digits=1, signed=False)} / 100, event risk {_fmt_num(_first_available(event_domain.get('event_risk_score'), event_domain.get('event_uncertainty_score')), digits=1, signed=False)} / 100, and catalyst quality {_fmt_num(_first_available(event_domain.get('catalyst_quality'), event_domain.get('catalyst_burst_score')), digits=1, signed=False)} / 100."
             if event_domain
             else _coverage_note(meta, "Event"),
+            f"Filings change signal is {_fmt_num(event_domain.get('filings_change_signal'), digits=1, signed=False)} / 100, estimate revision support is {_fmt_num(event_domain.get('estimate_revision_support'), digits=1, signed=False)} / 100, evidence recency quality is {_fmt_num(event_domain.get('evidence_recency_quality'), digits=1, signed=False)} / 100, and source-strength support / penalty is {_fmt_num(event_domain.get('source_strength_support'), digits=1, signed=False)} / {_fmt_num(event_domain.get('source_strength_penalty'), digits=1, signed=False)}."
+            if event_domain.get("filings_change_signal") is not None
+            or event_domain.get("estimate_revision_support") is not None
+            or event_domain.get("evidence_recency_quality") is not None
+            or event_domain.get("source_strength_support") is not None
+            else None,
             f"Days to next estimated major event: {_fmt_num(event_domain.get('days_to_next_event'), digits=0, signed=False)}; days since the last major event: {_fmt_num(event_domain.get('days_since_last_major_event'), digits=0, signed=False)}."
             if event_domain.get("days_to_next_event") is not None or event_domain.get("days_since_last_major_event") is not None
             else None,
@@ -612,6 +622,10 @@ def _event_catalyst_risk_text(
             else None,
             f"Recent catalyst headlines are {_fmt_list(titles[:4])}."
             if titles
+            else None,
+            f"Premium-evidence bonus is {_fmt_num(event_domain.get('premium_evidence_bonus'), digits=1, signed=False)} and source confidence is {_fmt_num(event_domain.get('source_confidence'), digits=1, signed=False)} / 100."
+            if event_domain.get("premium_evidence_bonus") is not None
+            or event_domain.get("source_confidence") is not None
             else None,
             f"Event suppression flags currently active are {_fmt_list((signal_payload.get('suppression_flags') or []))}."
             if "event_overhang" in (signal_payload.get("suppression_flags") or [])
@@ -2322,6 +2336,30 @@ def attach_axiom_context(
     updated["axiom_exceptional_opportunity"] = (
         (axiom.get("scorecard") or {}).get("exceptional_opportunity")
     )
+    updated["axiom_event_overhang_support"] = (
+        (axiom.get("scorecard") or {}).get("event_overhang_support")
+    )
+    updated["axiom_filings_change_signal"] = (
+        (axiom.get("scorecard") or {}).get("filings_change_signal")
+    )
+    updated["axiom_catalyst_quality"] = (
+        (axiom.get("scorecard") or {}).get("catalyst_quality")
+    )
+    updated["axiom_estimate_revision_support"] = (
+        (axiom.get("scorecard") or {}).get("estimate_revision_support")
+    )
+    updated["axiom_source_strength_support"] = (
+        (axiom.get("scorecard") or {}).get("source_strength_support")
+    )
+    updated["axiom_source_strength_penalty"] = (
+        (axiom.get("scorecard") or {}).get("source_strength_penalty")
+    )
+    updated["axiom_premium_evidence_bonus"] = (
+        (axiom.get("scorecard") or {}).get("premium_evidence_bonus")
+    )
+    updated["axiom_evidence_recency_quality"] = (
+        (axiom.get("scorecard") or {}).get("evidence_recency_quality")
+    )
     updated["axiom_regime_weighting_profile"] = (
         (axiom.get("scorecard") or {}).get("regime_weighting_profile")
     )
@@ -3466,6 +3504,7 @@ def build_analysis_report(
             ]
         )
     )
+    premium_connector_summary = quality_provenance.get("premium_connector_summary") or {}
     domain_availability = (data_bundle.get("domain_availability") or {}) or (
         quality_provenance.get("domain_availability") or {}
     )
@@ -3495,10 +3534,14 @@ def build_analysis_report(
             f"Depth overlays currently show event risk {str(event_catalyst_risk.get('event_risk_classification') or 'unknown').replace('_', ' ')}, implementation fragility {_fmt_num(liquidity_execution_fragility.get('implementation_fragility_score'), digits=1, signed=False)} / 100, breadth state {str(market_breadth_internals.get('breadth_state') or 'unknown').replace('_', ' ')}, cross-asset conflict {_fmt_num(cross_asset_confirmation.get('cross_asset_conflict_score'), digits=1, signed=False)} / 100, and market stress {_fmt_num(stress_spillover_conditions.get('market_stress_score'), digits=1, signed=False)} / 100."
             if event_catalyst_risk or liquidity_execution_fragility or market_breadth_internals or cross_asset_confirmation or stress_spillover_conditions
             else None,
+            f"Event and premium-evidence overlays show catalyst quality {_fmt_num(event_catalyst_risk.get('catalyst_quality'), digits=1, signed=False)} / 100, filings change signal {_fmt_num(event_catalyst_risk.get('filings_change_signal'), digits=1, signed=False)} / 100, source-strength support {_fmt_num(event_catalyst_risk.get('source_strength_support'), digits=1, signed=False)} / 100 versus penalty {_fmt_num(event_catalyst_risk.get('source_strength_penalty'), digits=1, signed=False)} / 100, and premium bonus {_fmt_num(event_catalyst_risk.get('premium_evidence_bonus'), digits=1, signed=False)} / 100."
+            if event_catalyst_risk
+            else None,
             f"Cross-domain agreement is {_fmt_num(domain_agreement.get('domain_agreement_score'), digits=1, signed=False)} / 100 versus conflict {_fmt_num(domain_agreement.get('domain_conflict_score'), digits=1, signed=False)} / 100; the strongest confirming domains are {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_confirming_domains') or []))}, while conflicts are concentrated in {_fmt_list(item.get('domain') for item in (domain_agreement.get('strongest_conflicting_domains') or []))}.",
             f"The dominant regime reads {regime}, freshness is {freshness_summary['overall_status']}, participant fit is {_fmt_list(participant_fit)}, and the main positive drivers are {_fmt_driver_list(why_signal['top_positive_drivers'])}.",
             f"The main risks are {_fmt_driver_list(why_signal['top_negative_drivers'])}, with scenario framing set to {job_context.get('scenario') or 'base'} and execution posture {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')}.",
             data_provider_quality_summary,
+            premium_connector_summary.get("summary"),
             f"Canonical suppression flags are {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}."
             if canonical_signal_payload.get("suppression_flags")
             else None,
@@ -3589,11 +3632,15 @@ def build_analysis_report(
             f"Depth realism overlays show event overhang {_fmt_num(canonical_feature_vector.get('event_overhang_score'), digits=1, signed=False)} / 100, implementation fragility {_fmt_num(canonical_feature_vector.get('implementation_fragility_score'), digits=1, signed=False)} / 100, breadth confirmation {_fmt_num(canonical_feature_vector.get('breadth_confirmation_score'), digits=1, signed=False)} / 100, cross-asset conflict {_fmt_num(canonical_feature_vector.get('cross_asset_conflict_score'), digits=1, signed=False)} / 100, and market stress {_fmt_num(canonical_feature_vector.get('market_stress_score'), digits=1, signed=False)} / 100."
             if canonical_feature_vector
             else None,
+            f"New evidence-domain hooks show catalyst quality {_fmt_num(event_catalyst_risk.get('catalyst_quality'), digits=1, signed=False)} / 100, event support / penalty {_fmt_num(event_catalyst_risk.get('event_overhang_support_or_penalty'), digits=1, signed=False)} / 100, filings change signal {_fmt_num(event_catalyst_risk.get('filings_change_signal'), digits=1, signed=False)} / 100, estimate revision support {_fmt_num(event_catalyst_risk.get('estimate_revision_support'), digits=1, signed=False)} / 100, and source-strength penalty {_fmt_num(event_catalyst_risk.get('source_strength_penalty'), digits=1, signed=False)} / 100."
+            if event_catalyst_risk
+            else None,
             f"The final posture stays at {strategy_signal} because raw signal action {action}, regime {regime}, opportunity-quality score {_fmt_num(composites.get('Opportunity Quality Score'), digits=1)} / 100, and execution framing {(execution_posture.get('preferred_posture') or 'staged_watch').replace('_', ' ')} outweigh the current detractors, but the system is explicitly least certain where {strategy.get('where_least_certain') or 'cross-domain disagreement is highest'}.",
             f"Suppression logic remains active through {_fmt_list(canonical_signal_payload.get('suppression_flags') or [])}, which is why the platform is treating superficially attractive setups more defensively when event windows, liquidity fragility, weak breadth, cross-asset conflict, or stress spillover are elevated."
             if canonical_signal_payload.get("suppression_flags")
             else None,
             data_provider_quality_summary,
+            premium_connector_summary.get("summary"),
             f"Scenario discipline matters: base case is {(scenario_matrix.get('base') or {}).get('summary') or strategy.get('base_case')}, bull transition requires {_fmt_list((strategy.get('confirmation_triggers') or []))}, bear deterioration comes through {_fmt_list((strategy.get('deterioration_triggers') or []))}, and top invalidators are {_fmt_list((invalidation_map.get('top_invalidators') or []))}.",
             "This remains a description of the platform's computed state, not personalized investment advice.",
         ]

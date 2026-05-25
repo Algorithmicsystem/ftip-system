@@ -21,6 +21,7 @@ def build_platform_health_summary(
     stored_exports: Optional[List[Dict[str, Any]]] = None,
     audit_events: List[Dict[str, Any]],
     integration_bindings: List[Dict[str, Any]],
+    premium_connector_overview: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     workflow_checks: List[str] = []
     dossier_checks: List[str] = []
@@ -52,6 +53,14 @@ def build_platform_health_summary(
         *dossier_checks,
         *export_checks,
     ][:20]
+    if premium_connector_overview and str(premium_connector_overview.get("status") or "unknown") != "ready":
+        warnings = [
+            *warnings,
+            str(
+                premium_connector_overview.get("summary")
+                or "Premium connector readiness is not fully ready."
+            ),
+        ][:20]
     return PlatformHealthSummary(
         platform_version=platform_version,
         workspace_id=workspace_id,
@@ -60,7 +69,10 @@ def build_platform_health_summary(
         pending_approval_count=sum(1 for item in approvals if str(item.get("status")) == "pending"),
         export_count=len(exports),
         audit_event_count=len(audit_events),
-        integration_health_summary=integration_health_summary(integration_bindings),
+        integration_health_summary=integration_health_summary(
+            integration_bindings,
+            premium_connector_overview=premium_connector_overview,
+        ),
         workflow_integrity_checks=workflow_checks[:20],
         dossier_integrity_checks=dossier_checks[:20],
         export_integrity_checks=export_checks[:20],

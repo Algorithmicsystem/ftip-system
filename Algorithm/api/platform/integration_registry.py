@@ -72,6 +72,58 @@ _DEFINITIONS: Dict[str, IntegrationDefinition] = {
         ],
         config_schema={"required": ["provider_name"]},
     ),
+    "premium_market_data": IntegrationDefinition(
+        integration_type="premium_market_data",
+        title="Premium Market Data",
+        description="Credential-aware premium market-data probe for institutional-grade bar and reference-feed readiness.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="probe_market_data",
+                title="Probe Market Data",
+                description="Check premium market-data readiness and optionally run a live probe against the configured feed.",
+            ),
+        ],
+        config_schema={"optional": ["sample_symbol", "execute_live"]},
+    ),
+    "premium_news_intel": IntegrationDefinition(
+        integration_type="premium_news_intel",
+        title="Premium News Intelligence",
+        description="Credential-aware premium news and headline-intelligence probe.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="probe_news_intel",
+                title="Probe News Intelligence",
+                description="Check premium news-intelligence readiness and optionally run a live probe against the configured feed.",
+            ),
+        ],
+        config_schema={"optional": ["sample_symbol", "execute_live"]},
+    ),
+    "filings_intel": IntegrationDefinition(
+        integration_type="filings_intel",
+        title="Filings Intelligence",
+        description="Credential-aware SEC and filings-intelligence probe for event and filing readiness.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="probe_filings_intel",
+                title="Probe Filings Intelligence",
+                description="Check filings-intelligence readiness and optionally run a live probe against the configured filing backbone.",
+            ),
+        ],
+        config_schema={"optional": ["sample_symbol", "execute_live"]},
+    ),
+    "estimates_or_earnings_intel": IntegrationDefinition(
+        integration_type="estimates_or_earnings_intel",
+        title="Estimates / Earnings Intelligence",
+        description="Credential-aware earnings and estimates-intelligence probe.",
+        capabilities=[
+            ConnectorCapability(
+                capability_id="probe_estimates_intel",
+                title="Probe Estimates Intelligence",
+                description="Check earnings-estimates readiness and optionally run a live probe against the configured enrichment source.",
+            ),
+        ],
+        config_schema={"optional": ["sample_symbol", "execute_live"]},
+    ),
     "messaging_notification": IntegrationDefinition(
         integration_type="messaging_notification",
         title="Messaging / Notification",

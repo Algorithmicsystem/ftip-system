@@ -11,12 +11,14 @@ from .fundamentals import (
     fetch_fundamentals_quarterly,
     fetch_fundamentals_quarterly_with_meta,
 )
-from .alphavantage import fetch_company_overview
+from .alphavantage import fetch_company_overview, fetch_earnings_intelligence
+from .events import build_event_intelligence_overlay
 from .finnhub import fetch_basic_financials, fetch_company_news, fetch_company_profile
 from .fred import fetch_series as fetch_fred_series
 from .gdelt import search_articles as search_gdelt_articles
 from .gnews import search_news as search_gnews
 from .newsapi import search_news as search_newsapi
+from .premium import build_premium_connector_overview, list_premium_connector_summaries, probe_premium_connector
 from .sec_edgar import fetch_company_filing_profile
 from .world_bank import fetch_indicator as fetch_world_bank_indicator
 
@@ -36,6 +38,8 @@ __all__ = [
     "fetch_fundamentals_quarterly",
     "fetch_fundamentals_quarterly_with_meta",
     "fetch_company_overview",
+    "fetch_earnings_intelligence",
+    "build_event_intelligence_overlay",
     "fetch_basic_financials",
     "fetch_company_news",
     "fetch_company_profile",
@@ -43,6 +47,9 @@ __all__ = [
     "search_gdelt_articles",
     "search_gnews",
     "search_newsapi",
+    "build_premium_connector_overview",
+    "list_premium_connector_summaries",
+    "probe_premium_connector",
     "fetch_company_filing_profile",
     "fetch_world_bank_indicator",
 ]

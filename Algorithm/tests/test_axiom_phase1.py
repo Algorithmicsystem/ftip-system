@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Dict, Tuple
 
 from api.axiom.contracts import AxiomArtifact, ENGINE_KEYS
@@ -111,6 +112,45 @@ def _build_axiom_inputs(
         "event_overhang_score": 18.0 if calm_setup else 79.0,
         "event_uncertainty_score": 24.0 if calm_setup else 74.0,
         "event_risk_classification": "low_event_risk" if calm_setup else "event_distorted",
+        "event_overhang_support_or_penalty": 76.0
+        if strong_fundamentals and calm_setup and not partial
+        else 34.0
+        if calm_setup
+        else 24.0,
+        "filings_change_signal": 72.0
+        if strong_fundamentals and not partial
+        else 38.0
+        if calm_setup and not partial
+        else 22.0,
+        "catalyst_quality": 79.0
+        if strong_fundamentals and calm_setup and not partial
+        else 48.0
+        if calm_setup
+        else 28.0,
+        "estimate_revision_support": 74.0
+        if strong_fundamentals and calm_setup and not partial
+        else 44.0
+        if calm_setup
+        else 30.0,
+        "source_strength_support": 82.0
+        if calm_setup and not partial
+        else 46.0
+        if calm_setup
+        else 31.0,
+        "source_strength_penalty": 18.0
+        if calm_setup and not partial
+        else 52.0
+        if calm_setup
+        else 74.0,
+        "premium_evidence_bonus": 8.0 if calm_setup and not partial else 0.0,
+        "evidence_recency_quality": 84.0
+        if calm_setup and not partial
+        else 48.0
+        if calm_setup
+        else 26.0,
+        "source_confidence": 78.0 if calm_setup and not partial else 42.0,
+        "event_freshness": "fresh" if calm_setup else "aging",
+        "event_relevance": "high" if calm_setup else "medium",
     }
     liquidity_domain = {
         "meta": {"coverage_score": 0.87 if not partial else 0.42},
@@ -611,6 +651,106 @@ def test_axiom_scorecard_uses_regime_weighting_profiles_and_exceptional_setup_se
     assert strong_scorecard.exceptional_opportunity > transition_scorecard.exceptional_opportunity
     assert strong_scorecard.timing_support > transition_scorecard.timing_support
     assert strong_scorecard.mispricing_readiness > transition_scorecard.mispricing_readiness
+
+
+def test_axiom_event_and_source_strength_hooks_change_real_score_fusion() -> None:
+    base_bundle, base_factors = _build_axiom_inputs(
+        fundamental_case="strong",
+        fragility_case="calm",
+    )
+    premium_bundle = deepcopy(base_bundle)
+    weak_bundle = deepcopy(base_bundle)
+
+    premium_bundle["event_catalyst_risk"].update(
+        {
+            "event_overhang_support_or_penalty": 78.0,
+            "filings_change_signal": 74.0,
+            "catalyst_quality": 82.0,
+            "estimate_revision_support": 76.0,
+            "source_strength_support": 84.0,
+            "source_strength_penalty": 18.0,
+            "premium_evidence_bonus": 12.0,
+            "evidence_recency_quality": 86.0,
+        }
+    )
+    weak_bundle["event_catalyst_risk"].update(
+        {
+            "event_overhang_support_or_penalty": 28.0,
+            "filings_change_signal": 24.0,
+            "catalyst_quality": 31.0,
+            "estimate_revision_support": 34.0,
+            "source_strength_support": 32.0,
+            "source_strength_penalty": 76.0,
+            "premium_evidence_bonus": 0.0,
+            "evidence_recency_quality": 29.0,
+        }
+    )
+
+    premium_input, premium_scores = _build_engine_scores(premium_bundle, base_factors)
+    weak_input, weak_scores = _build_engine_scores(weak_bundle, base_factors)
+    premium_scorecard = build_axiom_scorecard(premium_input, premium_scores)
+    weak_scorecard = build_axiom_scorecard(weak_input, weak_scores)
+
+    assert premium_scorecard.event_overhang_support > weak_scorecard.event_overhang_support
+    assert premium_scorecard.catalyst_quality > weak_scorecard.catalyst_quality
+    assert premium_scorecard.source_strength_support > weak_scorecard.source_strength_support
+    assert premium_scorecard.source_strength_penalty < weak_scorecard.source_strength_penalty
+    assert premium_scorecard.evidence_recency_quality > weak_scorecard.evidence_recency_quality
+    assert premium_scorecard.validated_edge > weak_scorecard.validated_edge
+    assert premium_scorecard.deployable_alpha_utility > weak_scorecard.deployable_alpha_utility
+
+
+def test_axiom_deployability_respects_weak_source_and_stale_event_penalties() -> None:
+    strong_bundle, strong_factors = _build_axiom_inputs(
+        fundamental_case="strong",
+        fragility_case="calm",
+    )
+    degraded_bundle = deepcopy(strong_bundle)
+    degraded_bundle["event_catalyst_risk"].update(
+        {
+            "event_overhang_support_or_penalty": 24.0,
+            "filings_change_signal": 22.0,
+            "catalyst_quality": 34.0,
+            "estimate_revision_support": 36.0,
+            "source_strength_support": 30.0,
+            "source_strength_penalty": 72.0,
+            "premium_evidence_bonus": 0.0,
+            "evidence_recency_quality": 26.0,
+        }
+    )
+
+    strong_input, strong_scores = _build_engine_scores(strong_bundle, strong_factors)
+    strong_scorecard = build_axiom_scorecard(strong_input, strong_scores)
+    strong_regime = classify_axiom_regime(strong_input, strong_scores, strong_scorecard)
+    strong_decision = classify_axiom_deployability(
+        strong_input,
+        strong_scores,
+        strong_scorecard,
+        strong_regime,
+    )
+
+    degraded_input, degraded_scores = _build_engine_scores(
+        degraded_bundle, strong_factors
+    )
+    degraded_scorecard = build_axiom_scorecard(degraded_input, degraded_scores)
+    degraded_regime = classify_axiom_regime(
+        degraded_input,
+        degraded_scores,
+        degraded_scorecard,
+    )
+    degraded_decision = classify_axiom_deployability(
+        degraded_input,
+        degraded_scores,
+        degraded_scorecard,
+        degraded_regime,
+    )
+
+    assert strong_decision.deployability_tier == "live_candidate"
+    assert degraded_decision.deployability_tier in {"paper_trade_only", "monitor_only"}
+    assert "weak_source_stack" in degraded_decision.invalidation_flags
+    assert "stale_event_evidence" in degraded_decision.invalidation_flags
+    assert "event_overhang_drag" in degraded_decision.invalidation_flags
+    assert degraded_scorecard.deployable_alpha_utility < strong_scorecard.deployable_alpha_utility
 
 
 def test_axiom_remaining_engines_now_expose_real_scores_or_partial_coverage():

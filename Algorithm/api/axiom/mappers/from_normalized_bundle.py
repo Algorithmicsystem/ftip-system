@@ -413,6 +413,29 @@ def build_axiom_engine_input(
             sentiment_intelligence.get("negative_news_resilient_price_divergence")
         ),
         event_pressure_score=safe_float(sentiment_intelligence.get("event_pressure_score")),
+        event_overhang_support_or_penalty=safe_float(
+            first_available(
+                event.get("event_overhang_support_or_penalty"),
+                event.get("event_overhang_score"),
+            )
+        ),
+        filings_change_signal=safe_float(event.get("filings_change_signal")),
+        catalyst_quality=safe_float(
+            first_available(
+                event.get("catalyst_quality"),
+                event.get("catalyst_burst_score"),
+            )
+        ),
+        estimate_revision_support=safe_float(event.get("estimate_revision_support")),
+        source_strength_support=safe_float(
+            first_available(
+                event.get("source_strength_support"),
+                quality_domain.get("quality_score"),
+            )
+        ),
+        source_strength_penalty=safe_float(event.get("source_strength_penalty")),
+        premium_evidence_bonus=safe_float(event.get("premium_evidence_bonus")),
+        evidence_recency_quality=safe_float(event.get("evidence_recency_quality")),
         strategy_posture=str(
             first_available(strategy.get("strategy_posture"), report_context.get("strategy_posture"))
             or ""

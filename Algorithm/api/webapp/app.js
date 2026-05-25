@@ -11,6 +11,7 @@ const state = {
   assistantWatchlist: [],
   assistantCompareSymbol: "",
   assistantHealth: null,
+  workspaceContinuityStore: {},
   demoMode: false,
   activeTab: "legacy",
   researchTab: "dashboard",
@@ -24,6 +25,7 @@ const ASSISTANT_WATCHLIST_STORAGE_KEY = "ftip.assistant.watchlist";
 const ASSISTANT_COMPARE_SYMBOL_STORAGE_KEY = "ftip.assistant.compare_symbol";
 const FTIP_DEMO_MODE_STORAGE_KEY = "ftip.demo_mode";
 const ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY = "ftip.assistant.copilot.collapsed";
+const ASSISTANT_WORKSPACE_CONTINUITY_STORAGE_KEY = "ftip.assistant.workspace_continuity";
 
 const isoDate = (date) => date.toISOString().slice(0, 10);
 const formatJson = (value) => JSON.stringify(value ?? {}, null, 2);
@@ -96,6 +98,160 @@ const removeStorageValue = (key) => {
   try {
     window.localStorage.removeItem(key);
   } catch {}
+};
+const uniqueStringList = (values, limit = 6) =>
+  [...new Set((Array.isArray(values) ? values : []).map((item) => String(item || "").trim()).filter(Boolean))].slice(
+    0,
+    limit
+  );
+const resolveCopilotContinuityScope = (pageContext = null) => {
+  const context = pageContext || {};
+  const workspaceId =
+    context.workspace_id || state.assistantActiveAnalysis?.platform_workspace_id || null;
+  const workspaceName =
+    context.workspace_name ||
+    state.assistantLatestReport?.platform_workspace?.name ||
+    null;
+  const symbol =
+    context.symbol ||
+    state.assistantActiveAnalysis?.symbol ||
+    state.assistantLatestReport?.symbol ||
+    null;
+  if (workspaceId) {
+    return `workspace:${workspaceId}`;
+  }
+  if (workspaceName) {
+    return `workspace_name:${String(workspaceName).trim().toLowerCase()}`;
+  }
+  if (symbol) {
+    return `symbol:${normalizeSymbol(symbol)}`;
+  }
+  return "global";
+};
+const getWorkspaceContinuityRecord = (pageContext = null) => {
+  const scopeId =
+    (pageContext && pageContext.continuity_scope_id) || resolveCopilotContinuityScope(pageContext);
+  return state.workspaceContinuityStore?.[scopeId] || {
+    scope_id: scopeId,
+    recent_symbols: [],
+    recent_dossiers: [],
+    recent_workflows: [],
+    recent_export_pack_types: [],
+    recent_pages: [],
+    recent_prompts: [],
+  };
+};
+const persistWorkspaceContinuityStore = (store) => {
+  state.workspaceContinuityStore = store || {};
+  writeStorageJson(
+    ASSISTANT_WORKSPACE_CONTINUITY_STORAGE_KEY,
+    state.workspaceContinuityStore
+  );
+};
+const updateWorkspaceContinuity = (partial = {}, pageContext = null) => {
+  const context = pageContext || buildCopilotPageContext();
+  const scopeId =
+    context.continuity_scope_id || resolveCopilotContinuityScope(context);
+  const current = getWorkspaceContinuityRecord({ continuity_scope_id: scopeId });
+  const next = {
+    ...current,
+    scope_id: scopeId,
+    workspace_id: context.workspace_id || current.workspace_id || null,
+    workspace_name: context.workspace_name || current.workspace_name || null,
+    recommendation_state:
+      partial.recommendation_state ??
+      context.recommendation_state ??
+      current.recommendation_state ??
+      null,
+    committee_state:
+      partial.committee_state ?? context.committee_state ?? current.committee_state ?? null,
+    provider_health_status:
+      partial.provider_health_status ??
+      context.provider_health_status ??
+      current.provider_health_status ??
+      null,
+    proof_maturity_level:
+      partial.proof_maturity_level ??
+      context.proof_maturity_level ??
+      current.proof_maturity_level ??
+      null,
+    calibration_status:
+      partial.calibration_status ??
+      context.calibration_status ??
+      current.calibration_status ??
+      null,
+    export_count:
+      partial.export_count ?? context.export_count ?? current.export_count ?? 0,
+    current_view_summary:
+      partial.current_view_summary ??
+      context.current_view_summary ??
+      current.current_view_summary ??
+      null,
+    recent_symbols: uniqueStringList(
+      [
+        partial.symbol,
+        context.symbol,
+        ...(partial.recent_symbols || []),
+        ...(current.recent_symbols || []),
+      ],
+      6
+    ),
+    recent_dossiers: uniqueStringList(
+      [
+        partial.dossier_id,
+        context.dossier_id,
+        ...(partial.recent_dossiers || []),
+        ...(current.recent_dossiers || []),
+      ],
+      6
+    ),
+    recent_workflows: uniqueStringList(
+      [
+        partial.workflow_id,
+        context.workflow_id,
+        ...(partial.recent_workflows || []),
+        ...(current.recent_workflows || []),
+      ],
+      6
+    ),
+    recent_export_pack_types: uniqueStringList(
+      [
+        ...(partial.recent_export_pack_types || []),
+        ...(context.active_pack_types || []),
+        ...(current.recent_export_pack_types || []),
+      ],
+      6
+    ),
+    recent_pages: uniqueStringList(
+      [
+        partial.page_label,
+        context.page_label,
+        ...(partial.recent_pages || []),
+        ...(current.recent_pages || []),
+      ],
+      6
+    ),
+    recent_prompts: uniqueStringList(
+      [
+        ...(partial.recent_prompts || []),
+        ...(current.recent_prompts || []),
+      ],
+      5
+    ),
+    updated_at: new Date().toISOString(),
+  };
+  persistWorkspaceContinuityStore({
+    ...state.workspaceContinuityStore,
+    [scopeId]: next,
+  });
+  return next;
+};
+const recordCopilotPrompt = (message, pageContext = null) => {
+  const prompt = String(message || "").trim();
+  if (!prompt) {
+    return;
+  }
+  updateWorkspaceContinuity({ recent_prompts: [prompt] }, pageContext);
 };
 
 const setDefaults = () => {
@@ -709,7 +865,7 @@ const buildCopilotPageContext = () => {
     (report.deployment_blockers || [])[0] ||
     (report.axiom_weakest_evidence_areas || [])[0] ||
     null;
-  return {
+  const baseContext = {
     app_tab: state.activeTab || "legacy",
     research_tab: state.researchTab || "dashboard",
     page_label: researchTabLabel(),
@@ -764,10 +920,17 @@ const buildCopilotPageContext = () => {
       null,
     context_warning: contextWarning,
   };
+  const continuityScopeId = resolveCopilotContinuityScope(baseContext);
+  return {
+    ...baseContext,
+    continuity_scope_id: continuityScopeId,
+    workspace_continuity: state.workspaceContinuityStore?.[continuityScopeId] || {},
+  };
 };
 
 const buildCopilotPromptSet = () => {
   const pageContext = buildCopilotPageContext();
+  const continuity = pageContext.workspace_continuity || {};
   const symbol =
     state.assistantActiveAnalysis?.symbol ||
     state.assistantLatestReport?.symbol ||
@@ -803,6 +966,24 @@ const buildCopilotPromptSet = () => {
       `Which provider or data-quality issue is most likely to distort the current view?`
     );
   }
+  if ((continuity.recent_symbols || []).length > 1) {
+    const comparisonPeer = (continuity.recent_symbols || []).find(
+      (item) => normalizeSymbol(item) !== normalizeSymbol(symbol)
+    );
+    if (comparisonPeer) {
+      base.push(
+        `How does ${symbol} compare with recently viewed ${comparisonPeer} on deployability and proof quality?`
+      );
+    }
+  }
+  if ((continuity.recent_prompts || []).length) {
+    base.push(`What changed since the last workspace question on this setup?`);
+  }
+  if ((continuity.recent_export_pack_types || []).length) {
+    base.push(
+      `Which recent export pack is most presentation-ready and what is still weak in it?`
+    );
+  }
   if (state.researchTab === "platform") {
     base.push(
       `Which workflow or committee item needs review first?`,
@@ -833,11 +1014,16 @@ const buildCopilotDockSummary = (pageContext) => {
   const workflow = formatTier(pageContext.workflow_stage || "no_workflow");
   const recommendation = formatTier(pageContext.recommendation_state || "no_recommendation");
   const unresolved = Number(pageContext.unresolved_concern_count || 0);
+  const continuity = pageContext.workspace_continuity || {};
+  const memoryState =
+    (continuity.recent_symbols || []).length || (continuity.recent_prompts || []).length
+      ? "memory live"
+      : "memory light";
   return {
     title: pageContext.symbol
       ? `${symbol} · ${formatTier(pageContext.deployability_tier || "watch_only")}`
       : "FTIP Platform Copilot",
-    subtitle: `${page} · ${workflow} · ${recommendation}${unresolved ? ` · ${unresolved} concern${unresolved === 1 ? "" : "s"}` : ""}`,
+    subtitle: `${page} · ${workflow} · ${recommendation}${unresolved ? ` · ${unresolved} concern${unresolved === 1 ? "" : "s"}` : ""} · ${memoryState}`,
     status: pageContext.context_warning
       ? "Warning visible"
       : pageContext.workspace_name || pageContext.workspace_id
@@ -862,10 +1048,12 @@ const renderCopilotShell = () => {
   toggle.textContent = state.copilotCollapsed ? "Open" : "Minimize";
 
   const pageContext = buildCopilotPageContext();
+  updateWorkspaceContinuity({}, pageContext);
   const dockSummary = buildCopilotDockSummary(pageContext);
   titleEl.textContent = dockSummary.title;
   inlineEl.textContent = dockSummary.subtitle;
   stateEl.textContent = dockSummary.status;
+  const continuity = pageContext.workspace_continuity || getWorkspaceContinuityRecord(pageContext);
 
   const contextChips = [
     `Page ${pageContext.page_label}`,
@@ -878,6 +1066,8 @@ const renderCopilotShell = () => {
     `Review ${formatTier(pageContext.review_state || "n/a")}`,
     `Approvals ${pageContext.pending_approval_count || 0}`,
     `Exports ${pageContext.export_count || 0}`,
+    `Recent symbols ${(continuity.recent_symbols || []).slice(0, 2).join(" / ") || "n/a"}`,
+    `Proof ${pageContext.proof_maturity_level || continuity.proof_maturity_level || "n/a"}`,
   ];
   const visibleChips = state.copilotCollapsed ? contextChips.slice(0, 3) : contextChips;
   contextEl.innerHTML = visibleChips
@@ -962,6 +1152,30 @@ const persistActiveAnalysis = (analysis) => {
     writeStorageJson(
       ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY,
       analysis
+    );
+    updateWorkspaceContinuity(
+      {
+        symbol: analysis.symbol || null,
+        workflow_id: analysis.platform_workflow_id || null,
+        dossier_id: analysis.platform_dossier_id || null,
+        recommendation_state:
+          analysis.platform_recommendation_state ||
+          analysis.axiom_evidence_backed_deployability_tier ||
+          null,
+        page_label: researchTabLabel(),
+      },
+      {
+        symbol: analysis.symbol || null,
+        workspace_id: analysis.platform_workspace_id || null,
+        workflow_id: analysis.platform_workflow_id || null,
+        workflow_stage: analysis.platform_workflow_stage || null,
+        dossier_id: analysis.platform_dossier_id || null,
+        recommendation_state:
+          analysis.platform_recommendation_state ||
+          analysis.axiom_evidence_backed_deployability_tier ||
+          null,
+        page_label: researchTabLabel(),
+      }
     );
   } else {
     removeStorageValue(ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY);
@@ -4934,6 +5148,38 @@ const renderCompareWorkspace = () => {
 const renderAssistantReport = (report) => {
   const container = qs("#assistant-analyze-report");
   state.assistantLatestReport = report || null;
+  if (report) {
+    updateWorkspaceContinuity({
+      symbol: report.symbol || null,
+      workflow_id: report.platform_workflow?.workflow_id || null,
+      dossier_id: report.platform_dossier?.dossier_id || null,
+      recent_export_pack_types: (report.platform_stored_exports || [])
+        .map((item) => item.pack_type)
+        .filter(Boolean),
+      recommendation_state:
+        report.platform_recommendation_state?.state ||
+        report.platform_dossier?.current_recommendation_state ||
+        null,
+      committee_state: report.platform_committee_decision?.decision_status || null,
+      provider_health_status:
+        report.provider_health_status ||
+        report.platform_health_summary?.integration_health_summary?.overall_status ||
+        null,
+      proof_maturity_level:
+        report.platform_proof_summary?.evidence_maturity_level || null,
+      calibration_status:
+        report.platform_calibration_hardening?.status ||
+        report.platform_model_credibility_snapshot?.status ||
+        null,
+      current_view_summary:
+        report.platform_dashboard_summary ||
+        report.platform_dossier_summary ||
+        report.axiom_proprietary_synthesis ||
+        report.signal_summary ||
+        null,
+      page_label: researchTabLabel(),
+    });
+  }
 
   if (!report) {
     container.classList.add("empty");
@@ -5587,6 +5833,8 @@ const submitAssistantChatMessage = async ({
   setButtonLoading(buttonSelector, true, "Sending...");
   setLegacyStatus(statusSelector, "Sending grounded narrator request...");
   try {
+    const pageContext = buildCopilotPageContext();
+    recordCopilotPrompt(message, pageContext);
     const data = await callJson("/assistant/chat", {
       method: "POST",
       headers: getHeaders(),
@@ -5595,7 +5843,7 @@ const submitAssistantChatMessage = async ({
         message,
         context: {
           active_analysis: state.assistantActiveAnalysis,
-          page_context: buildCopilotPageContext(),
+          page_context: pageContext,
           report_context: {
             report_id: state.assistantLatestReport?.report_id || null,
             axiom_artifact_id: state.assistantLatestReport?.axiom_artifact_id || null,
@@ -5897,6 +6145,9 @@ applyDemoMode(window.localStorage.getItem(FTIP_DEMO_MODE_STORAGE_KEY) === "1");
 }
 persistAssistantSessionId(
   window.localStorage.getItem(ASSISTANT_CHAT_SESSION_STORAGE_KEY) || generateUuid()
+);
+persistWorkspaceContinuityStore(
+  readStorageJson(ASSISTANT_WORKSPACE_CONTINUITY_STORAGE_KEY, {})
 );
 persistRecentReports(readStorageJson(ASSISTANT_RECENT_REPORTS_STORAGE_KEY, []));
 persistWatchlist(readStorageJson(ASSISTANT_WATCHLIST_STORAGE_KEY, []));

@@ -71,6 +71,7 @@ def _support_vs_drag_summary(engine_scores: Dict[str, EngineScore]) -> str:
 
 
 def _why_now_summary(
+    engine_input: AxiomEngineInput,
     scorecard: AxiomScorecard,
     regime_decision: AxiomRegimeDecision,
     engine_scores: Dict[str, EngineScore],
@@ -81,13 +82,15 @@ def _why_now_summary(
     return (
         f"Why now: AXIOM sees {str(regime_decision.regime_label).replace('_', ' ')} conditions where "
         f"timing support {float(scorecard.timing_support or 0.0):.1f}, setup maturity {float(scorecard.setup_maturity or 0.0):.1f}, "
-        f"and path survivability {float(scorecard.path_survivability or 0.0):.1f} are strong enough to convert the gross opportunity stack into "
+        f"path survivability {float(scorecard.path_survivability or 0.0):.1f}, catalyst quality {float(scorecard.catalyst_quality or 0.0):.1f}, "
+        f"and evidence recency quality {float(scorecard.evidence_recency_quality or 0.0):.1f} are strong enough to convert the gross opportunity stack into "
         f"validated edge {float(scorecard.validated_edge or 0.0):.1f}. State Pricing {_score_value(state_pricing):.1f}, "
         f"Flow Transmission {_score_value(flow):.1f}, and Behavioral Distortion {_score_value(behavior):.1f} are only trusted because the timing window is being supported by real implementation quality rather than by noise alone."
     )
 
 
 def _unique_mispricing_summary(
+    engine_input: AxiomEngineInput,
     scorecard: AxiomScorecard,
     engine_scores: Dict[str, EngineScore],
 ) -> str:
@@ -103,7 +106,8 @@ def _unique_mispricing_summary(
         f"Unique mispricing: AXIOM believes {primary_gap}. Mispricing readiness is {float(scorecard.mispricing_readiness or 0.0):.1f}, "
         f"cross-engine alignment is {float(scorecard.cross_engine_alignment or 0.0):.1f}, and Fundamental Reality {_score_value(fundamental):.1f}, "
         f"State Pricing {_score_value(state_pricing):.1f}, and Flow Transmission {_score_value(flow):.1f} imply the market is still misallocating either compensation or timing. "
-        f"Critical Fragility {_score_value(fragility):.1f} then determines whether that gap is monetizable or only analytically interesting."
+        f"Filings change signal {float(scorecard.filings_change_signal or 0.0):.1f}, estimate-revision support {float(scorecard.estimate_revision_support or 0.0):.1f}, "
+        f"and premium/source support {float(scorecard.source_strength_support or 0.0):.1f} vs penalty {float(scorecard.source_strength_penalty or 0.0):.1f} then determine whether that gap is monetizable or only analytically interesting."
     )
 
 
@@ -122,6 +126,7 @@ def _setup_character_summary(
 
 
 def _false_positive_risk_summary(
+    engine_input: AxiomEngineInput,
     scorecard: AxiomScorecard,
     engine_scores: Dict[str, EngineScore],
 ) -> str:
@@ -132,15 +137,18 @@ def _false_positive_risk_summary(
     fragility = _score_value(engine_scores["critical_fragility"])
     research = _score_value(engine_scores["research_integrity"])
     if float(scorecard.false_positive_penalty or 0.0) >= 62.0:
-        return "False-positive risk is elevated because crowding, conflict, fragility, and weak implementation quality are overpowering the nominal edge."
+        return "False-positive risk is elevated because crowding, conflict, fragility, weak implementation quality, and a weaker source/event stack are overpowering the nominal edge."
     if (behavior + flow) / 2.0 > (fundamental + state_pricing) / 2.0 and fragility >= 50.0:
         return "False-positive risk is elevated because flow and behavioral support are outrunning the underlying reality stack while fragility remains high."
     if research < 50.0:
         return "False-positive risk is elevated because research integrity is too weak to trust the apparent edge at face value."
-    return "False-positive risk is contained because the reality, pricing, and implementation layers are not being overwhelmed by crowding, instability, or weak research support."
+    if float(scorecard.source_strength_penalty or 0.0) >= 55.0:
+        return "False-positive risk is elevated because the source stack is too weak or fallback-heavy relative to the apparent opportunity."
+    return "False-positive risk is contained because the reality, pricing, implementation, and source-quality layers are not being overwhelmed by crowding, instability, or weak research support."
 
 
 def _decision_hierarchy_summary(
+    engine_input: AxiomEngineInput,
     scorecard: AxiomScorecard,
     engine_scores: Dict[str, EngineScore],
     deployability_decision: AxiomDeployabilityDecision,
@@ -150,7 +158,7 @@ def _decision_hierarchy_summary(
     return (
         f"Decision hierarchy: gross opportunity {float(scorecard.gross_opportunity or 0.0):.1f} first establishes whether an idea is worth attention, "
         f"validated edge {float(scorecard.validated_edge or 0.0):.1f} then tests whether that opportunity survives cross-engine confirmation, "
-        f"while false-positive penalty {float(scorecard.false_positive_penalty or 0.0):.1f}, evidence readiness {float(scorecard.evidence_readiness or 0.0):.1f}, and path survivability {float(scorecard.path_survivability or 0.0):.1f} decide whether it is actually investable. "
+        f"while false-positive penalty {float(scorecard.false_positive_penalty or 0.0):.1f}, evidence readiness {float(scorecard.evidence_readiness or 0.0):.1f}, path survivability {float(scorecard.path_survivability or 0.0):.1f}, and source-stack penalty {float(scorecard.source_strength_penalty or 0.0):.1f} decide whether it is actually investable. "
         f"Deployable alpha utility {float(scorecard.deployable_alpha_utility or 0.0):.1f} is therefore the final fusion output rather than a repackaged directional score. "
         f"The current strongest engine is {str(strongest.get('engine') or 'unknown').replace('_', ' ')} and the weakest is {str(weakest.get('engine') or 'unknown').replace('_', ' ')}, "
         f"which is why AXIOM lands on {deployability_decision.deployability_tier.replace('_', ' ')} rather than simply following directional enthusiasm."
@@ -254,16 +262,28 @@ def build_axiom_explanation(
         "regime_reason": regime_decision.rationale,
         "proprietary_synthesis_summary": _engine_stack_summary(engine_scores),
         "support_vs_drag_summary": _support_vs_drag_summary(engine_scores),
-        "why_now_summary": _why_now_summary(scorecard, regime_decision, engine_scores),
+        "why_now_summary": _why_now_summary(
+            engine_input,
+            scorecard,
+            regime_decision,
+            engine_scores,
+        ),
         "unique_mispricing_summary": _unique_mispricing_summary(
-            scorecard, engine_scores
+            engine_input,
+            scorecard,
+            engine_scores,
         ),
         "setup_character_summary": _setup_character_summary(scorecard, engine_scores),
         "false_positive_risk_summary": _false_positive_risk_summary(
-            scorecard, engine_scores
+            engine_input,
+            scorecard,
+            engine_scores,
         ),
         "decision_hierarchy_summary": _decision_hierarchy_summary(
-            scorecard, engine_scores, deployability_decision
+            engine_input,
+            scorecard,
+            engine_scores,
+            deployability_decision,
         ),
         "exceptionality_summary": (
             f"Exceptionality assessment is {exceptionality.replace('_', ' ')} because deployable alpha utility is "

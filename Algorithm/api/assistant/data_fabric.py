@@ -10,8 +10,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tupl
 
 from api import config
 from api.assistant.coverage import availability_payload
-from api.data_providers.alphavantage import fetch_company_overview
+from api.data_providers.alphavantage import (
+    fetch_company_overview,
+    fetch_earnings_intelligence,
+)
 from api.data_providers.bars import fetch_reference_bars
+from api.data_providers.events import build_event_intelligence_overlay
 from api.data_providers.errors import ProviderError
 from api.data_providers.finnhub import (
     fetch_basic_financials,
@@ -22,6 +26,7 @@ from api.data_providers.fred import fetch_series as fetch_fred_series
 from api.data_providers.gdelt import search_articles as search_gdelt_articles
 from api.data_providers.gnews import search_news as search_gnews
 from api.data_providers.newsapi import search_news as search_newsapi
+from api.data_providers.premium import build_premium_connector_overview
 from api.data_providers.sec_edgar import fetch_company_filing_profile
 from api.data_providers.world_bank import fetch_indicator as fetch_world_bank_indicator
 from api.source_governance import active_source_profile, source_allowed
@@ -162,6 +167,13 @@ def enrich_data_bundle(
     market_overlay = _build_market_overlay(symbol, as_of_date, data_bundle.get("market_price_volume") or {})
     fundamentals_overlay = _build_fundamental_overlay(symbol, symbol_meta, as_of_date)
     news_overlay = _build_news_overlay(symbol, symbol_meta, as_of_date)
+    event_overlay = _build_event_overlay(
+        symbol=symbol,
+        symbol_meta=symbol_meta,
+        as_of_date=as_of_date,
+        fundamentals_overlay=fundamentals_overlay,
+        news_overlay=news_overlay,
+    )
     cross_asset_overlay = _build_cross_asset_overlay(
         symbol_meta,
         as_of_date,
@@ -175,6 +187,7 @@ def enrich_data_bundle(
             "market_price_volume": market_overlay,
             "fundamental_filing": fundamentals_overlay,
             "sentiment_narrative_flow": news_overlay,
+            "event_catalyst_risk": event_overlay,
             "macro_cross_asset": macro_overlay,
             "geopolitical_policy": geopolitical_overlay,
             "relative_context": cross_asset_overlay,
@@ -188,6 +201,7 @@ def enrich_data_bundle(
             "market_price_volume": market_overlay,
             "fundamental_filing": fundamentals_overlay,
             "sentiment_narrative_flow": news_overlay,
+            "event_catalyst_risk": event_overlay,
             "macro_cross_asset": macro_overlay,
             "geopolitical_policy": geopolitical_overlay,
             "relative_context": cross_asset_overlay,
@@ -313,6 +327,16 @@ def _build_fundamental_overlay(
         provider_payloads["alphavantage_overview"] = alpha_overview
     elif alpha_status.get("note"):
         notes.append(f"alphavantage_overview: {alpha_status['note']}")
+
+    alpha_earnings, alpha_earnings_status = _safe_call(
+        lambda: fetch_earnings_intelligence(symbol),
+        source_name="alphavantage",
+    )
+    provider_status["alphavantage_earnings"] = alpha_earnings_status
+    if alpha_earnings is not None:
+        provider_payloads["alphavantage_earnings_intel"] = alpha_earnings
+    elif alpha_earnings_status.get("note"):
+        notes.append(f"alphavantage_earnings: {alpha_earnings_status['note']}")
 
     sec_profile, sec_status = _safe_call(
         lambda: fetch_company_filing_profile(
@@ -785,6 +809,33 @@ def _build_news_overlay(
     }
 
 
+def _build_event_overlay(
+    *,
+    symbol: str,
+    symbol_meta: Dict[str, Any],
+    as_of_date: dt.date,
+    fundamentals_overlay: Dict[str, Any],
+    news_overlay: Dict[str, Any],
+) -> Dict[str, Any]:
+    fetched_at = dt.datetime.now(dt.timezone.utc).isoformat()
+    overlay = build_event_intelligence_overlay(
+        symbol=symbol,
+        company_name=str(symbol_meta.get("name") or symbol).strip(),
+        as_of_date=as_of_date,
+        fundamentals_overlay=fundamentals_overlay,
+        news_overlay=news_overlay,
+    )
+    return {
+        **overlay,
+        "freshness": {
+            "fetched_at": fetched_at,
+            "data_as_of": ((overlay.get("latest_events") or [{}])[0]).get("event_date")
+            or ((fundamentals_overlay.get("filing_backbone") or {}).get("latest_filing_date")),
+            "freshness_status": overlay.get("event_freshness") or "mixed",
+        },
+    }
+
+
 def _build_macro_overlay(
     symbol_meta: Dict[str, Any],
     cross_asset_overlay: Dict[str, Any],
@@ -1192,6 +1243,7 @@ def _build_quality_overlay(
     weak_source_domains: List[str] = []
     partial_result_domains: List[str] = []
     source_warning_flags: List[str] = []
+    premium_connector_summary = build_premium_connector_overview(execute_live=False)
     fetched_at = dt.datetime.now(dt.timezone.utc).isoformat()
     for domain, payload in overlays.items():
         meta = payload.get("meta") or {}
@@ -1250,6 +1302,11 @@ def _build_quality_overlay(
         if freshness_summary
         else "Source stack is limited because no enriched domain provenance was captured."
     )
+    if premium_connector_summary.get("summary"):
+        provider_notes.append(str(premium_connector_summary.get("summary")))
+        if premium_connector_summary.get("status") != "ready":
+            warnings.append(str(premium_connector_summary.get("summary")))
+            source_warning_flags.append("premium_connector_partial")
     return {
         "source_map": sources,
         "freshness_summary": freshness_summary,
@@ -1262,6 +1319,7 @@ def _build_quality_overlay(
         "partial_result_domains": sorted(set(partial_result_domains)),
         "source_warning_flags": sorted(set(source_warning_flags)),
         "source_strength_summary": source_strength_summary,
+        "premium_connector_summary": premium_connector_summary,
         "warnings": list(dict.fromkeys(warnings)),
         "freshness": {
             "fetched_at": fetched_at,
@@ -1285,6 +1343,7 @@ def _build_quality_overlay(
             "confidence": confidence,
             "notes": provider_notes,
             "source_strength_summary": source_strength_summary,
+            "premium_connector_summary": premium_connector_summary,
             "warning_flags": sorted(set(source_warning_flags)),
         },
         "meta": {
@@ -1294,6 +1353,7 @@ def _build_quality_overlay(
             "fetched_at": fetched_at,
             "data_as_of": _latest_snapshot_date([freshness_summary]),
             "source_strength_summary": source_strength_summary,
+            "premium_connector_summary": premium_connector_summary,
             "source_warning_flags": sorted(set(source_warning_flags)),
             **availability_payload(
                 has_data=bool(freshness_summary),

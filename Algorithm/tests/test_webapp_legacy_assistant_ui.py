@@ -114,20 +114,24 @@ def test_legacy_assistant_ui_preserves_active_analysis_context() -> None:
     assert "assistantActiveAnalysis" in js
     assert "ASSISTANT_ACTIVE_ANALYSIS_STORAGE_KEY" in js
     assert "ASSISTANT_COPILOT_COLLAPSED_STORAGE_KEY" in js
+    assert "ASSISTANT_WORKSPACE_CONTINUITY_STORAGE_KEY" in js
     assert "ASSISTANT_RECENT_REPORTS_STORAGE_KEY" in js
     assert "ASSISTANT_WATCHLIST_STORAGE_KEY" in js
     assert "FTIP_DEMO_MODE_STORAGE_KEY" in js
     assert "session_id: pendingSessionId" in js
     assert "active_analysis: state.assistantActiveAnalysis" in js
-    assert "page_context: buildCopilotPageContext()" in js
+    assert "const pageContext = buildCopilotPageContext()" in js
+    assert "page_context: pageContext" in js
     assert "setResearchTab" in js
     assert "applyDemoMode" in js
     assert "buildNarratorPromptSet" in js
     assert "renderNarratorPromptChips" in js
     assert "renderCopilotShell" in js
     assert "sendPersistentCopilotChat" in js
+    assert "workspaceContinuityStore" in js
     assert "Platform Copilot" in html
     assert "What matters most on the" in js
+    assert "What changed since the last workspace question" in js
     assert "const formatPct" in js
     assert "copilotCollapsed: true" in js
     assert "renderDashboardWorkflow" in js
@@ -500,8 +504,8 @@ def test_copilot_shell_is_compact_by_default_and_page_context_is_system_aware() 
           platform_calibration_hardening: { status: "partial" },
         };
 
-        const pageContext = buildCopilotPageContext();
         renderCopilotShell();
+        const pageContext = buildCopilotPageContext();
 
         const shell = querySelector("#assistant-copilot-shell");
         const chipsHtml = querySelector("#assistant-copilot-context").innerHTML;
@@ -509,6 +513,7 @@ def test_copilot_shell_is_compact_by_default_and_page_context_is_system_aware() 
         const title = querySelector("#assistant-copilot-title").textContent;
         const subtitle = querySelector("#assistant-copilot-inline-context").textContent;
         const status = querySelector("#assistant-copilot-state").textContent;
+        const continuity = pageContext.workspace_continuity || {};
 
         if (pageContext.page_focus !== "workflow_and_committee_console") {
           throw new Error("copilot page context missing platform focus");
@@ -530,6 +535,12 @@ def test_copilot_shell_is_compact_by_default_and_page_context_is_system_aware() 
         }
         if (!title.includes("NVDA") || !subtitle.includes("2 concerns") || status !== "Warning visible") {
           throw new Error("copilot dock summary did not render expected compact state");
+        }
+        if (!continuity.recent_symbols || !continuity.recent_symbols.includes("NVDA")) {
+          throw new Error("workspace continuity did not retain the active symbol");
+        }
+        if (!continuity.recent_export_pack_types || !continuity.recent_export_pack_types.includes("ic_memo_pack")) {
+          throw new Error("workspace continuity did not retain recent export pack types");
         }
         console.log("ok");
         """

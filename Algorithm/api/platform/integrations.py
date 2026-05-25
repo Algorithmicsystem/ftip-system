@@ -46,18 +46,36 @@ def build_integration_binding(
     )
 
 
-def integration_health_summary(bindings: List[Dict[str, Any]]) -> Dict[str, Any]:
+def integration_health_summary(
+    bindings: List[Dict[str, Any]],
+    *,
+    premium_connector_overview: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     counts: Dict[str, int] = {}
     warnings: List[str] = []
     for binding in bindings:
         status = str(((binding.get("health") or {}).get("status")) or "unknown")
         counts[status] = counts.get(status, 0) + 1
         warnings.extend(((binding.get("health") or {}).get("warnings")) or [])
+    premium_status = str((premium_connector_overview or {}).get("status") or "unknown")
+    if premium_connector_overview and premium_status != "ready":
+        warnings.append(str((premium_connector_overview or {}).get("summary") or "Premium connector readiness is not fully ready."))
+    overall_status = "healthy"
+    if counts.get("degraded") or counts.get("failed"):
+        overall_status = "degraded"
+    elif counts.get("configured") or counts.get("unknown"):
+        overall_status = "configured"
+    if premium_status in {"limited", "partial"} and overall_status == "healthy":
+        overall_status = "configured"
+    elif premium_status == "unknown" and not bindings:
+        overall_status = "configured"
     return sanitize_payload(
         {
             "binding_count": len(bindings),
             "status_counts": counts,
+            "overall_status": overall_status,
             "warnings": warnings[:10],
+            "premium_connector_overview": premium_connector_overview or {},
             "definitions": [item.model_dump(mode="python") for item in list_integration_definitions()],
         }
     )
