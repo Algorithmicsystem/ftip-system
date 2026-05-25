@@ -6232,6 +6232,94 @@ qsa(".research-tab").forEach((tab) => {
 });
 
 // ---------------------------------------------------------------------------
+// IC Memo (Session 15)
+// ---------------------------------------------------------------------------
+
+const _CONVICTION_TIER_COLOR = {
+  HIGH:         "#34d399",
+  MODERATE:     "#60a5fa",
+  LOW:          "#fbbf24",
+  INSUFFICIENT: "#ef4444",
+};
+
+const renderMemo = (data) => {
+  const memo = data.memo || {};
+  const exec = memo.executive_summary || {};
+  const sizing = memo.position_sizing || {};
+  const conviction = memo.conviction_analysis || {};
+  const ic = memo.ic_calibration || {};
+
+  qs("#memo-result-wrap").style.display = "";
+  qs("#memo-headline").textContent = exec.headline || "Memo generated.";
+
+  const tier = exec.conviction_tier || "—";
+  const tierColor = _CONVICTION_TIER_COLOR[tier] || "#94a3b8";
+  qs("#memo-meta-grid").innerHTML = [
+    ["Signal",      exec.signal_direction || "—"],
+    ["Conviction",  `<span style="color:${tierColor};font-weight:600">${tier}</span> (${(exec.conviction_score ?? "—")})`],
+    ["Suggested Wt", exec.suggested_weight_pct || "—"],
+    ["Size Band",   sizing.size_band || "—"],
+    ["Constraint",  sizing.active_constraint || "—"],
+    ["Regime",      memo.signal_context?.regime_label || "—"],
+    ["Breadth",     memo.signal_context?.breadth_state || "—"],
+    ["IC State",    ic.ic_state || "—"],
+    ["DAU",         memo.axiom_scorecard?.dau ?? "—"],
+    ["Deployability", exec.deployability_tier || "—"],
+  ].map(([k, v]) => `<div class="metric-chip"><span class="metric-label">${k}</span><span class="metric-value">${v}</span></div>`).join("");
+
+  qs("#memo-hash").textContent = data.lineage_hash || memo.lineage_hash || "";
+  qs("#memo-json").textContent = JSON.stringify(memo, null, 2);
+};
+
+qs("#memo-generate-btn").addEventListener("click", async () => {
+  const symbol = normalizeSymbol(qs("#memo-symbol").value) || "NVDA";
+  const dateVal = qs("#memo-date").value;
+  const signalVal = qs("#memo-signal").value.trim().toUpperCase() || undefined;
+  const regimeVal = qs("#memo-regime").value.trim() || undefined;
+  const dauVal = qs("#memo-dau").value ? parseFloat(qs("#memo-dau").value) : undefined;
+  const storeMemo = qs("#memo-store").checked;
+
+  setButtonLoading("#memo-generate-btn", true, "Generating...");
+  setLegacyStatus("#memo-status", `Generating IC memo for ${symbol}...`);
+
+  try {
+    const body = { symbol, store: storeMemo };
+    if (dateVal) body.as_of_date = dateVal;
+    if (signalVal) body.signal_label = signalVal;
+    if (regimeVal) body.regime_label = regimeVal;
+    if (dauVal != null && !isNaN(dauVal)) body.dau = dauVal;
+
+    const data = await callJson("/axiom/memo", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    renderMemo(data);
+    const storedNote = data.stored ? " Stored in DB." : "";
+    setLegacyStatus(
+      "#memo-status",
+      `Memo generated. Hash: ${(data.lineage_hash || "").slice(0, 12)}…${storedNote}`,
+      "success"
+    );
+  } catch (err) {
+    setLegacyStatus("#memo-status", `Memo generation failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#memo-generate-btn", false, "Generating...");
+  }
+});
+
+qs("#memo-copy-hash-btn").addEventListener("click", () => {
+  const hash = qs("#memo-hash").textContent;
+  if (!hash) return;
+  navigator.clipboard?.writeText(hash).then(() =>
+    setLegacyStatus("#memo-status", "Lineage hash copied to clipboard.", "success")
+  ).catch(() => {
+    qs("#memo-hash").select?.();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Sector Breadth Heatmap
 // ---------------------------------------------------------------------------
 

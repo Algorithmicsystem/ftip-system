@@ -441,6 +441,40 @@
                       <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
                     </details>
                   </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Generate IC Memo</h4>
+                      <span class="legacy-badge">Institutional</span>
+                      <span class="legacy-badge">Lineage hash</span>
+                    </div>
+                    <div class="input-row" style="margin-bottom:8px">
+                      <input id="memo-symbol" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
+                      <input id="memo-date" type="date" placeholder="As-of date" />
+                      <input id="memo-signal" placeholder="Signal (BUY / SELL / HOLD)" />
+                      <input id="memo-regime" placeholder="Regime label (optional)" />
+                      <input id="memo-dau" type="number" placeholder="DAU 0–100 (optional)" min="0" max="100" />
+                      <label class="toggle-inline" for="memo-store">
+                        <input id="memo-store" type="checkbox" checked />
+                        <span>Store memo</span>
+                      </label>
+                      <button id="memo-generate-btn">Generate IC Memo</button>
+                    </div>
+                    <p class="muted" id="memo-status">No memo generated yet.</p>
+                    <div id="memo-result-wrap" style="display:none">
+                      <div id="memo-headline" style="font-size:1.05em;font-weight:600;margin-bottom:6px"></div>
+                      <div class="summary-grid" id="memo-meta-grid"></div>
+                      <div style="margin:10px 0">
+                        <span style="font-size:0.8em;color:#64748b">Lineage hash: </span>
+                        <code id="memo-hash" style="font-size:0.8em;color:#94a3b8;word-break:break-all"></code>
+                        <button id="memo-copy-hash-btn" class="secondary" style="margin-left:8px;font-size:0.75em;padding:2px 8px">Copy hash</button>
+                      </div>
+                      <details>
+                        <summary style="cursor:pointer;color:#94a3b8;font-size:0.85em">Full memo JSON</summary>
+                        <pre id="memo-json" class="json-block" style="max-height:320px;overflow:auto">{}</pre>
+                      </details>
+                    </div>
+                  </section>
                 </div>
               </section>
 
