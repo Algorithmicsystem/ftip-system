@@ -23,6 +23,12 @@ def classify_axiom_deployability(
     liquidity = engine_scores["liquidity_convexity"]
     research = engine_scores["research_integrity"]
     flow = engine_scores["flow_transmission"]
+    alignment = float(scorecard.cross_engine_alignment or 0.0)
+    evidence = float(scorecard.evidence_readiness or 0.0)
+    path = float(scorecard.path_survivability or 0.0)
+    false_positive = float(scorecard.false_positive_penalty or 0.0)
+    exceptional = float(scorecard.exceptional_opportunity or 0.0)
+    timing = float(scorecard.timing_support or 0.0)
     invalidation_flags = list(fragility.flags)
     if scorecard.overall_coverage < 40.0:
         invalidation_flags.append("insufficient_axiom_coverage")
@@ -39,6 +45,12 @@ def classify_axiom_deployability(
         invalidation_flags.append("weak_research_integrity")
     if (engine_input.support.model_drift_score or 0.0) >= 55.0:
         invalidation_flags.append("active_drift")
+    if false_positive >= 60.0:
+        invalidation_flags.append("false_positive_pressure")
+    if path < 45.0:
+        invalidation_flags.append("weak_path_survivability")
+    if evidence < 48.0:
+        invalidation_flags.append("weak_evidence_readiness")
 
     tier = "monitor_only"
     rationale = "AXIOM keeps the setup in monitor mode because deployability still needs cleaner liquidity, research, or fragility support."
@@ -49,14 +61,20 @@ def classify_axiom_deployability(
         or (fragility.score or 0.0) >= 82.0
         or scorecard.overall_coverage < 35.0
         or (research.score or 0.0) < 28.0
+        or false_positive >= 76.0
     ):
         tier = "not_actionable"
         size_band = "none"
-        rationale = "High fragility, an active pause condition, or very weak research integrity makes the setup unsuitable for actionability."
+        rationale = "High fragility, active drift or pause conditions, or extreme false-positive pressure makes the setup unsuitable for actionability."
     elif (
-        scorecard.deployable_alpha_utility >= 62.0
+        scorecard.deployable_alpha_utility >= 64.0
         and scorecard.overall_coverage >= 66.0
         and scorecard.overall_confidence >= 60.0
+        and alignment >= 64.0
+        and evidence >= 66.0
+        and path >= 64.0
+        and false_positive <= 34.0
+        and exceptional >= 64.0
         and (fragility.score or 100.0) <= 45.0
         and (liquidity.score or 0.0) >= 58.0
         and (research.score or 0.0) >= 62.0
@@ -65,18 +83,22 @@ def classify_axiom_deployability(
     ):
         tier = "live_candidate"
         size_band = "medium" if (fragility.score or 0.0) > 32.0 else "large"
-        rationale = "Coherent opportunity, contained fragility, usable liquidity, and stronger research integrity support live-candidate treatment."
+        rationale = "Live-candidate status is earned because cross-engine alignment, evidence readiness, and path survivability all clear live-capital thresholds while false-positive pressure stays contained."
     elif (
-        scorecard.deployable_alpha_utility >= 48.0
+        scorecard.deployable_alpha_utility >= 46.0
         and scorecard.overall_coverage >= 45.0
         and scorecard.overall_confidence >= 40.0
+        and alignment >= 44.0
+        and evidence >= 46.0
+        and path >= 44.0
+        and false_positive <= 58.0
         and (fragility.score or 100.0) <= 65.0
         and (liquidity.score or 0.0) >= 42.0
         and (research.score or 0.0) >= 42.0
     ):
         tier = "paper_trade_only"
         size_band = "small"
-        rationale = "The setup has enough structure for paper-trade validation, but evidence, fragility, or liquidity still cap live deployability."
+        rationale = "The setup is coherent enough for paper-trade validation, but evidence readiness, path survivability, or false-positive suppression still fall short of live deployment standards."
     elif scorecard.deployable_alpha_utility < 35.0:
         tier = "not_actionable"
         size_band = "none"
@@ -90,6 +112,10 @@ def classify_axiom_deployability(
         tier = "monitor_only"
         size_band = "none"
         rationale = "The regime profile is too unstable for paper-trade escalation despite some residual opportunity."
+    if tier == "paper_trade_only" and false_positive >= 52.0 and timing < 52.0:
+        tier = "monitor_only"
+        size_band = "none"
+        rationale = "Paper tracking is still too generous because timing support is weak while false-positive pressure remains elevated."
     if tier == "monitor_only" and scorecard.deployable_alpha_utility < 28.0:
         tier = "not_actionable"
         size_band = "none"
@@ -101,6 +127,9 @@ def classify_axiom_deployability(
             [
                 scorecard.overall_confidence,
                 scorecard.overall_coverage,
+                alignment,
+                evidence,
+                path,
                 research.confidence,
                 liquidity.confidence,
                 flow.confidence,

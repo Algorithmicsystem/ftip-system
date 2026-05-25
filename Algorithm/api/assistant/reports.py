@@ -1997,8 +1997,11 @@ def _axiom_summary_text(axiom: Dict[str, Any]) -> str:
         return _join_sentences(
             [
                 str(summary),
+                explanation.get("support_vs_drag_summary"),
                 explanation.get("why_now_summary"),
                 explanation.get("unique_mispricing_summary"),
+                explanation.get("setup_character_summary"),
+                explanation.get("false_positive_risk_summary"),
             ]
         )
     deployability_tier = axiom.get("deployability_tier") or "unknown"
@@ -2295,6 +2298,33 @@ def attach_axiom_context(
     updated["axiom_friction_burden"] = axiom.get("friction_burden")
     updated["axiom_validated_edge"] = axiom.get("validated_edge")
     updated["axiom_deployable_alpha_utility"] = axiom.get("deployable_alpha_utility")
+    updated["axiom_cross_engine_alignment"] = (
+        (axiom.get("scorecard") or {}).get("cross_engine_alignment")
+    )
+    updated["axiom_timing_support"] = (
+        (axiom.get("scorecard") or {}).get("timing_support")
+    )
+    updated["axiom_setup_maturity"] = (
+        (axiom.get("scorecard") or {}).get("setup_maturity")
+    )
+    updated["axiom_mispricing_readiness"] = (
+        (axiom.get("scorecard") or {}).get("mispricing_readiness")
+    )
+    updated["axiom_evidence_readiness"] = (
+        (axiom.get("scorecard") or {}).get("evidence_readiness")
+    )
+    updated["axiom_path_survivability"] = (
+        (axiom.get("scorecard") or {}).get("path_survivability")
+    )
+    updated["axiom_false_positive_penalty"] = (
+        (axiom.get("scorecard") or {}).get("false_positive_penalty")
+    )
+    updated["axiom_exceptional_opportunity"] = (
+        (axiom.get("scorecard") or {}).get("exceptional_opportunity")
+    )
+    updated["axiom_regime_weighting_profile"] = (
+        (axiom.get("scorecard") or {}).get("regime_weighting_profile")
+    )
     updated["axiom_regime_label"] = axiom.get("regime_label")
     updated["axiom_trade_family"] = axiom.get("trade_family")
     updated["axiom_deployability_tier"] = axiom.get("deployability_tier")

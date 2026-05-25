@@ -14,7 +14,11 @@ from api.source_governance import active_source_profile, source_allowed
 
 from .alphavantage import fetch_daily_adjusted_bars
 from .errors import ProviderError, ProviderUnavailable, SymbolNoData
-from .quality import provider_attempt, provider_result_metadata
+from .quality import (
+    provider_attempt,
+    provider_capability_profile,
+    provider_result_metadata,
+)
 from .symbols import canonical_symbol, detect_country_exchange, provider_symbol
 
 logger = logging.getLogger(__name__)
@@ -24,6 +28,14 @@ if _yf_spec:
     import yfinance as yf
 else:  # pragma: no cover - optional dependency
     yf = None
+
+
+_PROVIDER_ALIASES = {
+    "massive": "massive_polygon",
+    "polygon": "massive_polygon",
+    "massive_polygon": "massive_polygon",
+    "alpha_vantage": "alphavantage",
+}
 
 
 def _unwrap_scalar(value: Any) -> Any:
@@ -76,6 +88,66 @@ def _daily_provider_attempts() -> List[Tuple[str, Any]]:
     if source_allowed("yfinance"):
         attempts.append(("yfinance", _fetch_daily_yfinance))
     return attempts
+
+
+def _normalize_provider_name(provider_name: Optional[str]) -> Optional[str]:
+    normalized = str(provider_name or "").strip().lower()
+    if not normalized:
+        return None
+    return _PROVIDER_ALIASES.get(normalized, normalized)
+
+
+def _suppressed_provider_attempts(
+    disabled_providers: Optional[List[str]],
+) -> List[Dict[str, Any]]:
+    disabled = {
+        _normalize_provider_name(item)
+        for item in (disabled_providers or [])
+        if _normalize_provider_name(item)
+    }
+    if not disabled:
+        return []
+    return [
+        provider_attempt(
+            provider_name,
+            status="suppressed",
+            source_type="market_data",
+            reason_code="SUPPRESSED_BY_RUN_POLICY",
+            reason_detail="suppressed by run policy",
+            response_quality="degraded",
+            fallback_used=index > 0,
+        )
+        for index, (provider_name, _fetcher) in enumerate(_daily_provider_attempts())
+        if _normalize_provider_name(provider_name) in disabled
+    ]
+
+
+def _ordered_provider_attempts(
+    *,
+    preferred_provider: Optional[str] = None,
+    disabled_providers: Optional[List[str]] = None,
+) -> List[Tuple[str, Any]]:
+    disabled = {
+        _normalize_provider_name(item)
+        for item in (disabled_providers or [])
+        if _normalize_provider_name(item)
+    }
+    attempts = _daily_provider_attempts()
+    ranked: List[Tuple[int, int, Tuple[str, Any]]] = []
+    normalized_preferred = _normalize_provider_name(preferred_provider)
+    for index, attempt in enumerate(attempts):
+        provider_name = _normalize_provider_name(attempt[0]) or str(attempt[0]).strip().lower()
+        profile = provider_capability_profile(provider_name, capability="daily_bars")
+        priority = int(profile.get("fallback_priority") or 99)
+        if normalized_preferred and provider_name == normalized_preferred:
+            priority = -1
+        ranked.append((priority, index, attempt))
+    ordered = [attempt for _priority, _index, attempt in sorted(ranked, key=lambda item: (item[0], item[1]))]
+    return [
+        attempt
+        for attempt in ordered
+        if _normalize_provider_name(attempt[0]) not in disabled
+    ]
 
 def _date_range_filter(
     rows: List[Dict[str, object]], start: dt.date, end: dt.date
@@ -137,8 +209,59 @@ def _fetch_daily_stooq(
 def _fetch_daily_massive(
     symbol: str, start: dt.date, end: dt.date
 ) -> List[Dict[str, object]]:
+    def _legacy_rows() -> List[Dict[str, object]]:
+        try:
+            from api import main as app_main
+        except Exception:
+            return []
+        fetcher = getattr(app_main, "massive_fetch_daily_bars", None)
+        if not callable(fetcher):
+            return []
+        try:
+            payload = fetcher(canonical_symbol(symbol), start.isoformat(), end.isoformat())
+        except Exception:
+            return []
+        rows: List[Dict[str, object]] = []
+        for item in payload or []:
+            timestamp = getattr(item, "timestamp", None)
+            if timestamp is None and isinstance(item, dict):
+                timestamp = item.get("timestamp") or item.get("as_of_date") or item.get("date")
+            if timestamp is None:
+                continue
+            try:
+                as_of = (
+                    timestamp
+                    if isinstance(timestamp, dt.date)
+                    else dt.date.fromisoformat(str(timestamp)[:10])
+                )
+            except Exception:
+                continue
+            close = getattr(item, "close", None)
+            volume = getattr(item, "volume", None)
+            if isinstance(item, dict):
+                close = item.get("close", close)
+                volume = item.get("volume", volume)
+            if close is None:
+                continue
+            rows.append(
+                {
+                    "symbol": canonical_symbol(symbol),
+                    "as_of_date": as_of,
+                    "open": getattr(item, "open", None) if not isinstance(item, dict) else item.get("open"),
+                    "high": getattr(item, "high", None) if not isinstance(item, dict) else item.get("high"),
+                    "low": getattr(item, "low", None) if not isinstance(item, dict) else item.get("low"),
+                    "close": float(close),
+                    "volume": int(float(volume)) if volume is not None else None,
+                    "source": "massive_polygon",
+                }
+            )
+        return _date_range_filter(rows, start, end)
+
     api_key = config.massive_api_key()
     if not api_key:
+        legacy_rows = _legacy_rows()
+        if legacy_rows:
+            return legacy_rows
         raise ProviderUnavailable(
             "PROVIDER_UNAVAILABLE",
             "MASSIVE_API_KEY not set",
@@ -263,21 +386,46 @@ def fetch_daily_bars(
 
 
 def fetch_daily_bars_with_meta(
-    symbol: str, start_date: dt.date, end_date: dt.date
+    symbol: str,
+    start_date: dt.date,
+    end_date: dt.date,
+    *,
+    preferred_provider: Optional[str] = None,
+    disabled_providers: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, object]], Dict[str, Any]]:
-    attempts = _daily_provider_attempts()
+    disabled_set = {
+        _normalize_provider_name(item)
+        for item in (disabled_providers or [])
+        if _normalize_provider_name(item)
+    }
+    suppressed_attempts = _suppressed_provider_attempts(disabled_providers)
+    attempts = _ordered_provider_attempts(
+        preferred_provider=preferred_provider,
+        disabled_providers=disabled_providers,
+    )
     if not attempts:
         raise ProviderUnavailable(
             "PROVIDER_UNAVAILABLE",
             f"no daily-bar providers are allowed under source profile {active_source_profile()}",
             provider_name="daily_bars",
             source_type="market_data",
+            metadata={
+                "provider_context": provider_result_metadata(
+                    "daily_bars",
+                    source_type="market_data",
+                    end_date=end_date,
+                    response_quality="degraded",
+                    error_summary="all providers suppressed or disallowed",
+                    attempts=suppressed_attempts,
+                    capability="daily_bars",
+                )
+            },
         )
 
-    attempt_log: List[Dict[str, Any]] = []
+    attempt_log: List[Dict[str, Any]] = list(suppressed_attempts)
     last_error: Optional[ProviderError] = None
     for index, (provider_name, fetcher) in enumerate(attempts):
-        fallback_used = index > 0
+        fallback_used = index > 0 or bool(suppressed_attempts)
         try:
             rows = fetcher(symbol, start_date, end_date)
             attempt_log.append(
@@ -289,7 +437,7 @@ def fetch_daily_bars_with_meta(
                     fallback_used=fallback_used,
                 )
             )
-            return rows, provider_result_metadata(
+            metadata = provider_result_metadata(
                 provider_name,
                 source_type="market_data",
                 end_date=end_date,
@@ -298,6 +446,16 @@ def fetch_daily_bars_with_meta(
                 attempts=attempt_log,
                 capability="daily_bars",
             )
+            metadata["preferred_provider"] = _normalize_provider_name(preferred_provider)
+            metadata["suppressed_providers"] = sorted(item for item in disabled_set if item)
+            metadata["available_providers"] = [
+                _normalize_provider_name(name) or str(name).strip().lower()
+                for name, _fetcher in _ordered_provider_attempts(
+                    preferred_provider=preferred_provider,
+                    disabled_providers=None,
+                )
+            ]
+            return rows, metadata
         except ProviderError as exc:
             last_error = exc
             attempt_log.append(
@@ -364,6 +522,13 @@ def fetch_daily_bars_with_meta(
             capability="daily_bars",
         ),
     }
+    if isinstance(last_error.metadata.get("provider_context"), dict):
+        last_error.metadata["provider_context"]["preferred_provider"] = _normalize_provider_name(
+            preferred_provider
+        )
+        last_error.metadata["provider_context"]["suppressed_providers"] = sorted(
+            item for item in disabled_set if item
+        )
     raise last_error
 
 

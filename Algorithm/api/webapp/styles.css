@@ -387,15 +387,15 @@ textarea {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  width: min(1120px, calc(100% - 32px));
-  bottom: 14px;
+  width: min(980px, calc(100% - 40px));
+  bottom: 12px;
   z-index: 40;
   border: 1px solid rgba(92, 165, 255, 0.2);
-  border-radius: 16px;
+  border-radius: 14px;
   background:
     linear-gradient(135deg, rgba(78, 161, 255, 0.1), transparent 35%),
     linear-gradient(180deg, rgba(18, 29, 44, 0.98), rgba(8, 14, 21, 0.99));
-  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.38);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
   backdrop-filter: blur(10px);
 }
 
@@ -410,30 +410,30 @@ textarea {
 .assistant-copilot-shell-head {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  gap: 10px;
   align-items: center;
-  padding: 10px 14px;
+  padding: 8px 12px;
 }
 
 .assistant-copilot-shell-head h4 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
 }
 
 .assistant-copilot-head-primary {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
 .assistant-copilot-mini-kicker {
-  padding: 6px 10px;
+  padding: 5px 8px;
   border-radius: 999px;
   border: 1px solid rgba(92, 165, 255, 0.22);
   background: rgba(8, 18, 28, 0.72);
   color: var(--accent-2);
-  font-size: 10px;
+  font-size: 9px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -453,8 +453,8 @@ textarea {
 
 .assistant-copilot-note {
   margin-top: 3px;
-  max-width: 540px;
-  font-size: 12px;
+  max-width: 480px;
+  font-size: 11px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -462,12 +462,12 @@ textarea {
 
 .assistant-copilot-body {
   display: grid;
-  gap: 10px;
-  padding: 0 14px 14px;
+  gap: 8px;
+  padding: 0 12px 12px;
 }
 
 .assistant-copilot-body textarea {
-  min-height: 72px;
+  min-height: 64px;
 }
 
 .assistant-copilot-chip-row {
@@ -483,8 +483,8 @@ textarea {
 }
 
 .assistant-copilot-body .response-block {
-  min-height: 110px;
-  max-height: 220px;
+  min-height: 96px;
+  max-height: 180px;
   overflow: auto;
 }
 

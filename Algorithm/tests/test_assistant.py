@@ -490,6 +490,13 @@ def test_generate_analysis_report_persists_artifact(monkeypatch):
     assert result["axiom_deployability_tier"]
     assert result["axiom_validated_edge"] is not None
     assert result["axiom_deployable_alpha_utility"] is not None
+    assert result["axiom_cross_engine_alignment"] is not None
+    assert result["axiom_timing_support"] is not None
+    assert result["axiom_mispricing_readiness"] is not None
+    assert result["axiom_evidence_readiness"] is not None
+    assert result["axiom_path_survivability"] is not None
+    assert result["axiom_false_positive_penalty"] is not None
+    assert result["axiom_regime_weighting_profile"]
     assert result["axiom_historical_evidence"]["history_horizon_label"] == "21d"
     assert result["axiom_calibration_summary"]["horizon_label"] == "21d"
     assert result["axiom_portfolio_governance"]["symbol"] == "NVDA"

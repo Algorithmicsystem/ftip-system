@@ -11,7 +11,7 @@ from api import db
 from api.alpha import CANONICAL_FEATURE_VERSION, build_canonical_features
 from api.data_providers.bars import fetch_daily_bars_with_meta
 from api.data_providers.errors import ProviderError
-from api.data_providers.quality import provider_attempt, provider_result_metadata
+from api.data_providers.quality import provider_result_metadata
 from api.research import build_research_snapshot_from_bars
 
 
@@ -105,6 +105,17 @@ def _normalize_bar_payload(payload: Any, *, default_source: str) -> Dict[str, An
     }
 
 
+def _preferred_bars_provider(source: str) -> str | None:
+    normalized = str(source or "").strip().lower()
+    if not normalized:
+        return None
+    if normalized in {"massive", "polygon"}:
+        return "massive_polygon"
+    if normalized in {"massive_polygon", "alphavantage", "stooq", "yfinance"}:
+        return normalized
+    return None
+
+
 def ingest_bars(
     symbol: str,
     from_date: dt.date,
@@ -112,6 +123,8 @@ def ingest_bars(
     *,
     source: str = "massive",
     force_refresh: bool = False,
+    preferred_provider: str | None = None,
+    disabled_providers: List[str] | None = None,
 ) -> Dict[str, Any]:
     sym = (symbol or "").strip().upper()
     if not sym:
@@ -134,8 +147,9 @@ def ingest_bars(
 
     inserted = 0
     updated = 0
+    preferred = preferred_provider or _preferred_bars_provider(source)
     provider_context = provider_result_metadata(
-        "massive_polygon",
+        preferred or "massive_polygon",
         source_type="market_data",
         end_date=to_date,
         response_quality="complete",
@@ -146,104 +160,47 @@ def ingest_bars(
         missing_set = set(missing)
         normalized_bars: List[Dict[str, Any]] = []
         try:
-            from api.main import massive_fetch_daily_bars  # type: ignore
-
-            bars = massive_fetch_daily_bars(sym, from_date.isoformat(), to_date.isoformat())
-            provider_context = provider_result_metadata(
-                "massive_polygon",
-                source_type="market_data",
-                end_date=to_date,
-                response_quality="complete",
-                attempts=[
-                    provider_attempt(
-                        "massive_polygon",
-                        status="success",
-                        source_type="market_data",
-                        response_quality="complete",
-                    )
-                ],
-                capability="daily_bars",
+            fetched_rows, provider_context = fetch_daily_bars_with_meta(
+                sym,
+                from_date,
+                to_date,
+                preferred_provider=preferred,
+                disabled_providers=disabled_providers,
             )
             normalized_bars = [
-                _normalize_bar_payload(bar, default_source="massive_polygon")
-                for bar in bars
+                _normalize_bar_payload(
+                    row,
+                    default_source=str(
+                        provider_context.get("provider_name") or preferred or source or "unknown"
+                    ),
+                )
+                for row in fetched_rows
             ]
-        except HTTPException as exc:
-            try:
-                fallback_rows, provider_context = fetch_daily_bars_with_meta(
-                    sym, from_date, to_date
+        except ProviderError as provider_exc:
+            provider_context = (
+                (provider_exc.metadata or {}).get("provider_context")
+                or provider_result_metadata(
+                    provider_exc.provider_name or preferred or "unknown",
+                    source_type=provider_exc.source_type or "market_data",
+                    end_date=to_date,
+                    response_quality="degraded",
+                    error_summary=provider_exc.reason_detail,
+                    attempts=(provider_exc.metadata or {}).get("attempts") or [],
+                    capability="daily_bars",
                 )
-                normalized_bars = [
-                    _normalize_bar_payload(
-                        row,
-                        default_source=str(
-                            provider_context.get("provider_name") or source or "unknown"
-                        ),
-                    )
-                    for row in fallback_rows
-                ]
-            except ProviderError as provider_exc:
-                provider_context = (
-                    (provider_exc.metadata or {}).get("provider_context")
-                    or provider_result_metadata(
-                        provider_exc.provider_name or "unknown",
-                        source_type=provider_exc.source_type or "market_data",
-                        end_date=to_date,
-                        response_quality="degraded",
-                        error_summary=provider_exc.reason_detail,
-                        attempts=(provider_exc.metadata or {}).get("attempts") or [],
-                        capability="daily_bars",
-                    )
-                )
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "reason_code": provider_exc.reason_code,
-                        "reason_detail": provider_exc.reason_detail,
-                        "retryable": provider_exc.reason_code
-                        in {"PROVIDER_UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR"},
-                        "provider_context": provider_context,
-                        "upstream_status_code": exc.status_code,
-                    },
-                ) from provider_exc
-        except Exception as exc:
-            try:
-                fallback_rows, provider_context = fetch_daily_bars_with_meta(
-                    sym, from_date, to_date
-                )
-                normalized_bars = [
-                    _normalize_bar_payload(
-                        row,
-                        default_source=str(
-                            provider_context.get("provider_name") or source or "unknown"
-                        ),
-                    )
-                    for row in fallback_rows
-                ]
-            except ProviderError as provider_exc:
-                provider_context = (
-                    (provider_exc.metadata or {}).get("provider_context")
-                    or provider_result_metadata(
-                        provider_exc.provider_name or "unknown",
-                        source_type=provider_exc.source_type or "market_data",
-                        end_date=to_date,
-                        response_quality="degraded",
-                        error_summary=provider_exc.reason_detail,
-                        attempts=(provider_exc.metadata or {}).get("attempts") or [],
-                        capability="daily_bars",
-                    )
-                )
-                raise HTTPException(
-                    status_code=502,
-                    detail={
-                        "reason_code": provider_exc.reason_code,
-                        "reason_detail": provider_exc.reason_detail,
-                        "retryable": provider_exc.reason_code
-                        in {"PROVIDER_UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR"},
-                        "provider_context": provider_context,
-                        "upstream_error": str(exc),
-                    },
-                ) from provider_exc
+            )
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "reason_code": provider_exc.reason_code,
+                    "reason_detail": provider_exc.reason_detail,
+                    "retryable": provider_exc.reason_code
+                    in {"PROVIDER_UNAVAILABLE", "TIMEOUT", "NETWORK_ERROR"},
+                    "provider_context": provider_context,
+                    "preferred_provider": preferred,
+                    "disabled_providers": disabled_providers or [],
+                },
+            ) from provider_exc
 
         for payload in normalized_bars:
             day = payload["date"]
@@ -272,7 +229,7 @@ def ingest_bars(
                     payload.get("adj_close"),
                     payload.get("volume"),
                     payload.get("source") or source,
-                    json.dumps(payload.get("raw") or {}),
+                    json.dumps(payload.get("raw") or {}, default=str),
                 ),
             )
             if day in missing_set:

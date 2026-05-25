@@ -51,6 +51,52 @@ def test_fetch_daily_bars_with_meta_tracks_fallback(monkeypatch: pytest.MonkeyPa
     assert "fallback_chain_used" in metadata["source_warning_flags"]
     assert metadata["strength_label"] in {"weak", "mixed", "strong"}
     assert metadata["source_strength_summary"]
+    assert metadata["connector_slot"]
+    assert metadata["fallback_chain_used"] == ["massive_polygon", "stooq"]
+    assert metadata["provider_domain"] == "market_data"
+
+
+def test_fetch_daily_bars_with_meta_marks_run_suppressed_provider(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        bars,
+        "_daily_provider_attempts",
+        lambda: [
+            ("massive_polygon", lambda *_args, **_kwargs: []),
+            (
+                "stooq",
+                lambda symbol, _start, end: [
+                    {
+                        "symbol": symbol,
+                        "as_of_date": end,
+                        "open": 100.0,
+                        "high": 101.0,
+                        "low": 99.0,
+                        "close": 100.0,
+                        "volume": 10,
+                        "source": "stooq",
+                    }
+                ],
+            ),
+        ],
+    )
+
+    rows, metadata = bars.fetch_daily_bars_with_meta(
+        "AAPL",
+        dt.date(2024, 1, 1),
+        dt.date(2024, 1, 5),
+        disabled_providers=["massive_polygon"],
+    )
+
+    assert rows
+    assert metadata["provider_name"] == "stooq"
+    assert metadata["fallback_used"] is True
+    assert metadata["suppressed_providers"] == ["massive_polygon"]
+    assert metadata["attempts"][0]["status"] == "suppressed"
+    assert metadata["attempts"][1]["status"] == "success"
+    assert "provider_run_suppressed" in metadata["source_warning_flags"]
+    assert metadata["available_providers"][0] == "massive_polygon"
 
 
 def test_scalar_helpers_handle_series_like_values() -> None:
@@ -103,3 +149,4 @@ def test_fetch_news_items_with_meta_surfaces_partial_result_status(
     assert metadata["attempt_count"] >= 2
     assert "partial_result" in metadata["source_warning_flags"]
     assert metadata["source_strength_summary"]
+    assert metadata["connector_slot"]

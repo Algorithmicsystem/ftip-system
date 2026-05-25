@@ -221,6 +221,16 @@ class AxiomScorecard(BaseModel):
     friction_burden: float
     validated_edge: float
     deployable_alpha_utility: float
+    cross_engine_alignment: float = 0.0
+    timing_support: float = 0.0
+    setup_maturity: float = 0.0
+    mispricing_readiness: float = 0.0
+    evidence_readiness: float = 0.0
+    path_survivability: float = 0.0
+    false_positive_penalty: float = 0.0
+    exceptional_opportunity: float = 0.0
+    support_drag_spread: float = 0.0
+    regime_weighting_profile: str = "base_balance"
     overall_coverage: float
     overall_confidence: float
     component_support: Dict[str, float] = Field(default_factory=dict)

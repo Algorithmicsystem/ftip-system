@@ -42,6 +42,35 @@ def _top_score_snapshot(proprietary_scores: Dict[str, Any], *, limit: int = 5) -
     return ranked[:limit]
 
 
+def _caller_page_snapshot(caller_context: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    context = caller_context or {}
+    page_context = dict(context.get("page_context") or {})
+    report_context = dict(context.get("report_context") or {})
+    research_tab = page_context.get("research_tab")
+    page_label = page_context.get("page_label") or research_tab
+    return {
+        "page_label": page_label,
+        "page_focus": page_context.get("page_focus"),
+        "research_tab": research_tab,
+        "workspace_name": page_context.get("workspace_name"),
+        "workspace_id": page_context.get("workspace_id"),
+        "workflow_stage": page_context.get("workflow_stage"),
+        "dossier_id": page_context.get("dossier_id"),
+        "symbol": page_context.get("symbol"),
+        "deployability_tier": page_context.get("deployability_tier"),
+        "recommendation_state": page_context.get("recommendation_state"),
+        "committee_state": page_context.get("committee_state"),
+        "review_state": page_context.get("review_state"),
+        "export_count": page_context.get("export_count"),
+        "active_pack_types": list(page_context.get("active_pack_types") or []),
+        "current_view_summary": page_context.get("current_view_summary"),
+        "context_warning": page_context.get("context_warning"),
+        "report_id": report_context.get("report_id"),
+        "axiom_artifact_id": report_context.get("axiom_artifact_id"),
+        "report_export_count": report_context.get("export_count"),
+    }
+
+
 def _scenario_snapshot(report: Dict[str, Any]) -> Dict[str, Any]:
     scenarios = (report.get("strategy") or {}).get("scenario_matrix") or report.get("scenario_matrix") or {}
     return {
@@ -420,6 +449,16 @@ def build_narrator_context(
         )
         if active_analysis.get("platform_recommendation_locked") is not None
         else (((report.get("platform_dossier") or {}).get("metadata") or {}).get("recommendation_locked")),
+        "platform_recommendation_state": ((report.get("platform_recommendation_state") or {}).get("state")),
+        "platform_committee_state": (
+            (report.get("platform_committee_decision") or {}).get("decision_status")
+        ),
+        "platform_review_unresolved_count": (
+            (report.get("platform_review_summary") or {}).get("unresolved_concern_count")
+        ),
+        "platform_assignment_owner": (
+            (report.get("platform_assignment_summary") or {}).get("owner")
+        ),
         "operating_workflow_version": active_analysis.get("operating_workflow_version")
         or report.get("operating_workflow_version"),
         "daily_operating_summary": active_analysis.get("daily_operating_summary")
@@ -543,6 +582,15 @@ def build_narrator_context(
             "deployable_alpha_utility": report.get("axiom_deployable_alpha_utility"),
             "gross_opportunity": report.get("axiom_gross_opportunity"),
             "friction_burden": report.get("axiom_friction_burden"),
+            "cross_engine_alignment": report.get("axiom_cross_engine_alignment"),
+            "timing_support": report.get("axiom_timing_support"),
+            "setup_maturity": report.get("axiom_setup_maturity"),
+            "mispricing_readiness": report.get("axiom_mispricing_readiness"),
+            "evidence_readiness": report.get("axiom_evidence_readiness"),
+            "path_survivability": report.get("axiom_path_survivability"),
+            "false_positive_penalty": report.get("axiom_false_positive_penalty"),
+            "exceptional_opportunity": report.get("axiom_exceptional_opportunity"),
+            "regime_weighting_profile": report.get("axiom_regime_weighting_profile"),
             "calibration_status": report.get("axiom_calibration_status"),
             "portfolio_rank_score": report.get("axiom_portfolio_rank_score"),
             "portfolio_fit_label": report.get("axiom_portfolio_fit_label"),
@@ -593,6 +641,13 @@ def build_narrator_context(
             "demo_bundle_summary": report.get("platform_demo_bundle_summary"),
             "effective_role": (report.get("platform_access_summary") or {}).get("effective_role"),
             "pending_approval_count": (report.get("platform_summary_view") or {}).get("pending_approval_count"),
+            "review_summary": report.get("platform_review_summary"),
+            "assignment_summary": report.get("platform_assignment_summary"),
+            "committee_decision": report.get("platform_committee_decision"),
+            "recommendation_state": report.get("platform_recommendation_state"),
+            "export_capabilities": report.get("platform_export_capabilities"),
+            "health_summary": report.get("platform_health_summary"),
+            "proof_summary": report.get("platform_proof_summary"),
         },
         "operating_workflow_snapshot": {
             "operating_workflow_version": report.get("operating_workflow_version"),
@@ -851,4 +906,5 @@ def build_narrator_context(
         "uncertainty_notes": _compact_list(report.get("uncertainty_notes") or [], limit=6),
         "followup_questions": route.get("followup_questions") or [],
         "caller_context": caller_context or {},
+        "caller_page_snapshot": _caller_page_snapshot(caller_context),
     }

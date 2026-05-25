@@ -367,6 +367,186 @@ def test_platform_proof_renderer_has_percent_formatter_alias() -> None:
     assert "ok" in result.stdout
 
 
+def test_copilot_shell_is_compact_by_default_and_page_context_is_system_aware() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    script = textwrap.dedent(
+        """
+        const fs = require("fs");
+        const path = require("path");
+        const vm = require("vm");
+
+        const source = fs.readFileSync(
+          path.join(process.cwd(), "api/webapp/app.js"),
+          "utf8"
+        ) + "\\n;globalThis.__testExports = { buildCopilotPageContext, renderCopilotShell, state };";
+
+        const elements = new Map();
+        const makeElement = () => {
+          const classes = new Set();
+          return {
+            value: "",
+            textContent: "",
+            innerHTML: "",
+            disabled: false,
+            dataset: {},
+            style: {},
+            addEventListener() {},
+            removeEventListener() {},
+            focus() {},
+            closest() { return null; },
+            classList: {
+              toggle(name, force) {
+                if (force === undefined) {
+                  if (classes.has(name)) {
+                    classes.delete(name);
+                    return false;
+                  }
+                  classes.add(name);
+                  return true;
+                }
+                if (force) {
+                  classes.add(name);
+                } else {
+                  classes.delete(name);
+                }
+                return !!force;
+              },
+              add(name) { classes.add(name); },
+              remove(name) { classes.delete(name); },
+              contains(name) { return classes.has(name); },
+            },
+          };
+        };
+        const querySelector = (selector) => {
+          if (!elements.has(selector)) {
+            elements.set(selector, makeElement());
+          }
+          return elements.get(selector);
+        };
+
+        const context = {
+          console,
+          Date,
+          JSON,
+          Math,
+          Number,
+          String,
+          Boolean,
+          Array,
+          Object,
+          Promise,
+          Map,
+          Set,
+          window: {
+            localStorage: {
+              getItem() { return null; },
+              setItem() {},
+              removeItem() {},
+            },
+            crypto: { randomUUID: () => "00000000-0000-4000-8000-000000000000" },
+          },
+          document: {
+            body: makeElement(),
+            querySelector,
+            querySelectorAll() { return []; },
+          },
+          fetch: async () => ({
+            ok: true,
+            async json() {
+              return { status: "ok", llm_enabled: true, db_enabled: true };
+            },
+          }),
+          setTimeout,
+          clearTimeout,
+        };
+        context.document.body.addEventListener = () => {};
+        context.globalThis = context;
+
+        vm.createContext(context);
+        vm.runInContext(source, context);
+
+        const { buildCopilotPageContext, renderCopilotShell, state } = context.__testExports;
+        state.activeTab = "legacy";
+        state.researchTab = "platform";
+        state.assistantActiveAnalysis = {
+          symbol: "NVDA",
+          platform_workspace_id: "workspace-1",
+          platform_workflow_id: "workflow-1",
+          platform_workflow_stage: "decision",
+          platform_dossier_id: "dossier-1",
+          axiom_evidence_backed_deployability_tier: "paper_trade_only",
+        };
+        state.assistantLatestReport = {
+          symbol: "NVDA",
+          as_of_date: "2026-05-24",
+          platform_workspace: { workspace_id: "workspace-1", name: "Pilot HF Workspace" },
+          platform_workflow: { workflow_id: "workflow-1", stage: "decision" },
+          platform_dossier: {
+            dossier_id: "dossier-1",
+            dossier_type: "coverage",
+            evidence_status: "limited",
+            current_recommendation_state: "approved_paper",
+          },
+          platform_recommendation_state: { state: "approved_paper" },
+          platform_committee_decision: { decision_status: "approved_with_conditions" },
+          platform_review_summary: {
+            unresolved_concern_count: 2,
+            thread_summary: { total_comments: 3 },
+          },
+          platform_summary_view: { pending_approval_count: 1 },
+          platform_stored_exports: [{ pack_type: "ic_memo_pack" }, { pack_type: "dossier_pack" }],
+          platform_health_summary: { warnings: ["Provider confidence is mixed."] },
+          platform_proof_summary: { evidence_maturity_level: "emerging" },
+          platform_calibration_hardening: { status: "partial" },
+        };
+
+        const pageContext = buildCopilotPageContext();
+        renderCopilotShell();
+
+        const shell = querySelector("#assistant-copilot-shell");
+        const chipsHtml = querySelector("#assistant-copilot-context").innerHTML;
+        const promptsHtml = querySelector("#assistant-copilot-prompts").innerHTML;
+        const title = querySelector("#assistant-copilot-title").textContent;
+        const subtitle = querySelector("#assistant-copilot-inline-context").textContent;
+        const status = querySelector("#assistant-copilot-state").textContent;
+
+        if (pageContext.page_focus !== "workflow_and_committee_console") {
+          throw new Error("copilot page context missing platform focus");
+        }
+        if (pageContext.committee_state !== "approved_with_conditions") {
+          throw new Error("committee state missing from copilot page context");
+        }
+        if (pageContext.unresolved_concern_count !== 2) {
+          throw new Error("review concern count missing from copilot page context");
+        }
+        if (!shell.classList.contains("collapsed")) {
+          throw new Error("copilot shell should start collapsed");
+        }
+        if ((chipsHtml.match(/active-chip/g) || []).length !== 3) {
+          throw new Error("collapsed copilot shell should render only three chips");
+        }
+        if (!promptsHtml.includes("committee state") || !promptsHtml.includes("provider or data-quality issue")) {
+          throw new Error("copilot prompt set is missing system-aware suggestions");
+        }
+        if (!title.includes("NVDA") || !subtitle.includes("2 concerns") || status !== "Warning visible") {
+          throw new Error("copilot dock summary did not render expected compact state");
+        }
+        console.log("ok");
+        """
+    )
+
+    result = subprocess.run(
+        ["node", "-e", script],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "ok" in result.stdout
+
+
 def test_recent_report_persistence_quota_failure_does_not_break_analyze_flow() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     script = textwrap.dedent(

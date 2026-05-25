@@ -692,6 +692,23 @@ const buildCopilotPageContext = () => {
   const workflow = report.platform_workflow || {};
   const axiomCard = report.axiom_summary_card || {};
   const storedExports = report.platform_stored_exports || [];
+  const recommendationState = report.platform_recommendation_state || {};
+  const committeeDecision = report.platform_committee_decision || {};
+  const reviewSummary = report.platform_review_summary || {};
+  const healthSummary = report.platform_health_summary || {};
+  const proofSummary = report.platform_proof_summary || {};
+  const calibrationHardening = report.platform_calibration_hardening || {};
+  const unresolvedConcerns = reviewSummary.unresolved_concern_count || 0;
+  const providerHealthStatus =
+    report.provider_health_status ||
+    healthSummary.integration_health_summary?.overall_status ||
+    ((healthSummary.warnings || []).length ? "warning" : null);
+  const contextWarning =
+    (healthSummary.warnings || [])[0] ||
+    (report.live_readiness_blockers || [])[0] ||
+    (report.deployment_blockers || [])[0] ||
+    (report.axiom_weakest_evidence_areas || [])[0] ||
+    null;
   return {
     app_tab: state.activeTab || "legacy",
     research_tab: state.researchTab || "dashboard",
@@ -725,10 +742,19 @@ const buildCopilotPageContext = () => {
       analysis.axiom_deployability_tier ||
       axiomCard.deployability_tier ||
       null,
-    recommendation_state:
-      report.platform_recommendation_state?.state ||
-      report.platform_dossier?.current_recommendation_state ||
-      null,
+    recommendation_state: recommendationState.state || report.platform_dossier?.current_recommendation_state || null,
+    committee_state: committeeDecision.decision_status || null,
+    review_state:
+      unresolvedConcerns > 0 ? "concerns_open" : reviewSummary.thread_summary ? "reviewed" : null,
+    unresolved_concern_count: unresolvedConcerns,
+    pending_approval_count:
+      report.platform_summary_view?.pending_approval_count ||
+      report.platform_dashboard?.executive_metrics?.pending_approval_count ||
+      0,
+    provider_health_status: providerHealthStatus,
+    proof_maturity_level: proofSummary.evidence_maturity_level || null,
+    calibration_status:
+      calibrationHardening.status || report.platform_model_credibility_snapshot?.status || null,
     report_format_date: formatDate(report.as_of_date),
     current_view_summary:
       report.platform_dashboard_summary ||
@@ -736,18 +762,17 @@ const buildCopilotPageContext = () => {
       report.axiom_proprietary_synthesis ||
       report.signal_summary ||
       null,
+    context_warning: contextWarning,
   };
 };
 
 const buildCopilotPromptSet = () => {
+  const pageContext = buildCopilotPageContext();
   const symbol =
     state.assistantActiveAnalysis?.symbol ||
     state.assistantLatestReport?.symbol ||
     "this setup";
-  const recommendationState =
-    state.assistantLatestReport?.platform_recommendation_state?.state ||
-    state.assistantLatestReport?.platform_dossier?.current_recommendation_state ||
-    "draft";
+  const recommendationState = pageContext.recommendation_state || "draft";
   const base = [
     `What matters most on the ${researchTabLabel()} page right now?`,
     `Summarize the current workspace, dossier, and recommendation state for ${symbol}.`,
@@ -755,6 +780,29 @@ const buildCopilotPromptSet = () => {
     `What is the weakest evidence or biggest concern for ${symbol}?`,
     `What would have to improve to move ${symbol} beyond ${recommendationState.replaceAll("_", " ")}?`,
   ];
+  if (pageContext.unresolved_concern_count > 0) {
+    base.unshift(
+      `What unresolved concern is most likely to block ${symbol} right now?`
+    );
+  }
+  if (pageContext.committee_state) {
+    base.push(
+      `Explain the current committee state for ${symbol} and what it really means.`
+    );
+  }
+  if (pageContext.pending_approval_count > 0) {
+    base.push(`Which approval or workflow gate needs attention first?`);
+  }
+  if (pageContext.proof_maturity_level) {
+    base.push(
+      `How mature is the proof cycle behind ${symbol} and where is it still weak?`
+    );
+  }
+  if (pageContext.provider_health_status) {
+    base.push(
+      `Which provider or data-quality issue is most likely to distort the current view?`
+    );
+  }
   if (state.researchTab === "platform") {
     base.push(
       `Which workflow or committee item needs review first?`,
@@ -784,12 +832,17 @@ const buildCopilotDockSummary = (pageContext) => {
   const page = pageContext.page_label || "dashboard";
   const workflow = formatTier(pageContext.workflow_stage || "no_workflow");
   const recommendation = formatTier(pageContext.recommendation_state || "no_recommendation");
+  const unresolved = Number(pageContext.unresolved_concern_count || 0);
   return {
     title: pageContext.symbol
       ? `${symbol} · ${formatTier(pageContext.deployability_tier || "watch_only")}`
       : "FTIP Platform Copilot",
-    subtitle: `${page} · ${workflow} · ${recommendation}`,
-    status: pageContext.workspace_name || pageContext.workspace_id ? "Context live" : "Awaiting context",
+    subtitle: `${page} · ${workflow} · ${recommendation}${unresolved ? ` · ${unresolved} concern${unresolved === 1 ? "" : "s"}` : ""}`,
+    status: pageContext.context_warning
+      ? "Warning visible"
+      : pageContext.workspace_name || pageContext.workspace_id
+      ? "Context live"
+      : "Awaiting context",
   };
 };
 
@@ -821,9 +874,12 @@ const renderCopilotShell = () => {
     `Workflow ${formatTier(pageContext.workflow_stage || "n/a")}`,
     `Symbol ${pageContext.symbol || "n/a"}`,
     `Recommendation ${formatTier(pageContext.recommendation_state || "n/a")}`,
+    `Committee ${formatTier(pageContext.committee_state || "n/a")}`,
+    `Review ${formatTier(pageContext.review_state || "n/a")}`,
+    `Approvals ${pageContext.pending_approval_count || 0}`,
     `Exports ${pageContext.export_count || 0}`,
   ];
-  const visibleChips = state.copilotCollapsed ? contextChips.slice(0, 4) : contextChips;
+  const visibleChips = state.copilotCollapsed ? contextChips.slice(0, 3) : contextChips;
   contextEl.innerHTML = visibleChips
     .map((item) => `<div class="active-chip">${escapeHtml(item)}</div>`)
     .join("");

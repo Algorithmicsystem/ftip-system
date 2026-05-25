@@ -825,6 +825,11 @@ def test_phase5_builds_grounded_narrator_context_from_active_report() -> None:
     assert narrator_context["axiom_snapshot"]["lineage_summary"]
     assert narrator_context["axiom_snapshot"]["support_vs_drag_summary"]
     assert narrator_context["axiom_snapshot"]["decision_hierarchy_summary"]
+    assert narrator_context["axiom_snapshot"]["cross_engine_alignment"] is not None
+    assert narrator_context["axiom_snapshot"]["timing_support"] is not None
+    assert narrator_context["axiom_snapshot"]["path_survivability"] is not None
+    assert narrator_context["caller_page_snapshot"]["page_label"] == "platform"
+    assert narrator_context["caller_page_snapshot"]["workspace_id"] == "workspace-1"
     assert narrator_context["caller_context"]["page_context"]["research_tab"] == "platform"
 
 

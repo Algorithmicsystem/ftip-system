@@ -14,7 +14,11 @@ from api import config
 from api.source_governance import source_allowed
 
 from .errors import ProviderError
-from .quality import provider_attempt, provider_result_metadata
+from .quality import (
+    ordered_provider_candidates,
+    provider_attempt,
+    provider_result_metadata,
+)
 from .finnhub import fetch_company_news
 from .gdelt import search_articles as search_gdelt_articles
 from .gnews import search_news as search_gnews
@@ -66,42 +70,32 @@ def fetch_news_items_with_meta(
     errors: List[str] = []
     attempts: List[Dict[str, Any]] = []
 
-    for index, (provider_name, fetcher) in enumerate(
-        (
-        ("google_news_rss", lambda: _fetch_google_rss(symbol, from_ts, to_ts)),
-        (
-            "gnews",
-            lambda: search_gnews(
+    provider_plan = ordered_provider_candidates(
+        [
+            ("gnews", lambda: search_gnews(
                 f'"{symbol}" stock',
                 from_ts=from_ts,
                 to_ts=to_ts,
                 max_items=config.data_fabric_news_limit(),
-            ),
-        ),
-        (
-            "newsapi",
-            lambda: search_newsapi(
+            )),
+            ("newsapi", lambda: search_newsapi(
                 f'"{symbol}" stock',
                 from_ts=from_ts,
                 to_ts=to_ts,
                 max_items=config.data_fabric_news_limit(),
-            ),
-        ),
-        (
-            "finnhub_news",
-            lambda: fetch_company_news(symbol, from_ts.date(), to_ts.date()),
-        ),
-        (
-            "gdelt",
-            lambda: search_gdelt_articles(
+            )),
+            ("finnhub", lambda: fetch_company_news(symbol, from_ts.date(), to_ts.date())),
+            ("gdelt", lambda: search_gdelt_articles(
                 f'"{symbol}"',
                 from_ts=from_ts,
                 to_ts=to_ts,
                 max_records=config.data_fabric_news_limit(),
-            ),
-        ),
-        )
-    ):
+            )),
+            ("google_news_rss", lambda: _fetch_google_rss(symbol, from_ts, to_ts)),
+        ],
+        capability="news_items",
+    )
+    for index, (provider_name, fetcher) in enumerate(provider_plan):
         fallback_used = index > 0
         if not source_allowed(provider_name):
             errors.append(f"{provider_name}:blocked_by_source_profile")

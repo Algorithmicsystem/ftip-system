@@ -37,6 +37,16 @@ from ftip.risk import correlation_guard_stub, volatility_targeting
 router = APIRouter(dependencies=[Depends(security.require_prosperity_api_key)])
 logger = logging.getLogger(__name__)
 
+_SUPPRESSIBLE_PROVIDER_REASON_CODES = {
+    "PROVIDER_UNAVAILABLE",
+    "TIMEOUT",
+    "NETWORK_ERROR",
+    "UPSTREAM_5XX",
+    "PROVIDER_PARSE_FAILURE",
+    "PARSE_FAILURE",
+}
+_RUN_PROVIDER_SUPPRESSION_THRESHOLD = 2
+
 router.include_router(strategy_graph_router, prefix="/strategy_graph")
 router.include_router(narrator_router, prefix="/narrator")
 
@@ -762,6 +772,110 @@ def _provider_failure_summary(symbols_failed: List[Dict[str, Any]]) -> Dict[str,
     return summarize_provider_failures(failure_items)
 
 
+def _provider_failure_attempts(
+    provider_context: Optional[Dict[str, Any]],
+    *,
+    failure_cause_class: Optional[str] = None,
+    reason_code: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    context = dict(provider_context or {})
+    attempts = list(context.get("attempts") or [])
+    if attempts:
+        return [
+            item
+            for item in attempts
+            if str(item.get("status") or "").lower() == "failed"
+        ]
+    provider_name = context.get("provider_name")
+    if not provider_name:
+        return []
+    normalized_reason = str(reason_code or context.get("reason_code") or "UNKNOWN")
+    return [
+        {
+            "provider_name": provider_name,
+            "domain": context.get("provider_domain")
+            or context.get("domain")
+            or context.get("source_type"),
+            "reason_code": normalized_reason,
+            "response_quality": context.get("response_quality"),
+            "failure_cause_class": failure_cause_class,
+        }
+    ]
+
+
+def _update_run_provider_policy(
+    provider_policy: Dict[str, Any],
+    *,
+    provider_context: Optional[Dict[str, Any]],
+    failure_cause_class: str,
+    reason_code: str,
+) -> None:
+    if failure_cause_class not in {
+        "external_provider_error",
+        "provider_parse_failure",
+    } and reason_code not in _SUPPRESSIBLE_PROVIDER_REASON_CODES:
+        return
+    failure_counts = provider_policy.setdefault("failure_counts", {})
+    suppressed = provider_policy.setdefault("suppressed", {})
+    for attempt in _provider_failure_attempts(
+        provider_context,
+        failure_cause_class=failure_cause_class,
+        reason_code=reason_code,
+    ):
+        attempt_reason = str(attempt.get("reason_code") or reason_code or "UNKNOWN")
+        if attempt_reason not in _SUPPRESSIBLE_PROVIDER_REASON_CODES:
+            continue
+        provider_name = str(attempt.get("provider_name") or "").strip().lower()
+        if not provider_name:
+            continue
+        record = failure_counts.setdefault(
+            provider_name,
+            {
+                "provider_name": provider_name,
+                "count": 0,
+                "reason_codes": {},
+                "failure_cause_classes": {},
+                "domain": attempt.get("domain") or "unknown",
+            },
+        )
+        record["count"] = int(record.get("count", 0)) + 1
+        reason_bucket = record.setdefault("reason_codes", {})
+        reason_bucket[attempt_reason] = int(reason_bucket.get(attempt_reason, 0)) + 1
+        cause_bucket = record.setdefault("failure_cause_classes", {})
+        cause_bucket[failure_cause_class] = int(
+            cause_bucket.get(failure_cause_class, 0)
+        ) + 1
+        if (
+            int(record["count"]) >= _RUN_PROVIDER_SUPPRESSION_THRESHOLD
+            and provider_name not in suppressed
+        ):
+            suppressed[provider_name] = {
+                "provider_name": provider_name,
+                "suppressed_after_failures": int(record["count"]),
+                "domain": record.get("domain") or "unknown",
+                "reason_codes": dict(record.get("reason_codes") or {}),
+            }
+
+
+def _provider_run_suppression_summary(provider_policy: Dict[str, Any]) -> Dict[str, Any]:
+    failure_counts = provider_policy.get("failure_counts") or {}
+    suppressed = provider_policy.get("suppressed") or {}
+    return {
+        "suppressed_provider_count": len(suppressed),
+        "suppressed_providers": sorted(
+            suppressed.values(),
+            key=lambda item: (
+                -int(item.get("suppressed_after_failures") or 0),
+                str(item.get("provider_name") or ""),
+            ),
+        ),
+        "provider_failure_counts": sorted(
+            failure_counts.values(),
+            key=lambda item: (-int(item.get("count") or 0), str(item.get("provider_name") or "")),
+        ),
+    }
+
+
 def _try_cached_bars_recovery(
     symbol: str, from_date: dt.date, to_date: dt.date, required: int
 ) -> Optional[Dict[str, Any]]:
@@ -1094,6 +1208,10 @@ async def snapshot_run(
     timings["upsert_universe"] = time.time() - t0
 
     max_attempts = 3
+    provider_run_policy: Dict[str, Any] = {
+        "failure_counts": {},
+        "suppressed": {},
+    }
 
     for sym in symbols:
         sym_start = time.time()
@@ -1103,14 +1221,22 @@ async def snapshot_run(
         failure_stage = "provider_fetch"
         recovery_stage: Optional[str] = None
         provider_context: Dict[str, Any] = {}
+        recovery_outcome = "none"
         attempts = 0
         while attempts < max_attempts:
             attempts += 1
             failure_stage = "provider_fetch"
             recovery_stage = None
             try:
+                disabled_providers = sorted(
+                    (provider_run_policy.get("suppressed") or {}).keys()
+                )
                 ingest_result = ingest.ingest_bars(
-                    sym, req.from_date, req.to_date, force_refresh=req.force_refresh
+                    sym,
+                    req.from_date,
+                    req.to_date,
+                    force_refresh=req.force_refresh,
+                    disabled_providers=disabled_providers,
                 )
                 provider_context = _provider_context_from_ingest_result(ingest_result)
                 failure_stage = "cache_recovery"
@@ -1290,6 +1416,16 @@ async def snapshot_run(
                                     or [],
                                 }
                             )
+                            _update_run_provider_policy(
+                                provider_run_policy,
+                                provider_context=failure_provider_context,
+                                failure_cause_class=_failure_cause_class(
+                                    reason_code,
+                                    failure_stage=root_failure_stage,
+                                    reason_detail=reason_detail,
+                                ),
+                                reason_code=reason_code,
+                            )
                             _log_symbol_coverage(
                                 run_id,
                                 job_name,
@@ -1302,6 +1438,7 @@ async def snapshot_run(
                                 bars_returned=bars_returned,
                                 lock_owner=lock_owner,
                             )
+                            recovery_outcome = "cache_recovered"
                         cached_recovered = True
                     except Exception:
                         cached_recovered = False
@@ -1334,6 +1471,15 @@ async def snapshot_run(
                     failure_stage=root_failure_stage,
                     reason_detail=reason_detail,
                 )
+                _update_run_provider_policy(
+                    provider_run_policy,
+                    provider_context=failure_provider_context,
+                    failure_cause_class=cause_class,
+                    reason_code=reason_code,
+                )
+                active_suppressed_providers = sorted(
+                    (provider_run_policy.get("suppressed") or {}).keys()
+                )
                 symbols_failed.append(
                     {
                         "symbol": sym,
@@ -1349,6 +1495,8 @@ async def snapshot_run(
                         "retryable": bool(retryable),
                         "failure_stage": root_failure_stage,
                         "recovery_stage": recovery_stage,
+                        "recovery_outcome": recovery_outcome
+                        or ("retry_exhausted" if retryable else "unrecovered"),
                         "failure_cause_class": cause_class,
                         "provider_name": failure_provider_context.get("provider_name")
                         or provider_context.get("provider_name")
@@ -1367,9 +1515,16 @@ async def snapshot_run(
                         "provider_error_summary": failure_provider_context.get(
                             "error_summary"
                         ),
+                        "exact_error_summary": reason_detail or reason_code,
+                        "provider_domain": failure_provider_context.get(
+                            "provider_domain"
+                        )
+                        or failure_provider_context.get("domain")
+                        or failure_provider_context.get("source_type"),
                         "required_bars": bars_required,
                         "available_bars": bars_returned,
                         "lookback_days": req.lookback,
+                        "suppressed_providers_active": active_suppressed_providers,
                         # Backwards-compatible aliases.
                         "bars_required": bars_required,
                         "bars_returned": bars_returned,
@@ -1414,6 +1569,16 @@ async def snapshot_run(
             or bool((item.get("provider_context") or {}).get("fallback_used"))
         ),
     }
+    failure_report = {
+        "attempted": len(symbols),
+        "succeeded": len(symbols_ok),
+        "failed": len(symbols_failed),
+        "skipped": 0,
+        "fallback_used": summary_stats["fallback_used"],
+        "top_failure_causes": _top_failure_causes(symbols_failed),
+        "failure_stage_summary": _failure_stage_summary(symbols_failed),
+        "provider_failure_summary": _provider_failure_summary(symbols_failed),
+    }
 
     result_payload = {
         "symbols_ok": symbols_ok,
@@ -1421,6 +1586,7 @@ async def snapshot_run(
         "symbols_degraded": degraded_symbols,
         "degraded_mode": bool(degraded_symbols),
         "summary_stats": summary_stats,
+        "failure_report": failure_report,
         "failure_summary": _failure_summary(symbols_failed),
         "failure_stage_summary": _failure_stage_summary(symbols_failed),
         "top_failure_causes": _top_failure_causes(symbols_failed),
@@ -1428,6 +1594,11 @@ async def snapshot_run(
             [
                 {
                     "provider_name": item.get("provider") or "unknown",
+                    "provider_domain": (
+                        (item.get("provider_context") or {}).get("provider_domain")
+                        or (item.get("provider_context") or {}).get("domain")
+                        or (item.get("provider_context") or {}).get("source_type")
+                    ),
                     "fallback_used": bool(
                         (item.get("provider_context") or {}).get("fallback_used")
                     )
@@ -1436,11 +1607,18 @@ async def snapshot_run(
                         (item.get("provider_context") or {}).get("response_quality")
                         or ("degraded" if str(item.get("provider") or "") == "db_cache_fallback" else "complete")
                     ),
+                    "strength_label": (
+                        (item.get("provider_context") or {}).get("strength_label")
+                        or ("mixed" if str(item.get("provider") or "") == "db_cache_fallback" else "unknown")
+                    ),
                 }
                 for item in symbol_snapshots
             ]
         ),
         "provider_failure_summary": _provider_failure_summary(symbols_failed),
+        "provider_run_suppression_summary": _provider_run_suppression_summary(
+            provider_run_policy
+        ),
         "rows_written": rows_written,
         "dataset_fingerprint": _dataset_fingerprint(symbol_snapshots),
         "feature_version": FEATURE_VERSION,
@@ -1458,6 +1636,9 @@ async def snapshot_run(
                 "top_failure_causes": result_payload.get("top_failure_causes"),
                 "provider_failure_summary": result_payload.get(
                     "provider_failure_summary"
+                ),
+                "provider_run_suppression_summary": result_payload.get(
+                    "provider_run_suppression_summary"
                 ),
             },
         )

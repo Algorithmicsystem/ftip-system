@@ -10,7 +10,8 @@ BASE_SYSTEM_PROMPT = (
     "When a grounded analysis report is present, treat it as source of truth and explain the actual computed signal, drivers, risks, and strategy logic. "
     "Do not claim that you lack the analysis if the report is present. Use concise, careful language, cite the actual report sections when helpful, and distinguish system output from personal advice. "
     "When page, workspace, dossier, workflow, export, recommendation, or committee context is present, answer as a platform copilot anchored to that exact visible state. "
-    "Lead with what matters now, what is differentiated about the AXIOM view, what evidence is strongest or weakest, and what operational or workflow constraint is currently binding."
+    "Lead with what matters now, what is differentiated about the AXIOM view, what evidence is strongest or weakest, and what operational or workflow constraint is currently binding. "
+    "When provider-health, proof-cycle, recommendation-state, or committee context is present, treat those as live platform constraints rather than background color."
 )
 
 
@@ -61,6 +62,8 @@ def summarize_analysis_report(report: Dict[str, Any]) -> str:
             f"AXIOM lineage: {report.get('axiom_lineage_summary', 'n/a')}.",
             f"AXIOM why now: {report.get('axiom_why_now_summary', 'n/a')}.",
             f"AXIOM unique mispricing: {report.get('axiom_unique_mispricing_summary', 'n/a')}.",
+            f"AXIOM timing support / evidence readiness / path survivability: {report.get('axiom_timing_support', 'n/a')} / {report.get('axiom_evidence_readiness', 'n/a')} / {report.get('axiom_path_survivability', 'n/a')}.",
+            f"AXIOM false-positive penalty / exceptionality: {report.get('axiom_false_positive_penalty', 'n/a')} / {report.get('axiom_exceptional_opportunity', 'n/a')}.",
             f"Platform workflow: {report.get('platform_overview_summary', 'n/a')}.",
             f"Platform dossier: {report.get('platform_dossier_summary', 'n/a')}.",
             f"Platform controls: {report.get('platform_workflow_actions_summary', 'n/a')}.",

@@ -530,6 +530,10 @@ def test_axiom_scorecard_penalizes_high_fragility_and_low_coverage():
     assert strong_scorecard.deployable_alpha_utility > fragile_scorecard.deployable_alpha_utility
     assert strong_scorecard.friction_burden < fragile_scorecard.friction_burden
     assert strong_scorecard.validated_edge > fragile_scorecard.validated_edge
+    assert strong_scorecard.cross_engine_alignment > fragile_scorecard.cross_engine_alignment
+    assert strong_scorecard.path_survivability > fragile_scorecard.path_survivability
+    assert strong_scorecard.false_positive_penalty < fragile_scorecard.false_positive_penalty
+    assert strong_scorecard.exceptional_opportunity > fragile_scorecard.exceptional_opportunity
 
 
 def test_axiom_regime_classifies_fundamental_convergence_for_clean_quality_setup():
@@ -581,6 +585,32 @@ def test_axiom_deployability_distinguishes_live_candidate_from_not_actionable():
     assert weak_decision.deployability_tier == "not_actionable"
     assert strong_decision.review_required is False
     assert "insufficient_axiom_coverage" in weak_decision.invalidation_flags or "stale_fundamental_backbone" in weak_decision.invalidation_flags
+    assert "false_positive_pressure" in weak_decision.invalidation_flags
+
+
+def test_axiom_scorecard_uses_regime_weighting_profiles_and_exceptional_setup_separation():
+    strong_bundle, strong_factors = _build_axiom_inputs(
+        fundamental_case="strong",
+        fragility_case="calm",
+    )
+    transition_bundle, transition_factors = _build_axiom_inputs(
+        fundamental_case="strong",
+        fragility_case="unstable",
+    )
+
+    strong_input, strong_scores = _build_engine_scores(strong_bundle, strong_factors)
+    transition_input, transition_scores = _build_engine_scores(
+        transition_bundle, transition_factors
+    )
+
+    strong_scorecard = build_axiom_scorecard(strong_input, strong_scores)
+    transition_scorecard = build_axiom_scorecard(transition_input, transition_scores)
+
+    assert strong_scorecard.regime_weighting_profile == "trend_confirmation"
+    assert transition_scorecard.regime_weighting_profile == "transition_defensive"
+    assert strong_scorecard.exceptional_opportunity > transition_scorecard.exceptional_opportunity
+    assert strong_scorecard.timing_support > transition_scorecard.timing_support
+    assert strong_scorecard.mispricing_readiness > transition_scorecard.mispricing_readiness
 
 
 def test_axiom_remaining_engines_now_expose_real_scores_or_partial_coverage():

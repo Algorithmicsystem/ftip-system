@@ -337,6 +337,150 @@ async def test_snapshot_run_classifies_db_write_failures(
     assert result["result"]["top_failure_causes"][0]["cause_class"] == "db_write_error"
 
 
+@pytest.mark.anyio
+async def test_snapshot_run_suppresses_repeated_provider_failures_within_run(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _set_db_flags(monkeypatch)
+    monkeypatch.setattr(routes, "_require_db_enabled", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        routes.metrics_tracker, "record_run", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(ingest, "upsert_universe", lambda symbols: symbols)
+    monkeypatch.setattr(routes, "_log_symbol_coverage", lambda *args, **kwargs: None)
+
+    ingest_calls: list[dict[str, Any]] = []
+
+    def fake_ingest(
+        symbol: str,
+        *_args,
+        disabled_providers=None,
+        **_kwargs,
+    ):
+        ingest_calls.append(
+            {
+                "symbol": symbol,
+                "disabled_providers": sorted(disabled_providers or []),
+            }
+        )
+        if symbol in {"AAPL", "MSFT"}:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "reason_code": "PROVIDER_UNAVAILABLE",
+                    "reason_detail": "massive provider unavailable",
+                    "retryable": False,
+                    "provider_context": {
+                        "provider_name": "massive_polygon",
+                        "provider_domain": "market_data",
+                        "response_quality": "degraded",
+                        "attempts": [
+                            {
+                                "provider_name": "massive_polygon",
+                                "domain": "market_data",
+                                "status": "failed",
+                                "reason_code": "PROVIDER_UNAVAILABLE",
+                            }
+                        ],
+                    },
+                },
+            )
+        return {
+            "provider_context": {
+                "provider_name": "stooq",
+                "provider_domain": "market_data",
+                "fallback_used": True,
+                "response_quality": "complete",
+                "strength_label": "mixed",
+                "attempts": [
+                    {
+                        "provider_name": "stooq",
+                        "domain": "market_data",
+                        "status": "success",
+                    }
+                ],
+            }
+        }
+
+    monkeypatch.setattr(ingest, "ingest_bars", fake_ingest)
+    monkeypatch.setattr(
+        routes,
+        "_try_cached_bars_recovery",
+        lambda symbol, *_args, **_kwargs: {
+            "bars": [
+                {
+                    "date": dt.date(2024, 1, 1),
+                    "close": 100.0,
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.0,
+                    "volume": 1000,
+                }
+            ]
+            * 40,
+            "effective_as_of": dt.date(2024, 1, 3),
+            "bars_returned": 40,
+        }
+        if symbol == "NVDA"
+        else (_ for _ in ()).throw(routes.SymbolFailure("NO_DATA", "no cached recovery")),
+    )
+    monkeypatch.setattr(routes, "_candles_from_bars", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        routes,
+        "_compute_features_payload",
+        lambda *_args, **_kwargs: ({}, {}, "trend"),
+    )
+    monkeypatch.setattr(
+        routes,
+        "_compute_signal_payload",
+        lambda *_args, **_kwargs: {
+            "score_mode": "single",
+            "signal_dict": {"score": 1.0, "signal": "BUY"},
+            "base_score": 1.0,
+            "stacked_score": None,
+            "thresholds": {},
+            "regime": "trend",
+            "confidence": 0.8,
+            "notes": [],
+            "features": {},
+            "meta": {},
+            "signal_hash": "hash",
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "_persist_symbol_outputs",
+        lambda *_args, **_kwargs: {"features": 1, "signals": 1, "strategies": 0, "ensembles": 0},
+    )
+
+    req = SnapshotRunRequest(
+        symbols=["AAPL", "MSFT", "NVDA"],
+        from_date=dt.date(2024, 1, 1),
+        to_date=dt.date(2024, 1, 2),
+        as_of_date=dt.date(2024, 1, 3),
+        lookback=30,
+        concurrency=1,
+        force_refresh=False,
+        compute_strategy_graph=False,
+    )
+
+    result = await routes.snapshot_run(
+        req, Request(scope={"type": "http"}), run_id="run-suppress", job_name="job-1"
+    )
+    payload = result["result"]
+
+    assert ingest_calls[0]["disabled_providers"] == []
+    assert ingest_calls[1]["disabled_providers"] == []
+    assert ingest_calls[2]["disabled_providers"] == ["massive_polygon"]
+    assert payload["failure_report"]["failed"] == 2
+    assert payload["provider_run_suppression_summary"]["suppressed_provider_count"] == 1
+    assert (
+        payload["provider_run_suppression_summary"]["suppressed_providers"][0]["provider_name"]
+        == "massive_polygon"
+    )
+    assert payload["provider_failure_summary"]["provider_count"] >= 1
+
+
 def test_daily_snapshot_lock_conflict(monkeypatch: pytest.MonkeyPatch):
     _set_db_flags(monkeypatch)
     monkeypatch.setenv("FTIP_API_KEY", "secret")

@@ -554,10 +554,14 @@ async def _run_daily_snapshot(
             "symbols_failed": result_payload.get("symbols_failed", []),
             "symbols_degraded": result_payload.get("symbols_degraded", []),
             "summary_stats": result_payload.get("summary_stats", {}),
+            "failure_report": result_payload.get("failure_report", {}),
             "failure_summary": result_payload.get("failure_summary", {}),
             "provider_usage_summary": result_payload.get("provider_usage_summary", {}),
             "provider_failure_summary": result_payload.get(
                 "provider_failure_summary", {}
+            ),
+            "provider_run_suppression_summary": result_payload.get(
+                "provider_run_suppression_summary", {}
             ),
             "rows_written": result_payload.get("rows_written", {}),
             "strategy_graph_rows": result_payload.get("strategy_graph_rows", {}),
