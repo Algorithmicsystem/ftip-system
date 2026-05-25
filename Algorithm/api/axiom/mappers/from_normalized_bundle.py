@@ -64,6 +64,7 @@ def build_axiom_engine_input(
     quality_domain = normalized_bundle.get("quality_provenance") or {}
     provider_snapshot = fundamentals.get("provider_snapshot") or {}
     alpha_overview = provider_snapshot.get("alphavantage_overview") or {}
+    earnings_intel = provider_snapshot.get("alphavantage_earnings_intel") or {}
     latest_quarter = (
         fundamentals.get("latest_quarter")
         or ((fundamentals.get("statement_snapshot") or {}).get("latest_quarter"))
@@ -185,6 +186,17 @@ def build_axiom_engine_input(
             quality_proxies.get("reporting_completeness_score")
         ),
         reporting_quality_proxy=safe_float(quality_proxies.get("reporting_quality_proxy")),
+        quarterly_earnings_growth_yoy=safe_float(alpha_overview.get("quarterly_earnings_growth_yoy")),
+        earnings_beat_rate_4q=safe_float(earnings_intel.get("beat_rate_4q")),
+        earnings_miss_rate_4q=safe_float(earnings_intel.get("miss_rate_4q")),
+        earnings_avg_surprise_pct=safe_float(earnings_intel.get("average_surprise_pct_4q")),
+        earnings_estimate_revision_support=safe_float(
+            first_available(
+                earnings_intel.get("estimate_revision_support"),
+                event.get("estimate_revision_support"),
+            )
+        ),
+        earnings_freshness=str(earnings_intel.get("freshness_status") or "") or None,
         coverage_score=_coverage_percent(fundamentals),
         provider_confidence=_provider_confidence_percent(fundamentals),
         statement_coverage_flags=dict(fundamentals.get("coverage_flags") or {}),

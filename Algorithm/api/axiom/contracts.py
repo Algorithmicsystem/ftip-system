@@ -41,6 +41,14 @@ class FundamentalCandidateInputs(BaseModel):
     filing_recency_days: Optional[float] = None
     reporting_completeness_score: Optional[float] = None
     reporting_quality_proxy: Optional[float] = None
+    # Alpha Vantage earnings intelligence
+    quarterly_earnings_growth_yoy: Optional[float] = None
+    earnings_beat_rate_4q: Optional[float] = None
+    earnings_miss_rate_4q: Optional[float] = None
+    earnings_avg_surprise_pct: Optional[float] = None
+    earnings_estimate_revision_support: Optional[float] = None
+    earnings_freshness: Optional[str] = None
+
     coverage_score: float = 0.0
     provider_confidence: float = 0.0
     statement_coverage_flags: Dict[str, bool] = Field(default_factory=dict)

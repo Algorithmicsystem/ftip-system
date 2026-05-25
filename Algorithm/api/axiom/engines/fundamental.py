@@ -6,11 +6,12 @@ from api.assistant.phase3.common import bounded_score, clamp, first_available, i
 from api.axiom.contracts import AxiomEngineInput, EngineScore
 
 
-_VALUATION_WEIGHT = 0.18
-_PROFITABILITY_WEIGHT = 0.24
-_CASHFLOW_WEIGHT = 0.2
-_BALANCE_WEIGHT = 0.2
-_COMPLETENESS_WEIGHT = 0.18
+_VALUATION_WEIGHT = 0.14
+_PROFITABILITY_WEIGHT = 0.22
+_CASHFLOW_WEIGHT = 0.18
+_BALANCE_WEIGHT = 0.18
+_COMPLETENESS_WEIGHT = 0.14
+_EARNINGS_WEIGHT = 0.14
 
 
 def _rounded(value: Optional[float]) -> Optional[float]:
@@ -52,6 +53,14 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
             (bounded_score(candidate.net_margin, low=-0.02, high=0.3), 0.16),
             (bounded_score(candidate.return_on_assets, low=0.0, high=0.18), 0.1),
             (bounded_score(candidate.return_on_equity, low=0.0, high=0.35), 0.14),
+            (bounded_score(candidate.quarterly_earnings_growth_yoy, low=-0.1, high=0.4), 0.1),
+        ]
+    )
+    earnings_quality_component = _weighted_average(
+        [
+            (bounded_score(candidate.earnings_estimate_revision_support, low=0.0, high=1.0), 0.4),
+            (bounded_score(candidate.earnings_beat_rate_4q, low=0.25, high=0.85), 0.4),
+            (bounded_score(candidate.earnings_avg_surprise_pct, low=-5.0, high=10.0), 0.2),
         ]
     )
     cashflow_quality_component = _weighted_average(
@@ -86,6 +95,7 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
             (cashflow_quality_component, _CASHFLOW_WEIGHT),
             (balance_sheet_resilience_component, _BALANCE_WEIGHT),
             (data_completeness_component, _COMPLETENESS_WEIGHT),
+            (earnings_quality_component, _EARNINGS_WEIGHT),
         ]
     )
     component_values = {
@@ -94,6 +104,7 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         "cashflow_quality_component": _rounded(cashflow_quality_component),
         "balance_sheet_resilience_component": _rounded(balance_sheet_resilience_component),
         "data_completeness_component": _rounded(data_completeness_component),
+        "earnings_quality_component": _rounded(earnings_quality_component),
     }
     available_count = sum(1 for value in component_values.values() if value is not None)
     coverage = clamp(
@@ -152,6 +163,8 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         if data_completeness_component is not None
         else f"Coverage is {round(coverage, 1)} / 100.",
     ]
+    if earnings_quality_component is not None:
+        summary_parts.append(f"Earnings quality is {_rounded(earnings_quality_component)}.")
     if candidate.weaknesses:
         summary_parts.append(f"Key weaknesses: {', '.join(candidate.weaknesses[:2])}.")
     elif candidate.strengths:
