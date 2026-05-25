@@ -196,6 +196,7 @@
               <button class="research-tab" data-research-tab="analyze">Analyze</button>
               <button class="research-tab" data-research-tab="strategy">Strategy</button>
               <button class="research-tab" data-research-tab="portfolio">Portfolio</button>
+              <button class="research-tab" data-research-tab="markets">Markets</button>
               <button class="research-tab" data-research-tab="platform">Platform</button>
               <button class="research-tab" data-research-tab="evaluation">Evaluation</button>
               <button class="research-tab" data-research-tab="evidence">Evidence</button>
@@ -580,6 +581,44 @@
                     </div>
                     <div id="assistant-portfolio-workflow" class="drilldown-grid empty-state-card">
                       Watchlist, blocked reasons, stale review needs, and rotation pressure will render here.
+                    </div>
+                  </section>
+                </div>
+              </section>
+
+              <section class="research-panel hidden" data-research-panel="markets">
+                <div class="workspace-grid">
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>Sector Breadth Heatmap</h4>
+                      <span class="legacy-badge">Rotation Intelligence</span>
+                    </div>
+                    <div class="input-row" style="margin-bottom:8px">
+                      <input id="sector-breadth-date" type="date" placeholder="As-of date (blank = yesterday)" />
+                      <button id="sector-breadth-scan-btn">Run Sector Breadth Scan</button>
+                      <button id="sector-breadth-load-btn" class="secondary">Load Latest</button>
+                    </div>
+                    <p class="muted" id="sector-breadth-status">No sector breadth data loaded.</p>
+                    <div class="chart-wrap" id="sector-breadth-chart-wrap" style="display:none;height:340px;margin:12px 0">
+                      <canvas id="sector-breadth-chart"></canvas>
+                    </div>
+                    <div id="sector-breadth-table-wrap" style="display:none">
+                      <table class="workspace-table">
+                        <thead>
+                          <tr>
+                            <th>Rank</th>
+                            <th>Sector</th>
+                            <th>State</th>
+                            <th>BUY %</th>
+                            <th>Participation %</th>
+                            <th>Symbols</th>
+                            <th>BUY</th>
+                            <th>SELL</th>
+                            <th>HOLD</th>
+                          </tr>
+                        </thead>
+                        <tbody id="sector-breadth-table-body"></tbody>
+                      </table>
                     </div>
                   </section>
                 </div>

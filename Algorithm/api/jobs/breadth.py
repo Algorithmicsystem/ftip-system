@@ -50,7 +50,7 @@ def compute_market_breadth(as_of_date: dt.date, lookback: int = 252) -> Dict[str
         """
         SELECT score, signal
         FROM prosperity_signals_daily
-        WHERE as_of_date = %s AND lookback = %s
+        WHERE as_of = %s AND lookback = %s
         """,
         (as_of_date, lookback),
     )

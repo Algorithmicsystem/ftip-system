@@ -907,6 +907,7 @@ const researchTabLabel = () => {
     platform: "platform console",
     research: "learning lab",
     health: "system health",
+    markets: "sector breadth heatmap",
   };
   return labels[state.researchTab] || state.researchTab || "dashboard";
 };
@@ -951,6 +952,8 @@ const buildCopilotPageContext = () => {
         ? "system_health_and_provider_integrity"
         : state.researchTab === "chat"
         ? "narrator_and_copilot"
+        : state.researchTab === "markets"
+        ? "sector_breadth_and_rotation"
         : "analysis_and_monitoring",
     workspace_id: analysis.platform_workspace_id || workspace.workspace_id || null,
     workspace_name: workspace.name || null,
@@ -6226,6 +6229,108 @@ qsa(".tab").forEach((tab) => {
 });
 qsa(".research-tab").forEach((tab) => {
   tab.addEventListener("click", () => setResearchTab(tab.dataset.researchTab));
+});
+
+// ---------------------------------------------------------------------------
+// Sector Breadth Heatmap
+// ---------------------------------------------------------------------------
+
+const _BREADTH_STATE_COLOR = {
+  EXPANDING:   "rgba(52, 211, 153, 0.75)",
+  CONTRACTING: "rgba(239, 68,  68,  0.75)",
+  STRESSED:    "rgba(251, 191, 36,  0.75)",
+  NEUTRAL:     "rgba(100, 116, 139, 0.60)",
+};
+
+const _breadthStateBadge = (state) => {
+  const colors = {
+    EXPANDING: "#34d399", CONTRACTING: "#ef4444",
+    STRESSED: "#fbbf24", NEUTRAL: "#94a3b8",
+  };
+  const color = colors[state] || "#94a3b8";
+  return `<span style="color:${color};font-weight:600">${state || "—"}</span>`;
+};
+
+const renderSectorBreadthData = (data) => {
+  const sectors = data.sectors || [];
+  const asOf = data.as_of_date || "";
+  const statusEl = qs("#sector-breadth-status");
+
+  if (!sectors.length) {
+    statusEl.textContent = "No sector data available.";
+    qs("#sector-breadth-chart-wrap").style.display = "none";
+    qs("#sector-breadth-table-wrap").style.display = "none";
+    return;
+  }
+
+  statusEl.textContent = `${sectors.length} sectors as of ${asOf}.`;
+
+  const labels = sectors.map((s) => s.sector || "Unknown");
+  const values = sectors.map((s) => s.breadth_confirmation_score ?? 0);
+  const colors = sectors.map((s) => _BREADTH_STATE_COLOR[s.breadth_state] || _BREADTH_STATE_COLOR.NEUTRAL);
+
+  qs("#sector-breadth-chart-wrap").style.display = "";
+  makeChart("sector-breadth-chart", labels, values, colors, 0, 100);
+
+  const tbody = qs("#sector-breadth-table-body");
+  tbody.innerHTML = sectors.map((s) => `
+    <tr>
+      <td>${s.rotation_rank ?? "—"}</td>
+      <td><strong>${s.sector || "—"}</strong></td>
+      <td>${_breadthStateBadge(s.breadth_state)}</td>
+      <td>${s.breadth_confirmation_score != null ? s.breadth_confirmation_score.toFixed(1) + "%" : "—"}</td>
+      <td>${s.participation_breadth_score != null ? s.participation_breadth_score.toFixed(1) + "%" : "—"}</td>
+      <td>${s.symbol_count ?? "—"}</td>
+      <td>${s.buy_count ?? "—"}</td>
+      <td>${s.sell_count ?? "—"}</td>
+      <td>${s.hold_count ?? "—"}</td>
+    </tr>
+  `).join("");
+  qs("#sector-breadth-table-wrap").style.display = "";
+};
+
+qs("#sector-breadth-scan-btn").addEventListener("click", async () => {
+  const dateVal = qs("#sector-breadth-date").value;
+  setButtonLoading("#sector-breadth-scan-btn", true, "Scanning...");
+  setLegacyStatus("#sector-breadth-status", "Running sector breadth scan...");
+  try {
+    const body = dateVal ? { as_of_date: dateVal } : {};
+    const data = await callJson("/jobs/sector-breadth/daily-snapshot", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    renderSectorBreadthData(data);
+    setLegacyStatus(
+      "#sector-breadth-status",
+      `Scan complete: ${data.sector_count ?? 0} sectors, ${data.stored ?? 0} stored.`,
+      "success"
+    );
+  } catch (err) {
+    setLegacyStatus("#sector-breadth-status", `Scan failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#sector-breadth-scan-btn", false, "Scanning...");
+  }
+});
+
+qs("#sector-breadth-load-btn").addEventListener("click", async () => {
+  setButtonLoading("#sector-breadth-load-btn", true, "Loading...");
+  setLegacyStatus("#sector-breadth-status", "Loading latest sector breadth...");
+  try {
+    const data = await callJson("/jobs/sector-breadth/latest", {
+      method: "GET",
+      headers: getHeaders(),
+    });
+    if (data.status === "no_data") {
+      setLegacyStatus("#sector-breadth-status", "No stored sector breadth data found.", "error");
+    } else {
+      renderSectorBreadthData(data);
+    }
+  } catch (err) {
+    setLegacyStatus("#sector-breadth-status", `Load failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#sector-breadth-load-btn", false, "Loading...");
+  }
 });
 
 setDefaults();
