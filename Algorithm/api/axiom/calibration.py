@@ -122,9 +122,21 @@ def build_axiom_calibration_artifact(
     if len(matured) == 0:
         status = "insufficient_sample"
 
+    # IC decay summary (late import to avoid circular deps)
+    ic_decay: Dict[str, Any] = {}
+    try:
+        from api.jobs.ic import compute_ic_decay_summary, load_ic_history
+        ic_history = load_ic_history("composite", horizon_label, window_days=252)
+        if ic_history:
+            ic_decay = compute_ic_decay_summary(ic_history)
+    except Exception:
+        pass
+
+    ic_state = ic_decay.get("ic_state", "INSUFFICIENT")
     summary = (
         f"AXIOM calibration at {horizon_label} currently tracks {len(matured)} matured records. "
-        f"Top-bucket DAU edge is {rounded(top_return, digits=6)} with hit rate {rounded(top_hit_rate, digits=4)}."
+        f"Top-bucket DAU edge is {rounded(top_return, digits=6)} with hit rate {rounded(top_hit_rate, digits=4)}. "
+        f"Composite IC state: {ic_state}."
     )
 
     artifact = AxiomCalibrationArtifact(
@@ -148,6 +160,7 @@ def build_axiom_calibration_artifact(
             "phase3_version": AXIOM_PHASE3_VERSION,
             "overall_outcome_metrics": outcome_metrics(matured, horizon_label=horizon_label),
             "minimum_sample_size": min_sample_size,
+            "ic_decay_summary": ic_decay,
         },
     )
     return artifact.model_dump(mode="python")

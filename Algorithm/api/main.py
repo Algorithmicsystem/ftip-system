@@ -34,6 +34,7 @@ from api.jobs.market_data import router as market_data_jobs_router
 from api.jobs.features import router as features_jobs_router
 from api.jobs.signals import router as signals_jobs_router
 from api.jobs.breadth import router as breadth_jobs_router
+from api.jobs.ic import router as ic_jobs_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
 
@@ -1815,6 +1816,7 @@ app.include_router(market_data_jobs_router)
 app.include_router(features_jobs_router)
 app.include_router(signals_jobs_router)
 app.include_router(breadth_jobs_router)
+app.include_router(ic_jobs_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)

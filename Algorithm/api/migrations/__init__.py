@@ -680,6 +680,14 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "033_platform_phase9a_proof_cycle",
         _migration_platform_phase9a_proof_cycle,
     ),
+    (
+        "034_market_breadth_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("034_market_breadth_daily.sql").read_text()),
+    ),
+    (
+        "035_signal_ic_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("035_signal_ic_daily.sql").read_text()),
+    ),
 ]
 
 
