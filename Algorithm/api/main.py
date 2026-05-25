@@ -532,6 +532,7 @@ class PortfolioBacktestResponse(BaseModel):
     max_drawdown: float
     volatility: float
     turnover: float
+    beta: Optional[float] = None  # portfolio beta vs SPY
 
     equity_curve: Optional[Dict[str, float]] = None
     audit: Optional[Dict[str, Any]] = None
@@ -1479,21 +1480,32 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             closes2 = [float(p[1]) for p in pairs]
             rets_by_sym[s] = _daily_returns_from_closes(ds2, closes2)
 
-        mode = _score_mode()
+        reb_every = max(1, int(req.rebalance_every))
+
+        # Pre-compute signal matrix for every (symbol, rebalance_date) pair so
+        # the rebalance loop is O(1) per lookup instead of re-running the full
+        # feature + signal pipeline on each iteration.
+        reb_dates = {
+            common_dates[i]
+            for i in range(1, len(common_dates))
+            if (i - 1) % reb_every == 0
+        }
+        pre_signals: Dict[str, Dict[str, Optional[Dict[str, Any]]]] = {}
+        for _ps, _cs_all in candles_by_sym.items():
+            pre_signals[_ps] = {}
+            for _rd in reb_dates:
+                try:
+                    _sig = compute_signal_for_symbol_from_candles(
+                        _ps, _rd, int(req.lookback), _cs_all
+                    )
+                    pre_signals[_ps][_rd] = _sig.model_dump()
+                except Exception:
+                    pre_signals[_ps][_rd] = None
 
         def _compute_signal_from_cached(
             symbol: str, as_of: str, lookback: int
         ) -> Optional[Dict[str, Any]]:
-            cs_all = candles_by_sym.get(symbol, [])
-            if not cs_all:
-                return None
-            try:
-                payload = compute_signal_for_symbol_from_candles(
-                    symbol, as_of, lookback, cs_all
-                )
-            except HTTPException:
-                return None
-            return payload.model_dump()
+            return pre_signals.get(symbol, {}).get(as_of)
 
         def _weights_for_date(as_of: str) -> Tuple[Dict[str, float], float]:
             max_w = (
@@ -1558,7 +1570,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 
         weights: Dict[str, float] = {}
         total_turnover = 0.0
-        reb_every = max(1, int(req.rebalance_every))
 
         max_w_caps = (
             float(req.max_weight)
@@ -1647,6 +1658,35 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
                 }
             )
 
+        # Portfolio beta vs SPY benchmark
+        beta: Optional[float] = None
+        if len(daily_port_rets) > 2:
+            try:
+                spy_candles = massive_fetch_daily_bars_cached("SPY", buffer_start, req.to_date)
+                spy_pairs = [
+                    (c.timestamp, float(c.close))
+                    for c in spy_candles
+                    if c.timestamp in common_set
+                ]
+                spy_pairs.sort(key=lambda x: x[0])
+                if len(spy_pairs) >= 2:
+                    spy_rets_map = _daily_returns_from_closes(
+                        [p[0] for p in spy_pairs], [p[1] for p in spy_pairs]
+                    )
+                    spy_rets = [spy_rets_map.get(d, 0.0) for d in common_dates[1:]]
+                    if len(spy_rets) == len(daily_port_rets):
+                        p_mean = _mean(daily_port_rets)
+                        s_mean = _mean(spy_rets)
+                        cov = _mean(
+                            [(p - p_mean) * (s - s_mean)
+                             for p, s in zip(daily_port_rets, spy_rets)]
+                        )
+                        var_spy = _mean([(s - s_mean) ** 2 for s in spy_rets])
+                        if var_spy > 0:
+                            beta = float(cov / var_spy)
+            except Exception:
+                pass
+
         return PortfolioBacktestResponse(
             total_return=float(total_return),
             annual_return=float(annual_return),
@@ -1654,6 +1694,7 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
             max_drawdown=float(max_dd),
             volatility=float(volatility),
             turnover=float(total_turnover),
+            beta=beta,
             equity_curve=equity_curve if req.include_equity_curve else None,
             audit=audit_payload or None,
         )
