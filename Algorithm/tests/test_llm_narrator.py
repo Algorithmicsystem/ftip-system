@@ -5,7 +5,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import security
-from api.llm import prompts, routes
+from api.llm import prompts
+from api.narrator import routes
 from api.main import app
 
 
@@ -56,7 +57,7 @@ def test_narrator_signal_uses_disclaimer(monkeypatch):
         }
 
     monkeypatch.setattr(routes, "_resolve_signal", fake_resolver)
-    monkeypatch.setattr(routes.client, "complete_chat", fake_complete_chat)
+    monkeypatch.setattr(routes.narrator_client, "complete_chat", fake_complete_chat)
 
     client = TestClient(app)
     resp = client.post(
@@ -98,7 +99,7 @@ def test_narrator_ask_returns_citations(monkeypatch):
         }
 
     monkeypatch.setattr(routes, "_resolve_signal", fake_resolver)
-    monkeypatch.setattr(routes.client, "complete_chat", fake_complete_chat)
+    monkeypatch.setattr(routes.narrator_client, "complete_chat", fake_complete_chat)
 
     client = TestClient(app)
     resp = client.post(

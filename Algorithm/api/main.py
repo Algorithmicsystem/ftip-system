@@ -25,7 +25,6 @@ from api.db import DBError
 from api.assistant.routes import router as assistant_router
 from api.backtest.routes import router as backtest_router
 from api.friction.routes import router as friction_router
-from api.llm.routes import router as llm_router
 from api.platform.routes import router as platform_router
 from api.prosperity.routes import router as prosperity_router
 from api.narrator.routes import router as narrator_router
@@ -1005,50 +1004,6 @@ def _thresholds_for_regime(
 
 
 # =============================================================================
-# Core backtest engine (simple buy-and-hold placeholder for /run_backtest)
-# =============================================================================
-
-
-def run_backtest_core(
-    candles: List[Candle], include_equity: bool, include_returns: bool
-) -> BacktestSummary:
-    closes = [c.close for c in candles]
-    dates = [c.timestamp for c in candles]
-
-    rets = _pct_change(closes)
-    equity = [1.0]
-    for r in rets[1:]:
-        equity.append(equity[-1] * (1.0 + r))
-
-    total_return = equity[-1] - 1.0
-
-    n = max(1, len(rets) - 1)
-    ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
-
-    vol = _std(rets[1:]) * math.sqrt(252.0) if len(rets) > 2 else 0.0
-    sharpe = (ann_return / vol) if vol > 0 else 0.0
-    mdd = _max_drawdown(equity)
-
-    return BacktestSummary(
-        total_return=float(total_return),
-        annual_return=float(ann_return),
-        sharpe=float(sharpe),
-        max_drawdown=float(mdd),
-        volatility=float(vol),
-        equity_curve=(
-            {d: float(equity[i]) for i, d in enumerate(dates)}
-            if include_equity
-            else None
-        ),
-        returns=(
-            {d: float(rets[i]) for i, d in enumerate(dates)}
-            if include_returns
-            else None
-        ),
-    )
-
-
-# =============================================================================
 # Signal computation
 # =============================================================================
 
@@ -1852,7 +1807,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 app.include_router(assistant_router, prefix="/assistant")
 app.include_router(platform_router)
-app.include_router(llm_router)
 app.include_router(narrator_router, prefix="/narrator")
 app.include_router(prosperity_router, prefix="/prosperity")
 app.include_router(prosperity_jobs_router)
@@ -2375,7 +2329,35 @@ def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
             )
         candles = massive_fetch_daily_bars(req.symbol, req.from_date, req.to_date)
 
-    summary = run_backtest_core(candles, req.include_equity_curve, req.include_returns)
+    closes = [c.close for c in candles]
+    dates = [c.timestamp for c in candles]
+    rets = _pct_change(closes)
+    equity = [1.0]
+    for r in rets[1:]:
+        equity.append(equity[-1] * (1.0 + r))
+    total_return = equity[-1] - 1.0
+    n = max(1, len(rets) - 1)
+    ann_return = (1.0 + total_return) ** (252.0 / n) - 1.0 if n > 0 else 0.0
+    vol = _std(rets[1:]) * math.sqrt(252.0) if len(rets) > 2 else 0.0
+    sharpe = (ann_return / vol) if vol > 0 else 0.0
+    mdd = _max_drawdown(equity)
+    summary = BacktestSummary(
+        total_return=float(total_return),
+        annual_return=float(ann_return),
+        sharpe=float(sharpe),
+        max_drawdown=float(mdd),
+        volatility=float(vol),
+        equity_curve=(
+            {d: float(equity[i]) for i, d in enumerate(dates)}
+            if req.include_equity_curve
+            else None
+        ),
+        returns=(
+            {d: float(rets[i]) for i, d in enumerate(dates)}
+            if req.include_returns
+            else None
+        ),
+    )
     return {"backtest_summary": summary.model_dump(exclude_none=True)}
 
 

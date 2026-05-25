@@ -346,18 +346,6 @@ def _acquire_job_lock(
         }
 
 
-def _release_job_lock(_run_id: str, _job_name: str) -> None:
-    """Legacy stub retained for backwards compatibility."""
-
-    return None
-
-
-def _insert_job_run(*_args, **_kwargs) -> None:
-    """Legacy stub retained for backwards compatibility."""
-
-    return None
-
-
 def _update_job_run(
     run_id: str,
     *,

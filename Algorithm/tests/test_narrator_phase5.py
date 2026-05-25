@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 import api.main as api_main
 from api import security
-from api.llm import routes as narrator_routes
+from api.narrator import routes as narrator_routes
 from api.main import app
 
 
@@ -57,7 +57,7 @@ def _assert_perf_numbers(perf: Dict[str, float]):
 def test_portfolio_no_backtest_returns_defaults(monkeypatch):
     _prepare_env(monkeypatch)
     monkeypatch.setattr(
-        narrator_routes.client,
+        narrator_routes.narrator_client,
         "complete_chat",
         lambda *_, **__: ("Portfolio summary", "mock-model", {}),
     )
@@ -81,7 +81,7 @@ def test_portfolio_no_backtest_returns_defaults(monkeypatch):
 def test_portfolio_backtest_coerces_missing_stats(monkeypatch):
     _prepare_env(monkeypatch)
     monkeypatch.setattr(
-        narrator_routes.client,
+        narrator_routes.narrator_client,
         "complete_chat",
         lambda *_, **__: ("Portfolio with backtest", "mock-model", {}),
     )

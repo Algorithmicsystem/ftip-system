@@ -41,12 +41,6 @@ def stub_job_run_tables(monkeypatch: pytest.MonkeyPatch):
         lambda *args, **kwargs: (True, {"locked_until": None, "lock_owner": "test"}),
     )
     monkeypatch.setattr(
-        "api.jobs.prosperity._release_job_lock", lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
-        "api.jobs.prosperity._insert_job_run", lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
         "api.jobs.prosperity._update_job_run", lambda *args, **kwargs: None
     )
 
