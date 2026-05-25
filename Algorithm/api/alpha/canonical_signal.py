@@ -4,7 +4,7 @@ import json
 import hashlib
 from typing import Any, Dict, List, Optional, Tuple
 
-from api import config
+from api import config, db
 from .canonical_features import (
     CANONICAL_FEATURE_VERSION,
     classify_signal_regime,
@@ -51,6 +51,16 @@ def _stack_weights_for_regime(regime: str) -> Dict[str, float]:
 
 def _load_calibration_for_symbol(symbol: Optional[str]) -> Tuple[bool, Optional[Dict[str, Any]]]:
     sym = (symbol or "").strip().upper()
+
+    if db.db_read_enabled():
+        try:
+            from api.alpha.calibration_store import load_calibration_from_db
+            loaded, cal = load_calibration_from_db(sym)
+            if loaded and cal:
+                return True, cal
+        except Exception:
+            pass
+
     raw_map = config.env("FTIP_CALIBRATION_JSON_MAP")
     if raw_map:
         try:
@@ -421,7 +431,7 @@ def build_signal_from_features(
         reason_details["NEUTRAL_SCORE"] = "The canonical score remains close to neutral."
     notes.append(f"Regime: {regime}.")
     if calibration_loaded:
-        notes.append("Using calibrated thresholds from FTIP_CALIBRATION_JSON_MAP/FTIP_CALIBRATION_JSON.")
+        notes.append("Using calibrated thresholds (DB or env var).")
     notes.append(f"Score mode: {score_mode.upper()} (canonical alpha core).")
     if suppression_flags:
         notes.append(

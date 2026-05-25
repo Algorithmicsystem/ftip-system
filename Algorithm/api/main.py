@@ -363,10 +363,20 @@ def _load_calibration_for_symbol(
     """
     Loads calibration thresholds.
     Priority:
-      1) FTIP_CALIBRATION_JSON_MAP (per-symbol)
-      2) FTIP_CALIBRATION_JSON (single fallback)
+      1) prosperity_calibrations DB table (most recent row for symbol)
+      2) FTIP_CALIBRATION_JSON_MAP (per-symbol env var)
+      3) FTIP_CALIBRATION_JSON (single fallback env var)
     """
     sym = (symbol or "").strip().upper()
+
+    if db.db_read_enabled():
+        try:
+            from api.alpha.calibration_store import load_calibration_from_db
+            loaded, cal = load_calibration_from_db(sym)
+            if loaded and cal:
+                return True, cal
+        except Exception:
+            pass
 
     raw_map = _env("FTIP_CALIBRATION_JSON_MAP")
     if raw_map:
@@ -2553,6 +2563,18 @@ def calibrate(req: CalibrateRequest) -> Dict[str, Any]:
 
     # ---- Phase 4: persist calibration snapshot (best-effort) ----
     db_insert_calibration_snapshot(sym, env_payload)
+
+    if db.db_write_enabled():
+        try:
+            from api.alpha.calibration_store import upsert_calibration
+            upsert_calibration(
+                sym,
+                env_payload,
+                optimize_horizon=int(cal_core.get("optimize_horizon") or req.optimize_horizon),
+                train_range=env_payload.get("train_range"),
+            )
+        except Exception:
+            pass
 
     return {
         "calibration": env_payload,

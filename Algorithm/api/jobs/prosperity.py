@@ -814,3 +814,186 @@ async def prosperity_daily_snapshot_coverage(as_of_date: dt.date):
 async def prosperity_daily_snapshot_run_coverage(run_id: str):
     _require_db_enabled(read=True)
     return _coverage_response(run_id=run_id)
+
+
+# =============================================================================
+# Nightly recalibration job
+# =============================================================================
+
+RECALIB_JOB_NAME = "prosperity_nightly_recalibrate"
+
+
+class RecalibrateParams(BaseModel):
+    symbols_mode: str = Field("core10")
+    from_date: Optional[str] = None
+    to_date: Optional[str] = None
+    lookback: int = Field(252, ge=60)
+    optimize_horizon: int = Field(21, ge=5)
+    min_trades_per_side: int = Field(5, ge=1)
+    horizons: Optional[List[int]] = None
+
+
+def _recalib_date_range(
+    from_date: Optional[str], to_date: Optional[str]
+) -> Tuple[str, str]:
+    today = _utc_today()
+    td = dt.date.fromisoformat(to_date) if to_date else today - dt.timedelta(days=1)
+    fd = dt.date.fromisoformat(from_date) if from_date else td - dt.timedelta(days=365)
+    return fd.isoformat(), td.isoformat()
+
+
+def _run_recalibrate_symbol(
+    symbol: str,
+    from_date: str,
+    to_date: str,
+    lookback: int,
+    optimize_horizon: int,
+    min_trades_per_side: int,
+    horizons: List[int],
+) -> Dict[str, object]:
+    # Late imports to avoid circular dependency (api/main.py imports this module).
+    from api.main import walk_forward_table, calibrate_thresholds
+    from api.alpha.calibration_store import upsert_calibration
+
+    try:
+        rows = walk_forward_table(symbol, from_date, to_date, lookback, horizons)
+        if not rows:
+            return {"symbol": symbol, "status": "SKIPPED", "reason": "no_rows"}
+
+        cal = calibrate_thresholds(rows, optimize_horizon, min_trades_per_side)
+        payload = {
+            "created_at_utc": cal["created_at_utc"],
+            "symbol": symbol.upper(),
+            "train_range": {"from_date": from_date, "to_date": to_date},
+            "optimize_horizon": cal["optimize_horizon"],
+            "thresholds_by_regime": cal["thresholds_by_regime"],
+            "diagnostics": cal["diagnostics"],
+        }
+        ok = upsert_calibration(
+            symbol,
+            payload,
+            optimize_horizon=int(optimize_horizon),
+            train_range={"from_date": from_date, "to_date": to_date},
+        )
+        return {
+            "symbol": symbol,
+            "status": "OK" if ok else "WRITE_FAILED",
+            "row_count": len(rows),
+            "regimes": list(cal["thresholds_by_regime"].keys()),
+        }
+    except Exception as exc:
+        return {"symbol": symbol, "status": "ERROR", "error": str(exc)}
+
+
+@router.post("/prosperity/nightly-recalibrate")
+async def prosperity_nightly_recalibrate(request: Request):
+    _require_db_enabled(write=True, read=True)
+
+    body: Dict[str, object] = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+
+    payload: Dict[str, object] = dict(request.query_params)
+    payload.update(body if isinstance(body, dict) else {})
+
+    try:
+        params = RecalibrateParams.model_validate(payload)
+    except ValidationError as exc:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_request", "detail": exc.errors()},
+        )
+
+    symbols_mode = (params.symbols_mode or "core10").strip()
+    if symbols_mode not in SYMBOLS_MODES:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=400,
+            content={"error": "invalid_symbols_mode", "allowed": sorted(SYMBOLS_MODES)},
+        )
+
+    symbols = _symbols_for_mode(symbols_mode)
+    from_date, to_date = _recalib_date_range(params.from_date, params.to_date)
+    horizons = params.horizons or [params.optimize_horizon]
+    if params.optimize_horizon not in horizons:
+        horizons = sorted(set(horizons) | {params.optimize_horizon})
+
+    run_id = str(uuid.uuid4())
+    ttl_seconds = _lock_ttl_seconds()
+    lock_owner = _job_lock_owner()
+    as_of_date = dt.date.fromisoformat(to_date)
+
+    requested_payload: Dict[str, object] = {
+        "symbols_mode": symbols_mode,
+        "symbols": symbols,
+        "from_date": from_date,
+        "to_date": to_date,
+        "lookback": params.lookback,
+        "optimize_horizon": params.optimize_horizon,
+    }
+
+    run_recorded = False
+    status = "FAILED"
+    result_record: Dict[str, object] = {}
+    error_message: Optional[str] = None
+
+    try:
+        acquired, lock_info = _acquire_job_lock(
+            run_id, RECALIB_JOB_NAME, as_of_date, requested_payload, ttl_seconds, lock_owner
+        )
+        if not acquired:
+            from fastapi.responses import JSONResponse
+            return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
+
+        run_recorded = True
+        results = []
+        for sym in symbols:
+            r = _run_recalibrate_symbol(
+                sym,
+                from_date,
+                to_date,
+                params.lookback,
+                params.optimize_horizon,
+                params.min_trades_per_side,
+                horizons,
+            )
+            results.append(r)
+
+        ok_count = sum(1 for r in results if r.get("status") == "OK")
+        error_count = sum(1 for r in results if r.get("status") == "ERROR")
+        status = "SUCCESS" if error_count == 0 else "PARTIAL"
+        result_record = {
+            "ok_count": ok_count,
+            "error_count": error_count,
+            "symbol_results": results,
+        }
+        return {
+            "run_id": run_id,
+            "status": status,
+            "from_date": from_date,
+            "to_date": to_date,
+            "symbols": symbols,
+            "ok_count": ok_count,
+            "error_count": error_count,
+            "symbol_results": results,
+        }
+    except Exception as exc:
+        error_message = str(exc)
+        logger.exception("jobs.prosperity.nightly_recalibrate.error", extra={"run_id": run_id})
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=500,
+            content={"error": "unexpected_error", "detail": error_message},
+        )
+    finally:
+        try:
+            if run_recorded:
+                _update_job_run(run_id, status=status, result=result_record, error=error_message)
+        except Exception:
+            logger.warning(
+                "jobs.prosperity.nightly_recalibrate.run_update_failed",
+                extra={"run_id": run_id},
+            )
