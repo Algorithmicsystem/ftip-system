@@ -6514,6 +6514,180 @@ qs("#sector-breadth-load-btn").addEventListener("click", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Session 20: AXIOM Backtest Harness
+// ---------------------------------------------------------------------------
+
+const _BT_STATE_COLOR = (sharpe) => {
+  if (sharpe == null) return "#94a3b8";
+  if (sharpe >= 1.0) return "#34d399";
+  if (sharpe >= 0.5) return "#a3e635";
+  if (sharpe >= 0.0) return "#fbbf24";
+  return "#f87171";
+};
+
+const renderBacktestResult = (data) => {
+  const resultWrap  = qs("#bt-result");
+  const metricsGrid = qs("#bt-metrics-grid");
+  const regimeGrid  = qs("#bt-regime-grid");
+  const chartWrap   = qs("#bt-chart-wrap");
+
+  resultWrap.style.display = "";
+
+  // Metrics grid
+  metricsGrid.innerHTML = "";
+  const sharpeColor = _BT_STATE_COLOR(data.sharpe);
+  const metrics = [
+    ["Signals", data.total_signals ?? "—"],
+    ["Hit Rate", data.hit_rate != null ? `${(data.hit_rate * 100).toFixed(1)}%` : "—"],
+    ["Avg Return", data.avg_return_pct != null ? `${data.avg_return_pct > 0 ? "+" : ""}${data.avg_return_pct.toFixed(2)}%` : "—"],
+    ["Sharpe", data.sharpe != null ? data.sharpe.toFixed(3) : "—"],
+    ["Max Drawdown", data.max_drawdown != null ? `${(data.max_drawdown * 100).toFixed(1)}%` : "—"],
+    ["Spearman IC", data.spearman_ic != null ? data.spearman_ic.toFixed(4) : "—"],
+  ];
+  metrics.forEach(([label, value]) => {
+    const el = document.createElement("div");
+    const isSharp = label === "Sharpe";
+    el.style.cssText = "padding:6px 12px;border-radius:6px;background:rgba(59,130,246,0.12);font-size:0.82rem";
+    el.innerHTML = `<span style="color:var(--text-muted)">${label}:</span> <strong style="color:${isSharp ? sharpeColor : "inherit"}">${value}</strong>`;
+    metricsGrid.appendChild(el);
+  });
+
+  // By-signal pills
+  const bySignal = data.by_signal || {};
+  Object.entries(bySignal).forEach(([label, s]) => {
+    const el = document.createElement("div");
+    const bg = label === "BUY" ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.2)";
+    el.style.cssText = `padding:5px 10px;border-radius:6px;background:${bg};font-size:0.78rem`;
+    el.innerHTML = `<strong>${label}</strong>: ${s.hit_rate != null ? (s.hit_rate * 100).toFixed(1) + "% win" : "n/a"} &middot; avg ${s.avg_return_pct != null ? (s.avg_return_pct > 0 ? "+" : "") + s.avg_return_pct.toFixed(2) + "%" : "—"} &middot; n=${s.n}`;
+    metricsGrid.appendChild(el);
+  });
+
+  // Top regime pills (up to 5)
+  regimeGrid.innerHTML = "";
+  Object.entries(data.by_regime || {}).slice(0, 5).forEach(([regime, s]) => {
+    const el = document.createElement("div");
+    const wr = s.hit_rate != null ? `${(s.hit_rate * 100).toFixed(1)}% win` : "n/a";
+    el.style.cssText = "padding:5px 10px;border-radius:6px;background:rgba(100,116,139,0.15);font-size:0.75rem";
+    el.textContent = `${regime.replace(/_/g, " ")}: ${wr} · n=${s.n}`;
+    regimeGrid.appendChild(el);
+  });
+
+  // Equity curve chart
+  const equityCurve = data.equity_curve || {};
+  const ecDates = Object.keys(equityCurve).sort();
+  if (ecDates.length >= 2) {
+    chartWrap.style.display = "";
+    destroyChart("bt-equity-chart");
+    const ctx = qs("#bt-equity-chart").getContext("2d");
+    const ecValues = ecDates.map(d => equityCurve[d]);
+    const finalVal = ecValues[ecValues.length - 1] || 1.0;
+    const lineColor = finalVal >= 1.0 ? "rgba(52,211,153,0.9)" : "rgba(239,68,68,0.9)";
+    _charts["bt-equity-chart"] = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: ecDates,
+        datasets: [{
+          data: ecValues,
+          borderColor: lineColor,
+          backgroundColor: lineColor.replace("0.9)", "0.1)"),
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0,
+          borderWidth: 2,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+          y: { ticks: { font: { size: 10 }, callback: v => v.toFixed(3) } },
+        },
+      },
+    });
+  } else {
+    chartWrap.style.display = "none";
+  }
+};
+
+const renderBacktestHistory = (data) => {
+  const wrap = qs("#bt-history-wrap");
+  const tbody = qs("#bt-history-body");
+  const runs = data.runs || [];
+  if (!runs.length) {
+    tbody.innerHTML = "<tr><td colspan='8' style='text-align:center;color:var(--text-muted)'>No runs stored yet.</td></tr>";
+  } else {
+    tbody.innerHTML = "";
+    runs.forEach(r => {
+      const sharpeColor = _BT_STATE_COLOR(r.sharpe);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td style="font-size:0.78rem">${(r.created_at || "").slice(0, 10)}</td>
+        <td>${r.from_date || ""}</td>
+        <td>${r.to_date || ""}</td>
+        <td>${r.horizon_days}d</td>
+        <td>${r.total_signals ?? "—"}</td>
+        <td>${r.hit_rate != null ? (r.hit_rate * 100).toFixed(1) + "%" : "—"}</td>
+        <td style="color:${sharpeColor};font-weight:600">${r.sharpe != null ? r.sharpe.toFixed(3) : "—"}</td>
+        <td>${r.max_drawdown != null ? (r.max_drawdown * 100).toFixed(1) + "%" : "—"}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+  wrap.style.display = "";
+};
+
+qs("#bt-run-btn").addEventListener("click", async () => {
+  const fromDate = qs("#bt-from-date").value;
+  const toDate   = qs("#bt-to-date").value;
+  if (!fromDate || !toDate) {
+    setLegacyStatus("#bt-status", "Please set both from and to dates.", "error");
+    return;
+  }
+  const horizon   = parseInt(qs("#bt-horizon").value) || 21;
+  const minDau    = parseFloat(qs("#bt-min-dau").value) || 0;
+  const useBuy    = qs("#bt-buy").checked;
+  const useSell   = qs("#bt-sell").checked;
+  const sigFilter = [...(useBuy ? ["BUY"] : []), ...(useSell ? ["SELL"] : [])];
+  if (!sigFilter.length) {
+    setLegacyStatus("#bt-status", "Select at least one signal type (BUY or SELL).", "error");
+    return;
+  }
+  setButtonLoading("#bt-run-btn", true, "Running...");
+  setLegacyStatus("#bt-status", "Running AXIOM backtest...");
+  try {
+    const data = await callJson("/jobs/axiom-backtest/run", {
+      method: "POST",
+      headers: { ...getHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ from_date: fromDate, to_date: toDate, horizon_days: horizon, min_dau: minDau, signal_filter: sigFilter }),
+    });
+    renderBacktestResult(data);
+    setLegacyStatus(
+      "#bt-status",
+      `Backtest complete — ${data.total_signals} signals · hit rate ${data.hit_rate != null ? (data.hit_rate * 100).toFixed(1) + "%" : "n/a"} · Sharpe ${data.sharpe != null ? data.sharpe.toFixed(3) : "n/a"}`
+    );
+  } catch (err) {
+    setLegacyStatus("#bt-status", `Backtest failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#bt-run-btn", false, "Run Backtest");
+  }
+});
+
+qs("#bt-history-btn").addEventListener("click", async () => {
+  setButtonLoading("#bt-history-btn", true, "Loading...");
+  try {
+    const data = await callJson("/jobs/axiom-backtest/runs", { headers: getHeaders() });
+    renderBacktestHistory(data);
+    setLegacyStatus("#bt-status", `Loaded ${data.count} recent backtest run(s).`);
+  } catch (err) {
+    setLegacyStatus("#bt-status", `Load failed: ${err.message}`, "error");
+  } finally {
+    setButtonLoading("#bt-history-btn", false, "Load History");
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Session 19: Portfolio Risk Overlay
 // ---------------------------------------------------------------------------
 

@@ -673,6 +673,51 @@
                       Factor and strategy component usefulness will render here.
                     </div>
                   </section>
+
+                  <section class="legacy-card workspace-span-2">
+                    <div class="legacy-card-head">
+                      <h4>AXIOM Backtest Harness</h4>
+                      <span class="legacy-badge">Historical signal performance</span>
+                    </div>
+                    <div class="input-row" style="margin-bottom:8px">
+                      <input id="bt-from-date" type="date" placeholder="From date" />
+                      <input id="bt-to-date" type="date" placeholder="To date" />
+                      <select id="bt-horizon" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border)">
+                        <option value="5">5-day horizon</option>
+                        <option value="21" selected>21-day horizon</option>
+                        <option value="63">63-day horizon</option>
+                      </select>
+                      <input id="bt-min-dau" type="number" min="0" max="100" value="0" placeholder="Min DAU" style="width:90px" />
+                    </div>
+                    <div class="input-row" style="margin-bottom:8px">
+                      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+                        <input type="checkbox" id="bt-buy" checked /> BUY signals
+                      </label>
+                      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
+                        <input type="checkbox" id="bt-sell" /> SELL signals (short)
+                      </label>
+                      <button id="bt-run-btn">Run Backtest</button>
+                      <button id="bt-history-btn" class="secondary">Load History</button>
+                    </div>
+                    <p class="muted" id="bt-status">Select a date range and click Run Backtest.</p>
+                    <div id="bt-result" style="display:none">
+                      <div id="bt-metrics-grid" class="summary-grid" style="margin:8px 0"></div>
+                      <div id="bt-regime-grid" class="summary-grid" style="margin:4px 0 8px"></div>
+                      <div id="bt-chart-wrap" style="display:none;height:220px;margin:12px 0">
+                        <canvas id="bt-equity-chart"></canvas>
+                      </div>
+                    </div>
+                    <div id="bt-history-wrap" style="display:none;margin-top:12px">
+                      <p style="font-weight:600;margin:4px 0">Recent Runs</p>
+                      <table class="workspace-table" style="width:100%">
+                        <thead><tr>
+                          <th>Date</th><th>From</th><th>To</th><th>Horizon</th>
+                          <th>Signals</th><th>Hit Rate</th><th>Sharpe</th><th>MaxDD</th>
+                        </tr></thead>
+                        <tbody id="bt-history-body"></tbody>
+                      </table>
+                    </div>
+                  </section>
                 </div>
               </section>
 

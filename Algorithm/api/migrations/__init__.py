@@ -704,6 +704,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "039_signal_pnl_daily",
         lambda cur: cur.execute(Path(__file__).with_name("039_signal_pnl_daily.sql").read_text()),
     ),
+    (
+        "040_axiom_backtest_runs",
+        lambda cur: cur.execute(Path(__file__).with_name("040_axiom_backtest_runs.sql").read_text()),
+    ),
 ]
 
 
