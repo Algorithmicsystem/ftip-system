@@ -116,9 +116,9 @@ def evaluate_prediction_outcome(
             "latest_available_date": rows[-1].get("as_of_date"),
         }
 
-    entry_row = rows[0]
+    entry_row = rows[1]  # enter next trading day — rows[0] close is used to generate the signal
     exit_row = rows[horizon_value]
-    entry_price = safe_float(entry_row.get("close"))
+    entry_price = safe_float(entry_row.get("open")) or safe_float(entry_row.get("close"))
     exit_price = safe_float(exit_row.get("close"))
     if entry_price in (None, 0) or exit_price is None:
         return {"outcome_status": "invalid_prices", "matured": False, "horizon_days": horizon_value}

@@ -31,9 +31,9 @@ def _rationale(*items: str) -> List[str]:
 
 
 def trend_momentum(features: Dict[str, float]) -> StrategyOutput:
-    mom21 = float(features.get("mom_21", 0.0))
-    mom63 = float(features.get("mom_63", 0.0))
-    trend = float(features.get("trend_sma20_50", 0.0))
+    mom21 = float(features.get("mom_21") or 0.0)
+    mom63 = float(features.get("mom_63") or 0.0)
+    trend = float(features.get("trend_sma20_50") or 0.0)
     slope = 0.6 * mom21 + 0.4 * mom63
     raw = 0.5 * slope + 0.5 * trend
     normalized = _normalize(raw, 0.25)
@@ -68,8 +68,8 @@ def trend_momentum(features: Dict[str, float]) -> StrategyOutput:
 
 
 def mean_reversion(features: Dict[str, float]) -> StrategyOutput:
-    rsi = float(features.get("rsi14", 50.0))
-    mom5 = float(features.get("mom_5", 0.0))
+    rsi = float(features.get("rsi14") or 50.0)
+    mom5 = float(features.get("mom_5") or 0.0)
     z = _normalize((50.0 - rsi) / 50.0, 1.0)
     raw = -0.6 * mom5 + 0.4 * z
     normalized = _normalize(raw, 0.2)
@@ -105,8 +105,8 @@ def mean_reversion(features: Dict[str, float]) -> StrategyOutput:
 
 
 def volatility_breakout(features: Dict[str, float]) -> StrategyOutput:
-    vola = float(features.get("volatility_ann", 0.0))
-    range_proxy = abs(float(features.get("mom_5", 0.0)))
+    vola = float(features.get("volatility_ann") or 0.0)
+    range_proxy = abs(float(features.get("mom_5") or 0.0))
     raw = range_proxy + max(0.0, vola - 0.2)
     normalized = _normalize(raw, 0.4)
     signal = _score_to_signal(normalized, (0.2, -0.2))
@@ -129,8 +129,8 @@ def volatility_breakout(features: Dict[str, float]) -> StrategyOutput:
 
 
 def defensive_risk_off(features: Dict[str, float]) -> StrategyOutput:
-    vola = float(features.get("volatility_ann", 0.0))
-    trend = float(features.get("trend_sma20_50", 0.0))
+    vola = float(features.get("volatility_ann") or 0.0)
+    trend = float(features.get("trend_sma20_50") or 0.0)
     drawdown_proxy = max(0.0, -trend)
     raw = -(0.7 * vola + 0.3 * drawdown_proxy)
     normalized = _clamp(raw)
@@ -159,7 +159,7 @@ def macro_proxy_sentiment(features: Dict[str, float]) -> StrategyOutput:
         if isinstance(features.get("sentiment"), (int, float))
         else 0.0
     )
-    mom21 = float(features.get("mom_21", 0.0))
+    mom21 = float(features.get("mom_21") or 0.0)
     raw = 0.4 * sentiment + 0.6 * mom21
     normalized = _normalize(raw, 0.25)
     signal = _score_to_signal(normalized, (0.1, -0.1))

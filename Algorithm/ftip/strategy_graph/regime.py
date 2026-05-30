@@ -25,8 +25,8 @@ def classify_regime(
 ) -> RegimeDecision:
     closes = [float(c.close) for c in candles]
     returns = _pct_change(closes)
-    vol_ann = float(features.get("volatility_ann", 0.0))
-    trend = float(features.get("trend_sma20_50", 0.0))
+    vol_ann = float(features.get("volatility_ann") or 0.0)
+    trend = float(features.get("trend_sma20_50") or 0.0)
 
     drawdown = 0.0
     if closes:

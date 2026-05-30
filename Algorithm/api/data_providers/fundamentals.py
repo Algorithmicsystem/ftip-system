@@ -153,7 +153,8 @@ def _fetch_yfinance_quarterly(symbol: str) -> List[Dict[str, object]]:
             {
                 "symbol": symbol,
                 "fiscal_period_end": fiscal_end,
-                "report_date": fiscal_end,
+                "report_date": None,  # yfinance does not provide actual SEC filing date
+                "pit_safe": False,
                 "revenue": float(revenue) if revenue is not None else None,
                 "eps": None,
                 "gross_margin": (
