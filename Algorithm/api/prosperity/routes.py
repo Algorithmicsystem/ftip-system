@@ -400,11 +400,13 @@ def _persist_symbol_outputs(
             )
             rows_written["features"] += 1
 
+            _sig_dict = signal_payload["signal_dict"]
+            _sig_meta = signal_payload["meta"] or {}
             cur.execute(
                 """
                 INSERT INTO prosperity_signals_daily(
-                    symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, thresholds, regime, confidence, notes, features, calibration_meta, meta, signal_hash
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s)
+                    symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, thresholds, regime, confidence, notes, features, calibration_meta, meta, signal_hash, signal_version, feature_version
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s,%s,%s)
                 ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
                     score_mode=EXCLUDED.score_mode,
                     score=EXCLUDED.score,
@@ -419,6 +421,8 @@ def _persist_symbol_outputs(
                     calibration_meta=EXCLUDED.calibration_meta,
                     meta=EXCLUDED.meta,
                     signal_hash=EXCLUDED.signal_hash,
+                    signal_version=EXCLUDED.signal_version,
+                    feature_version=EXCLUDED.feature_version,
                     updated_at=now()
                 """,
                 (
@@ -426,20 +430,20 @@ def _persist_symbol_outputs(
                     as_of_date,
                     lookback,
                     signal_payload["score_mode"],
-                    signal_payload["signal_dict"].get("score"),
+                    _sig_dict.get("score"),
                     signal_payload["base_score"],
                     signal_payload["stacked_score"],
-                    signal_payload["signal_dict"].get("signal"),
+                    _sig_dict.get("signal"),
                     json.dumps(signal_payload["thresholds"]),
                     signal_payload["regime"],
                     signal_payload["confidence"],
                     json.dumps(signal_payload["notes"]),
                     json.dumps(signal_payload["features"]),
-                    json.dumps(
-                        signal_payload["signal_dict"].get("calibration_meta") or {}
-                    ),
-                    json.dumps(signal_payload["meta"]),
+                    json.dumps(_sig_dict.get("calibration_meta") or {}),
+                    json.dumps(_sig_meta),
                     signal_payload["signal_hash"],
+                    _sig_dict.get("signal_version") or _sig_meta.get("signal_version"),
+                    _sig_dict.get("feature_version") or _sig_meta.get("feature_version"),
                 ),
             )
             rows_written["signals"] += 1

@@ -242,6 +242,8 @@ def _migration_prosperity_core(cur: Any) -> None:
         cur, "prosperity_signals_daily", "signal_hash", "IF NOT EXISTS signal_hash TEXT"
     )
     _ensure_column(cur, "prosperity_signals_daily", "meta", "IF NOT EXISTS meta JSONB")
+    _ensure_column(cur, "prosperity_signals_daily", "signal_version", "IF NOT EXISTS signal_version TEXT")
+    _ensure_column(cur, "prosperity_signals_daily", "feature_version", "IF NOT EXISTS feature_version TEXT")
     _ensure_column(
         cur,
         "prosperity_signals_daily",

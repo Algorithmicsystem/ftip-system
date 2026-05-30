@@ -383,12 +383,14 @@ def compute_and_store_signal(
     notes = signal_dict.get("notes") or []
     features = signal_dict.get("features") or {}
     meta = signal_dict.get("meta") or {}
+    signal_version = signal_dict.get("signal_version") or (meta.get("signal_version"))
+    feature_version = signal_dict.get("feature_version") or (meta.get("feature_version"))
 
     db.safe_execute(
         """
         INSERT INTO prosperity_signals_daily(
-            symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, thresholds, regime, confidence, notes, features, calibration_meta, meta, signal_hash
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s)
+            symbol, as_of, lookback, score_mode, score, base_score, stacked_score, signal, thresholds, regime, confidence, notes, features, calibration_meta, meta, signal_hash, signal_version, feature_version
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb,%s,%s,%s,%s)
         ON CONFLICT(symbol, as_of, lookback) DO UPDATE SET
             score_mode=EXCLUDED.score_mode,
             score=EXCLUDED.score,
@@ -403,6 +405,8 @@ def compute_and_store_signal(
             calibration_meta=EXCLUDED.calibration_meta,
             meta=EXCLUDED.meta,
             signal_hash=EXCLUDED.signal_hash,
+            signal_version=EXCLUDED.signal_version,
+            feature_version=EXCLUDED.feature_version,
             updated_at=now()
         """,
         (
@@ -422,6 +426,8 @@ def compute_and_store_signal(
             json.dumps(calibration_meta),
             json.dumps(meta),
             signal_hash,
+            signal_version,
+            feature_version,
         ),
     )
     return signal_dict

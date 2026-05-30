@@ -286,6 +286,14 @@ def build_validation_artifact(
     }
 
 
+def _one_way_cost_rate(cost_model: Dict[str, Any]) -> float:
+    """Fee + half-spread + slippage as a fractional rate (not bps)."""
+    fee = float(cost_model.get("fee_bps") or 1.0)
+    spread = float(cost_model.get("spread_bps") or 2.0)
+    slippage = float(cost_model.get("slippage_bps") or 5.0)
+    return (fee + spread / 2.0 + slippage) / 10000.0
+
+
 def run_canonical_backtest(
     *,
     symbols: Sequence[str],
@@ -362,6 +370,7 @@ def run_canonical_backtest(
             if current and desired != current["side"]:
                 exit_px = closes[date]
                 pnl_pct = (exit_px / current["entry_px"] - 1.0) * (1.0 if current["side"] == "LONG" else -1.0)
+                trade_cost += _one_way_cost_rate(cost_model)  # exit cost
                 trades.append(
                     {
                         "symbol": sym,
@@ -385,6 +394,7 @@ def run_canonical_backtest(
                     "entry_px": closes[date],
                     "qty": 1.0,
                 }
+                trade_cost += _one_way_cost_rate(cost_model)  # entry cost
                 trades_notional += 1.0
 
             current = positions.get(sym)
