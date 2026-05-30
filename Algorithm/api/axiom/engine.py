@@ -163,4 +163,4 @@ def build_axiom_artifact(
             scorecard=scorecard,
         ),
     )
-    return artifact.model_dump(mode="python")
+    return artifact.model_dump(mode="python", exclude={"scorecard": {"component_support"}})

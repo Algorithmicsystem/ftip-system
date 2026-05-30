@@ -81,17 +81,12 @@ class SizeResponse(BaseModel):
     as_of_date: str
     suggested_weight: float
     suggested_weight_pct: str
-    kelly_gross_weight: float
-    fractional_kelly_applied: float
-    ic_kelly_multiplier: float
-    fragility_penalty_applied: float
     active_constraint: str
     size_band: str
     deployability_tier: str
     ic_state: str
     downside_flags: list
     rationale: str
-    inputs: dict
     data_source: str   # "db" | "inline" | "partial"
 
 
@@ -259,17 +254,12 @@ def axiom_size(req: SizeRequest) -> SizeResponse:
         as_of_date=result.as_of_date,
         suggested_weight=result.suggested_weight,
         suggested_weight_pct=f"{result.suggested_weight * 100:.2f}%",
-        kelly_gross_weight=result.kelly_gross_weight,
-        fractional_kelly_applied=result.fractional_kelly_applied,
-        ic_kelly_multiplier=result.ic_kelly_multiplier,
-        fragility_penalty_applied=result.fragility_penalty_applied,
         active_constraint=result.active_constraint,
         size_band=result.size_band,
         deployability_tier=result.deployability_tier,
         ic_state=result.ic_state,
         downside_flags=result.downside_flags,
         rationale=result.rationale,
-        inputs=result.inputs,
         data_source=data_source,
     )
 

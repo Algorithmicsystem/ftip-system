@@ -2386,7 +2386,7 @@ def signal(
     lookback: int = Query(252, ge=30, le=2000),
 ) -> Dict[str, Any]:
     out = compute_signal_for_symbol(symbol, as_of, lookback)
-    return out.model_dump(exclude_none=True)
+    return out.external_payload()
 
 
 @app.post("/signals")
@@ -2400,7 +2400,7 @@ def signals(req: SignalsRequest) -> Dict[str, Any]:
             continue
         try:
             out = compute_signal_for_symbol(s, req.as_of, req.lookback)
-            results[s] = out.model_dump(exclude_none=True)
+            results[s] = out.external_payload()
         except HTTPException as e:
             errors[s] = {"status_code": e.status_code, "detail": e.detail}
         except Exception as e:
@@ -2438,9 +2438,7 @@ def portfolio_signals(req: PortfolioRequest) -> Dict[str, Any]:
         if not s:
             continue
         try:
-            out = compute_signal_for_symbol(s, req.as_of, req.lookback).model_dump(
-                exclude_none=True
-            )
+            out = compute_signal_for_symbol(s, req.as_of, req.lookback).external_payload()
             per[s] = out
         except HTTPException as e:
             errors[s] = {"status_code": e.status_code, "detail": e.detail}

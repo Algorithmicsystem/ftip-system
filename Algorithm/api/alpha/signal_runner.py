@@ -74,6 +74,26 @@ class SignalResponse(BaseModel):
     feature_version: Optional[str] = None
     signal_version: Optional[str] = None
 
+    _EXTERNAL_EXCLUDE = {
+        "thresholds", "base_score", "stacked_score", "stacked_meta",
+        "environment_penalties", "event_penalties", "liquidity_penalties",
+        "breadth_penalties", "cross_asset_penalties", "stress_penalties",
+    }
+
+    def external_payload(self) -> Dict[str, Any]:
+        d = self.model_dump(exclude_none=True)
+        for key in self._EXTERNAL_EXCLUDE:
+            d.pop(key, None)
+        if isinstance(d.get("calibration_meta"), dict):
+            d["calibration_meta"].pop("base_score", None)
+            d["calibration_meta"].pop("stacked_score", None)
+        depth = (d.get("meta") or {}).get("depth_adjustments")
+        if isinstance(depth, dict):
+            for k in ("environment_penalties", "event_penalties", "liquidity_penalties",
+                      "breadth_penalties", "cross_asset_penalties", "stress_penalties"):
+                depth.pop(k, None)
+        return d
+
 
 # ---------------------------------------------------------------------------
 # Helpers
