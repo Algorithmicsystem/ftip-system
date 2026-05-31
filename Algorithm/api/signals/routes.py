@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api import db, security
 from api.alpha.provenance import get_feature_coverage_summary, get_feature_provenance
 from api.data_providers import canonical_symbol
+from api.signals.linkage import graph as linkage_graph
 from api.signals.query import get_unified_signal
 
 router = APIRouter(
@@ -344,3 +345,30 @@ async def feature_coverage_summary(days: int = Query(30, ge=1, le=365)):
     """Aggregate feature coverage status counts over the last N days."""
     _require_db_enabled(read=True)
     return get_feature_coverage_summary(days=days)
+
+
+@router.get("/linkage")
+async def symbol_linkage(
+    symbol: str,
+    link_type: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Return symbols linked to the given symbol from the SymbolLinkageGraph."""
+    _require_db_enabled(read=True)
+    symbol = canonical_symbol(symbol)
+    peers = linkage_graph.get_peers(symbol, link_type=link_type, limit=limit)
+    counts = linkage_graph.get_link_counts(symbol)
+    return {
+        "symbol": symbol,
+        "link_type_filter": link_type,
+        "link_counts": counts,
+        "links": [p.model_dump() for p in peers],
+    }
+
+
+@router.post("/linkage/build-sector")
+async def build_sector_linkage(sector: Optional[str] = Query(None)):
+    """Bootstrap sector_peer links from market_symbols.sector for all (or one) sector."""
+    _require_db_enabled(read=False)
+    written = linkage_graph.build_from_sector(sector=sector)
+    return {"written": written, "sector_filter": sector}
