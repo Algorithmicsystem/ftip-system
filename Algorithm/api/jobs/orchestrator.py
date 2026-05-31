@@ -65,10 +65,12 @@ def _run_stage(
 # ---------------------------------------------------------------------------
 
 def _build_headline(stages: Dict[str, Any]) -> str:
-    breadth  = stages.get("market_breadth", {})
-    screen   = stages.get("screen", {})
-    alerts   = stages.get("alerts", {})
-    ic_snap  = stages.get("ic_snapshot", {})
+    breadth   = stages.get("market_breadth", {})
+    screen    = stages.get("screen", {})
+    alerts    = stages.get("alerts", {})
+    ic_snap   = stages.get("ic_snapshot", {})
+    pnl       = stages.get("signal_pnl", {})
+    providers = stages.get("provider_reliability", {})
 
     breadth_state = (
         breadth.get("breadth_state")
@@ -79,6 +81,8 @@ def _build_headline(stages: Dict[str, Any]) -> str:
     fired = alerts.get("fired", 0)
     count = screen.get("count", 0)
     ic_rows = ic_snap.get("rows_written", 0)
+    pnl_rows = pnl.get("rows_stored", 0)
+    degraded = providers.get("degraded") or []
 
     parts = [f"{breadth_state} breadth, {ic_state} IC."]
     if ic_rows:
@@ -87,6 +91,10 @@ def _build_headline(stages: Dict[str, Any]) -> str:
         parts.append(f"{fired} alert{'s' if fired != 1 else ''} fired.")
     if count:
         parts.append(f"{count} conviction candidate{'s' if count != 1 else ''} in screen.")
+    if pnl_rows:
+        parts.append(f"P&L updated ({pnl_rows} rows).")
+    if degraded:
+        parts.append(f"Provider degraded: {', '.join(degraded)}.")
     return " ".join(parts)
 
 
@@ -100,10 +108,18 @@ def run_daily_pipeline(
     lookback: int = 252,
     min_dau: float = 0.0,
     screen_limit: int = 20,
+    skip_stages: Optional[set] = None,
 ) -> Dict[str, Any]:
     started_at = dt.datetime.utcnow().isoformat() + "Z"
     t_start = time.monotonic()
     stages: Dict[str, Any] = {}
+    _skip = skip_stages or set()
+
+    def _maybe_run(name: str, fn: Callable[[], Dict[str, Any]]) -> None:
+        if name in _skip:
+            stages[name] = {"status": "skipped"}
+        else:
+            _run_stage(name, fn, stages)
 
     write_ok = db.db_write_enabled()
 
@@ -121,7 +137,7 @@ def run_daily_pipeline(
             "stored": stored,
         }
 
-    _run_stage("market_breadth", _breadth, stages)
+    _maybe_run("market_breadth", _breadth)
 
     # ------------------------------------------------------------------
     # Stage 2: Sector breadth
@@ -138,7 +154,7 @@ def run_daily_pipeline(
             "stored": stored,
         }
 
-    _run_stage("sector_breadth", _sector_breadth, stages)
+    _maybe_run("sector_breadth", _sector_breadth)
 
     # ------------------------------------------------------------------
     # Stage 3: IC snapshot
@@ -153,7 +169,7 @@ def run_daily_pipeline(
             "rows_written": rows_written,
         }
 
-    _run_stage("ic_snapshot", _ic_snapshot, stages)
+    _maybe_run("ic_snapshot", _ic_snapshot)
 
     # ------------------------------------------------------------------
     # Stage 4: Alert scan
@@ -171,7 +187,7 @@ def run_daily_pipeline(
             "webhook_failed":    summary.webhook_failed,
         }
 
-    _run_stage("alerts", _alerts, stages)
+    _maybe_run("alerts", _alerts)
 
     # ------------------------------------------------------------------
     # Stage 5: Universe screen
@@ -194,7 +210,49 @@ def run_daily_pipeline(
             "top_opportunities": top[:5],
         }
 
-    _run_stage("screen", _screen, stages)
+    _maybe_run("screen", _screen)
+
+    # ------------------------------------------------------------------
+    # Stage 6: Signal P&L update
+    # ------------------------------------------------------------------
+    from api.jobs.pnl import compute_signal_pnl, store_signal_pnl
+
+    def _pnl() -> Dict[str, Any]:
+        rows = compute_signal_pnl(as_of_date)
+        stored = store_signal_pnl(rows) if rows and write_ok else 0
+        return {"rows_computed": len(rows), "rows_stored": stored}
+
+    _maybe_run("signal_pnl", _pnl)
+
+    # ------------------------------------------------------------------
+    # Stage 7: Provider reliability snapshot
+    # ------------------------------------------------------------------
+    from api.providers import get_providers_health
+    from api.providers.reliability import snapshot_provider_reliability
+
+    def _provider_reliability() -> Dict[str, Any]:
+        health = get_providers_health()
+        written = snapshot_provider_reliability(health, as_of_date=as_of_date) if write_ok else 0
+        degraded = [p.name for p in health.providers if p.status != "ok" and p.enabled]
+        return {
+            "overall_status": health.status,
+            "providers_checked": len(health.providers),
+            "degraded": degraded,
+            "rows_written": written,
+        }
+
+    _maybe_run("provider_reliability", _provider_reliability)
+
+    # ------------------------------------------------------------------
+    # Stage 8: Linkage graph refresh (sector peers)
+    # ------------------------------------------------------------------
+    from api.signals.linkage import graph as linkage_graph
+
+    def _linkage() -> Dict[str, Any]:
+        written = linkage_graph.build_from_sector() if write_ok else 0
+        return {"links_written": written}
+
+    _maybe_run("linkage_refresh", _linkage)
 
     # ------------------------------------------------------------------
     # Assemble digest
@@ -239,6 +297,10 @@ class DailyRunRequest(BaseModel):
     lookback: int = Field(default=252, ge=5, le=2000)
     min_dau: float = Field(default=0.0, ge=0.0, le=100.0)
     screen_limit: int = Field(default=20, ge=1, le=100)
+    skip_stages: List[str] = Field(
+        default_factory=list,
+        description="Stage names to skip, e.g. ['linkage_refresh', 'provider_reliability']",
+    )
 
 
 @router.post("/daily-run")
@@ -257,4 +319,5 @@ def daily_run(req: DailyRunRequest) -> Dict[str, Any]:
         lookback=req.lookback,
         min_dau=req.min_dau,
         screen_limit=req.screen_limit,
+        skip_stages=set(req.skip_stages),
     )

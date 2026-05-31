@@ -145,6 +145,8 @@ class TestRunDailyPipeline:
     def _run(self, **overrides):
         from api.jobs.orchestrator import run_daily_pipeline
 
+        from unittest.mock import MagicMock as _MM
+        _mock_health = _MM(); _mock_health.status = "ok"; _mock_health.providers = []
         defaults = {
             "api.jobs.breadth.compute_market_breadth": lambda d, lb: {
                 "breadth_state": "EXPANDING",
@@ -171,6 +173,11 @@ class TestRunDailyPipeline:
                      "regime_label": "fundamental_convergence"},
                 ],
             },
+            "api.jobs.pnl.compute_signal_pnl": lambda d: [],
+            "api.jobs.pnl.store_signal_pnl": lambda rows: 0,
+            "api.providers.get_providers_health": lambda: _mock_health,
+            "api.providers.reliability.snapshot_provider_reliability": lambda h, **kw: 0,
+            "api.signals.linkage.SymbolLinkageGraph.build_from_sector": lambda self, **kw: 0,
         }
         defaults.update(overrides)
 
@@ -188,6 +195,13 @@ class TestRunDailyPipeline:
             patch("api.jobs.ic.store_ic_snapshot", patches["api.jobs.ic.store_ic_snapshot"]),
             patch("api.jobs.alerts.run_alert_scan", patches["api.jobs.alerts.run_alert_scan"]),
             patch("api.axiom.screener.screen_universe", patches["api.axiom.screener.screen_universe"]),
+            patch("api.jobs.pnl.compute_signal_pnl", patches["api.jobs.pnl.compute_signal_pnl"]),
+            patch("api.jobs.pnl.store_signal_pnl", patches["api.jobs.pnl.store_signal_pnl"]),
+            patch("api.providers.get_providers_health", patches["api.providers.get_providers_health"]),
+            patch("api.providers.reliability.snapshot_provider_reliability",
+                  patches["api.providers.reliability.snapshot_provider_reliability"]),
+            patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector",
+                  patches["api.signals.linkage.SymbolLinkageGraph.build_from_sector"]),
         ):
             mock_db.db_write_enabled.return_value = True
             return run_daily_pipeline(_DATE)
@@ -206,18 +220,21 @@ class TestRunDailyPipeline:
         result = self._run()
         assert result["as_of_date"] == _DATE.isoformat()
 
-    def test_five_stages_present(self):
+    def test_eight_stages_present(self):
         result = self._run()
         assert set(result["stages"].keys()) == {
-            "market_breadth", "sector_breadth", "ic_snapshot", "alerts", "screen"
+            "market_breadth", "sector_breadth", "ic_snapshot", "alerts", "screen",
+            "signal_pnl", "provider_reliability", "linkage_refresh",
         }
 
     def test_partial_status_when_one_stage_fails(self):
+        from unittest.mock import MagicMock as _MM
         from api.jobs.orchestrator import run_daily_pipeline
 
         def bad_breadth(d, lb):
             raise RuntimeError("no data")
 
+        _h = _MM(); _h.status = "ok"; _h.providers = []
         with (
             patch("api.jobs.orchestrator.db") as mock_db,
             patch("api.jobs.breadth.compute_market_breadth", bad_breadth),
@@ -231,6 +248,11 @@ class TestRunDailyPipeline:
                 "status": "ok", "total_screened": 0, "count": 0,
                 "ic_state": "MODERATE", "breadth_state": "UNKNOWN", "results": [],
             }),
+            patch("api.jobs.pnl.compute_signal_pnl", lambda d: []),
+            patch("api.jobs.pnl.store_signal_pnl", lambda rows: 0),
+            patch("api.providers.get_providers_health", lambda: _h),
+            patch("api.providers.reliability.snapshot_provider_reliability", lambda h, **kw: 0),
+            patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", lambda self, **kw: 0),
         ):
             mock_db.db_write_enabled.return_value = True
             result = run_daily_pipeline(_DATE)
