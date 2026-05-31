@@ -710,6 +710,22 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "040_axiom_backtest_runs",
         lambda cur: cur.execute(Path(__file__).with_name("040_axiom_backtest_runs.sql").read_text()),
     ),
+    (
+        "041_provider_reliability_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("041_provider_reliability_daily.sql").read_text()),
+    ),
+    (
+        "042_feature_provenance_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("042_feature_provenance_daily.sql").read_text()),
+    ),
+    (
+        "043_symbol_linkage",
+        lambda cur: cur.execute(Path(__file__).with_name("043_symbol_linkage.sql").read_text()),
+    ),
+    (
+        "044_version_columns_text",
+        lambda cur: cur.execute(Path(__file__).with_name("044_version_columns_text.sql").read_text()),
+    ),
 ]
 
 
