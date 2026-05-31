@@ -11,6 +11,7 @@ from api.data_providers import canonical_symbol
 from api.jobs import features as features_job
 from api.jobs import market_data as market_data_job
 from api.jobs import signals as signals_job
+from api.signals.query import get_unified_signal
 
 _PROSPERITY_SIGNAL_ASOF_COLUMN: Optional[str] = None
 _PROSPERITY_SIGNAL_ACTION_COLUMN: Optional[str] = None
@@ -351,44 +352,28 @@ def _fetch_latest_prosperity_feature_row(
 
 
 def fetch_signal(symbol: str, as_of_date: dt.date) -> Optional[Dict[str, Any]]:
-    row = db.safe_fetchone(
-        """
-        SELECT action, score, confidence, entry_low, entry_high, stop_loss,
-               take_profit_1, take_profit_2, horizon_days, reason_codes, reason_details
-        FROM signals_daily
-        WHERE symbol = %s AND as_of_date = %s
-        """,
-        (symbol, as_of_date),
-    )
-    if not row:
-        prosperity_row = _fetch_latest_prosperity_signal_row(symbol, as_of_date)
-        if not prosperity_row:
-            return None
-        return {
-            "action": prosperity_row[0],
-            "score": prosperity_row[1],
-            "confidence": prosperity_row[2],
-            "entry_low": None,
-            "entry_high": None,
-            "stop_loss": None,
-            "take_profit_1": None,
-            "take_profit_2": None,
-            "horizon_days": None,
-            "reason_codes": [],
-            "reason_details": {},
-        }
+    unified = get_unified_signal(symbol, as_of_date)
+    if unified is None:
+        return None
+    # Preserve the historical return shape callers depend on
     return {
-        "action": row[0],
-        "score": row[1],
-        "confidence": row[2],
-        "entry_low": row[3],
-        "entry_high": row[4],
-        "stop_loss": row[5],
-        "take_profit_1": row[6],
-        "take_profit_2": row[7],
-        "horizon_days": row[8],
-        "reason_codes": row[9] or [],
-        "reason_details": row[10] or {},
+        "action": unified["action"],
+        "score": unified["score"],
+        "confidence": unified["confidence"],
+        "entry_low": unified.get("entry_low"),
+        "entry_high": unified.get("entry_high"),
+        "stop_loss": unified.get("stop_loss"),
+        "take_profit_1": unified.get("take_profit_1"),
+        "take_profit_2": unified.get("take_profit_2"),
+        "horizon_days": None,
+        "reason_codes": unified.get("reason_codes") or [],
+        "reason_details": unified.get("reason_details") or {},
+        # Additional normalised fields now available to all callers
+        "signal": unified["signal"],
+        "regime": unified.get("regime"),
+        "signal_version": unified.get("signal_version"),
+        "feature_version": unified.get("feature_version"),
+        "source_table": unified.get("source_table"),
     }
 
 
