@@ -60,7 +60,7 @@ const state = {
   assistantHealth: null,
   workspaceContinuityStore: {},
   demoMode: false,
-  activeTab: "legacy",
+  activeTab: "workspace",
   researchTab: "dashboard",
   copilotCollapsed: true,
 };
@@ -939,7 +939,7 @@ const buildCopilotPageContext = () => {
     (report.axiom_weakest_evidence_areas || [])[0] ||
     null;
   const baseContext = {
-    app_tab: state.activeTab || "legacy",
+    app_tab: state.activeTab || "workspace",
     research_tab: state.researchTab || "dashboard",
     page_label: researchTabLabel(),
     page_focus:
@@ -6084,7 +6084,7 @@ qs("#assistant-health-refresh-btn").addEventListener("click", refreshAssistantSy
 qs("#demo-mode-toggle").addEventListener("click", () => {
   applyDemoMode(!state.demoMode);
   if (state.demoMode) {
-    setActiveTab("legacy");
+    setActiveTab("workspace");
     setResearchTab("dashboard");
   }
 });
@@ -6189,14 +6189,14 @@ document.body.addEventListener("click", (event) => {
   const openTab = event.target.closest("[data-open-research-tab]");
   if (openTab) {
     setResearchTab(openTab.dataset.openResearchTab);
-    setActiveTab("legacy");
+    setActiveTab("workspace");
     return;
   }
 
   const loadReportButton = event.target.closest("[data-load-report]");
   if (loadReportButton) {
     loadStoredReportAsActive(loadReportButton.dataset.loadReport, "#assistant-analyze-status");
-    setActiveTab("legacy");
+    setActiveTab("workspace");
     setResearchTab("dashboard");
     return;
   }
@@ -6207,7 +6207,7 @@ document.body.addEventListener("click", (event) => {
     persistCompareSymbol(symbol);
     renderCompareWorkspace();
     setLegacyStatus("#assistant-compare-status", `Comparator set to ${symbol}.`, "success");
-    setActiveTab("legacy");
+    setActiveTab("workspace");
     setResearchTab("compare");
     return;
   }
@@ -7080,5 +7080,5 @@ renderAssistantChatTranscript();
 renderSystemHealth(null);
 renderCopilotShell();
 setResearchTab("dashboard");
-setActiveTab(state.demoMode ? "legacy" : "signal");
+setActiveTab(state.demoMode ? "workspace" : "signal");
 refreshAssistantSystemHealth();
