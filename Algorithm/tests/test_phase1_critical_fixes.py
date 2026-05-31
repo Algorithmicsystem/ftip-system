@@ -155,8 +155,8 @@ def test_backtest_entry_uses_next_day_row():
 # ---------------------------------------------------------------------------
 
 def test_changed_signals_returns_list_of_dicts():
-    """_changed_signals must return List[Dict] with layer/description/direction/prior/current."""
-    from api.assistant.phase14.daily import _changed_signals
+    """_changed_signals must return List[WhatChangedItem] with layer/description/direction/prior/current."""
+    from api.assistant.phase14.daily import _changed_signals, WhatChangedItem
 
     current = {
         "strategy": {"final_signal": "BUY"},
@@ -179,24 +179,24 @@ def test_changed_signals_returns_list_of_dicts():
     assert isinstance(result, list), "must return a list"
     assert len(result) > 0
     for item in result:
-        assert isinstance(item, dict), f"each item must be a dict, got {type(item)}"
+        assert isinstance(item, WhatChangedItem), f"each item must be WhatChangedItem, got {type(item)}"
         for key in ("layer", "description", "direction", "prior", "current"):
-            assert key in item, f"missing key '{key}' in change item: {item}"
+            assert hasattr(item, key), f"missing field '{key}' on WhatChangedItem"
 
 
 def test_changed_signals_no_prior_returns_baseline_dict():
-    """With no prior report, must return a single baseline dict, not a plain string."""
-    from api.assistant.phase14.daily import _changed_signals
+    """With no prior report, must return a single baseline WhatChangedItem."""
+    from api.assistant.phase14.daily import _changed_signals, WhatChangedItem
 
     result = _changed_signals({"strategy": {"final_signal": "BUY"}}, {})
     assert isinstance(result, list)
     assert len(result) == 1
-    assert isinstance(result[0], dict)
-    assert result[0]["layer"] == "baseline"
+    assert isinstance(result[0], WhatChangedItem)
+    assert result[0].layer == "baseline"
 
 
 def test_changed_signals_no_changes_returns_unchanged_dict():
-    """When nothing changed, must return List[Dict] with direction='unchanged'."""
+    """When nothing changed, must return List[WhatChangedItem] with direction='unchanged'."""
     from api.assistant.phase14.daily import _changed_signals
 
     same = {
@@ -209,4 +209,4 @@ def test_changed_signals_no_changes_returns_unchanged_dict():
     }
     result = _changed_signals(same, same)
     assert isinstance(result, list)
-    assert result[0]["direction"] == "unchanged"
+    assert result[0].direction == "unchanged"

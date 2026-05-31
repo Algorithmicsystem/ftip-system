@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence
 
+from pydantic import BaseModel
+
 from .common import compact_list, safe_float
+
+
+class WhatChangedItem(BaseModel):
+    layer: str          # signal | posture | deployment | trust | operating_mode | classification | none | baseline
+    description: str
+    direction: str      # changed | unchanged | new
+    prior: str
+    current: str
 
 
 def _candidate_score(row: Dict[str, Any]) -> float:
@@ -79,10 +89,14 @@ def _find_prior_same_symbol(
     return {}
 
 
-def _changed_signals(current_report: Dict[str, Any], prior_report: Dict[str, Any]) -> List[Dict[str, Any]]:
+def _changed_signals(current_report: Dict[str, Any], prior_report: Dict[str, Any]) -> List[WhatChangedItem]:
     if not prior_report:
-        return [{"layer": "baseline", "description": "No prior same-symbol report is available, so this review is establishing the baseline shadow record.", "direction": "new", "prior": "n/a", "current": "n/a"}]
-    changes: List[Dict[str, Any]] = []
+        return [WhatChangedItem(
+            layer="baseline",
+            description="No prior same-symbol report is available, so this review is establishing the baseline shadow record.",
+            direction="new", prior="n/a", current="n/a",
+        )]
+    changes: List[WhatChangedItem] = []
     current_signal = (current_report.get("strategy") or {}).get("final_signal") or (
         current_report.get("signal") or {}
     ).get("action")
@@ -90,7 +104,11 @@ def _changed_signals(current_report: Dict[str, Any], prior_report: Dict[str, Any
         prior_report.get("signal") or {}
     ).get("action")
     if current_signal != prior_signal:
-        changes.append({"layer": "signal", "description": f"Signal changed from {prior_signal or 'n/a'} to {current_signal or 'n/a'}.", "direction": "changed", "prior": prior_signal or "n/a", "current": current_signal or "n/a"})
+        changes.append(WhatChangedItem(
+            layer="signal",
+            description=f"Signal changed from {prior_signal or 'n/a'} to {current_signal or 'n/a'}.",
+            direction="changed", prior=prior_signal or "n/a", current=current_signal or "n/a",
+        ))
 
     current_posture = current_report.get("strategy_posture") or (
         current_report.get("strategy") or {}
@@ -99,18 +117,50 @@ def _changed_signals(current_report: Dict[str, Any], prior_report: Dict[str, Any
         prior_report.get("strategy") or {}
     ).get("strategy_posture")
     if current_posture != prior_posture:
-        changes.append({"layer": "posture", "description": f"Strategy posture changed from {prior_posture or 'n/a'} to {current_posture or 'n/a'}.", "direction": "changed", "prior": prior_posture or "n/a", "current": current_posture or "n/a"})
+        changes.append(WhatChangedItem(
+            layer="posture",
+            description=f"Strategy posture changed from {prior_posture or 'n/a'} to {current_posture or 'n/a'}.",
+            direction="changed", prior=prior_posture or "n/a", current=current_posture or "n/a",
+        ))
 
     if current_report.get("deployment_permission") != prior_report.get("deployment_permission"):
-        changes.append({"layer": "deployment", "description": f"Deployment permission moved from {prior_report.get('deployment_permission') or 'n/a'} to {current_report.get('deployment_permission') or 'n/a'}.", "direction": "changed", "prior": prior_report.get("deployment_permission") or "n/a", "current": current_report.get("deployment_permission") or "n/a"})
+        changes.append(WhatChangedItem(
+            layer="deployment",
+            description=f"Deployment permission moved from {prior_report.get('deployment_permission') or 'n/a'} to {current_report.get('deployment_permission') or 'n/a'}.",
+            direction="changed",
+            prior=prior_report.get("deployment_permission") or "n/a",
+            current=current_report.get("deployment_permission") or "n/a",
+        ))
     if current_report.get("trust_tier") != prior_report.get("trust_tier"):
-        changes.append({"layer": "trust", "description": f"Trust tier shifted from {prior_report.get('trust_tier') or 'n/a'} to {current_report.get('trust_tier') or 'n/a'}.", "direction": "changed", "prior": prior_report.get("trust_tier") or "n/a", "current": current_report.get("trust_tier") or "n/a"})
+        changes.append(WhatChangedItem(
+            layer="trust",
+            description=f"Trust tier shifted from {prior_report.get('trust_tier') or 'n/a'} to {current_report.get('trust_tier') or 'n/a'}.",
+            direction="changed",
+            prior=prior_report.get("trust_tier") or "n/a",
+            current=current_report.get("trust_tier") or "n/a",
+        ))
     if current_report.get("current_operating_mode") != prior_report.get("current_operating_mode"):
-        changes.append({"layer": "operating_mode", "description": f"Operating mode moved from {prior_report.get('current_operating_mode') or 'n/a'} to {current_report.get('current_operating_mode') or 'n/a'}.", "direction": "changed", "prior": prior_report.get("current_operating_mode") or "n/a", "current": current_report.get("current_operating_mode") or "n/a"})
+        changes.append(WhatChangedItem(
+            layer="operating_mode",
+            description=f"Operating mode moved from {prior_report.get('current_operating_mode') or 'n/a'} to {current_report.get('current_operating_mode') or 'n/a'}.",
+            direction="changed",
+            prior=prior_report.get("current_operating_mode") or "n/a",
+            current=current_report.get("current_operating_mode") or "n/a",
+        ))
     if current_report.get("candidate_classification") != prior_report.get("candidate_classification"):
-        changes.append({"layer": "classification", "description": f"Candidate classification moved from {prior_report.get('candidate_classification') or 'n/a'} to {current_report.get('candidate_classification') or 'n/a'}.", "direction": "changed", "prior": prior_report.get("candidate_classification") or "n/a", "current": current_report.get("candidate_classification") or "n/a"})
+        changes.append(WhatChangedItem(
+            layer="classification",
+            description=f"Candidate classification moved from {prior_report.get('candidate_classification') or 'n/a'} to {current_report.get('candidate_classification') or 'n/a'}.",
+            direction="changed",
+            prior=prior_report.get("candidate_classification") or "n/a",
+            current=current_report.get("candidate_classification") or "n/a",
+        ))
     if not changes:
-        changes.append({"layer": "none", "description": "No material change was detected versus the prior same-symbol report.", "direction": "unchanged", "prior": "n/a", "current": "n/a"})
+        changes.append(WhatChangedItem(
+            layer="none",
+            description="No material change was detected versus the prior same-symbol report.",
+            direction="unchanged", prior="n/a", current="n/a",
+        ))
     return changes
 
 
@@ -178,8 +228,8 @@ def build_daily_workflow(
         ],
         limit=6,
     )
-    what_changed = changed_signals  # structured List[Dict] — callers use "description" for text
-    changed_signals_text = [item["description"] for item in changed_signals]
+    what_changed = [item.model_dump() for item in changed_signals]
+    changed_signals_text = [item.description for item in changed_signals]
     daily_summary = (
         f"Today’s operator triage has {len(triage_rows)} tracked candidates, "
         f"{len(promotions)} live-like names, {len(shadow_only)} shadow-only names, and {len(blocked)} blocked names. "

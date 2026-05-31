@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db, security
 from api.data_providers import canonical_symbol
+from api.signals.query import get_unified_signal
 
 router = APIRouter(
     prefix="/signals",
@@ -120,6 +121,94 @@ async def top_picks(
         }
         for row in rows
     ]
+
+
+@router.get("/intelligence")
+async def signal_intelligence(
+    symbol: str,
+    as_of_date: Optional[dt.date] = None,
+):
+    """Canonical intelligence endpoint — unified signal + ExplanationPayload.
+
+    Uses prosperity_signals_daily (primary) with fallback to signals_daily.
+    Returns full ExplanationPayload including drivers, staleness, and reason codes.
+    """
+    _require_db_enabled(read=True)
+    symbol = canonical_symbol(symbol)
+    if as_of_date is None:
+        as_of_date = dt.date.today()
+
+    unified = get_unified_signal(symbol, as_of_date)
+    if unified is None:
+        raise HTTPException(status_code=404, detail="signal not found")
+
+    # Pull features from features_daily for evidence building (best-effort).
+    feature_row = db.safe_fetchone(
+        """
+        SELECT mom_5, mom_21, mom_63, mom_126, mom_252,
+               rsi14, trend_sma20_50, trend_r2_63d,
+               volume_z20, sentiment_score, sentiment_surprise,
+               mom_vol_adj_21d, trend_slope_63d
+        FROM features_daily
+        WHERE symbol = %s AND as_of_date = %s
+        """,
+        (symbol, as_of_date),
+    )
+    _FEATURE_COLS = [
+        "mom_5", "mom_21", "mom_63", "mom_126", "mom_252",
+        "rsi14", "trend_sma20_50", "trend_r2_63d",
+        "volume_z20", "sentiment_score", "sentiment_surprise",
+        "mom_vol_adj_21d", "trend_slope_63d",
+    ]
+    features_dict = (
+        {k: float(v) for k, v in zip(_FEATURE_COLS, feature_row) if v is not None}
+        if feature_row else {}
+    )
+
+    from api.alpha.signal_runner import SignalResponse, _build_evidence, _compute_system_confidence
+    sig = SignalResponse(
+        symbol=symbol,
+        as_of=str(unified["as_of"]),
+        lookback=63,
+        effective_lookback=63,
+        regime=str(unified.get("regime") or "CHOPPY"),
+        thresholds=dict(unified.get("thresholds") or {}),
+        score=float(unified.get("score") or 0.0),
+        signal=str(unified.get("signal") or "HOLD"),
+        confidence=float(unified.get("confidence") or 0.0),
+        features=features_dict,
+        reason_codes=list(unified.get("reason_codes") or []),
+    )
+    ev_for, ev_against = _build_evidence(sig)
+    system_confidence = _compute_system_confidence(sig)
+
+    signal_dict = {
+        **{k: v for k, v in unified.items() if k != "thresholds"},
+        "evidence_for": ev_for,
+        "evidence_against": ev_against,
+        "adjusted_confidence_notes": [],
+        "as_of": str(unified["as_of"]),
+    }
+
+    from api.assistant.explanation import build_explanation_payload
+    explanation = build_explanation_payload(signal_dict)
+
+    return {
+        "symbol": symbol,
+        "as_of": str(unified["as_of"]),
+        "signal": unified["signal"],
+        "score": unified["score"],
+        "confidence": unified["confidence"],
+        "regime": unified.get("regime"),
+        "source_table": unified.get("source_table"),
+        "system_confidence": system_confidence,
+        "entry_low": unified.get("entry_low"),
+        "entry_high": unified.get("entry_high"),
+        "stop_loss": unified.get("stop_loss"),
+        "take_profit_1": unified.get("take_profit_1"),
+        "take_profit_2": unified.get("take_profit_2"),
+        "explanation": explanation.model_dump(exclude_none=True),
+    }
 
 
 @router.get("/evidence")
