@@ -38,6 +38,13 @@ class DriverItem(BaseModel):
     strength_label: str     # "strong" | "moderate" | "weak"
 
 
+class NextResearchItem(BaseModel):
+    """A structured follow-up research question produced by the narrator."""
+    question: str
+    category: str = "general"  # fundamentals | technicals | macro | risk | catalyst | general
+    priority: str = "medium"   # high | medium | low
+
+
 # ---------------------------------------------------------------------------
 # Main struct
 # ---------------------------------------------------------------------------
@@ -59,7 +66,20 @@ class ExplanationPayload(BaseModel):
     summary: Optional[str] = None
     bullets: List[str] = []
     disclaimer: str = ""
-    followups: List[str] = []
+    followups: List[NextResearchItem] = []
+
+
+# ---------------------------------------------------------------------------
+# Coercion helpers
+# ---------------------------------------------------------------------------
+
+def _coerce_followup(item: Any) -> NextResearchItem:
+    """Convert a string, dict, or NextResearchItem into a NextResearchItem."""
+    if isinstance(item, NextResearchItem):
+        return item
+    if isinstance(item, dict):
+        return NextResearchItem(**item)
+    return NextResearchItem(question=str(item))
 
 
 # ---------------------------------------------------------------------------
@@ -173,17 +193,26 @@ def build_explanation_payload(
 
     # LLM overlay
     if narration is not None:
-        payload.headline = getattr(narration, "headline", None) or narration.get("headline") if isinstance(narration, dict) else getattr(narration, "headline", None)
-        payload.summary = getattr(narration, "summary", None) or narration.get("summary") if isinstance(narration, dict) else getattr(narration, "summary", None)
-        payload.bullets = list(getattr(narration, "bullets", None) or narration.get("bullets", []) if isinstance(narration, dict) else getattr(narration, "bullets", []))
-        payload.disclaimer = str(getattr(narration, "disclaimer", "") or narration.get("disclaimer", "") if isinstance(narration, dict) else getattr(narration, "disclaimer", ""))
-        payload.followups = list(getattr(narration, "followups", None) or narration.get("followups", []) if isinstance(narration, dict) else getattr(narration, "followups", []))
+        if isinstance(narration, dict):
+            payload.headline = narration.get("headline")
+            payload.summary = narration.get("summary")
+            payload.bullets = list(narration.get("bullets") or [])
+            payload.disclaimer = str(narration.get("disclaimer") or "")
+            raw_followups = list(narration.get("followups") or [])
+        else:
+            payload.headline = getattr(narration, "headline", None)
+            payload.summary = getattr(narration, "summary", None)
+            payload.bullets = list(getattr(narration, "bullets", None) or [])
+            payload.disclaimer = str(getattr(narration, "disclaimer", "") or "")
+            raw_followups = list(getattr(narration, "followups", None) or [])
+        payload.followups = [_coerce_followup(f) for f in raw_followups]
 
     return payload
 
 
 __all__ = [
     "DriverItem",
+    "NextResearchItem",
     "ExplanationPayload",
     "build_explanation_payload",
     "compute_signal_staleness",

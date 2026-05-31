@@ -5,8 +5,9 @@ import re
 from typing import Any, Dict, List, Optional, Set
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, field_validator
 
+from api.assistant.explanation import NextResearchItem
 from ftip.narrator import client as narrator_client
 
 
@@ -15,7 +16,22 @@ class NarrationPayload(BaseModel):
     summary: str
     bullets: List[str]
     disclaimer: str
-    followups: List[str]
+    followups: List[NextResearchItem] = []
+
+    @field_validator("followups", mode="before")
+    @classmethod
+    def _coerce_followups(cls, v: Any) -> List[Any]:
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if isinstance(item, NextResearchItem):
+                result.append(item)
+            elif isinstance(item, dict):
+                result.append(NextResearchItem(**item))
+            else:
+                result.append(NextResearchItem(question=str(item)))
+        return result
 
     def as_explanation(
         self,
@@ -62,7 +78,12 @@ def _sanitize_output(
         bullets=[_sanitize_numbers(item, allowed_numbers) for item in model.bullets],
         disclaimer=_sanitize_numbers(model.disclaimer, allowed_numbers),
         followups=[
-            _sanitize_numbers(item, allowed_numbers) for item in model.followups
+            NextResearchItem(
+                question=_sanitize_numbers(item.question, allowed_numbers),
+                category=item.category,
+                priority=item.priority,
+            )
+            for item in model.followups
         ],
     )
 
@@ -71,7 +92,11 @@ def _build_prompt(payload: Dict[str, Any], user_message: str) -> List[Dict[str, 
     system_prompt = (
         "You are the FTIP narrator. Use only the provided payload to answer. "
         "Only use numeric values present in the payload; if a number is missing say 'not available'. "
-        "Return JSON with keys: headline, summary, bullets, disclaimer, followups."
+        "Return JSON with keys: headline, summary, bullets, disclaimer, followups. "
+        "followups must be a list of objects each with keys: "
+        "question (string), "
+        "category (one of: fundamentals, technicals, macro, risk, catalyst, general), "
+        "priority (one of: high, medium, low)."
     )
     user_prompt = (
         "Payload:\n"
