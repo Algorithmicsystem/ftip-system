@@ -13,8 +13,11 @@ from unittest.mock import MagicMock, patch
 ALL_STAGES = [
     "market_breadth", "sector_breadth", "ic_snapshot",
     "alerts", "screen", "signal_pnl",
-    "provider_reliability", "linkage_refresh",
+    "provider_reliability", "linkage_refresh", "ic_calibration",
 ]
+
+_IC_CAL_MOCK = {"hit_rate": 0.52, "mean_ic": 0.04, "ic_state": "MODERATE",
+                "sample_count": 30, "snapshot_stored": True}
 
 
 def _run_pipeline_with_mocks(as_of=dt.date(2024, 6, 1), skip_stages=None, **overrides):
@@ -73,8 +76,8 @@ def _run_pipeline_with_mocks(as_of=dt.date(2024, 6, 1), skip_stages=None, **over
 # 1. Pipeline now has 8 stages
 # ---------------------------------------------------------------------------
 
-def test_pipeline_runs_all_eight_stages():
-    """run_daily_pipeline must produce all 8 stage keys in result."""
+def test_pipeline_runs_all_nine_stages():
+    """run_daily_pipeline must produce all 9 stage keys in result."""
     from api.jobs.orchestrator import run_daily_pipeline
     with patch("api.jobs.orchestrator.db") as mock_db, \
          patch("api.jobs.breadth.compute_market_breadth", return_value={"breadth_state": "NEUTRAL", "universe_size": 0}), \
@@ -93,7 +96,8 @@ def test_pipeline_runs_all_eight_stages():
          patch("api.providers.get_providers_health",
                return_value=MagicMock(status="ok", providers=[])), \
          patch("api.providers.reliability.snapshot_provider_reliability", return_value=0), \
-         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0):
+         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0), \
+         patch("api.jobs.ic.snapshot_ic_as_calibration", return_value=_IC_CAL_MOCK):
         mock_db.db_write_enabled.return_value = True
         mock_db.db_read_enabled.return_value = True
         result = run_daily_pipeline(dt.date(2024, 6, 1))
@@ -122,7 +126,8 @@ def test_pipeline_result_has_status_and_headline():
          patch("api.providers.get_providers_health",
                return_value=MagicMock(status="ok", providers=[])), \
          patch("api.providers.reliability.snapshot_provider_reliability", return_value=0), \
-         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0):
+         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0), \
+         patch("api.jobs.ic.snapshot_ic_as_calibration", return_value=_IC_CAL_MOCK):
         mock_db.db_write_enabled.return_value = True
         mock_db.db_read_enabled.return_value = True
         result = run_daily_pipeline(dt.date(2024, 6, 1))
@@ -158,7 +163,8 @@ def test_signal_pnl_stage_records_stored():
          patch("api.providers.get_providers_health",
                return_value=MagicMock(status="ok", providers=[])), \
          patch("api.providers.reliability.snapshot_provider_reliability", return_value=0), \
-         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0):
+         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0), \
+         patch("api.jobs.ic.snapshot_ic_as_calibration", return_value=_IC_CAL_MOCK):
         mock_db.db_write_enabled.return_value = True
         mock_db.db_read_enabled.return_value = True
         result = run_daily_pipeline(dt.date(2024, 6, 1))
@@ -200,7 +206,8 @@ def test_provider_reliability_stage_reports_degraded():
          patch("api.jobs.pnl.store_signal_pnl", return_value=0), \
          patch("api.providers.get_providers_health", return_value=mock_health), \
          patch("api.providers.reliability.snapshot_provider_reliability", return_value=0), \
-         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0):
+         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0), \
+         patch("api.jobs.ic.snapshot_ic_as_calibration", return_value=_IC_CAL_MOCK):
         mock_db.db_write_enabled.return_value = True
         mock_db.db_read_enabled.return_value = True
         result = run_daily_pipeline(dt.date(2024, 6, 1))
@@ -266,7 +273,8 @@ def test_skip_stages_marks_stage_as_skipped():
          patch("api.providers.get_providers_health",
                return_value=MagicMock(status="ok", providers=[])), \
          patch("api.providers.reliability.snapshot_provider_reliability", return_value=0), \
-         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0):
+         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0), \
+         patch("api.jobs.ic.snapshot_ic_as_calibration", return_value=_IC_CAL_MOCK):
         mock_db.db_write_enabled.return_value = True
         mock_db.db_read_enabled.return_value = True
         result = run_daily_pipeline(
@@ -303,7 +311,8 @@ def test_one_stage_failure_does_not_abort_rest():
          patch("api.providers.get_providers_health",
                return_value=MagicMock(status="ok", providers=[])), \
          patch("api.providers.reliability.snapshot_provider_reliability", return_value=0), \
-         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0):
+         patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", return_value=0), \
+         patch("api.jobs.ic.snapshot_ic_as_calibration", return_value=_IC_CAL_MOCK):
         mock_db.db_write_enabled.return_value = True
         mock_db.db_read_enabled.return_value = True
         result = run_daily_pipeline(dt.date(2024, 6, 1))

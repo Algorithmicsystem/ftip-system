@@ -428,6 +428,73 @@ def compute_ic_decay_summary(
 
 
 # ---------------------------------------------------------------------------
+# Public: translate IC history → axiom_calibration_snapshots
+# ---------------------------------------------------------------------------
+
+def snapshot_ic_as_calibration(
+    as_of_date: dt.date,
+    *,
+    write_ok: bool = True,
+    horizon_label: str = "21d",
+    score_field: str = "composite",
+) -> Dict[str, Any]:
+    """Derive a Kelly-compatible hit_rate from the IC history and persist it.
+
+    Reads the rolling IC history for (score_field, horizon_label) from
+    signal_ic_daily, computes the decay summary, and converts mean_ic to an
+    approximate hit_rate via the Gaussian CDF:
+
+        hit_rate ≈ Φ(mean_ic) = 0.5 + 0.5 * erf(mean_ic / √2)
+
+    For mean_ic = 0 → hit_rate = 0.50 (no edge, Kelly = 0).
+    For mean_ic = 0.10 → hit_rate ≈ 0.54 (mild edge).
+    For mean_ic = 0.20 → hit_rate ≈ 0.58 (solid edge).
+
+    Writes to axiom_calibration_snapshots so _load_hit_rate() always finds a
+    current value after the nightly IC stage runs.
+    """
+    from api.axiom.persistence import persist_axiom_calibration_snapshot
+
+    history = load_ic_history(score_field, horizon_label, window_days=252)
+    summary = compute_ic_decay_summary(history)
+
+    mean_ic = float(summary.get("mean_ic") or 0.0)
+    # Gaussian CDF approximation: hit_rate = Φ(mean_ic)
+    hit_rate = 0.5 + 0.5 * math.erf(mean_ic / math.sqrt(2.0))
+    hit_rate = max(0.01, min(0.99, round(hit_rate, 4)))
+
+    payload = {
+        "as_of_date": as_of_date.isoformat(),
+        "horizon_label": horizon_label,
+        "framework_version": "ic_daily_v1",
+        "diagnostics": {
+            "overall_outcome_metrics": {
+                "hit_rate": hit_rate,
+                "mean_ic": summary.get("mean_ic"),
+                "icir": summary.get("icir"),
+                "ic_state": summary.get("ic_state", "INSUFFICIENT"),
+                "sample_count": summary.get("sample_count", 0),
+            }
+        },
+    }
+
+    snapshot_key = None
+    if write_ok:
+        snapshot_key = persist_axiom_calibration_snapshot(
+            payload,
+            snapshot_key=f"ic_daily_v1:{horizon_label}:{as_of_date.isoformat()}",
+        )
+
+    return {
+        "hit_rate": hit_rate,
+        "mean_ic": summary.get("mean_ic"),
+        "ic_state": summary.get("ic_state", "INSUFFICIENT"),
+        "sample_count": summary.get("sample_count", 0),
+        "snapshot_stored": snapshot_key is not None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Endpoint
 # ---------------------------------------------------------------------------
 

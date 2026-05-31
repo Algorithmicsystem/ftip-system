@@ -71,22 +71,26 @@ def _build_headline(stages: Dict[str, Any]) -> str:
     ic_snap   = stages.get("ic_snapshot", {})
     pnl       = stages.get("signal_pnl", {})
     providers = stages.get("provider_reliability", {})
+    ic_cal    = stages.get("ic_calibration", {})
 
     breadth_state = (
         breadth.get("breadth_state")
         or screen.get("breadth_state")
         or "UNKNOWN"
     )
-    ic_state = screen.get("ic_state") or "UNKNOWN"
+    ic_state = screen.get("ic_state") or ic_cal.get("ic_state") or "UNKNOWN"
     fired = alerts.get("fired", 0)
     count = screen.get("count", 0)
     ic_rows = ic_snap.get("rows_written", 0)
     pnl_rows = pnl.get("rows_stored", 0)
     degraded = providers.get("degraded") or []
+    hit_rate = ic_cal.get("hit_rate")
 
     parts = [f"{breadth_state} breadth, {ic_state} IC."]
     if ic_rows:
         parts.append(f"IC updated ({ic_rows} rows).")
+    if hit_rate is not None:
+        parts.append(f"Kelly hit-rate {hit_rate:.2f}.")
     if fired:
         parts.append(f"{fired} alert{'s' if fired != 1 else ''} fired.")
     if count:
@@ -253,6 +257,16 @@ def run_daily_pipeline(
         return {"links_written": written}
 
     _maybe_run("linkage_refresh", _linkage)
+
+    # ------------------------------------------------------------------
+    # Stage 9: IC calibration snapshot → Kelly hit-rate
+    # ------------------------------------------------------------------
+    from api.jobs.ic import snapshot_ic_as_calibration
+
+    def _ic_calibration() -> Dict[str, Any]:
+        return snapshot_ic_as_calibration(as_of_date, write_ok=write_ok)
+
+    _maybe_run("ic_calibration", _ic_calibration)
 
     # ------------------------------------------------------------------
     # Assemble digest

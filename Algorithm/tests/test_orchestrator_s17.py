@@ -178,6 +178,10 @@ class TestRunDailyPipeline:
             "api.providers.get_providers_health": lambda: _mock_health,
             "api.providers.reliability.snapshot_provider_reliability": lambda h, **kw: 0,
             "api.signals.linkage.SymbolLinkageGraph.build_from_sector": lambda self, **kw: 0,
+            "api.jobs.ic.snapshot_ic_as_calibration": lambda d, **kw: {
+                "hit_rate": 0.52, "mean_ic": 0.04, "ic_state": "MODERATE",
+                "sample_count": 30, "snapshot_stored": True,
+            },
         }
         defaults.update(overrides)
 
@@ -202,6 +206,8 @@ class TestRunDailyPipeline:
                   patches["api.providers.reliability.snapshot_provider_reliability"]),
             patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector",
                   patches["api.signals.linkage.SymbolLinkageGraph.build_from_sector"]),
+            patch("api.jobs.ic.snapshot_ic_as_calibration",
+                  patches["api.jobs.ic.snapshot_ic_as_calibration"]),
         ):
             mock_db.db_write_enabled.return_value = True
             return run_daily_pipeline(_DATE)
@@ -220,11 +226,11 @@ class TestRunDailyPipeline:
         result = self._run()
         assert result["as_of_date"] == _DATE.isoformat()
 
-    def test_eight_stages_present(self):
+    def test_nine_stages_present(self):
         result = self._run()
         assert set(result["stages"].keys()) == {
             "market_breadth", "sector_breadth", "ic_snapshot", "alerts", "screen",
-            "signal_pnl", "provider_reliability", "linkage_refresh",
+            "signal_pnl", "provider_reliability", "linkage_refresh", "ic_calibration",
         }
 
     def test_partial_status_when_one_stage_fails(self):
@@ -253,6 +259,9 @@ class TestRunDailyPipeline:
             patch("api.providers.get_providers_health", lambda: _h),
             patch("api.providers.reliability.snapshot_provider_reliability", lambda h, **kw: 0),
             patch("api.signals.linkage.SymbolLinkageGraph.build_from_sector", lambda self, **kw: 0),
+            patch("api.jobs.ic.snapshot_ic_as_calibration",
+                  lambda d, **kw: {"hit_rate": 0.5, "mean_ic": 0.0, "ic_state": "INSUFFICIENT",
+                                   "sample_count": 0, "snapshot_stored": False}),
         ):
             mock_db.db_write_enabled.return_value = True
             result = run_daily_pipeline(_DATE)
