@@ -308,7 +308,14 @@ def run_canonical_backtest(
     quality_score_fetcher: Callable[[str, dt.date], int],
     signal_resolver: Callable[[str, dt.date], Optional[Dict[str, Any]]],
     friction_engine: Any,
+    pit_universe: Optional[Dict[str, dt.date]] = None,
 ) -> Dict[str, Any]:
+    """Run a vectorised canonical backtest.
+
+    pit_universe: if provided, maps symbol → first available (listing) date.
+    Symbols are excluded from any date before their listing date, preventing
+    survivorship and look-ahead universe bias.
+    """
     spy_closes = bars.get("SPY", {})
     all_dates = sorted({date for series in bars.values() for date in series.keys() if start <= date <= end})
     positions: Dict[str, Dict[str, Any]] = {}
@@ -319,6 +326,7 @@ def run_canonical_backtest(
     daily_equity: List[float] = [1.0]
     daily_dates: List[dt.date] = [all_dates[0]]
     trades_notional = 0.0
+    pit_filtered_symbol_days = 0  # counts (symbol, date) pairs excluded by PIT guard
     signal_cache: Dict[Tuple[str, dt.date], Optional[Dict[str, Any]]] = {}
     lineage: Dict[str, Any] = {
         "snapshot_version": CANONICAL_SNAPSHOT_VERSION,
@@ -333,6 +341,12 @@ def run_canonical_backtest(
             closes = bars.get(sym, {})
             if date not in closes:
                 continue
+            # PIT universe guard: skip symbol if it was not yet listed on this date
+            if pit_universe is not None:
+                first_available = pit_universe.get(sym)
+                if first_available is not None and date < first_available:
+                    pit_filtered_symbol_days += 1
+                    continue
             decision = signal_cache.get((sym, date))
             if (sym, date) not in signal_cache:
                 decision = signal_resolver(sym, date)
@@ -497,6 +511,8 @@ def run_canonical_backtest(
             "turnover": turnover,
             "alpha_vs_spy": total_return - spy_return,
             "beta": None,
+            "pit_guard_applied": pit_universe is not None,
+            "pit_filtered_symbol_days": pit_filtered_symbol_days,
         },
         "regime_metrics": regime_rows,
         "validation_artifact": validation_artifact,
