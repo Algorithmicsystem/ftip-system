@@ -441,17 +441,6 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
         """,
         (symbol, as_of_date),
     )
-    signal_row = db.safe_fetchone(
-        """
-        SELECT action, score, confidence, reason_codes, reason_details,
-               signal_version, effective_lookback, regime, thresholds, score_mode,
-               base_score, stacked_score, snapshot_id, snapshot_version, signal_meta
-        FROM signals_daily
-        WHERE symbol = %s AND as_of_date = %s
-        """,
-        (symbol, as_of_date),
-    )
-
     feature_vector: Dict[str, Any] = {}
     feature_meta: Dict[str, Any] = {}
     signal_meta: Dict[str, Any] = {}
@@ -485,20 +474,22 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
                 }
             )
 
-    if signal_row:
-        signal_meta = dict(signal_row[14] or {})
+    # Use canonical unified signal read (prosperity first, legacy fallback)
+    unified_signal = get_unified_signal(symbol, as_of_date)
+    if unified_signal:
+        signal_meta = unified_signal.get("meta") or {}
         depth_adjustments = dict(signal_meta.get("depth_adjustments") or {})
         signal_payload = {
-            "action": signal_row[0],
-            "score": signal_row[1],
-            "confidence": signal_row[2],
-            "reason_codes": signal_row[3] or [],
-            "reason_details": signal_row[4] or {},
-            "regime": signal_row[7],
-            "thresholds": signal_row[8] or {},
-            "score_mode": signal_row[9],
-            "base_score": signal_row[10],
-            "stacked_score": signal_row[11],
+            "action": unified_signal["action"],
+            "score": unified_signal["score"],
+            "confidence": unified_signal["confidence"],
+            "reason_codes": unified_signal.get("reason_codes") or [],
+            "reason_details": unified_signal.get("reason_details") or {},
+            "regime": unified_signal.get("regime"),
+            "thresholds": unified_signal.get("thresholds") or {},
+            "score_mode": unified_signal.get("score_mode"),
+            "base_score": unified_signal.get("base_score"),
+            "stacked_score": unified_signal.get("stacked_score"),
             "signal_meta": signal_meta,
             "suppression_flags": depth_adjustments.get("suppression_flags") or [],
             "environment_penalties": depth_adjustments.get("environment_penalties") or {},
@@ -511,65 +502,12 @@ def fetch_canonical_core_record(symbol: str, as_of_date: dt.date) -> Dict[str, A
         }
         lineage.update(
             {
-                "signal_version": signal_meta.get("signal_version") or signal_row[5],
-                "effective_lookback": lineage.get("effective_lookback") or signal_row[6],
-                "snapshot_id": lineage.get("snapshot_id") or signal_row[12],
-                "snapshot_version": lineage.get("snapshot_version") or signal_row[13],
+                "signal_version": unified_signal.get("signal_version") or signal_meta.get("signal_version"),
+                "effective_lookback": lineage.get("effective_lookback") or signal_meta.get("effective_lookback"),
+                "snapshot_id": lineage.get("snapshot_id") or signal_meta.get("snapshot_id"),
+                "snapshot_version": lineage.get("snapshot_version") or signal_meta.get("snapshot_version"),
             }
         )
-    else:
-        as_of_column = _prosperity_signal_asof_column()
-        prosperity_signal = db.safe_fetchone(
-            f"""
-            SELECT signal, score, confidence, score_mode, base_score, stacked_score, regime, thresholds, meta
-            FROM prosperity_signals_daily
-            WHERE symbol = %s AND {as_of_column} = %s
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            (symbol, as_of_date),
-        )
-        if not prosperity_signal:
-            prosperity_signal = db.safe_fetchone(
-                f"""
-                SELECT signal, score, confidence, score_mode, base_score, stacked_score, regime, thresholds, meta
-                FROM prosperity_signals_daily
-                WHERE symbol = %s AND {as_of_column} <= %s
-                ORDER BY {as_of_column} DESC, updated_at DESC NULLS LAST
-                LIMIT 1
-                """,
-                (symbol, as_of_date),
-            )
-        if prosperity_signal:
-            signal_meta = dict(prosperity_signal[8] or {})
-            depth_adjustments = dict(signal_meta.get("depth_adjustments") or {})
-            signal_payload = {
-                "action": prosperity_signal[0],
-                "score": prosperity_signal[1],
-                "confidence": prosperity_signal[2],
-                "score_mode": prosperity_signal[3],
-                "base_score": prosperity_signal[4],
-                "stacked_score": prosperity_signal[5],
-                "regime": prosperity_signal[6],
-                "thresholds": prosperity_signal[7] or {},
-                "signal_meta": signal_meta,
-                "suppression_flags": depth_adjustments.get("suppression_flags") or [],
-                "environment_penalties": depth_adjustments.get("environment_penalties") or {},
-                "event_penalties": depth_adjustments.get("event_penalties") or {},
-                "liquidity_penalties": depth_adjustments.get("liquidity_penalties") or {},
-                "breadth_penalties": depth_adjustments.get("breadth_penalties") or {},
-                "cross_asset_penalties": depth_adjustments.get("cross_asset_penalties") or {},
-                "stress_penalties": depth_adjustments.get("stress_penalties") or {},
-                "adjusted_confidence_notes": depth_adjustments.get("adjusted_confidence_notes") or [],
-            }
-            lineage.update(
-                {
-                    "signal_version": signal_meta.get("signal_version"),
-                    "snapshot_id": lineage.get("snapshot_id") or signal_meta.get("snapshot_id"),
-                    "snapshot_version": lineage.get("snapshot_version")
-                    or signal_meta.get("snapshot_version"),
-                }
-            )
 
     if not lineage and not feature_vector and not signal_payload:
         return {}
@@ -610,38 +548,56 @@ def fetch_quality(
 
 
 def fetch_top_picks(limit: int) -> Tuple[Optional[dt.date], List[Dict[str, Any]]]:
-    latest_row = db.safe_fetchone("SELECT MAX(as_of_date) FROM signals_daily")
+    # Try canonical table first, fall back to legacy
+    latest_row = db.safe_fetchone("SELECT MAX(as_of) FROM prosperity_signals_daily")
     as_of_date = latest_row[0] if latest_row else None
     if not as_of_date:
+        latest_row = db.safe_fetchone("SELECT MAX(as_of_date) FROM signals_daily")
+        as_of_date = latest_row[0] if latest_row else None
+    if not as_of_date:
         return None, []
+
     rows = db.safe_fetchall(
         """
-        SELECT symbol, action, score, confidence, reason_codes
-        FROM signals_daily
-        WHERE as_of_date = %s
+        SELECT symbol, signal, score, confidence, meta
+        FROM prosperity_signals_daily
+        WHERE as_of = %s
         ORDER BY ABS(score) DESC
         LIMIT %s
         """,
         (as_of_date, limit),
     )
-    picks: List[Dict[str, Any]] = []
+    if not rows:
+        rows_legacy = db.safe_fetchall(
+            """
+            SELECT symbol, action, score, confidence, reason_codes
+            FROM signals_daily
+            WHERE as_of_date = %s
+            ORDER BY ABS(score) DESC
+            LIMIT %s
+            """,
+            (as_of_date, limit),
+        )
+        picks: List[Dict[str, Any]] = []
+        for row in rows_legacy or []:
+            direction = (
+                "long" if (row[1] or "").upper() == "BUY"
+                else "short" if (row[1] or "").upper() == "SELL"
+                else "hold"
+            )
+            picks.append({"symbol": row[0], "direction": direction,
+                           "score": row[2], "confidence": row[3],
+                           "reason_codes": row[4] or []})
+        return as_of_date, picks
+
+    picks = []
     for row in rows:
-        direction = (
-            "long"
-            if (row[1] or "").upper() == "BUY"
-            else "short"
-            if (row[1] or "").upper() == "SELL"
-            else "hold"
-        )
-        picks.append(
-            {
-                "symbol": row[0],
-                "direction": direction,
-                "score": row[2],
-                "confidence": row[3],
-                "reason_codes": row[4] or [],
-            }
-        )
+        signal_str = (row[1] or "HOLD").upper()
+        direction = "long" if signal_str == "BUY" else "short" if signal_str == "SELL" else "hold"
+        meta = dict(row[4] or {})
+        picks.append({"symbol": row[0], "direction": direction,
+                       "score": row[2], "confidence": row[3],
+                       "reason_codes": meta.get("reason_codes") or []})
     return as_of_date, picks
 
 
@@ -651,10 +607,13 @@ def universe_coverage(as_of_date: Optional[dt.date]) -> float:
     counts = db.safe_fetchone(
         """
         SELECT
-            (SELECT COUNT(*) FROM signals_daily WHERE as_of_date = %s),
+            GREATEST(
+                (SELECT COUNT(*) FROM prosperity_signals_daily WHERE as_of = %s),
+                (SELECT COUNT(*) FROM signals_daily WHERE as_of_date = %s)
+            ),
             (SELECT COUNT(*) FROM market_symbols WHERE is_active = TRUE)
         """,
-        (as_of_date,),
+        (as_of_date, as_of_date),
     )
     if not counts:
         return 0.0
