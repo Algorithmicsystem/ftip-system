@@ -13,6 +13,7 @@ from psycopg.types.json import Json
 
 from api.alpha import build_canonical_features, features_daily_row
 from api import config, db, security
+from api.errors import simple_error
 from api.data_providers import canonical_symbol
 from api.feature_engine import compute_intraday_features
 from api.research import build_research_snapshot_from_bars
@@ -267,7 +268,7 @@ async def compute_features_daily(req: FeaturesDailyRequest):
         _job_lock_owner(),
     )
     if not acquired:
-        return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
+        return simple_error("locked", "job is already in progress", status_code=409, extra=lock_info)
 
     symbols_ok: List[str] = []
     symbols_failed: List[Dict[str, str]] = []
@@ -454,7 +455,7 @@ async def compute_features_intraday(req: FeaturesIntradayRequest):
         _job_lock_owner(),
     )
     if not acquired:
-        return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
+        return simple_error("locked", "job is already in progress", status_code=409, extra=lock_info)
 
     symbols_ok: List[str] = []
     symbols_failed: List[Dict[str, str]] = []

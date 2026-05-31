@@ -392,7 +392,7 @@ def _migrations_status() -> tuple[bool, Dict[str, Any]]:
         versions = [row[0] for row in rows]
         return True, {"versions": versions}
     except Exception as exc:  # pragma: no cover - defensive
-        return False, {"error": str(exc)}
+        return False, {"error": "internal_error", "detail": str(exc)}
 
 
 def _latest_signal_exists(symbol: str, lookback: int) -> tuple[bool, Dict[str, Any]]:
@@ -402,7 +402,7 @@ def _latest_signal_exists(symbol: str, lookback: int) -> tuple[bool, Dict[str, A
         exists = bool(query.latest_signal(symbol, lookback))
         return exists, {"found": exists, "symbol": symbol, "lookback": lookback}
     except Exception as exc:  # pragma: no cover - defensive
-        return False, {"error": str(exc)}
+        return False, {"error": "internal_error", "detail": str(exc)}
 
 
 # ---------------------------------------------------------------------------

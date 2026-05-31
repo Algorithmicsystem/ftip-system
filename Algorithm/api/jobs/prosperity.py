@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from psycopg.errors import UndefinedColumn
 from psycopg.types.json import Json
+from api.errors import simple_error
 
 from api import config, db, security
 from api.prosperity.constants import FEATURE_VERSION
@@ -503,9 +504,7 @@ async def _run_daily_snapshot(
                     "lock_owner": lock_info.get("lock_owner"),
                 },
             )
-            return JSONResponse(
-                status_code=409, content={"error": "locked", **lock_info}
-            )
+            return simple_error("locked", "job is already in progress", status_code=409, extra=lock_info)
 
         run_recorded = True
 
@@ -870,7 +869,7 @@ def _run_recalibrate_symbol(
             "regimes": list(cal["thresholds_by_regime"].keys()),
         }
     except Exception as exc:
-        return {"symbol": symbol, "status": "ERROR", "error": str(exc)}
+        return {"symbol": symbol, "status": "error", "error": "computation_error", "detail": str(exc)}
 
 
 @router.post("/prosperity/nightly-recalibrate")
@@ -933,8 +932,7 @@ async def prosperity_nightly_recalibrate(request: Request):
             run_id, RECALIB_JOB_NAME, as_of_date, requested_payload, ttl_seconds, lock_owner
         )
         if not acquired:
-            from fastapi.responses import JSONResponse
-            return JSONResponse(status_code=409, content={"error": "locked", **lock_info})
+            return simple_error("locked", "job is already in progress", status_code=409, extra=lock_info)
 
         run_recorded = True
         results = []
