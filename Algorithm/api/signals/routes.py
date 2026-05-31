@@ -6,6 +6,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api import db, security
+from api.alpha.provenance import get_feature_coverage_summary, get_feature_provenance
 from api.data_providers import canonical_symbol
 from api.signals.query import get_unified_signal
 
@@ -325,3 +326,21 @@ async def signal_evidence(symbol: str, as_of_date: dt.date):
             "sentiment_score": sentiment_row[1] if sentiment_row else None,
         },
     }
+
+
+@router.get("/features/provenance")
+async def feature_provenance(symbol: str, as_of_date: dt.date):
+    """Return feature provenance record for a given symbol and date."""
+    _require_db_enabled(read=True)
+    symbol = canonical_symbol(symbol)
+    rec = get_feature_provenance(symbol, as_of_date)
+    if rec is None:
+        raise HTTPException(status_code=404, detail="feature provenance not found")
+    return rec.model_dump()
+
+
+@router.get("/features/coverage")
+async def feature_coverage_summary(days: int = Query(30, ge=1, le=365)):
+    """Aggregate feature coverage status counts over the last N days."""
+    _require_db_enabled(read=True)
+    return get_feature_coverage_summary(days=days)
