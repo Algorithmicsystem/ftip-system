@@ -17,6 +17,23 @@ class NarrationPayload(BaseModel):
     disclaimer: str
     followups: List[str]
 
+    def as_explanation(
+        self,
+        signal: Optional[Dict[str, Any]] = None,
+        *,
+        data_warnings: Optional[List[str]] = None,
+    ) -> "Any":
+        """Promote this NarrationPayload into a unified ExplanationPayload.
+
+        Imports lazily to avoid circular imports.
+        """
+        from api.assistant.explanation import build_explanation_payload
+        return build_explanation_payload(
+            signal or {},
+            narration=self,
+            data_warnings=data_warnings,
+        )
+
 
 NUMBER_PATTERN = re.compile(r"[-+]?\d+(?:\.\d+)?")
 

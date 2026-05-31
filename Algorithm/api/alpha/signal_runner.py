@@ -97,6 +97,9 @@ class SignalResponse(BaseModel):
         ev_for, ev_against = _build_evidence(self)
         d["evidence_for"] = ev_for
         d["evidence_against"] = ev_against
+        # Signal staleness (requires lazy import to avoid circular deps)
+        from api.assistant.explanation import compute_signal_staleness
+        d.update(compute_signal_staleness(self.as_of))
         return d
 
 
