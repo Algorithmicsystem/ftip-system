@@ -624,7 +624,7 @@ async def _run_daily_snapshot(
 async def prosperity_daily_snapshot(request: Request):
     today = _utc_today()
     as_of_date = today - dt.timedelta(days=1)
-    lookback_days = config.env_int("FTIP_SNAPSHOT_WINDOW_DAYS", 365)
+    lookback_days = config.env_int("FTIP_SNAPSHOT_WINDOW_DAYS", 420)
     concurrency = config.env_int("FTIP_SNAPSHOT_CONCURRENCY", 3)
     symbols = _parse_symbols(config.env("FTIP_UNIVERSE"))
     return await _run_daily_snapshot(

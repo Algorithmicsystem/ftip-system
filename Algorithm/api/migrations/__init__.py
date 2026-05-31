@@ -726,6 +726,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "044_version_columns_text",
         lambda cur: cur.execute(Path(__file__).with_name("044_version_columns_text.sql").read_text()),
     ),
+    (
+        "045_prosperity_signals_version_cols",
+        lambda cur: cur.execute(Path(__file__).with_name("045_prosperity_signals_version_cols.sql").read_text()),
+    ),
 ]
 
 

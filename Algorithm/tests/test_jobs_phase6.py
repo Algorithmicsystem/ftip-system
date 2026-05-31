@@ -87,7 +87,7 @@ def test_daily_snapshot_runs_with_defaults(monkeypatch: pytest.MonkeyPatch):
     body = resp.json()
 
     assert called["req"].as_of_date == dt.date(2024, 1, 9)
-    assert called["req"].from_date == dt.date(2023, 1, 9)
+    assert called["req"].from_date == dt.date(2024, 1, 9) - dt.timedelta(days=420)
     assert called["req"].to_date == dt.date(2024, 1, 9)
     assert called["req"].lookback == 252
     assert called["req"].concurrency == 3

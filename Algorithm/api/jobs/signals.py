@@ -332,7 +332,7 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                     take_profit_1, take_profit_2, horizon_days, reason_codes, reason_details,
                     signal_version, effective_lookback, regime, thresholds, score_mode, base_score,
                     stacked_score, snapshot_id, snapshot_version, signal_meta, computed_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s::jsonb,now())
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb,%s,%s,%s,%s,%s,%s::jsonb,now())
                 ON CONFLICT (symbol, as_of_date)
                 DO UPDATE SET
                     action = EXCLUDED.action,
