@@ -55,8 +55,8 @@ def test_fetch_news_items_deduplicates_multi_source_items(monkeypatch):
     assert len(items) == 2
     assert items[0]["source"] == "newsapi"
     deduped = next(item for item in items if item["url"] == "https://example.com/article-1")
-    assert deduped["source"] == "google_news_rss|gnews"
-    assert deduped["content_snippet"] == "rss"
+    assert deduped["source"] == "gnews|google_news_rss"
+    assert deduped["content_snippet"] == "gnews"
 
 
 def test_fetch_fundamentals_quarterly_prefers_alphavantage(monkeypatch):
