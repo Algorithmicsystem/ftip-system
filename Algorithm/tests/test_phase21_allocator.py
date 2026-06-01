@@ -37,7 +37,16 @@ def _patch_db(monkeypatch, rows, ic_state="STRONG"):
     from api.axiom import screener as scr
 
     monkeypatch.setattr(mod.db, "db_read_enabled", lambda: True)
-    monkeypatch.setattr(mod.db, "safe_fetchall", lambda *_a, **_k: rows)
+
+    call_count = [0]
+
+    def fake_fetchall(*_a, **_k):
+        call_count[0] += 1
+        # First call: axiom scores query → 4-tuple rows
+        # Subsequent calls: pnl returns for correlation guard → empty
+        return rows if call_count[0] == 1 else []
+
+    monkeypatch.setattr(mod.db, "safe_fetchall", fake_fetchall)
     monkeypatch.setattr(mod.db, "safe_fetchone", lambda *_a, **_k: None)
     monkeypatch.setattr(scr, "_load_ic_state_bulk", lambda _d: ic_state)
     monkeypatch.setattr(scr, "_load_breadth_state_bulk", lambda _d: "EXPANDING")
@@ -155,8 +164,14 @@ def test_allocate_endpoint_returns_200(monkeypatch):
     ])
 
     import api.axiom.allocator as mod
+    call_count = [0]
+
+    def fake_fetchall(*_a, **_k):
+        call_count[0] += 1
+        return rows if call_count[0] == 1 else []
+
     monkeypatch.setattr(mod.db, "db_read_enabled", lambda: True)
-    monkeypatch.setattr(mod.db, "safe_fetchall", lambda *_a, **_k: rows)
+    monkeypatch.setattr(mod.db, "safe_fetchall", fake_fetchall)
     monkeypatch.setattr(mod.db, "safe_fetchone", lambda *_a, **_k: None)
     monkeypatch.setenv("FTIP_API_KEY", "secret")
 

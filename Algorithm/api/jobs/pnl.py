@@ -466,3 +466,143 @@ def pnl_attribution(
         horizon_days=horizon_days,
         group_by=group_by,
     )
+
+
+# ---------------------------------------------------------------------------
+# Calibration auto-update
+# ---------------------------------------------------------------------------
+
+_CAL_VERSION = "pnl_auto_v1"
+
+
+def compute_calibration_snapshot(
+    as_of_date: dt.date,
+    *,
+    lookback_days: int = 90,
+) -> Dict[str, Any]:
+    """Derive calibration stats from signal_pnl_daily and return a snapshot payload.
+
+    Computes overall hit_rate and per-bucket (signal_label × horizon_days) stats.
+    Ready to upsert into axiom_calibration_snapshots.
+    """
+    if not db.db_read_enabled():
+        return {"status": "db_disabled"}
+
+    since = as_of_date - dt.timedelta(days=lookback_days)
+
+    rows = db.safe_fetchall(
+        """
+        SELECT signal_label, horizon_days, regime_label, return_pct, hit
+        FROM signal_pnl_daily
+        WHERE signal_date >= %s
+          AND return_pct IS NOT NULL
+        """,
+        (since,),
+    )
+
+    if not rows:
+        return {"status": "no_data", "as_of_date": as_of_date.isoformat()}
+
+    all_hits = [bool(r[4]) for r in rows if r[4] is not None]
+    overall_hit_rate = round(sum(all_hits) / len(all_hits), 4) if all_hits else None
+    overall_avg_return = round(sum(float(r[3]) for r in rows) / len(rows), 4)
+
+    # Per (signal_label, horizon_days) bucket
+    buckets: Dict[str, Dict] = {}
+    for sig, h, regime, ret_pct, hit in rows:
+        key = f"{sig or 'UNKNOWN'}_{h}d"
+        if key not in buckets:
+            buckets[key] = {"signal_label": sig, "horizon_days": h, "rets": [], "hits": []}
+        b = buckets[key]
+        b["rets"].append(float(ret_pct))
+        if hit is not None:
+            b["hits"].append(bool(hit))
+
+    bucket_stats = []
+    for key, b in sorted(buckets.items()):
+        hits = b["hits"]
+        rets = b["rets"]
+        hr = round(sum(1 for h in hits if h) / len(hits), 4) if hits else None
+        bucket_stats.append({
+            "bucket_key": key,
+            "signal_label": b["signal_label"],
+            "horizon_days": b["horizon_days"],
+            "n": len(rets),
+            "hit_rate": hr,
+            "avg_return_pct": round(sum(rets) / len(rets), 4),
+        })
+
+    payload = {
+        "overall_hit_rate": overall_hit_rate,
+        "overall_avg_return_pct": overall_avg_return,
+        "sample_count": len(rows),
+        "lookback_days": lookback_days,
+        "as_of_date": as_of_date.isoformat(),
+        "calibration_version": _CAL_VERSION,
+        "buckets": bucket_stats,
+    }
+
+    return {"status": "ok", "payload": payload}
+
+
+def store_calibration_snapshot(
+    as_of_date: dt.date,
+    payload: Dict[str, Any],
+    *,
+    horizon_label: str = "auto",
+) -> bool:
+    """Upsert a calibration snapshot row. Returns True on success."""
+    if not db.db_write_enabled():
+        return False
+    snapshot_key = f"pnl_auto_v1:{as_of_date.isoformat()}:{horizon_label}"
+    try:
+        db.safe_execute(
+            """
+            INSERT INTO axiom_calibration_snapshots
+                (snapshot_key, as_of_date, horizon_label, framework_version, payload)
+            VALUES (%s, %s, %s, %s, %s::jsonb)
+            ON CONFLICT (snapshot_key) DO UPDATE SET
+                payload    = EXCLUDED.payload,
+                updated_at = now()
+            """,
+            (snapshot_key, as_of_date, horizon_label, _CAL_VERSION, __import__("json").dumps(payload)),
+        )
+        return True
+    except Exception as exc:
+        logger.warning("calibration.store_failed error=%s", exc)
+        return False
+
+
+class CalibrationUpdateRequest(BaseModel):
+    as_of_date: Optional[str] = None
+    lookback_days: int = Field(default=90, ge=7, le=365)
+    store: bool = True
+
+
+@router.post("/calibration/daily")
+def calibration_daily(req: CalibrationUpdateRequest) -> Dict[str, Any]:
+    """Compute calibration stats from realized P&L and upsert into axiom_calibration_snapshots."""
+    as_of = _resolve_date(req.as_of_date)
+    result = compute_calibration_snapshot(as_of, lookback_days=req.lookback_days)
+
+    if result.get("status") not in ("ok",):
+        return result
+
+    stored = False
+    if req.store:
+        stored = store_calibration_snapshot(as_of, result["payload"])
+
+    logger.info(
+        "calibration.daily as_of=%s n=%d hit_rate=%s stored=%s",
+        as_of,
+        result["payload"].get("sample_count", 0),
+        result["payload"].get("overall_hit_rate"),
+        stored,
+    )
+
+    return {
+        "status": "ok",
+        "as_of_date": as_of.isoformat(),
+        "stored": stored,
+        **result["payload"],
+    }

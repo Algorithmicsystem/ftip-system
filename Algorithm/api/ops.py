@@ -268,6 +268,49 @@ async def last_runs() -> List[Dict[str, Any]]:
     return metrics_tracker.last_runs()
 
 
+@router.get("/regime/transitions")
+def regime_transitions(
+    limit: int = Query(default=20, ge=1, le=100),
+    since: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    """Return the most recent regime transition events."""
+    from api.jobs.regime_monitor import load_regime_transitions
+    since_date = dt.date.fromisoformat(since) if since else None
+    transitions = load_regime_transitions(limit=limit, since=since_date)
+    return {
+        "count": len(transitions),
+        "transitions": transitions,
+    }
+
+
+@router.post("/regime/detect")
+def regime_detect(
+    as_of_date: Optional[str] = Query(default=None),
+    store: bool = Query(default=True),
+) -> Dict[str, Any]:
+    """Detect a regime transition for the given date and optionally store it."""
+    from api.jobs.regime_monitor import detect_regime_transition, store_regime_transition
+    date = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    transition = detect_regime_transition(date)
+    if transition is None:
+        return {
+            "status": "no_transition",
+            "as_of_date": date.isoformat(),
+            "message": "Dominant regime unchanged from prior day.",
+        }
+    stored = store_regime_transition(transition) if store else False
+    return {
+        "status": "transition_detected",
+        "stored": stored,
+        "transition": {
+            **transition,
+            "as_of_date": transition["as_of_date"].isoformat()
+            if hasattr(transition["as_of_date"], "isoformat")
+            else str(transition["as_of_date"]),
+        },
+    }
+
+
 @router.get("/intelligence")
 def intelligence_digest(
     as_of_date: Optional[str] = Query(default=None),

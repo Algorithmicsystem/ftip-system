@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api import db, security
@@ -569,6 +569,7 @@ class AllocateRequest(BaseModel):
     min_conviction: float = Field(default=0.0, ge=0.0, le=100.0)
     fractional_kelly: float = Field(default=0.5, gt=0.0, le=1.0)
     limit: int = Field(default=20, ge=1, le=100)
+    correlation_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
 
 
 @router.post("/allocate")
@@ -599,6 +600,7 @@ def axiom_allocate(req: AllocateRequest) -> Dict[str, Any]:
         min_conviction=req.min_conviction,
         fractional_kelly=req.fractional_kelly,
         limit=req.limit,
+        correlation_threshold=req.correlation_threshold,
     )
 
     logger.info(
@@ -610,3 +612,223 @@ def axiom_allocate(req: AllocateRequest) -> Dict[str, Any]:
     )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 29: Conviction Velocity
+# ---------------------------------------------------------------------------
+
+def _linear_slope(values: list) -> float:
+    """Least-squares slope of values vs integer index [0, 1, ..., n-1]."""
+    n = len(values)
+    if n < 2:
+        return 0.0
+    xs = list(range(n))
+    mx = sum(xs) / n
+    my = sum(values) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, values))
+    den = sum((x - mx) ** 2 for x in xs)
+    return num / den if den > 0 else 0.0
+
+
+def _compute_conviction_trends(
+    as_of_date: dt.date,
+    *,
+    window: int = 5,
+    min_dau: float = 0.0,
+    limit: int = 50,
+) -> Dict[str, Any]:
+    from api import db
+    if not db.db_read_enabled():
+        return {"status": "db_disabled", "trends": []}
+
+    since = as_of_date - dt.timedelta(days=window + 3)
+    rows = db.safe_fetchall(
+        """
+        SELECT
+            symbol,
+            as_of_date,
+            (payload->>'overall_confidence')::numeric  AS confidence,
+            (payload->>'deployable_alpha_utility')::numeric AS dau
+        FROM axiom_scores_daily
+        WHERE as_of_date BETWEEN %s AND %s
+          AND (payload->>'overall_confidence') IS NOT NULL
+        ORDER BY symbol, as_of_date ASC
+        """,
+        (since, as_of_date),
+    )
+
+    # Group by symbol
+    by_sym: Dict[str, list] = {}
+    dau_by_sym: Dict[str, float] = {}
+    for sym, date, conf, dau in (rows or []):
+        by_sym.setdefault(sym, []).append(float(conf or 0))
+        dau_by_sym[sym] = float(dau or 0)
+
+    trends = []
+    for sym, confs in by_sym.items():
+        dau = dau_by_sym.get(sym, 0.0)
+        if dau < min_dau:
+            continue
+        slope = round(_linear_slope(confs[-window:]), 4)
+        latest = confs[-1]
+        earliest = confs[0]
+        trends.append({
+            "symbol": sym,
+            "conviction_velocity": slope,
+            "latest_confidence": round(latest, 2),
+            "change_over_window": round(latest - earliest, 2),
+            "dau": round(dau, 2),
+            "trend": "accelerating" if slope > 1.0 else ("decelerating" if slope < -1.0 else "stable"),
+            "window_days": len(confs[-window:]),
+        })
+
+    trends.sort(key=lambda x: x["conviction_velocity"], reverse=True)
+    return {
+        "status": "ok",
+        "as_of_date": as_of_date.isoformat(),
+        "window": window,
+        "symbol_count": len(trends),
+        "trends": trends[:limit],
+    }
+
+
+@router.get("/allocate/replay")
+def allocate_replay(
+    start_date: str = Query(...),
+    end_date: Optional[str] = Query(default=None),
+    max_position_weight: float = Query(default=0.10, ge=0.001, le=1.0),
+    max_sector_concentration: float = Query(default=0.30, ge=0.01, le=1.0),
+    max_portfolio_heat: float = Query(default=1.0, ge=0.01, le=1.0),
+    fractional_kelly: float = Query(default=0.5, gt=0.0, le=1.0),
+    horizon_days: int = Query(default=21, ge=1, le=63),
+) -> Dict[str, Any]:
+    """Replay allocator over a date range and evaluate against realized P&L.
+
+    For each trading date in [start_date, end_date]:
+    1. Runs build_portfolio_allocation to get the day's positions
+    2. Looks up forward returns from signal_pnl_daily at horizon_days
+    3. Computes a synthetic portfolio return as weighted-average return
+
+    Returns an equity curve, Sharpe ratio, max drawdown, and win rate.
+    """
+    from api import db
+    from api.axiom.allocator import build_portfolio_allocation
+
+    try:
+        start = dt.date.fromisoformat(start_date)
+        end = dt.date.fromisoformat(end_date) if end_date else dt.date.today()
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+
+    if (end - start).days > 365:
+        return {"status": "error", "message": "Date range cannot exceed 365 days."}
+
+    if not db.db_read_enabled():
+        return {"status": "db_disabled", "equity_curve": [], "summary": {}}
+
+    daily_returns: list = []
+    equity = 1.0
+    equity_curve = []
+    winning_days = 0
+
+    current = start
+    while current <= end:
+        alloc = build_portfolio_allocation(
+            current,
+            max_position_weight=max_position_weight,
+            max_sector_concentration=max_sector_concentration,
+            max_portfolio_heat=max_portfolio_heat,
+            fractional_kelly=fractional_kelly,
+        )
+
+        allocations = alloc.get("allocations") or []
+        if not allocations:
+            equity_curve.append({"date": current.isoformat(), "equity": round(equity, 6), "day_return": 0.0, "positions": 0})
+            current += dt.timedelta(days=1)
+            continue
+
+        symbols = [a["symbol"] for a in allocations]
+        weights = {a["symbol"]: a["suggested_weight"] for a in allocations}
+
+        pnl_rows = db.safe_fetchall(
+            """
+            SELECT symbol, return_pct
+            FROM signal_pnl_daily
+            WHERE symbol = ANY(%s)
+              AND signal_date = %s
+              AND horizon_days = %s
+              AND return_pct IS NOT NULL
+            """,
+            (symbols, current, horizon_days),
+        ) or []
+
+        pnl_map = {r[0]: float(r[1]) for r in pnl_rows}
+
+        if pnl_map:
+            weighted_ret = sum(
+                weights.get(sym, 0.0) * ret / max(sum(weights.values()), 1e-8)
+                for sym, ret in pnl_map.items()
+            )
+            day_return = round(weighted_ret, 4)
+            equity = round(equity * (1 + day_return / 100), 6)
+            daily_returns.append(day_return)
+            if day_return > 0:
+                winning_days += 1
+        else:
+            day_return = 0.0
+
+        equity_curve.append({
+            "date": current.isoformat(),
+            "equity": equity,
+            "day_return": day_return,
+            "positions": len(allocations),
+            "covered": len(pnl_map),
+        })
+        current += dt.timedelta(days=1)
+
+    # Summary stats
+    n = len(daily_returns)
+    avg_ret = sum(daily_returns) / n if n else 0.0
+    std_ret = (sum((r - avg_ret) ** 2 for r in daily_returns) / n) ** 0.5 if n > 1 else 0.0
+    sharpe = round((avg_ret / std_ret) * (252 ** 0.5), 3) if std_ret > 0 else None
+
+    max_dd = 0.0
+    peak = 1.0
+    for point in equity_curve:
+        eq = point["equity"]
+        if eq > peak:
+            peak = eq
+        dd = (eq - peak) / peak if peak > 0 else 0.0
+        if dd < max_dd:
+            max_dd = dd
+
+    return {
+        "status": "ok",
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+        "trading_days_with_pnl": n,
+        "equity_curve": equity_curve,
+        "summary": {
+            "final_equity": round(equity, 6),
+            "total_return_pct": round((equity - 1.0) * 100, 3),
+            "avg_daily_return_pct": round(avg_ret, 4),
+            "sharpe_ratio": sharpe,
+            "max_drawdown_pct": round(max_dd * 100, 3),
+            "win_rate": round(winning_days / n, 3) if n else None,
+            "winning_days": winning_days,
+            "total_days": n,
+        },
+    }
+
+
+@router.get("/conviction/trends")
+def conviction_trends(
+    as_of_date: Optional[str] = Query(default=None),
+    window: int = Query(default=5, ge=2, le=30),
+    min_dau: float = Query(default=0.0, ge=0.0, le=100.0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> Dict[str, Any]:
+    """Return conviction velocity (5-day confidence slope) per symbol."""
+    date = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    return _compute_conviction_trends(date, window=window, min_dau=min_dau, limit=limit)

@@ -67,6 +67,7 @@ def build_portfolio_allocation(
     min_conviction: float = 0.0,
     fractional_kelly: float = 0.5,
     limit: int = 20,
+    correlation_threshold: float = 0.80,
 ) -> Dict[str, Any]:
     """Return a sector-capped, heat-limited portfolio allocation.
 
@@ -88,6 +89,7 @@ def build_portfolio_allocation(
     from api.axiom.sizer import compute_kelly_size
     from api.jobs.alerts import compute_conviction_score
     from api.axiom.memo import conviction_tier as get_tier
+    from ftip.risk import compute_return_correlation_matrix, correlation_guard
 
     ic_state = _load_ic_state_bulk(as_of_date)
     breadth_state = _load_breadth_state_bulk(as_of_date)
@@ -255,6 +257,51 @@ def build_portfolio_allocation(
         portfolio_heat = round(portfolio_heat + w, 6)
         allocations.append(entry)
 
+    # ------------------------------------------------------------------
+    # Correlation guard pass
+    # ------------------------------------------------------------------
+    corr_adjusted_count = 0
+    corr_dropped: List[str] = []
+
+    if len(allocations) >= 2:
+        syms = [a.symbol for a in allocations]
+        returns_map = _load_returns_for_symbols(syms, as_of_date)
+        if len(returns_map) >= 2:
+            corr_matrix = compute_return_correlation_matrix(returns_map)
+            raw_weights = {a.symbol: a.suggested_weight for a in allocations}
+            adjusted = correlation_guard(raw_weights, corr_matrix, threshold=correlation_threshold)
+            total_heat_before = sum(raw_weights.values())
+            # Scale normalised output back to original heat envelope
+            for entry in allocations[:]:
+                norm_w = adjusted.get(entry.symbol)
+                if norm_w is None or norm_w * total_heat_before < 1e-5:
+                    corr_dropped.append(entry.symbol)
+                    rej = RejectedEntry(
+                        symbol=entry.symbol, sector=entry.sector,
+                        dau=entry.dau, conviction_score=entry.conviction_score,
+                        kelly_weight=entry.suggested_weight,
+                        rejection_reason="correlation_guard",
+                    )
+                    rejected.append(rej)
+                    allocations.remove(entry)
+                else:
+                    new_w = round(norm_w * total_heat_before, 6)
+                    if abs(new_w - entry.suggested_weight) > 1e-6:
+                        entry.suggested_weight = new_w
+                        entry.suggested_weight_pct = f"{new_w * 100:.2f}%"
+                        entry.active_constraint = "correlation_guard"
+                        corr_adjusted_count += 1
+
+            # Re-rank and recompute heat/sector after adjustment
+            portfolio_heat = 0.0
+            sector_weight = {}
+            for i, entry in enumerate(allocations):
+                entry.rank = i + 1
+                w = entry.suggested_weight
+                portfolio_heat = round(portfolio_heat + w, 6)
+                sec = entry.sector or "Unknown"
+                sector_weight[sec] = round(sector_weight.get(sec, 0.0) + w, 6)
+
     sector_breakdown = {k: round(v, 4) for k, v in sorted(sector_weight.items(), key=lambda x: -x[1])}
 
     return {
@@ -272,6 +319,11 @@ def build_portfolio_allocation(
             "max_sector_concentration": max_sector_concentration,
             "max_portfolio_heat": max_portfolio_heat,
             "fractional_kelly": fractional_kelly,
+            "correlation_threshold": correlation_threshold,
+        },
+        "correlation_guard": {
+            "adjusted_count": corr_adjusted_count,
+            "dropped_symbols": corr_dropped,
         },
         "allocations": [asdict(a) for a in allocations],
         "rejected": [asdict(r) for r in rejected if r.rejection_reason],
@@ -281,6 +333,34 @@ def build_portfolio_allocation(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _load_returns_for_symbols(
+    symbols: List[str],
+    as_of_date: dt.date,
+    lookback_days: int = 60,
+) -> Dict[str, List[float]]:
+    """Return {symbol: [return_pct, ...]} for pairwise correlation computation."""
+    if not db.db_read_enabled() or not symbols:
+        return {}
+    since = as_of_date - dt.timedelta(days=lookback_days)
+    rows = db.safe_fetchall(
+        """
+        SELECT symbol, return_pct
+        FROM signal_pnl_daily
+        WHERE symbol = ANY(%s)
+          AND signal_date >= %s
+          AND return_pct IS NOT NULL
+          AND horizon_days = 5
+        ORDER BY symbol, signal_date
+        """,
+        (symbols, since),
+    )
+    result: Dict[str, List[float]] = {}
+    for sym, ret in (rows or []):
+        result.setdefault(sym, []).append(float(ret))
+    # Only include symbols with at least 5 data points
+    return {s: v for s, v in result.items() if len(v) >= 5}
+
 
 def _load_hit_rate() -> Optional[float]:
     if not db.db_read_enabled():
