@@ -294,6 +294,102 @@ def load_pnl_summary(
 
 
 # ---------------------------------------------------------------------------
+# Attribution by regime / sector / signal_version
+# ---------------------------------------------------------------------------
+
+def load_pnl_attribution(
+    as_of_date: dt.date,
+    *,
+    lookback_days: int = 90,
+    horizon_days: int = 21,
+    group_by: str = "regime",   # "regime" | "sector" | "signal_version"
+) -> Dict[str, Any]:
+    """Group realised P&L rows into attribution buckets.
+
+    Returns win_rate, avg_return, max_drawdown (worst single return), and n
+    per bucket. Only rows with a resolved return_pct are included in stats;
+    n counts all rows in the bucket.
+    """
+    if not db.db_read_enabled():
+        return {"status": "db_disabled", "group_by": group_by, "buckets": []}
+
+    since = as_of_date - dt.timedelta(days=lookback_days)
+
+    allowed_groups = {"regime", "sector", "signal_version"}
+    if group_by not in allowed_groups:
+        group_by = "regime"
+
+    rows = db.safe_fetchall(
+        """
+        SELECT
+            p.regime_label,
+            COALESCE(m.sector, 'Unknown')                       AS sector,
+            COALESCE(psd.signal_version, 'unknown')             AS signal_version,
+            p.return_pct,
+            p.hit
+        FROM signal_pnl_daily p
+        LEFT JOIN market_symbols m
+            ON m.symbol = p.symbol
+        LEFT JOIN prosperity_signals_daily psd
+            ON psd.symbol = p.symbol AND psd.as_of = p.signal_date
+        WHERE p.signal_date >= %s
+          AND p.horizon_days = %s
+        """,
+        (since, horizon_days),
+    )
+
+    buckets: Dict[str, Dict[str, Any]] = {}
+
+    for regime, sector, sig_ver, ret_pct, hit in rows:
+        if group_by == "regime":
+            key = str(regime or "unknown")
+        elif group_by == "sector":
+            key = str(sector or "Unknown")
+        else:
+            key = str(sig_ver or "unknown")
+
+        if key not in buckets:
+            buckets[key] = {"n": 0, "rets": [], "hits": []}
+        b = buckets[key]
+        b["n"] += 1
+        if ret_pct is not None:
+            b["rets"].append(float(ret_pct))
+        if hit is not None:
+            b["hits"].append(bool(hit))
+
+    result_buckets = []
+    for label, b in sorted(buckets.items()):
+        rets = b["rets"]
+        hits = b["hits"]
+        avg_return  = round(sum(rets) / len(rets), 3) if rets else None
+        max_drawdown = round(min(rets), 3) if rets else None
+        win_rate    = round(sum(1 for h in hits if h) / len(hits), 3) if hits else None
+        result_buckets.append({
+            "bucket": label,
+            "n": b["n"],
+            "avg_return_pct": avg_return,
+            "win_rate": win_rate,
+            "max_drawdown_pct": max_drawdown,
+        })
+
+    # Sort by win_rate desc, then avg_return desc
+    result_buckets.sort(
+        key=lambda x: (x["win_rate"] or 0.0, x["avg_return_pct"] or 0.0),
+        reverse=True,
+    )
+
+    return {
+        "status": "ok",
+        "as_of_date": as_of_date.isoformat(),
+        "lookback_days": lookback_days,
+        "horizon_days": horizon_days,
+        "group_by": group_by,
+        "bucket_count": len(result_buckets),
+        "buckets": result_buckets,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -354,3 +450,19 @@ def pnl_summary(
 ) -> Dict[str, Any]:
     as_of = _resolve_date(as_of_date)
     return load_pnl_summary(as_of, lookback_days)
+
+
+@router.get("/pnl/attribution")
+def pnl_attribution(
+    as_of_date: Optional[str] = Query(default=None),
+    lookback_days: int = Query(default=90, ge=7, le=365),
+    horizon_days: int = Query(default=21, ge=1, le=252),
+    group_by: str = Query(default="regime", pattern="^(regime|sector|signal_version)$"),
+) -> Dict[str, Any]:
+    as_of = _resolve_date(as_of_date)
+    return load_pnl_attribution(
+        as_of,
+        lookback_days=lookback_days,
+        horizon_days=horizon_days,
+        group_by=group_by,
+    )

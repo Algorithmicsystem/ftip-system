@@ -62,6 +62,49 @@ _IC_MULTIPLIER = {
 
 _WEBHOOK_TIMEOUT_S = 10
 
+_SIGNAL_EMOJI = {"BUY": ":large_green_circle:", "SELL": ":red_circle:", "HOLD": ":large_yellow_circle:"}
+
+
+def format_slack_blocks(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a Slack Incoming Webhook payload with blocks layout."""
+    symbol   = event["symbol"]
+    signal   = event.get("signal", "UNKNOWN")
+    dau      = event.get("dau", 0.0)
+    regime   = event.get("regime", "—")
+    breadth  = event.get("breadth_state", "—")
+    ic       = event.get("ic_state", "—")
+    conv     = event.get("conviction_score", 0.0)
+    date_str = event.get("as_of_date", "")
+    emoji    = _SIGNAL_EMOJI.get(signal.upper(), ":white_circle:")
+
+    return {
+        "text": f"{emoji} {symbol} {signal} alert  (conviction {conv:.1f})",
+        "blocks": [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"{emoji} {symbol} — {signal} Signal Alert",
+                    "emoji": True,
+                },
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {"type": "mrkdwn", "text": f"*Symbol*\n{symbol}"},
+                    {"type": "mrkdwn", "text": f"*Signal*\n{signal}"},
+                    {"type": "mrkdwn", "text": f"*DAU Score*\n{dau:.1f}"},
+                    {"type": "mrkdwn", "text": f"*Conviction*\n{conv:.1f}"},
+                    {"type": "mrkdwn", "text": f"*Regime*\n{regime}"},
+                    {"type": "mrkdwn", "text": f"*Breadth*\n{breadth}"},
+                    {"type": "mrkdwn", "text": f"*IC State*\n{ic}"},
+                    {"type": "mrkdwn", "text": f"*Date*\n{date_str}"},
+                ],
+            },
+            {"type": "divider"},
+        ],
+    }
+
 
 # ---------------------------------------------------------------------------
 # Conviction scoring
@@ -164,7 +207,8 @@ def _load_active_rules() -> List[Dict[str, Any]]:
     rows = db.safe_fetchall(
         """
         SELECT rule_id, symbol, min_dau, signal_filter, favorable_regimes,
-               require_breadth_alignment, min_conviction_score, webhook_url, meta
+               require_breadth_alignment, min_conviction_score, webhook_url, meta,
+               COALESCE(channel_type, 'generic') AS channel_type
         FROM signal_alert_rules
         WHERE is_active = true
         ORDER BY symbol, rule_id
@@ -180,6 +224,7 @@ def _load_active_rules() -> List[Dict[str, Any]]:
             "min_conviction_score": float(r[6] or 35),
             "webhook_url": r[7],
             "meta": r[8] or {},
+            "channel_type": str(r[9] or "generic"),
         }
         for r in rows if r
     ]
@@ -373,9 +418,13 @@ def run_alert_scan(as_of_date: dt.date) -> AlertScanSummary:
             "as_of_date": as_of_date.isoformat(), "rule_id": rule_id,
         }
 
-        # Deliver webhook
+        # Deliver webhook — use Slack blocks format when channel_type is 'slack'
         if rule.get("webhook_url"):
-            code = deliver_webhook(rule["webhook_url"], event_payload)
+            if rule.get("channel_type") == "slack":
+                outbound = format_slack_blocks(event_payload)
+            else:
+                outbound = event_payload
+            code = deliver_webhook(rule["webhook_url"], outbound)
             webhook_status_code = code
             webhook_delivered = 200 <= code < 300
             if webhook_delivered:
@@ -421,6 +470,7 @@ class AlertRuleRequest(BaseModel):
     require_breadth_alignment: bool = True
     min_conviction_score: float = Field(default=35.0, ge=0.0, le=100.0)
     webhook_url: Optional[str] = None
+    channel_type: str = Field(default="generic", pattern="^(generic|slack)$")
 
 
 @router.post("/alerts/daily-scan")
@@ -453,8 +503,8 @@ def upsert_alert_rule(req: AlertRuleRequest) -> Dict[str, Any]:
         """
         INSERT INTO signal_alert_rules (
             rule_id, symbol, min_dau, signal_filter, favorable_regimes,
-            require_breadth_alignment, min_conviction_score, webhook_url, is_active
-        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,true)
+            require_breadth_alignment, min_conviction_score, webhook_url, channel_type, is_active
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,true)
         ON CONFLICT (rule_id) DO UPDATE SET
             symbol                    = EXCLUDED.symbol,
             min_dau                   = EXCLUDED.min_dau,
@@ -463,6 +513,7 @@ def upsert_alert_rule(req: AlertRuleRequest) -> Dict[str, Any]:
             require_breadth_alignment = EXCLUDED.require_breadth_alignment,
             min_conviction_score      = EXCLUDED.min_conviction_score,
             webhook_url               = EXCLUDED.webhook_url,
+            channel_type              = EXCLUDED.channel_type,
             updated_at                = now()
         """,
         (
@@ -472,6 +523,7 @@ def upsert_alert_rule(req: AlertRuleRequest) -> Dict[str, Any]:
             req.require_breadth_alignment,
             req.min_conviction_score,
             req.webhook_url,
+            req.channel_type,
         ),
     )
     return {"status": "ok", "rule_id": rule_id, "symbol": req.symbol}

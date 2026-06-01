@@ -15,6 +15,7 @@ from api.alpha import build_signal_from_features, signals_daily_row
 from api import config, db, security
 from api.errors import simple_error
 from api.data_providers import canonical_symbol
+from api.jobs.ic_gate import load_ic_gate_state, apply_ic_gate
 
 router = APIRouter(
     prefix="/jobs",
@@ -242,6 +243,14 @@ async def compute_signals_daily(req: SignalsDailyRequest):
     symbols_failed: List[Dict[str, str]] = []
     rows_written = 0
 
+    # Load IC quality gate once — applies to every symbol this run
+    ic_gate = load_ic_gate_state(as_of_date)
+    if ic_gate["gate_active"]:
+        logger.info(
+            "signals.ic_gate_active state=%s mult=%.2f",
+            ic_gate["ic_state"], ic_gate["confidence_mult"],
+        )
+
     for symbol in symbols:
         try:
             feat_row = db.safe_fetchone(
@@ -325,6 +334,7 @@ async def compute_signals_daily(req: SignalsDailyRequest):
                 },
             )
             signal = signals_daily_row(signal_payload)
+            signal = apply_ic_gate(signal, ic_gate)
             db.safe_execute(
                 """
                 INSERT INTO signals_daily(

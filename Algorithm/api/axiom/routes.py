@@ -554,3 +554,59 @@ def axiom_screen(req: ScreenRequest) -> Dict[str, Any]:
     )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Phase 21: Portfolio Allocation Engine
+# ---------------------------------------------------------------------------
+
+class AllocateRequest(BaseModel):
+    as_of_date: Optional[str] = None
+    max_position_weight: float = Field(default=0.10, ge=0.001, le=1.0)
+    max_sector_concentration: float = Field(default=0.30, ge=0.01, le=1.0)
+    max_portfolio_heat: float = Field(default=1.0, ge=0.01, le=1.0)
+    min_dau: float = Field(default=0.0, ge=0.0, le=100.0)
+    min_conviction: float = Field(default=0.0, ge=0.0, le=100.0)
+    fractional_kelly: float = Field(default=0.5, gt=0.0, le=1.0)
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+@router.post("/allocate")
+def axiom_allocate(req: AllocateRequest) -> Dict[str, Any]:
+    """Build a sector-capped, heat-limited portfolio allocation.
+
+    Runs the conviction screener across the universe and applies:
+    - per-position Kelly weight cap
+    - per-sector concentration limit
+    - portfolio heat (total invested %) cap
+
+    Returns a ranked allocation with sector breakdown and rejected positions.
+    """
+    from api.axiom.allocator import build_portfolio_allocation
+
+    as_of_date_str = req.as_of_date or dt.date.today().isoformat()
+    try:
+        as_of_date = dt.date.fromisoformat(as_of_date_str)
+    except ValueError:
+        as_of_date = dt.date.today()
+
+    result = build_portfolio_allocation(
+        as_of_date,
+        max_position_weight=req.max_position_weight,
+        max_sector_concentration=req.max_sector_concentration,
+        max_portfolio_heat=req.max_portfolio_heat,
+        min_dau=req.min_dau,
+        min_conviction=req.min_conviction,
+        fractional_kelly=req.fractional_kelly,
+        limit=req.limit,
+    )
+
+    logger.info(
+        "axiom.allocate date=%s positions=%d weight_total=%.3f ic=%s",
+        as_of_date,
+        result.get("position_count", 0),
+        result.get("portfolio_weight_total", 0.0),
+        result.get("ic_state"),
+    )
+
+    return result
