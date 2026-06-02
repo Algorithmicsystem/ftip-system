@@ -774,6 +774,14 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "056_api_tenants",
         lambda cur: cur.execute(Path(__file__).with_name("056_api_tenants.sql").read_text()),
     ),
+    (
+        "057_axiom_performance_indexes",
+        lambda cur: cur.execute(Path(__file__).with_name("057_axiom_performance_indexes.sql").read_text()),
+    ),
+    (
+        "058_effective_breadth",
+        lambda cur: cur.execute(Path(__file__).with_name("058_effective_breadth.sql").read_text()),
+    ),
 ]
 
 

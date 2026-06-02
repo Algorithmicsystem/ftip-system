@@ -259,6 +259,7 @@ def score_critical_fragility(engine_input: AxiomEngineInput) -> EngineScore:
         "regime_transition_risk_component": _rounded(regime_transition_risk_component),
         "scps_component": _rounded(scps_component),
         "bfs_component": _rounded(bfs_component),
+        "mtrs_score": _rounded(mtrs_score),
     }
     available_count = sum(1 for value in component_values.values() if value is not None)
     coverage = clamp(

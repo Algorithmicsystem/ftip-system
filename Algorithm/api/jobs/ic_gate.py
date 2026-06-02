@@ -92,7 +92,7 @@ def load_ic_gate_state(
     try:
         row = db.safe_fetchone(
             """
-            SELECT ic_state, sample_count, mean_ic
+            SELECT ic_state, sample_size, ic_mean_21d, effective_breadth
             FROM signal_ic_daily
             WHERE score_field = %s AND horizon_label = %s
               AND as_of_date <= %s
@@ -117,6 +117,10 @@ def load_ic_gate_state(
         mean_ic = float(row[2]) if row[2] is not None else None
     except (TypeError, ValueError):
         mean_ic = None
+    try:
+        effective_breadth = int(row[3]) if len(row) > 3 and row[3] is not None else sample_count
+    except (TypeError, ValueError, IndexError):
+        effective_breadth = sample_count
 
     mult = _IC_CONFIDENCE_MULT.get(ic_state, 1.00)
     note = _IC_GATE_NOTE.get(ic_state, "")
@@ -132,17 +136,19 @@ def load_ic_gate_state(
 
     gate_active = mult < 1.0
 
-    # AMQS: continuous quality score using IC value and sample breadth as proxy
-    tracking_error = 0.05  # default TE assumption when not separately measured
+    # AMQS uses effective_breadth (symbols with IC > 0.02) when available,
+    # falling back to sample_count as proxy
+    tracking_error = 0.05
     amqs_score = compute_amqs(
         ic_value=mean_ic if mean_ic is not None else 0.0,
-        breadth=sample_count,
+        breadth=effective_breadth,
         tracking_error=tracking_error,
     )
 
     return {
         "ic_state": ic_state,
         "sample_count": sample_count,
+        "effective_breadth": effective_breadth,
         "mean_ic": mean_ic,
         "confidence_mult": mult,
         "gate_active": gate_active,
@@ -191,6 +197,7 @@ def _open_gate(ic_state: str, sample_count: int, mean_ic: Optional[float]) -> Di
     return {
         "ic_state": ic_state,
         "sample_count": sample_count,
+        "effective_breadth": sample_count,
         "mean_ic": mean_ic,
         "confidence_mult": 1.0,
         "gate_active": False,

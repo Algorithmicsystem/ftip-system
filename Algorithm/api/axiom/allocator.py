@@ -339,27 +339,64 @@ def _load_returns_for_symbols(
     as_of_date: dt.date,
     lookback_days: int = 60,
 ) -> Dict[str, List[float]]:
-    """Return {symbol: [return_pct, ...]} for pairwise correlation computation."""
+    """Return {symbol: [return_pct, ...]} for pairwise correlation computation.
+
+    Sector-proxy fallback: symbols with < 5 own observations get the average
+    return series of other symbols in the same sector that do have enough data.
+    This prevents the correlation guard from being skipped entirely when live
+    PnL history is thin.
+    """
     if not db.db_read_enabled() or not symbols:
         return {}
     since = as_of_date - dt.timedelta(days=lookback_days)
     rows = db.safe_fetchall(
         """
-        SELECT symbol, return_pct
-        FROM signal_pnl_daily
-        WHERE symbol = ANY(%s)
-          AND signal_date >= %s
-          AND return_pct IS NOT NULL
-          AND horizon_days = 5
-        ORDER BY symbol, signal_date
+        SELECT p.symbol, p.return_pct, COALESCE(m.sector, 'Unknown') AS sector
+        FROM signal_pnl_daily p
+        LEFT JOIN market_symbols m ON m.symbol = p.symbol
+        WHERE p.symbol = ANY(%s)
+          AND p.signal_date >= %s
+          AND p.return_pct IS NOT NULL
+          AND p.horizon_days = 5
+        ORDER BY p.symbol, p.signal_date
         """,
         (symbols, since),
     )
-    result: Dict[str, List[float]] = {}
-    for sym, ret in (rows or []):
-        result.setdefault(sym, []).append(float(ret))
-    # Only include symbols with at least 5 data points
-    return {s: v for s, v in result.items() if len(v) >= 5}
+    symbol_sector: Dict[str, str] = {}
+    raw: Dict[str, List[float]] = {}
+    for row in (rows or []):
+        sym = str(row[0])
+        ret = row[1]
+        sector = str(row[2]) if len(row) > 2 and row[2] is not None else "Unknown"
+        symbol_sector[sym] = sector
+        raw.setdefault(sym, []).append(float(ret))
+
+    # Symbols with enough data are used directly
+    result: Dict[str, List[float]] = {s: v for s, v in raw.items() if len(v) >= 5}
+
+    # Sector proxy fallback for symbols with < 5 data points
+    if len(result) >= 2:
+        sector_series: Dict[str, List[float]] = {}
+        for sym, series in result.items():
+            sec = symbol_sector.get(sym, "Unknown")
+            existing = sector_series.get(sec, [])
+            # Average element-wise across sector peers (truncate to shortest series)
+            if not existing:
+                sector_series[sec] = list(series)
+            else:
+                n = min(len(existing), len(series))
+                sector_series[sec] = [
+                    (existing[i] + series[i]) / 2.0 for i in range(n)
+                ]
+
+        for sym in symbols:
+            if sym not in result:
+                sec = symbol_sector.get(sym, "Unknown")
+                proxy = sector_series.get(sec) or sector_series.get("Unknown")
+                if proxy and len(proxy) >= 5:
+                    result[sym] = proxy
+
+    return result
 
 
 def _load_hit_rate() -> Optional[float]:

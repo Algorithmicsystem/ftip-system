@@ -29,6 +29,10 @@ router = APIRouter(
 
 HORIZONS: Dict[str, int] = {"5d": 5, "21d": 21, "63d": 63}
 
+# Per-symbol IC threshold for effective breadth (Grinold-Kahn)
+_EFFECTIVE_BREADTH_IC_THRESHOLD = 0.02
+_EFFECTIVE_BREADTH_WINDOW_DAYS = 63
+
 # Approximate calendar-day equivalent for each trading-day horizon
 # Using 365/252 ≈ 1.449 scaling
 _CALENDAR_DAYS: Dict[str, int] = {k: round(v * 365.0 / 252.0) + 1 for k, v in HORIZONS.items()}
@@ -203,6 +207,98 @@ def _fetch_forward_returns(
 
 
 # ---------------------------------------------------------------------------
+# Effective breadth (Grinold-Kahn): per-symbol time-series IC
+# ---------------------------------------------------------------------------
+
+def _fetch_per_symbol_scores_and_returns(
+    symbols: List[str],
+    as_of_date: dt.date,
+    horizon_label: str,
+    window_days: int = 63,
+) -> Dict[str, List[Tuple[float, float]]]:
+    """Return {symbol: [(score, fwd_return), ...]} over the rolling window."""
+    if not db.db_read_enabled() or not symbols:
+        return {}
+    calendar_lookback = round(window_days * 365.0 / 252.0) + 10
+    since = as_of_date - dt.timedelta(days=calendar_lookback)
+    calendar_horizon = _CALENDAR_DAYS[horizon_label]
+
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT a.symbol, a.as_of_date,
+                   (a.payload->>'deployable_alpha_utility')::numeric AS score,
+                   b.close AS entry_close,
+                   b2.exit_close
+            FROM axiom_scores_daily a
+            JOIN market_bars_daily b
+                ON b.symbol = a.symbol AND b.as_of_date = a.as_of_date AND b.close IS NOT NULL
+            JOIN LATERAL (
+                SELECT close AS exit_close
+                FROM market_bars_daily
+                WHERE symbol = a.symbol
+                  AND as_of_date >= a.as_of_date + %s
+                  AND close IS NOT NULL
+                ORDER BY as_of_date ASC
+                LIMIT 1
+            ) b2 ON true
+            WHERE a.symbol = ANY(%s)
+              AND a.as_of_date >= %s AND a.as_of_date < %s
+              AND (a.payload->>'deployable_alpha_utility') IS NOT NULL
+            ORDER BY a.symbol, a.as_of_date
+            """,
+            (dt.timedelta(days=calendar_horizon - 1), symbols, since, as_of_date),
+        )
+    except Exception:
+        return {}
+
+    result: Dict[str, List[Tuple[float, float]]] = {}
+    for row in (rows or []):
+        if len(row) < 5:
+            continue
+        sym = str(row[0])
+        try:
+            score = float(row[2]) if row[2] is not None else None
+            entry = float(row[3]) if row[3] is not None else None
+            exit_ = float(row[4]) if row[4] is not None else None
+        except (TypeError, ValueError):
+            continue
+        if score is None or entry is None or exit_ is None or entry <= 0:
+            continue
+        fwd = exit_ / entry - 1.0
+        result.setdefault(sym, []).append((score, fwd))
+    return result
+
+
+def compute_effective_breadth(
+    symbols: List[str],
+    as_of_date: dt.date,
+    horizon_label: str = "21d",
+) -> int:
+    """Grinold-Kahn effective breadth: count of symbols with per-symbol rolling IC > threshold.
+
+    For each symbol, computes Spearman IC between its time-series AXIOM scores
+    and its forward returns over the rolling 63-day window. Returns the count
+    of symbols where this IC exceeds _EFFECTIVE_BREADTH_IC_THRESHOLD (0.02).
+    """
+    if not symbols or not db.db_read_enabled():
+        return 0
+    series_map = _fetch_per_symbol_scores_and_returns(
+        symbols, as_of_date, horizon_label, window_days=_EFFECTIVE_BREADTH_WINDOW_DAYS
+    )
+    count = 0
+    for sym, pairs in series_map.items():
+        if len(pairs) < _MIN_SAMPLE:
+            continue
+        scores_list = [p[0] for p in pairs]
+        returns_list = [p[1] for p in pairs]
+        ic_val, _ = spearman_ic(scores_list, returns_list)
+        if ic_val is not None and ic_val > _EFFECTIVE_BREADTH_IC_THRESHOLD:
+            count += 1
+    return count
+
+
+# ---------------------------------------------------------------------------
 # IC decay summary helpers
 # ---------------------------------------------------------------------------
 
@@ -247,20 +343,25 @@ def compute_ic_snapshot(
     Compute IC for all SCORE_FIELDS × HORIZONS for a given as_of_date.
 
     Returns dict keyed by (score_field, horizon_label) → {ic_value, sample_size,
-    p_value, t_stat, ic_state}.  Returns {} if no axiom scores exist for that date.
+    p_value, t_stat, ic_state, effective_breadth}.  Returns {} if no axiom scores
+    exist for that date.
     """
     score_rows = _fetch_axiom_scores(as_of_date)
     if not score_rows:
         return {}
 
     symbols = [row["symbol"] for row in score_rows]
-    payloads = {row["symbol"]: row["payload"] for row in score_rows}
 
     # Extract per-field scores once
     field_scores: Dict[str, Dict[str, Optional[float]]] = {
         field: {row["symbol"]: _extract_score(row["payload"], field) for row in score_rows}
         for field in SCORE_FIELDS
     }
+
+    # Compute effective breadth per horizon (shared across score fields)
+    effective_breadths: Dict[str, int] = {}
+    for horizon_label in HORIZONS:
+        effective_breadths[horizon_label] = compute_effective_breadth(symbols, as_of_date, horizon_label)
 
     results: Dict[str, Any] = {}
 
@@ -283,6 +384,7 @@ def compute_ic_snapshot(
                     "p_value": None,
                     "t_stat": None,
                     "ic_state": "INSUFFICIENT",
+                    "effective_breadth": effective_breadths.get(horizon_label, 0),
                 }
                 continue
 
@@ -301,6 +403,7 @@ def compute_ic_snapshot(
                 "p_value": p_val,
                 "t_stat": t_stat,
                 "ic_state": "INSUFFICIENT" if ic_val is None else None,  # final state set during store
+                "effective_breadth": effective_breadths.get(horizon_label, 0),
             }
 
     return results
@@ -319,20 +422,23 @@ def store_ic_snapshot(as_of_date: dt.date, snapshot: Dict[Tuple[str, str], Dict[
         ic_val = row.get("ic_value")
         t_stat = row.get("t_stat")
         ic_state = row.get("ic_state") or (_ic_state(None) if ic_val is None else None)
+        effective_breadth = row.get("effective_breadth") or 0
         db.safe_execute(
             """
             INSERT INTO signal_ic_daily (
                 as_of_date, score_field, horizon_label,
-                ic_value, sample_size, p_value, t_stat, ic_state, meta
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
+                ic_value, sample_size, p_value, t_stat, ic_state,
+                effective_breadth, meta
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb)
             ON CONFLICT (as_of_date, score_field, horizon_label) DO UPDATE SET
-                ic_value   = EXCLUDED.ic_value,
-                sample_size= EXCLUDED.sample_size,
-                p_value    = EXCLUDED.p_value,
-                t_stat     = EXCLUDED.t_stat,
-                ic_state   = EXCLUDED.ic_state,
-                meta       = EXCLUDED.meta,
-                updated_at = now()
+                ic_value         = EXCLUDED.ic_value,
+                sample_size      = EXCLUDED.sample_size,
+                p_value          = EXCLUDED.p_value,
+                t_stat           = EXCLUDED.t_stat,
+                ic_state         = EXCLUDED.ic_state,
+                effective_breadth= EXCLUDED.effective_breadth,
+                meta             = EXCLUDED.meta,
+                updated_at       = now()
             """,
             (
                 as_of_date,
@@ -343,6 +449,7 @@ def store_ic_snapshot(as_of_date: dt.date, snapshot: Dict[Tuple[str, str], Dict[
                 row.get("p_value"),
                 t_stat,
                 ic_state,
+                effective_breadth,
                 "{}",
             ),
         )

@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from api import db, security
@@ -27,6 +27,7 @@ from api.axiom.memo import (
     load_memo_by_hash,
 )
 from api.axiom.screener import screen_universe
+from api.axiom.sanitizer import sanitize_engine_breakdown
 
 router = APIRouter(
     prefix="/axiom",
@@ -524,7 +525,7 @@ class ScreenRequest(BaseModel):
 
 
 @router.post("/screen")
-def axiom_screen(req: ScreenRequest) -> Dict[str, Any]:
+def axiom_screen(req: ScreenRequest, request: Request = None) -> Dict[str, Any]:
     as_of_date_str = req.as_of_date or dt.date.today().isoformat()
     try:
         as_of_date = dt.date.fromisoformat(as_of_date_str)
@@ -552,6 +553,19 @@ def axiom_screen(req: ScreenRequest) -> Dict[str, Any]:
         as_of_date, result.get("total_screened", 0), result.get("count", 0),
         result.get("ic_state"), result.get("breadth_state"),
     )
+
+    # Sanitize proprietary sub-component fields for free-tier callers
+    tenant = getattr(request.state, "tenant", None) if request else None
+    tenant_tier = (tenant or {}).get("tier", "free")
+    if tenant_tier not in ("pro", "enterprise"):
+        symbols_out = []
+        for sym_entry in result.get("symbols") or []:
+            payload = sym_entry.get("payload") or {}
+            sym_entry = dict(sym_entry)
+            sym_entry["payload"] = sanitize_engine_breakdown(payload)
+            symbols_out.append(sym_entry)
+        result = dict(result)
+        result["symbols"] = symbols_out
 
     return result
 

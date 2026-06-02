@@ -188,9 +188,22 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         "operating_margin": candidate.operating_margin,
         "revenue_growth_yoy": candidate.revenue_growth_yoy,
     }
+    _sector = str(engine_input.source_context.get("symbol_meta", {}).get("sector") or "").lower()
+    _SECTOR_WACC = {
+        "technology": 0.09, "financials": 0.10, "healthcare": 0.08,
+        "consumer discretionary": 0.09, "consumer staples": 0.07,
+        "energy": 0.10, "industrials": 0.09, "utilities": 0.06,
+        "real estate": 0.07, "communication services": 0.09, "materials": 0.09,
+    }
+    _SECTOR_MOAT = {
+        "technology": 70.0, "healthcare": 65.0, "consumer staples": 62.0,
+        "financials": 50.0, "energy": 40.0, "utilities": 45.0,
+        "consumer discretionary": 55.0, "industrials": 48.0,
+        "communication services": 60.0, "materials": 42.0, "real estate": 45.0,
+    }
     _sector_ctx = {
-        "wacc": 0.08,
-        "sector_moat_score": 50.0,
+        "wacc": _SECTOR_WACC.get(_sector, 0.08),
+        "sector_moat_score": _SECTOR_MOAT.get(_sector, 50.0),
     }
     caps_component = compute_caps(_caps_inputs, _sector_ctx)
     score = _weighted_average(

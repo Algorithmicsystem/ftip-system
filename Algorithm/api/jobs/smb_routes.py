@@ -4,10 +4,16 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/smb", tags=["smb"])
+from api.jobs.tenant_auth import require_tier
+
+router = APIRouter(
+    prefix="/smb",
+    tags=["smb"],
+    dependencies=[Depends(require_tier("enterprise"))],
+)
 
 
 class SMBFinancialsIn(BaseModel):

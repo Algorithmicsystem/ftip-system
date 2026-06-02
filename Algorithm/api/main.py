@@ -45,6 +45,8 @@ from api.jobs.linkage_routes import router as linkage_router
 from api.jobs.pe_routes import router as pe_router
 from api.jobs.smb_routes import router as smb_router
 from api.jobs.platform_routes import router as platform_v2_router
+from api.jobs.scheduler import router as scheduler_router
+from api.jobs.onboarding import router as onboarding_router
 from api.axiom.routes import router as axiom_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
@@ -1843,6 +1845,8 @@ app.include_router(linkage_router)
 app.include_router(pe_router)
 app.include_router(smb_router)
 app.include_router(platform_v2_router)
+app.include_router(scheduler_router)
+app.include_router(onboarding_router)
 app.include_router(data_router)
 
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"

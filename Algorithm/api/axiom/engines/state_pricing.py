@@ -132,6 +132,7 @@ def score_state_pricing(engine_input: AxiomEngineInput) -> EngineScore:
         "cross_asset_confirmation_component": rounded(cross_asset_confirmation_component),
         "bad_state_exposure_component": rounded(bad_state_exposure_component),
         "state_pricing_conflict_component": rounded(state_pricing_conflict_component),
+        "cardi_score": rounded(cardi_score),
     }
     available_count = sum(1 for value in component_values.values() if value is not None)
     coverage = clamp(

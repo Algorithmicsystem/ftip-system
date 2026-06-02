@@ -703,19 +703,20 @@ def build_axiom_engine_input(
             2,
         ),
     }
+    from api.jobs.macro_context import get_cardi_inputs, get_market_bubble_context as _get_mbc
     _macro_raw = normalized_bundle.get("macro_cross_asset") or {}
     _risk_on = safe_float(_macro_raw.get("risk_on_score"))
-    _macro_cardi_inputs = {
-        "carry_score": None,
-        "value_score": None,
-        "momentum_score": round(_risk_on * 100.0, 2) if _risk_on is not None else None,
-        "defensive_score": None,
-    }
-    _mkt_bubble_ctx = {
-        "cape_z_score": None,
-        "kindleberger_stage": "normal",
-        "narrative_intensity": 50.0,
-    }
+    try:
+        _macro_cardi_inputs = get_cardi_inputs()
+        if _risk_on is not None:
+            _macro_cardi_inputs["momentum_score"] = round(_risk_on * 100.0, 2)
+    except Exception:
+        _macro_cardi_inputs = {"carry_score": None, "value_score": None, "momentum_score": round(_risk_on * 100.0, 2) if _risk_on is not None else None, "defensive_score": None}
+    try:
+        _regime = str((normalized_bundle.get("macro_cross_asset") or {}).get("inferred_market_regime") or "normal")
+        _mkt_bubble_ctx = _get_mbc(regime_label=_regime)
+    except Exception:
+        _mkt_bubble_ctx = {"cape_z_score": None, "kindleberger_stage": "normal", "narrative_intensity": 50.0}
     return AxiomEngineInput(
         framework_version="axiom50_phase2_v1",
         symbol=str(job_context.get("symbol") or raw.get("signal", {}).get("symbol") or "").upper(),
