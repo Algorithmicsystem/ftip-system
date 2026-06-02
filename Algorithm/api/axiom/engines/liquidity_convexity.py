@@ -133,6 +133,7 @@ def score_liquidity_convexity(engine_input: AxiomEngineInput) -> EngineScore:
         ]
     )
     component_values = {
+        "kle_score": rounded(kle_score),
         "liquidity_integrity_component": rounded(liquidity_integrity_component),
         "liquidation_feasibility_component": rounded(liquidation_feasibility_component),
         "hedge_feasibility_component": rounded(hedge_feasibility_component),

@@ -237,6 +237,10 @@ def _build_historical_data_bundle(
         "resistance_21d": feature_vector.get("resistance_21d"),
         "recent_bars": daily_bars[-5:],
         "recent_intraday_bars": intraday_bars[-12:],
+        "price_series": [b["close"] for b in daily_bars if b.get("close") is not None],
+        "return_series": intelligence._to_returns([b.get("close") for b in daily_bars]),
+        "volume_series": [b["volume"] for b in daily_bars if b.get("volume") is not None],
+        "avg_volume_21d": intelligence._mean([b.get("volume") for b in daily_bars[-21:] if b.get("volume") is not None]) if daily_bars else None,
         "meta": {
             "coverage_score": min(len(daily_bars) / 252.0, 1.0),
             "sources": [snapshot.get("provenance", {}).get("market_bars_source") or "historical_snapshot"],

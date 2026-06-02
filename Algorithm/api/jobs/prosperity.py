@@ -34,8 +34,12 @@ CORE5_UNIVERSE = "AAPL,MSFT,NVDA,AMZN,TSLA"
 SP500_SAMPLE_UNIVERSE = (
     "AAPL,MSFT,NVDA,AMZN,TSLA,GOOGL,META,JPM,XOM,BRK.B,JNJ,UNH,V,PG,HD"
 )
+LARGE30_UNIVERSE = (
+    "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,BRK.B,JPM,JNJ,V,UNH,XOM,WMT,PG,"
+    "MA,HD,CVX,MRK,LLY,ABBV,PEP,KO,AVGO,COST,MCD,TMO,ACN,DHR,NEE"
+)
 
-SYMBOLS_MODES = {"core10", "core5", "sp500_sample"}
+SYMBOLS_MODES = {"core10", "core5", "sp500_sample", "large30"}
 RETENTION_TABLE_DATE_COLUMNS = {
     "prosperity_features_daily": "as_of",
     "prosperity_signals_daily": "as_of",
@@ -425,6 +429,8 @@ def _symbols_for_mode(mode: str) -> List[str]:
         return _parse_symbols(CORE5_UNIVERSE)
     if mode == "sp500_sample":
         return _parse_symbols(SP500_SAMPLE_UNIVERSE)
+    if mode == "large30":
+        return _parse_symbols(LARGE30_UNIVERSE)
     return _parse_symbols(DEFAULT_UNIVERSE)
 
 

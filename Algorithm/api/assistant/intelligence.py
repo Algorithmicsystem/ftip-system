@@ -788,6 +788,10 @@ def _market_domain(
         "breakout_window_days": breakout_window_days or None,
         "recent_bars": daily_bars[-5:],
         "recent_intraday_bars": intraday_bars[-12:],
+        "price_series": [c for c in close_values if c is not None],
+        "return_series": returns,
+        "volume_series": [v for v in volume_values if v is not None],
+        "avg_volume_21d": _mean(volume_values[-21:]),
         "meta": {
             "sources": sorted(
                 [

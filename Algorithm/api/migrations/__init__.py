@@ -738,6 +738,42 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "047_regime_transitions",
         lambda cur: cur.execute(Path(__file__).with_name("047_regime_transitions.sql").read_text()),
     ),
+    (
+        "048_triple_barrier_outcome",
+        lambda cur: cur.execute(Path(__file__).with_name("048_triple_barrier_outcome.sql").read_text()),
+    ),
+    (
+        "049_regime_analog_library",
+        lambda cur: cur.execute(Path(__file__).with_name("049_regime_analog_library.sql").read_text()),
+    ),
+    (
+        "050_company_macro_sensitivity",
+        lambda cur: cur.execute(Path(__file__).with_name("050_company_macro_sensitivity.sql").read_text()),
+    ),
+    (
+        "051_symbol_linkage_strength",
+        lambda cur: cur.execute(Path(__file__).with_name("051_symbol_linkage_strength.sql").read_text()),
+    ),
+    (
+        "052_private_entities",
+        lambda cur: cur.execute(Path(__file__).with_name("052_private_entities.sql").read_text()),
+    ),
+    (
+        "053_private_entity_financials",
+        lambda cur: cur.execute(Path(__file__).with_name("053_private_entity_financials.sql").read_text()),
+    ),
+    (
+        "054_smb_entities",
+        lambda cur: cur.execute(Path(__file__).with_name("054_smb_entities.sql").read_text()),
+    ),
+    (
+        "055_smb_monthly_financials",
+        lambda cur: cur.execute(Path(__file__).with_name("055_smb_monthly_financials.sql").read_text()),
+    ),
+    (
+        "056_api_tenants",
+        lambda cur: cur.execute(Path(__file__).with_name("056_api_tenants.sql").read_text()),
+    ),
 ]
 
 

@@ -703,6 +703,19 @@ def build_axiom_engine_input(
             2,
         ),
     }
+    _macro_raw = normalized_bundle.get("macro_cross_asset") or {}
+    _risk_on = safe_float(_macro_raw.get("risk_on_score"))
+    _macro_cardi_inputs = {
+        "carry_score": None,
+        "value_score": None,
+        "momentum_score": round(_risk_on * 100.0, 2) if _risk_on is not None else None,
+        "defensive_score": None,
+    }
+    _mkt_bubble_ctx = {
+        "cape_z_score": None,
+        "kindleberger_stage": "normal",
+        "narrative_intensity": 50.0,
+    }
     return AxiomEngineInput(
         framework_version="axiom50_phase2_v1",
         symbol=str(job_context.get("symbol") or raw.get("signal", {}).get("symbol") or "").upper(),
@@ -714,6 +727,13 @@ def build_axiom_engine_input(
             "signal_version": lineage.get("signal_version"),
             "symbol_meta": normalized_bundle.get("symbol_meta") or {},
             "domain_availability": domain_coverage,
+            "price_series": market.get("price_series") or [],
+            "return_series": market.get("return_series") or [],
+            "price_returns_series": market.get("return_series") or [],
+            "volume_series": market.get("volume_series") or [],
+            "avg_volume_21d": safe_float(market.get("avg_volume_21d")),
+            "market_bubble_context": _mkt_bubble_ctx,
+            "macro_cardi_inputs": _macro_cardi_inputs,
         },
         fundamental=fundamental_inputs,
         fragility=fragility_inputs,

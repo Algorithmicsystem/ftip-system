@@ -45,7 +45,7 @@ def db_enabled() -> bool:
 
 
 def db_write_enabled() -> bool:
-    return env_bool("FTIP_DB_WRITE_ENABLED", True)
+    return env_bool("FTIP_DB_WRITE_ENABLED", False)
 
 
 def db_read_enabled() -> bool:

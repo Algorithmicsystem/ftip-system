@@ -88,7 +88,7 @@ def _ic_health(as_of_date: dt.date) -> Dict[str, Any]:
         return {"ic_state": "UNKNOWN", "sample_count": 0, "mean_ic": None}
     row = db.safe_fetchone(
         """
-        SELECT ic_state, sample_count, mean_ic, as_of_date
+        SELECT ic_state, sample_size, ic_mean_21d, as_of_date
         FROM signal_ic_daily
         WHERE score_field = 'composite' AND horizon_label = '21d'
           AND as_of_date <= %s
