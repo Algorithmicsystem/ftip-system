@@ -29,6 +29,42 @@ DEFAULT_HORIZONS: List[int] = [5, 21, 63]
 
 
 # ---------------------------------------------------------------------------
+# 1.10 De Prado Triple Barrier Labeling
+# ---------------------------------------------------------------------------
+
+def compute_triple_barrier_label(
+    price_series: list,
+    entry_price: float,
+    profit_factor: float = 0.02,
+    stop_factor: float = 0.01,
+    horizon_days: int = 5,
+) -> int:
+    """De Prado Triple Barrier Labeling.
+
+    Grounded in Advances in Financial Machine Learning (López de Prado).
+
+    Returns:
+        1  — profit target hit first (upper barrier)
+       -1  — stop loss hit first (lower barrier)
+        0  — time stop (horizon elapsed without barrier touch)
+    """
+    if not price_series or not entry_price or float(entry_price) <= 0:
+        return 0
+
+    entry = float(entry_price)
+    profit_barrier = entry * (1.0 + profit_factor)
+    stop_barrier = entry * (1.0 - stop_factor)
+
+    prices = [float(p) for p in price_series[:horizon_days] if p is not None]
+    for price in prices:
+        if price >= profit_barrier:
+            return 1
+        if price <= stop_barrier:
+            return -1
+    return 0  # time stop
+
+
+# ---------------------------------------------------------------------------
 # P&L computation
 # ---------------------------------------------------------------------------
 
@@ -94,12 +130,22 @@ def compute_signal_pnl(
 
             ret_pct: Optional[float] = None
             hit: Optional[bool] = None
+            triple_barrier_outcome: Optional[int] = None
             if p0 and p1 and p0 > 0:
                 ret_pct = round(((p1 / p0) - 1.0) * 100.0, 4)
                 if signal == "BUY":
                     hit = ret_pct > 0
                 elif signal == "SELL":
                     hit = ret_pct < 0
+                # Triple barrier labeling using available prices as path proxy
+                _price_path = [v for v in [p0, p1] if v is not None]
+                triple_barrier_outcome = compute_triple_barrier_label(
+                    price_series=_price_path,
+                    entry_price=p0,
+                    profit_factor=0.02,
+                    stop_factor=0.01,
+                    horizon_days=h,
+                )
 
             rows.append(
                 {
@@ -116,6 +162,7 @@ def compute_signal_pnl(
                     "price_at_horizon": p1,
                     "return_pct": ret_pct,
                     "hit": hit,
+                    "triple_barrier_outcome": triple_barrier_outcome,
                     "computed_at": as_of_date,
                 }
             )
@@ -137,24 +184,26 @@ def store_signal_pnl(rows: List[Dict[str, Any]]) -> int:
                     symbol, signal_date, horizon_days, lookback, signal_label,
                     signal_score, dau, regime_label, price_at_signal,
                     horizon_date, price_at_horizon, return_pct, hit,
-                    computed_at, updated_at
+                    triple_barrier_outcome, computed_at, updated_at
                 )
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,now())
                 ON CONFLICT (symbol, signal_date, horizon_days)
                 DO UPDATE SET
-                    price_at_signal  = EXCLUDED.price_at_signal,
-                    price_at_horizon = EXCLUDED.price_at_horizon,
-                    horizon_date     = EXCLUDED.horizon_date,
-                    return_pct       = EXCLUDED.return_pct,
-                    hit              = EXCLUDED.hit,
-                    computed_at      = EXCLUDED.computed_at,
-                    updated_at       = now()
+                    price_at_signal        = EXCLUDED.price_at_signal,
+                    price_at_horizon       = EXCLUDED.price_at_horizon,
+                    horizon_date           = EXCLUDED.horizon_date,
+                    return_pct             = EXCLUDED.return_pct,
+                    hit                    = EXCLUDED.hit,
+                    triple_barrier_outcome = EXCLUDED.triple_barrier_outcome,
+                    computed_at            = EXCLUDED.computed_at,
+                    updated_at             = now()
                 """,
                 (
                     r["symbol"], r["signal_date"], r["horizon_days"], r["lookback"],
                     r["signal_label"], r["signal_score"], r["dau"], r["regime_label"],
                     r["price_at_signal"], r["horizon_date"], r["price_at_horizon"],
-                    r["return_pct"], r["hit"], r["computed_at"],
+                    r["return_pct"], r["hit"], r.get("triple_barrier_outcome"),
+                    r["computed_at"],
                 ),
             )
             written += 1

@@ -23,6 +23,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from api import db
+from api.assistant.phase3.common import clamp
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +46,28 @@ _IC_GATE_NOTE: Dict[str, str] = {
     "DEGRADED":     "ic_quality_gate_degraded",
     "INSUFFICIENT": "ic_quality_gate_insufficient_samples",
 }
+
+
+# ---------------------------------------------------------------------------
+# 1.9 Grinold-Kahn Active Management Quality Score
+# ---------------------------------------------------------------------------
+
+def compute_amqs(ic_value: float, breadth: int, tracking_error: float) -> float:
+    """Grinold-Kahn Active Management Quality Score (0–100).
+
+    Grounded in Active Portfolio Management (Grinold & Kahn).
+    Fundamental Law of Active Management: IR = IC × sqrt(breadth) / TE
+
+    More breadth (more symbols) → higher AMQS for same IC and TE.
+    Score normalised from IR range [-2.0, 3.0] → [0, 100].
+    """
+    ic = clamp(float(ic_value or 0.0), -1.0, 1.0)
+    br = max(int(breadth or 1), 1)
+    te = max(float(tracking_error or 0.01), 0.001)
+
+    ir = ic * (br ** 0.5) / te
+    score = clamp((ir + 2.0) / 5.0 * 100.0, 0.0, 100.0)
+    return round(score, 2)
 
 
 def load_ic_gate_state(
@@ -109,6 +132,14 @@ def load_ic_gate_state(
 
     gate_active = mult < 1.0
 
+    # AMQS: continuous quality score using IC value and sample breadth as proxy
+    tracking_error = 0.05  # default TE assumption when not separately measured
+    amqs_score = compute_amqs(
+        ic_value=mean_ic if mean_ic is not None else 0.0,
+        breadth=sample_count,
+        tracking_error=tracking_error,
+    )
+
     return {
         "ic_state": ic_state,
         "sample_count": sample_count,
@@ -116,6 +147,7 @@ def load_ic_gate_state(
         "confidence_mult": mult,
         "gate_active": gate_active,
         "gate_note": note,
+        "amqs_score": amqs_score,
     }
 
 
@@ -151,6 +183,11 @@ def apply_ic_gate(
 # ---------------------------------------------------------------------------
 
 def _open_gate(ic_state: str, sample_count: int, mean_ic: Optional[float]) -> Dict[str, Any]:
+    amqs_score = compute_amqs(
+        ic_value=mean_ic if mean_ic is not None else 0.0,
+        breadth=sample_count,
+        tracking_error=0.05,
+    )
     return {
         "ic_state": ic_state,
         "sample_count": sample_count,
@@ -158,4 +195,5 @@ def _open_gate(ic_state: str, sample_count: int, mean_ic: Optional[float]) -> Di
         "confidence_mult": 1.0,
         "gate_active": False,
         "gate_note": "",
+        "amqs_score": amqs_score,
     }

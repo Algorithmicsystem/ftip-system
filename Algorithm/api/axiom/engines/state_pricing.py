@@ -1,10 +1,49 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from api.assistant.phase3.common import bounded_score, clamp, mean
 from api.axiom.common import inverse_score, rounded, weighted_average
 from api.axiom.contracts import AxiomEngineInput, EngineScore
+
+
+# ---------------------------------------------------------------------------
+# 1.7 Ilmanen Cross-Asset Return Driver Index
+# ---------------------------------------------------------------------------
+
+def compute_cardi(macro_data: dict) -> float:
+    """Ilmanen Cross-Asset Return Driver Index (0–100).
+
+    Grounded in Expected Returns (Ilmanen).
+
+    Formula: carry_score × 0.25 + value_score × 0.25 + momentum_score × 0.30
+             + defensive_score × 0.20
+
+    Positive term spread + strong 12-1 cross-asset momentum → CARDI > 65.
+    """
+    carry_score = macro_data.get("carry_score")       # term spread / credit carry
+    value_score = macro_data.get("value_score")       # CAPE inverse / E/P spread
+    momentum_score = macro_data.get("momentum_score") # 12-1 cross-asset momentum
+    defensive_score = macro_data.get("defensive_score")  # low-vol / quality factor
+
+    components = [
+        (carry_score,    0.25),
+        (value_score,    0.25),
+        (momentum_score, 0.30),
+        (defensive_score, 0.20),
+    ]
+    usable = [
+        (clamp(float(v), 0.0, 100.0), w)
+        for v, w in components
+        if v is not None
+    ]
+    if not usable:
+        return 50.0
+    total_weight = sum(w for _, w in usable)
+    if total_weight <= 0:
+        return 50.0
+    cardi = sum(v * w for v, w in usable) / total_weight
+    return round(clamp(cardi, 0.0, 100.0), 2)
 
 
 def score_state_pricing(engine_input: AxiomEngineInput) -> EngineScore:
@@ -12,9 +51,13 @@ def score_state_pricing(engine_input: AxiomEngineInput) -> EngineScore:
     fragility = engine_input.fragility
     fundamental = engine_input.fundamental
 
+    # CARDI: compute from macro_cardi_inputs if present, else 50 (neutral)
+    _macro_cardi = engine_input.source_context.get("macro_cardi_inputs", {})
+    cardi_score = compute_cardi(_macro_cardi) if _macro_cardi else None
+
     macro_alignment_component = weighted_average(
         [
-            (support.macro_alignment_score, 0.25),
+            (cardi_score if cardi_score is not None else support.macro_alignment_score, 0.25),
             (support.macro_growth_alignment_score, 0.16),
             (support.risk_on_alignment_score, 0.15),
             (support.macro_regime_consistency_score, 0.16),

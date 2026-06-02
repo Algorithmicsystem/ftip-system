@@ -7,6 +7,43 @@ from api.axiom.common import inverse_score, midrange_score, rounded, weighted_av
 from api.axiom.contracts import AxiomEngineInput, EngineScore
 
 
+# ---------------------------------------------------------------------------
+# 1.6 Kyle Lambda Estimate
+# ---------------------------------------------------------------------------
+
+def compute_kyle_lambda(returns: list, volumes: list, avg_volume: float) -> float:
+    """Kyle Lambda Estimate (0–100, higher = better liquidity / lower market impact).
+
+    Grounded in Continuous Auctions and Insider Trading (Kyle 1985).
+
+    OLS regression: |return| = lambda × normalized_order_flow
+    Score is inverted: low lambda (liquid) → high score.
+    """
+    if not returns or not volumes or not avg_volume or avg_volume <= 0:
+        return 50.0
+
+    n = min(len(returns), len(volumes))
+    if n < 5:
+        return 50.0
+
+    avg_vol = float(avg_volume)
+    norm_flow = [float(volumes[i]) / avg_vol for i in range(n)]
+    abs_ret = [abs(float(returns[i])) for i in range(n)]
+
+    sum_xy = sum(norm_flow[i] * abs_ret[i] for i in range(n))
+    sum_xx = sum(nf ** 2 for nf in norm_flow)
+
+    if sum_xx <= 0:
+        return 50.0
+
+    kyle_lambda_raw = sum_xy / sum_xx  # price impact per unit of normalized flow
+
+    # Low lambda = liquid (good) → high score
+    # Bounded: lambda ≤ 0 → 100; lambda ≥ 0.10 → 0
+    liquidity_score = clamp((0.10 - min(kyle_lambda_raw, 0.10)) / 0.10 * 100.0, 0.0, 100.0)
+    return round(liquidity_score, 2)
+
+
 def score_liquidity_convexity(engine_input: AxiomEngineInput) -> EngineScore:
     support = engine_input.support
     fragility = engine_input.fragility
@@ -15,10 +52,19 @@ def score_liquidity_convexity(engine_input: AxiomEngineInput) -> EngineScore:
         engine_input.source_context.get("option_surface_available")
     )
 
+    # Kyle Lambda: compute if raw series are available, else fall back to existing
+    _returns_series = engine_input.source_context.get("price_returns_series", [])
+    _volume_series = engine_input.source_context.get("volume_series", [])
+    _avg_volume = engine_input.source_context.get("avg_volume_21d") or getattr(fragility, "dollar_vol_21d", None)
+    if _returns_series and _volume_series and _avg_volume:
+        kle_score = compute_kyle_lambda(_returns_series, _volume_series, float(_avg_volume))
+    else:
+        kle_score = fragility.liquidity_quality_score  # graceful fallback
+
     liquidity_integrity_component = weighted_average(
         [
-            (fragility.liquidity_quality_score, 0.34),
-            (fragility.execution_cleanliness_score, 0.2),
+            (kle_score, 0.34),                                     # KLE as primary liquidity input
+            (fragility.execution_cleanliness_score, 0.20),
             (support.execution_quality_score, 0.18),
             (inverse_score(fragility.tradability_caution_score), 0.16),
             (inverse_score(fragility.implementation_fragility_score), 0.12),

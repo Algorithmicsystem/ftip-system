@@ -180,11 +180,13 @@ def test_engine_earnings_component_present_in_components():
 
 
 def test_engine_score_computed_without_earnings_fields():
+    """EIS always computes (via fallback), so earnings_quality_component is always present."""
     inp = _make_engine_input()
     result = score_fundamental_reality(inp)
     assert result.score is not None
     assert result.status in ("available", "partial")
-    assert "earnings_quality_component" not in result.components
+    # EIS (Penman-Schilit) replaces raw earnings_quality and always has a value
+    assert "earnings_quality_component" in result.components
 
 
 def test_engine_earnings_component_in_summary_when_present():
@@ -193,10 +195,12 @@ def test_engine_earnings_component_in_summary_when_present():
         earnings_estimate_revision_support=0.6,
     )
     result = score_fundamental_reality(inp)
-    assert "earnings quality" in result.summary.lower()
+    # Summary now uses "Earnings integrity (EIS)" instead of "Earnings quality"
+    assert "earnings integrity" in result.summary.lower()
 
 
 def test_engine_summary_omits_earnings_when_absent():
     inp = _make_engine_input()
     result = score_fundamental_reality(inp)
-    assert "earnings quality" not in result.summary.lower()
+    # EIS always present in summary; check for the correct new label
+    assert "earnings integrity" in result.summary.lower()

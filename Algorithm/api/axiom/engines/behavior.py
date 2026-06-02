@@ -6,6 +6,40 @@ from api.assistant.phase3.common import bounded_score, clamp, mean
 from api.axiom.common import inverse_score, midrange_score, rounded, weighted_average
 from api.axiom.contracts import AxiomEngineInput, EngineScore
 
+# Kahneman-Tversky (1979) loss aversion coefficient
+_LOSS_AVERSION_COEFFICIENT = 2.25
+
+
+# ---------------------------------------------------------------------------
+# 1.3 Kahneman-Tversky Asymmetric Sentiment Score
+# ---------------------------------------------------------------------------
+
+def compute_asymmetric_sentiment(positive: float, negative: float) -> float:
+    """Kahneman-Tversky Asymmetric Sentiment Score (0–100).
+
+    Grounded in Prospect Theory (Kahneman-Tversky 1979) and Thinking Fast
+    and Slow.  Loss aversion coefficient = 2.25 (exact paper value).
+
+    Equal positive and negative sentiment → net score < 50 because losses
+    are weighted 2.25× gains.  Returns higher score when positive sentiment
+    dominates after asymmetric weighting.
+    """
+    p = clamp(float(positive or 0.0), 0.0, 100.0) / 100.0
+    n = clamp(float(negative or 0.0), 0.0, 100.0) / 100.0
+
+    # Prospect-theory net: gain utility minus loss aversion × loss disutility
+    net = p - _LOSS_AVERSION_COEFFICIENT * n
+
+    # Piecewise mapping centred at net=0 → 50 (no sentiment = neutral):
+    #   net = +1   → 100 (pure positive)
+    #   net =  0   →  50 (neutral)
+    #   net = -2.25→   0 (pure negative, full loss aversion applied)
+    if net >= 0:
+        score = 50.0 + net * 50.0
+    else:
+        score = 50.0 + net * (50.0 / _LOSS_AVERSION_COEFFICIENT)
+    return round(clamp(score, 0.0, 100.0), 2)
+
 
 def score_behavioral_distortion(engine_input: AxiomEngineInput) -> EngineScore:
     support = engine_input.support
@@ -45,9 +79,14 @@ def score_behavioral_distortion(engine_input: AxiomEngineInput) -> EngineScore:
             (inverse_score(support.event_pressure_score), 0.15),
         ]
     )
+    # Asymmetric sentiment: positive direction vs negative crowding pressure
+    _pos_sent = support.sentiment_direction_score or 50.0
+    _neg_sent = support.narrative_crowding_index or 50.0
+    asymmetric_sent_score = compute_asymmetric_sentiment(_pos_sent, _neg_sent)
+
     underreaction_continuation_component = weighted_average(
         [
-            (support.sentiment_direction_score, 0.18),
+            (asymmetric_sent_score, 0.18),      # replaces raw sentiment_direction
             (support.sentiment_trend_score, 0.12),
             (support.trend_quality_score, 0.16),
             (support.directional_persistence_score, 0.16),
