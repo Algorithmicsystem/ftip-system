@@ -998,3 +998,28 @@ body.demo-mode .active-analysis-banner {
   text-transform: uppercase;
   margin-bottom: 8px;
 }
+
+/* Shared data table for dashboards */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+.data-table th {
+  text-align: left;
+  padding: 6px 8px;
+  background: #1a2535;
+  color: var(--text-soft);
+  font-weight: 600;
+  border-bottom: 1px solid #26364b;
+}
+.data-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid #1e2d40;
+  color: var(--text-primary, #edf3ff);
+  vertical-align: top;
+}
+.data-table tr:hover td {
+  background: #1e2d40;
+}

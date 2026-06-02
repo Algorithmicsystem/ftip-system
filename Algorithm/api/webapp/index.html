@@ -49,6 +49,9 @@
         <button class="tab active" data-tab="signal">Latest Signal (official v1)</button>
         <button class="tab" data-tab="features">Latest Features (official v1)</button>
         <button class="tab" data-tab="workspace">Institutional workspace</button>
+        <button class="tab" data-tab="investment">Investment Intelligence</button>
+        <button class="tab" data-tab="pe-dashboard">PE Portfolio</button>
+        <button class="tab" data-tab="smb-dashboard">SMB Intelligence</button>
       </div>
 
       <div id="signal" class="panel tab-panel">
@@ -1448,6 +1451,98 @@
           </div>
         </div>
       </div>
+
+      <!-- ================================================================ -->
+      <!-- Investment Intelligence Dashboard                                  -->
+      <!-- ================================================================ -->
+      <div id="investment" class="panel tab-panel hidden">
+        <h3>Investment Intelligence</h3>
+        <div class="input-row">
+          <input id="inv-symbol-input" placeholder="Symbol (e.g. AAPL)" value="AAPL" />
+          <input id="inv-date-input" type="date" />
+          <button id="inv-load-btn">Load Intelligence</button>
+        </div>
+        <p class="muted" id="inv-status">Enter a symbol and click Load Intelligence.</p>
+
+        <div id="inv-axiom-section" style="display:none">
+          <h4>AXIOM Score</h4>
+          <div class="signal-grid" id="inv-axiom-grid"></div>
+        </div>
+
+        <div id="inv-regime-analogs-section" style="display:none">
+          <h4>Regime Analogs</h4>
+          <div id="inv-analogs-table"></div>
+        </div>
+
+        <div id="inv-peers-section" style="display:none">
+          <h4>Linked Peers</h4>
+          <div id="inv-peers-table"></div>
+        </div>
+
+        <div id="inv-stress-section" style="display:none">
+          <h4>Stress Propagation</h4>
+          <div class="signal-grid" id="inv-stress-grid"></div>
+          <div id="inv-propagation-table"></div>
+        </div>
+      </div>
+
+      <!-- ================================================================ -->
+      <!-- PE Portfolio Dashboard                                             -->
+      <!-- ================================================================ -->
+      <div id="pe-dashboard" class="panel tab-panel hidden">
+        <h3>PE Portfolio Intelligence</h3>
+        <div class="input-row">
+          <input id="pe-org-input" placeholder="Org ID (e.g. FUND001)" value="FUND001" />
+          <button id="pe-load-btn">Load Portfolio</button>
+        </div>
+        <p class="muted" id="pe-status">Enter an Org ID and click Load Portfolio.</p>
+
+        <div id="pe-summary-section" style="display:none">
+          <h4>Portfolio Summary</h4>
+          <div class="signal-grid" id="pe-summary-grid"></div>
+        </div>
+
+        <div id="pe-entities-section" style="display:none">
+          <h4>Portfolio Companies</h4>
+          <div id="pe-entities-table"></div>
+        </div>
+
+        <div id="pe-alerts-section" style="display:none">
+          <h4>Stress Alerts</h4>
+          <div id="pe-alerts-list"></div>
+        </div>
+
+        <div id="pe-entity-detail-section" style="display:none">
+          <h4>Entity Detail: <span id="pe-detail-name"></span></h4>
+          <div class="signal-grid" id="pe-detail-grid"></div>
+          <div id="pe-exit-timing-grid"></div>
+        </div>
+      </div>
+
+      <!-- ================================================================ -->
+      <!-- SMB Intelligence Dashboard                                         -->
+      <!-- ================================================================ -->
+      <div id="smb-dashboard" class="panel tab-panel hidden">
+        <h3>SMB Intelligence</h3>
+        <div class="input-row">
+          <input id="smb-entity-input" placeholder="SMB Entity ID" value="" />
+          <button id="smb-load-btn">Load Intelligence</button>
+        </div>
+        <p class="muted" id="smb-status">Enter an SMB Entity ID and click Load Intelligence.</p>
+
+        <div id="smb-forecast-section" style="display:none">
+          <h4>Cash Flow Forecast (12-Month)</h4>
+          <div class="signal-grid" id="smb-forecast-summary"></div>
+          <div id="smb-forecast-table"></div>
+        </div>
+
+        <div id="smb-risks-section" style="display:none">
+          <h4>Supplier &amp; Cash Risks</h4>
+          <div class="signal-grid" id="smb-risks-summary"></div>
+          <div id="smb-risks-list"></div>
+        </div>
+      </div>
+
     </main>
 
     <section id="assistant-copilot-shell" class="assistant-copilot-shell">

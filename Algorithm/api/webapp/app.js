@@ -7051,6 +7051,240 @@ qs("#daily-run-btn").addEventListener("click", async () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Investment Intelligence Dashboard
+// ---------------------------------------------------------------------------
+
+const renderKeyValueGrid = (containerId, pairs) => {
+  const el = qs(`#${containerId}`);
+  if (!el) return;
+  el.innerHTML = pairs.map(([k, v]) =>
+    `<div>${k}: <strong>${v ?? "N/A"}</strong></div>`
+  ).join("");
+};
+
+const renderSimpleTable = (containerId, headers, rows) => {
+  const el = qs(`#${containerId}`);
+  if (!el) return;
+  if (!rows.length) { el.innerHTML = `<p class="muted">No data.</p>`; return; }
+  const thead = headers.map(h => `<th>${h}</th>`).join("");
+  const tbody = rows.map(r =>
+    `<tr>${r.map(c => `<td>${c ?? "—"}</td>`).join("")}</tr>`
+  ).join("");
+  el.innerHTML = `<table class="data-table"><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table>`;
+};
+
+qs("#inv-load-btn")?.addEventListener("click", async () => {
+  const symbol = (qs("#inv-symbol-input")?.value || "").toUpperCase().trim();
+  const dateVal = qs("#inv-date-input")?.value;
+  if (!symbol) { qs("#inv-status").textContent = "Enter a symbol."; return; }
+  const today = dateVal || new Date().toISOString().slice(0, 10);
+  const headers = getHeaders();
+  setButtonLoading("#inv-load-btn", true, "Loading…");
+  qs("#inv-status").textContent = "Loading…";
+  try {
+    // AXIOM scores
+    const axiomData = await callJson(`/axiom/scores?symbol=${symbol}&as_of_date=${today}`, { headers });
+    const score = axiomData?.payload;
+    if (score) {
+      renderKeyValueGrid("inv-axiom-grid", [
+        ["Symbol", symbol],
+        ["As Of", today],
+        ["DAU", score.deployable_alpha_utility?.toFixed(1)],
+        ["Regime", score.regime_label],
+        ["Tier", score.deployability_tier],
+        ["Confidence", score.overall_confidence?.toFixed(2)],
+      ]);
+      qs("#inv-axiom-section").style.display = "";
+    }
+
+    // Regime analogs
+    const regime = score?.regime_label;
+    if (regime) {
+      const analogData = await callJson(`/ops/regime/analogs?regime_label=${encodeURIComponent(regime)}&limit=5`, { headers });
+      const analogs = analogData?.analogs || [];
+      renderSimpleTable("inv-analogs-table",
+        ["Date", "Description", "VIX", "CAPE", "Similarity"],
+        analogs.map(a => [a.reference_date, a.description, a.vix_at_entry, a.cape_at_entry, a.similarity_score])
+      );
+      qs("#inv-regime-analogs-section").style.display = "";
+    }
+
+    // Peers
+    const peersData = await callJson(`/linkage/peers/${symbol}?as_of_date=${today}`, { headers });
+    const peers = peersData?.peers || [];
+    renderSimpleTable("inv-peers-table",
+      ["Peer", "Link Type", "Strength", "DAU", "Regime", "Tier"],
+      peers.map(p => [p.linked_symbol, p.link_type, p.linkage_strength?.toFixed(2), p.dau?.toFixed(1), p.regime_label, p.deployability_tier])
+    );
+    qs("#inv-peers-section").style.display = "";
+
+    // Stress propagation
+    const stressData = await callJson(`/linkage/stress-propagation/${symbol}?as_of_date=${today}`, { headers });
+    renderKeyValueGrid("inv-stress-grid", [
+      ["Source Fragility", stressData.source_fragility?.toFixed(1)],
+      ["Peers with Alert", (stressData.propagation || []).filter(p => p.stress_alert).length],
+    ]);
+    renderSimpleTable("inv-propagation-table",
+      ["Peer", "Transmitted Stress", "Alert", "DAU"],
+      (stressData.propagation || []).map(p => [
+        p.linked_symbol, p.transmitted_stress?.toFixed(1),
+        p.stress_alert ? "⚠️ YES" : "—", p.dau?.toFixed(1)
+      ])
+    );
+    qs("#inv-stress-section").style.display = "";
+    qs("#inv-status").textContent = `Loaded intelligence for ${symbol}`;
+  } catch (err) {
+    qs("#inv-status").textContent = `Error: ${err.message}`;
+  } finally {
+    setButtonLoading("#inv-load-btn", false, "Load Intelligence");
+  }
+});
+
+// ---------------------------------------------------------------------------
+// PE Portfolio Dashboard
+// ---------------------------------------------------------------------------
+
+qs("#pe-load-btn")?.addEventListener("click", async () => {
+  const orgId = (qs("#pe-org-input")?.value || "").trim();
+  if (!orgId) { qs("#pe-status").textContent = "Enter an Org ID."; return; }
+  const headers = getHeaders();
+  setButtonLoading("#pe-load-btn", true, "Loading…");
+  qs("#pe-status").textContent = "Loading…";
+  try {
+    const data = await callJson(`/pe/portfolio/${encodeURIComponent(orgId)}/overview`, { headers });
+
+    renderKeyValueGrid("pe-summary-grid", [
+      ["Org ID", orgId],
+      ["Entities", data.entity_count],
+      ["Avg Health", data.avg_health_score?.toFixed(1)],
+      ["Alerts", data.alert_count],
+    ]);
+    qs("#pe-summary-section").style.display = "";
+
+    renderSimpleTable("pe-entities-table",
+      ["Entity", "Sector", "Entry Date", "Target Exit", "Health", "Alert"],
+      (data.entities || []).map(e => [
+        `<button class="secondary pe-entity-btn" data-id="${e.entity_id}" data-name="${e.entity_name}">${e.entity_name}</button>`,
+        e.sector, e.entry_date, e.target_exit_date,
+        e.health_score?.toFixed(1) ?? "—",
+        e.alert ? "⚠️" : "✓"
+      ])
+    );
+    qs("#pe-entities-section").style.display = "";
+    qsa(".pe-entity-btn").forEach(btn => {
+      btn.addEventListener("click", () => loadPEEntityDetail(btn.dataset.id, btn.dataset.name));
+    });
+
+    // Stress alerts
+    const alertData = await callJson(`/pe/portfolio/${encodeURIComponent(orgId)}/stress-alerts`, { headers });
+    const alerts = alertData?.alerts || [];
+    if (alerts.length) {
+      qs("#pe-alerts-list").innerHTML = alerts.map(e =>
+        `<div class="signal-grid" style="margin-bottom:8px"><div>⚠️ <strong>${e.entity_name}</strong></div><div>Health: ${e.health_score?.toFixed(1) ?? "—"}</div><div>Sector: ${e.sector ?? "—"}</div></div>`
+      ).join("");
+      qs("#pe-alerts-section").style.display = "";
+    } else {
+      qs("#pe-alerts-section").style.display = "none";
+    }
+
+    qs("#pe-status").textContent = `Portfolio loaded: ${data.entity_count} companies`;
+  } catch (err) {
+    qs("#pe-status").textContent = `Error: ${err.message}`;
+  } finally {
+    setButtonLoading("#pe-load-btn", false, "Load Portfolio");
+  }
+});
+
+const loadPEEntityDetail = async (entityId, entityName) => {
+  qs("#pe-detail-name").textContent = entityName || entityId;
+  const headers = getHeaders();
+  try {
+    const [health, exit] = await Promise.all([
+      callJson(`/pe/entity/${encodeURIComponent(entityId)}/health`, { headers }),
+      callJson(`/pe/entity/${encodeURIComponent(entityId)}/exit-timing`, { headers }),
+    ]);
+
+    renderKeyValueGrid("pe-detail-grid", [
+      ["Health Score", health.health_score?.toFixed(1)],
+      ["Latest Period", health.latest_period],
+      ["Alert", health.alert ? "⚠️ YES" : "No"],
+      ["EBITDA Margin", health.components?.ebitda_margin_score?.toFixed(1)],
+      ["Revenue Growth", health.components?.revenue_growth_score?.toFixed(1)],
+      ["Leverage", health.components?.leverage_score?.toFixed(1)],
+    ]);
+    qs("#pe-exit-timing-grid").innerHTML = `
+      <div class="signal-grid" style="margin-top:8px">
+        <div>Months Held: <strong>${exit.months_held ?? "—"}</strong></div>
+        <div>EBITDA Trend: <strong>${exit.ebitda_trend ?? "—"}</strong></div>
+        <div>Exit Readiness: <strong>${exit.exit_readiness_score?.toFixed(1) ?? "—"}</strong></div>
+        <div>Recommendation: <strong>${exit.recommendation ?? "—"}</strong></div>
+      </div>
+    `;
+    qs("#pe-entity-detail-section").style.display = "";
+  } catch (err) {
+    qs("#pe-entity-detail-section").style.display = "none";
+  }
+};
+
+// ---------------------------------------------------------------------------
+// SMB Intelligence Dashboard
+// ---------------------------------------------------------------------------
+
+qs("#smb-load-btn")?.addEventListener("click", async () => {
+  const entityId = (qs("#smb-entity-input")?.value || "").trim();
+  if (!entityId) { qs("#smb-status").textContent = "Enter an SMB Entity ID."; return; }
+  const headers = getHeaders();
+  setButtonLoading("#smb-load-btn", true, "Loading…");
+  qs("#smb-status").textContent = "Loading…";
+  try {
+    const [forecast, risks] = await Promise.all([
+      callJson(`/smb/entity/${encodeURIComponent(entityId)}/cash-flow-forecast`, { headers }),
+      callJson(`/smb/entity/${encodeURIComponent(entityId)}/supplier-risks`, { headers }),
+    ]);
+
+    // Cash flow forecast
+    renderKeyValueGrid("smb-forecast-summary", [
+      ["Entity", entityId],
+      ["History Months", forecast.history_months_used],
+      ["Latest Cash", forecast.latest_cash_balance],
+      ["Revenue Trend/Mo", forecast.revenue_monthly_trend],
+      ["Cash Runway", forecast.cash_runway_months != null ? `${forecast.cash_runway_months} months` : "Healthy"],
+      ["Status", forecast.runway_status],
+    ]);
+    renderSimpleTable("smb-forecast-table",
+      ["Month", "Projected Revenue", "Projected Costs", "Net Cash Flow", "Cumulative Cash"],
+      (forecast.forecast || []).map(p => [
+        p.month, p.projected_revenue, p.projected_costs, p.net_cash_flow, p.cumulative_cash
+      ])
+    );
+    qs("#smb-forecast-section").style.display = "";
+
+    // Supplier risks
+    renderKeyValueGrid("smb-risks-summary", [
+      ["Overall Risk", risks.overall_risk],
+      ["Top Supplier Concentration", risks.top_supplier_concentration != null ? `${(risks.top_supplier_concentration*100).toFixed(1)}%` : "—"],
+      ["Cash Buffer (months)", risks.cash_buffer_months?.toFixed(1)],
+      ["Risk Count", risks.risk_count],
+    ]);
+    const riskHtml = (risks.risks || []).map(r =>
+      `<div class="signal-grid" style="margin-bottom:6px">
+        <div>${r.severity === "high" ? "🔴" : "🟡"} <strong>${r.risk_type}</strong></div>
+        <div>Severity: ${r.severity}</div>
+        <div>${r.description}</div>
+      </div>`
+    ).join("") || `<p class="muted">No risks detected.</p>`;
+    qs("#smb-risks-list").innerHTML = riskHtml;
+    qs("#smb-risks-section").style.display = "";
+
+    qs("#smb-status").textContent = `Intelligence loaded for ${entityId}`;
+  } catch (err) {
+    qs("#smb-status").textContent = `Error: ${err.message}`;
+  } finally {
+    setButtonLoading("#smb-load-btn", false, "Load Intelligence");
+  }
+});
+
 setDefaults();
 applyDemoMode(window.localStorage.getItem(FTIP_DEMO_MODE_STORAGE_KEY) === "1");
 {
