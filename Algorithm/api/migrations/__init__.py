@@ -782,6 +782,22 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "058_effective_breadth",
         lambda cur: cur.execute(Path(__file__).with_name("058_effective_breadth.sql").read_text()),
     ),
+    (
+        "059_options_flow_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("059_options_flow_daily.sql").read_text()),
+    ),
+    (
+        "060_narrative_intelligence_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("060_narrative_intelligence_daily.sql").read_text()),
+    ),
+    (
+        "061_institutional_flow_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("061_institutional_flow_daily.sql").read_text()),
+    ),
+    (
+        "062_earnings_intelligence_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("062_earnings_intelligence_daily.sql").read_text()),
+    ),
 ]
 
 

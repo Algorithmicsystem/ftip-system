@@ -46,6 +46,9 @@ def score_behavioral_distortion(engine_input: AxiomEngineInput) -> EngineScore:
     fragility = engine_input.fragility
     fundamental = engine_input.fundamental
 
+    _nms = engine_input.source_context.get("nms")
+    _nss = engine_input.source_context.get("nss")
+
     raw_narrative_intensity = weighted_average(
         [
             (support.attention_intensity_score, 0.24),
@@ -87,7 +90,7 @@ def score_behavioral_distortion(engine_input: AxiomEngineInput) -> EngineScore:
     underreaction_continuation_component = weighted_average(
         [
             (asymmetric_sent_score, 0.18),      # replaces raw sentiment_direction
-            (support.sentiment_trend_score, 0.12),
+            (_nms if _nms is not None else support.sentiment_trend_score, 0.12),
             (support.trend_quality_score, 0.16),
             (support.directional_persistence_score, 0.16),
             (support.price_volume_alignment_score, 0.14),
@@ -138,6 +141,8 @@ def score_behavioral_distortion(engine_input: AxiomEngineInput) -> EngineScore:
         "reversal_setup_component": rounded(reversal_setup_component),
         "contradiction_penalty_component": rounded(contradiction_penalty_component),
     }
+    if _nms is not None:
+        component_values["nms_score"] = rounded(_nms)
     available_count = sum(1 for value in component_values.values() if value is not None)
     coverage = clamp(
         mean(

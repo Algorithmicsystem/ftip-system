@@ -160,6 +160,8 @@ def build_signal_from_features(
     trend_sig = _clamp(trend / 0.10, -1.0, 1.0)
     volume_sig = _clamp(volume_z20 / 3.0, -1.0, 1.0)
     sentiment_sig = _clamp(sentiment / 0.30, -1.0, 1.0)
+    osms_raw = _safe_float(features.get("osms")) or 50.0
+    osms_sig = _clamp((osms_raw - 50.0) / 50.0, -1.0, 1.0)
     drawdown_pen = _clamp(maxdd / 0.35, 0.0, 1.0)
     vol_pen = _clamp((volatility_ann - 0.25) / 0.50, 0.0, 0.5)
     fragility_pen = _clamp((atr_pct - 0.04) / 0.08, 0.0, 0.4)
@@ -235,14 +237,26 @@ def build_signal_from_features(
         + 0.05 * sentiment_sig
         - 0.10 * drawdown_pen
     )
-    stacked_raw = (
-        weights["short"] * short_component
-        + weights["mid"] * mid_component
-        + weights["long"] * long_component
-        + 0.08 * sentiment_sig
-        + 0.04 * volume_sig
-        - 0.10 * drawdown_pen
-    )
+    if regime == "TRENDING":
+        stacked_raw = (
+            weights["short"] * short_component
+            + weights["mid"] * mid_component
+            + weights["long"] * long_component
+            + 0.05 * sentiment_sig
+            + 0.01 * volume_sig
+            + 0.12 * osms_sig
+            - 0.10 * drawdown_pen
+        )
+    else:
+        stacked_raw = (
+            weights["short"] * short_component
+            + weights["mid"] * mid_component
+            + weights["long"] * long_component
+            + 0.08 * sentiment_sig
+            + 0.04 * volume_sig
+            + 0.07 * osms_sig
+            - 0.10 * drawdown_pen
+        )
     environment_penalty = _clamp(
         (
             0.28 * event_penalty
@@ -314,6 +328,10 @@ def build_signal_from_features(
         suppression_flags.append("cross_asset_conflict")
     if stress_penalty >= 0.45 or unstable_environment_flag or defensive_regime_flag:
         suppression_flags.append("market_stress")
+    pess_raw = _safe_float(features.get("pess")) or 0.0
+    days_to_earnings = _safe_float(features.get("days_to_earnings"))
+    if pess_raw > 80.0 and days_to_earnings is not None and days_to_earnings <= 30:
+        suppression_flags.append("earnings_risk")
 
     severe_suppression = (
         (event_overhang_score >= 82 and earnings_window_flag)
@@ -395,6 +413,8 @@ def build_signal_from_features(
     elif sentiment_sig < -0.15:
         reason_codes.append("SENTIMENT_NEGATIVE")
         reason_details["SENTIMENT_NEGATIVE"] = "Sentiment is leaning negative relative to the recent baseline."
+    if abs(osms_sig) > 0.3:
+        reason_codes.append("options_flow")
     if maxdd >= 0.15:
         reason_codes.append("DRAWDOWN_PRESSURE")
         reason_details["DRAWDOWN_PRESSURE"] = "Recent drawdown pressure is still constraining signal quality."
@@ -483,6 +503,7 @@ def build_signal_from_features(
                 "mid": mid_component,
                 "long": long_component,
                 "sentiment": sentiment_sig,
+                "osms": osms_sig,
                 "drawdown_penalty": drawdown_pen,
                 "fragility_penalty": fragility_pen,
                 "environment_support": environment_support,

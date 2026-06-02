@@ -11,6 +11,9 @@ def score_flow_transmission(engine_input: AxiomEngineInput) -> EngineScore:
     support = engine_input.support
     fragility = engine_input.fragility
 
+    _ias = engine_input.source_context.get("ias")
+    _ias_sig = max(-1.0, min(1.0, (float(_ias) - 50.0) / 50.0)) if _ias is not None else None
+
     trend_quality_component = weighted_average(
         [
             (support.trend_quality_score, 0.32),
@@ -24,8 +27,9 @@ def score_flow_transmission(engine_input: AxiomEngineInput) -> EngineScore:
             (bounded_score(support.ret_21d, low=-0.15, high=0.25), 0.22),
             (bounded_score(support.mom_vol_adj_21d, low=-0.8, high=1.2), 0.22),
             (support.price_volume_alignment_score, 0.2),
-            (support.cross_domain_conviction_score, 0.18),
-            (support.opportunity_quality_score, 0.18),
+            (support.cross_domain_conviction_score, 0.12),
+            (support.opportunity_quality_score, 0.12),
+            (_ias, 0.12),
         ]
     )
     breadth_confirmation_component = weighted_average(
@@ -82,6 +86,8 @@ def score_flow_transmission(engine_input: AxiomEngineInput) -> EngineScore:
         "flow_persistence_component": rounded(flow_persistence_component),
         "conflict_penalty_component": rounded(conflict_penalty_component),
     }
+    if _ias is not None:
+        component_values["ias_score"] = rounded(_ias)
     available_count = sum(1 for value in component_values.values() if value is not None)
     coverage = clamp(
         mean(

@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 
 from api.assistant.phase3.common import bounded_score, clamp, first_available, inverse_metric, mean, safe_float
 from api.axiom.contracts import AxiomEngineInput, EngineScore
+from api.axiom.engines.earnings_intelligence import compute_pess, evaluate_pess_flags
 
 
 _VALUATION_WEIGHT = 0.14
@@ -206,6 +207,14 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         "sector_moat_score": _SECTOR_MOAT.get(_sector, 50.0),
     }
     caps_component = compute_caps(_caps_inputs, _sector_ctx)
+    _pess_data = engine_input.source_context.get("pess_data") or {}
+    _pess = compute_pess(_pess_data)
+    _days_to_earnings = engine_input.source_context.get("days_to_earnings")
+    _pess_flags = evaluate_pess_flags(_pess, _days_to_earnings)
+    # Apply earnings confidence penalty when PESS fires
+    _pess_earnings_weight = _EARNINGS_WEIGHT
+    if _pess_flags["earnings_stress_flag"]:
+        _pess_earnings_weight = max(0.09, _EARNINGS_WEIGHT - 0.05)
     score = _weighted_average(
         [
             (valuation_gap_component, _VALUATION_WEIGHT),
@@ -213,7 +222,7 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
             (cashflow_quality_component, _CASHFLOW_WEIGHT),
             (balance_sheet_resilience_component, _BALANCE_WEIGHT),
             (caps_component, _CAPS_WEIGHT),
-            (earnings_quality_component, _EARNINGS_WEIGHT),
+            (earnings_quality_component, _pess_earnings_weight),
         ]
     )
     component_values = {
@@ -223,6 +232,7 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         "balance_sheet_resilience_component": _rounded(balance_sheet_resilience_component),
         "caps_component": _rounded(caps_component),
         "earnings_quality_component": _rounded(earnings_quality_component),
+        "pess_component": _rounded(_pess),
     }
     available_count = sum(1 for value in component_values.values() if value is not None)
     coverage = clamp(
@@ -251,6 +261,10 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         100.0,
     )
     flags: List[str] = []
+    if _pess_flags["earnings_stress_flag"]:
+        flags.append("earnings_stress_pre_announcement")
+    if _pess_flags["high_earnings_risk"]:
+        flags.append("high_earnings_risk")
     if candidate.filing_recency_days is not None and candidate.filing_recency_days > 180:
         flags.append("stale_filing_context")
     if candidate.coverage_score < 50:
