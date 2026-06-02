@@ -43,6 +43,7 @@ from api.jobs.risk import router as risk_jobs_router
 from api.jobs.axiom_backtest import router as axiom_backtest_jobs_router
 from api.jobs.linkage_routes import router as linkage_router
 from api.jobs.pe_routes import router as pe_router
+from api.jobs.smb_routes import router as smb_router
 from api.axiom.routes import router as axiom_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
@@ -1839,6 +1840,7 @@ app.include_router(friction_router)
 app.include_router(ops_router)
 app.include_router(linkage_router)
 app.include_router(pe_router)
+app.include_router(smb_router)
 app.include_router(data_router)
 
 WEBAPP_DIR = Path(__file__).resolve().parent / "webapp"
