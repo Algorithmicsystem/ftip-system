@@ -329,6 +329,28 @@ def intelligence_digest(
     }
 
 
+@router.get("/regime/analogs")
+def regime_analogs(
+    regime_label: str = Query(..., description="Regime label to match (e.g. liquidity_fracture)"),
+    limit: int = Query(default=5, ge=1, le=20),
+    vix: Optional[float] = Query(default=None, description="Current VIX for similarity scoring"),
+    cape: Optional[float] = Query(default=None, description="Current CAPE for similarity scoring"),
+) -> Dict[str, Any]:
+    """Return closest historical regime analogs for a given regime label."""
+    from api.jobs.regime_analogs import find_regime_analogs
+    analogs = find_regime_analogs(
+        regime_label,
+        limit=limit,
+        vix_current=vix,
+        cape_current=cape,
+    )
+    return {
+        "regime_label": regime_label,
+        "count": len(analogs),
+        "analogs": analogs,
+    }
+
+
 @router.get("/domain")
 async def domain_readiness(request: Request) -> Dict[str, Any]:
     # Lazy import to avoid circular dependency when configuring middleware.
