@@ -818,6 +818,26 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "067_ml_adjusted_dau",
         lambda cur: cur.execute(Path(__file__).with_name("067_ml_adjusted_dau.sql").read_text()),
     ),
+    (
+        "068_axiom_intraday_updates",
+        lambda cur: cur.execute(Path(__file__).with_name("068_axiom_intraday_updates.sql").read_text()),
+    ),
+    (
+        "069_realtime_alert_log",
+        lambda cur: cur.execute(Path(__file__).with_name("069_realtime_alert_log.sql").read_text()),
+    ),
+    (
+        "070_market_breadth_sri",
+        lambda cur: cur.execute(Path(__file__).with_name("070_market_breadth_sri.sql").read_text()),
+    ),
+    (
+        "071_morning_briefings",
+        lambda cur: cur.execute(Path(__file__).with_name("071_morning_briefings.sql").read_text()),
+    ),
+    (
+        "072_intraday_ic_daily",
+        lambda cur: cur.execute(Path(__file__).with_name("072_intraday_ic_daily.sql").read_text()),
+    ),
 ]
 
 

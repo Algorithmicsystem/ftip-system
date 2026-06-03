@@ -50,6 +50,10 @@ from api.jobs.onboarding import router as onboarding_router
 from api.axiom.routes import router as axiom_router
 from api.axiom.factor_routes import router as factor_routes_router
 from api.axiom.ml.ml_routes import router as ml_routes_router
+from api.axiom.intraday.intraday_routes import router as intraday_routes_router
+from api.realtime.ws_routes import router as ws_alerts_router
+from api.jobs.morning_briefing import router as morning_briefing_router
+from api.jobs.intraday_ic import router as intraday_ic_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
 
@@ -1697,7 +1701,11 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     _startup()
+    from api.jobs.scheduler import start_scheduler
+    start_scheduler()
     yield
+    from api.jobs.scheduler import scheduler_manager
+    scheduler_manager.stop()
 
 
 def _startup() -> List[str]:
@@ -1841,6 +1849,10 @@ app.include_router(axiom_backtest_jobs_router)
 app.include_router(axiom_router)
 app.include_router(factor_routes_router)
 app.include_router(ml_routes_router)
+app.include_router(intraday_routes_router)
+app.include_router(ws_alerts_router)
+app.include_router(morning_briefing_router)
+app.include_router(intraday_ic_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)

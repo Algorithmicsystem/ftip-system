@@ -1,0 +1,1 @@
+ALTER TABLE market_breadth_daily ADD COLUMN IF NOT EXISTS sri NUMERIC;

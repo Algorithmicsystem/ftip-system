@@ -60,6 +60,10 @@ def migrations_auto() -> bool:
     return env_bool("FTIP_MIGRATIONS_AUTO", False)
 
 
+def scheduler_enabled() -> bool:
+    return env_bool("FTIP_SCHEDULER_ENABLED", False)
+
+
 def llm_enabled() -> bool:
     return env_bool("FTIP_LLM_ENABLED", False)
 
