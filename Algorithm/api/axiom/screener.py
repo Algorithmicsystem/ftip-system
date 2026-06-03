@@ -98,6 +98,7 @@ class ScreenerResult:
     ic_state: str
     downside_flags: List[str] = field(default_factory=list)
     active_constraint: str = "kelly"
+    factor_composite_score: float = 50.0
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +189,7 @@ def screen_universe(
         dau = _safe_float(payload.get("deployable_alpha_utility"), 0.0)
         if dau < min_dau:
             continue
+        fcs = _safe_float(payload.get("factor_composite_score"), 50.0)
 
         fragility_score   = _engine_score(payload, "critical_fragility",  50.0)
         liquidity_score   = _engine_score(payload, "liquidity_convexity",  50.0)
@@ -238,6 +240,7 @@ def screen_universe(
             ic_state=ic_state,
             downside_flags=sizing.downside_flags,
             active_constraint=sizing.active_constraint,
+            factor_composite_score=round(fcs, 2),
         ))
 
     candidates.sort(key=lambda r: r.conviction_score, reverse=True)

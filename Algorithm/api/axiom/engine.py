@@ -163,4 +163,55 @@ def build_axiom_artifact(
             scorecard=scorecard,
         ),
     )
-    return artifact.model_dump(mode="python", exclude={"scorecard": {"component_support"}})
+    payload = artifact.model_dump(mode="python", exclude={"scorecard": {"component_support"}})
+
+    # Factor Model: compute and inject factor loadings + FCS + alpha decomposition
+    try:
+        from api.axiom.factors.factor_model import compute_all_factor_loadings
+        from api.axiom.factors.alpha_decomposition import decompose_alpha
+        from api.axiom.factors.regime_factor_matrix import compute_factor_composite_score
+
+        _regime_for_factors = str(payload.get("regime_label") or "CHOPPY").upper()
+        # Map AXIOM regime labels to factor matrix regimes
+        _REGIME_MAP = {
+            "BULL_TRENDING": "TRENDING", "TREND_CONFIRMED": "TRENDING",
+            "BEAR_STRESS": "HIGH_VOL", "LIQUIDITY_FRACTURE": "HIGH_VOL",
+            "RECOVERY_PHASE": "RECOVERY",
+        }
+        _regime_key = _REGIME_MAP.get(_regime_for_factors, _regime_for_factors)
+        if _regime_key not in ("TRENDING", "CHOPPY", "HIGH_VOL", "RECOVERY"):
+            _regime_key = "CHOPPY"
+
+        # Build engine_scores dict for factor model (scores as dicts)
+        _es = {}
+        for _name, _escore in engine_scores.items():
+            _es[_name] = {
+                "score": _escore.score,
+                "components": dict(_escore.components or {}),
+            }
+
+        # engine_inputs carries regime info
+        _ei = {
+            "regime_label": _regime_key,
+            "regime_strength": float((engine_input.source_context or {}).get("regime_strength", 0.5)),
+            "amqs_score": (engine_input.source_context or {}).get("amqs_score"),
+        }
+
+        _factor_loadings = compute_all_factor_loadings(_es, _ei)
+        _fcs = compute_factor_composite_score(_factor_loadings, _regime_key)
+        _decomp = decompose_alpha(payload, _factor_loadings, _regime_key,
+                                   symbol=str(engine_input.symbol or ""),
+                                   as_of_date=str(engine_input.as_of or ""))
+
+        payload["factor_composite_score"] = _fcs
+        payload["alpha_decomposition"] = _decomp.to_dict()
+        payload["factor_loadings_summary"] = [
+            {"factor_name": fl.factor_name, "loading": fl.loading, "t_stat": fl.t_stat}
+            for fl in _factor_loadings
+        ]
+    except Exception:
+        payload["factor_composite_score"] = 50.0
+        payload["alpha_decomposition"] = {}
+        payload["factor_loadings_summary"] = []
+
+    return payload

@@ -46,6 +46,7 @@ SCORE_FIELDS = [
     "liquidity_convexity",
     "critical_fragility",
     "research_integrity",
+    "factor_composite",
 ]
 
 _MIN_SAMPLE = 5   # minimum symbols to compute a valid IC
@@ -119,6 +120,8 @@ def _extract_score(payload: Dict[str, Any], field: str) -> Optional[float]:
         if val is None:
             val = payload.get("gross_opportunity")
         return _safe_float(val)
+    if field == "factor_composite":
+        return _safe_float(payload.get("factor_composite_score"))
     engine_scores = payload.get("engine_scores") or {}
     engine_block = engine_scores.get(field) or {}
     return _safe_float(engine_block.get("score"))
