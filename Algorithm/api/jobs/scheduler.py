@@ -14,7 +14,7 @@ from fastapi import APIRouter
 router = APIRouter(prefix="/jobs/scheduler", tags=["scheduler"])
 logger = logging.getLogger(__name__)
 
-# Canonical job IDs (exactly 8)
+# Canonical job IDs (exactly 9)
 _JOB_IDS = {
     "morning_briefing",
     "intraday_update_10",
@@ -24,6 +24,7 @@ _JOB_IDS = {
     "intraday_update_16",
     "full_daily_pipeline",
     "ml_training_check",
+    "memory_consolidation",
 }
 
 
@@ -91,6 +92,28 @@ def _job_ml_training_check() -> None:
         logger.warning("scheduler.ml_training_check_failed error=%s", exc)
 
 
+def _job_memory_consolidation() -> None:
+    aod = dt.date.today()
+    try:
+        from api.intelligence.signal_memory import update_signal_performance_archive
+        r1 = update_signal_performance_archive(aod)
+        logger.info("scheduler.memory_consolidation signals_updated=%s", r1.get("updated"))
+    except Exception as exc:
+        logger.warning("scheduler.memory_consolidation_signals_failed error=%s", exc)
+    try:
+        from api.intelligence.regime_playbook import update_regime_playbook
+        r2 = update_regime_playbook(aod)
+        logger.info("scheduler.memory_consolidation regimes_updated=%s", r2.get("regimes_updated"))
+    except Exception as exc:
+        logger.warning("scheduler.memory_consolidation_playbook_failed error=%s", exc)
+    try:
+        from api.intelligence.company_dossier import run_dossier_update_job
+        r3 = run_dossier_update_job(aod)
+        logger.info("scheduler.memory_consolidation dossier_events=%s", r3.get("events_created"))
+    except Exception as exc:
+        logger.warning("scheduler.memory_consolidation_dossier_failed error=%s", exc)
+
+
 # ---------------------------------------------------------------------------
 # SchedulerManager
 # ---------------------------------------------------------------------------
@@ -128,6 +151,8 @@ class SchedulerManager:
                   id="full_daily_pipeline", replace_existing=True)
         s.add_job(_job_ml_training_check, CronTrigger(day_of_week="mon-fri", hour=18, minute=30),
                   id="ml_training_check", replace_existing=True)
+        s.add_job(_job_memory_consolidation, CronTrigger(day_of_week="mon-fri", hour=19, minute=0),
+                  id="memory_consolidation", replace_existing=True)
 
         s.start()
         self._running = True

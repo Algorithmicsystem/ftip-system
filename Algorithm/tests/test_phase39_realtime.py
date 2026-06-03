@@ -307,6 +307,7 @@ class TestScheduler:
             "intraday_update_16",
             "full_daily_pipeline",
             "ml_training_check",
+            "memory_consolidation",
         }
         assert _JOB_IDS == expected
 
@@ -332,9 +333,9 @@ class TestScheduler:
         assert "next_run_times" in status
         assert "last_run_results" in status
 
-    def test_job_count_is_eight(self):
+    def test_job_count_is_nine(self):
         from api.jobs.scheduler import _JOB_IDS
-        assert len(_JOB_IDS) == 8
+        assert len(_JOB_IDS) == 9
 
 
 # ---------------------------------------------------------------------------

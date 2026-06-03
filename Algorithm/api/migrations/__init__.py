@@ -846,6 +846,26 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "074_stress_test_results",
         lambda cur: cur.execute(Path(__file__).with_name("074_stress_test_results.sql").read_text()),
     ),
+    (
+        "075_signal_performance_archive",
+        lambda cur: cur.execute(Path(__file__).with_name("075_signal_performance_archive.sql").read_text()),
+    ),
+    (
+        "076_regime_playbook",
+        lambda cur: cur.execute(Path(__file__).with_name("076_regime_playbook.sql").read_text()),
+    ),
+    (
+        "077_company_intelligence_archive",
+        lambda cur: cur.execute(Path(__file__).with_name("077_company_intelligence_archive.sql").read_text()),
+    ),
+    (
+        "078_intelligence_graph_nodes",
+        lambda cur: cur.execute(Path(__file__).with_name("078_intelligence_graph_nodes.sql").read_text()),
+    ),
+    (
+        "079_intelligence_graph_edges",
+        lambda cur: cur.execute(Path(__file__).with_name("079_intelligence_graph_edges.sql").read_text()),
+    ),
 ]
 
 
