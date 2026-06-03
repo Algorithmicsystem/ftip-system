@@ -56,8 +56,24 @@ def compute_eis(financials: dict) -> float:
         beat_rate = float(financials.get("earnings_beat_rate_4q") or 0.5)
         receivables_score = clamp(beat_rate * 100.0, 0.0, 100.0)
 
-    eis = cash_earnings_score * 0.30 + accruals_score * 0.40 + receivables_score * 0.30
-    return round(clamp(eis, 0.0, 100.0), 2)
+    base_eis = cash_earnings_score * 0.30 + accruals_score * 0.40 + receivables_score * 0.30
+    base_eis = round(clamp(base_eis, 0.0, 100.0), 2)
+
+    # Apply Schilit penalty when sufficient full-financial fields are present
+    _SCHILIT_FIELDS = {
+        "dso_change_yoy", "revenue_growth_yoy", "nonrecurring_income_pct",
+        "capex_pct_revenue", "impairment_pct_assets", "related_party_revenue_pct",
+    }
+    if len(_SCHILIT_FIELDS & set(financials)) >= 2:
+        try:
+            from api.pe.schilit_analyzer import run_full_schilit_analysis
+            schilit = run_full_schilit_analysis(financials)
+            impact = float(schilit.get("composite_eis_impact") or 0.0)
+            return round(clamp(base_eis - impact, 0.0, 100.0), 2)
+        except Exception:
+            pass
+
+    return base_eis
 
 
 # ---------------------------------------------------------------------------

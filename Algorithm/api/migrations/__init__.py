@@ -866,6 +866,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "079_intelligence_graph_edges",
         lambda cur: cur.execute(Path(__file__).with_name("079_intelligence_graph_edges.sql").read_text()),
     ),
+    (
+        "080_lp_reports",
+        lambda cur: cur.execute(Path(__file__).with_name("080_lp_reports.sql").read_text()),
+    ),
 ]
 
 
