@@ -870,6 +870,18 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "080_lp_reports",
         lambda cur: cur.execute(Path(__file__).with_name("080_lp_reports.sql").read_text()),
     ),
+    (
+        "081_family_office_portfolios",
+        lambda cur: cur.execute(Path(__file__).with_name("081_family_office_portfolios.sql").read_text()),
+    ),
+    (
+        "082_family_office_goals",
+        lambda cur: cur.execute(Path(__file__).with_name("082_family_office_goals.sql").read_text()),
+    ),
+    (
+        "083_ria_client_profiles",
+        lambda cur: cur.execute(Path(__file__).with_name("083_ria_client_profiles.sql").read_text()),
+    ),
 ]
 
 
