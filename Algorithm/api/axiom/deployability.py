@@ -163,6 +163,15 @@ def classify_axiom_deployability(
         tier = "not_actionable"
         size_band = "none"
 
+    # Drawdown intelligence gate: deep observed drawdown degrades live candidacy
+    evidence_backed_drawdown = engine_input.support.evidence_backed_drawdown
+    if evidence_backed_drawdown is not None and evidence_backed_drawdown < -0.35:
+        if tier == "live_candidate":
+            tier = "paper_trade_only"
+            size_band = "small"
+            rationale = "Deep historical drawdown observed (below -35%) degrades live candidacy."
+        invalidation_flags.append("deep_drawdown_observed")
+
     flags = sorted(set(invalidation_flags))
     review_required = tier != "live_candidate"
     confidence = clamp(

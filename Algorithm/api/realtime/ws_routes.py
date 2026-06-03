@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 _BROADCASTER_INTERVAL_S = 60
 _SRI_ALERT_THRESHOLD = 70.0
+_SRI_ALERT_COOLDOWN_S = 3600  # 60-minute throttle
+
+_last_sri_alert_time: Optional[dt.datetime] = None
 
 
 async def _alert_broadcaster() -> None:
@@ -42,6 +45,7 @@ async def _alert_broadcaster() -> None:
 
 async def _scan_and_broadcast() -> None:
     """Query recent axiom + intraday updates and broadcast relevant alerts."""
+    global _last_sri_alert_time
     if not db.db_read_enabled():
         return
 
@@ -99,13 +103,17 @@ async def _scan_and_broadcast() -> None:
     if sri_row and sri_row[0] is not None:
         sri = float(sri_row[0])
         if sri > _SRI_ALERT_THRESHOLD:
-            risk_alert = build_risk_alert(
-                symbol="MARKET",
-                risk_type="systemic_risk_spike",
-                severity="critical",
-                description=f"Systemic Risk Index is {sri:.1f} (above threshold {_SRI_ALERT_THRESHOLD})",
-            )
-            await manager.broadcast_alert(risk_alert)
+            now = dt.datetime.now(dt.timezone.utc)
+            elapsed = (now - _last_sri_alert_time).total_seconds() if _last_sri_alert_time else _SRI_ALERT_COOLDOWN_S + 1
+            if elapsed >= _SRI_ALERT_COOLDOWN_S:
+                risk_alert = build_risk_alert(
+                    symbol="SYSTEM",
+                    risk_type="systemic_risk",
+                    severity="warning",
+                    description=f"SRI at {sri:.1f}",
+                )
+                await manager.broadcast_alert(risk_alert)
+                _last_sri_alert_time = now
 
 
 @router.websocket("/ws/alerts")

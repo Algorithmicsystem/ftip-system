@@ -203,6 +203,7 @@ class AxiomSupportContext(BaseModel):
     fragility_vetoes: List[str] = Field(default_factory=list)
     deployment_blockers: List[str] = Field(default_factory=list)
     monitoring_triggers: List[str] = Field(default_factory=list)
+    evidence_backed_drawdown: Optional[float] = None
 
 
 class AxiomEngineInput(BaseModel):

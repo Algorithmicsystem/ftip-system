@@ -57,12 +57,17 @@ class MorningBriefing:
 
 
 def compute_systemic_risk_index(as_of_date: dt.date) -> float:
-    """Compute SRI from fragility, SCPS, BFS, IC degradation, and correlation.
+    """Compute SRI — delegates to full Phase 11 SRI engine when DB is available.
 
     Returns 50.0 (neutral) if insufficient data.
     """
     if not db.db_read_enabled():
         return 50.0
+    try:
+        from api.axiom.risk.systemic_risk import compute_sri
+        return compute_sri(as_of_date)["sri"]
+    except Exception:
+        pass
 
     try:
         rows = db.safe_fetchall(

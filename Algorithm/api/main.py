@@ -54,6 +54,7 @@ from api.axiom.intraday.intraday_routes import router as intraday_routes_router
 from api.realtime.ws_routes import router as ws_alerts_router
 from api.jobs.morning_briefing import router as morning_briefing_router
 from api.jobs.intraday_ic import router as intraday_ic_router
+from api.axiom.risk.risk_routes import router as risk_framework_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
 
@@ -1853,6 +1854,7 @@ app.include_router(intraday_routes_router)
 app.include_router(ws_alerts_router)
 app.include_router(morning_briefing_router)
 app.include_router(intraday_ic_router)
+app.include_router(risk_framework_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)
