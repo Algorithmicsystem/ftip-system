@@ -49,6 +49,7 @@ from api.jobs.scheduler import router as scheduler_router
 from api.jobs.onboarding import router as onboarding_router
 from api.axiom.routes import router as axiom_router
 from api.axiom.factor_routes import router as factor_routes_router
+from api.axiom.ml.ml_routes import router as ml_routes_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
 
@@ -1839,6 +1840,7 @@ app.include_router(risk_jobs_router)
 app.include_router(axiom_backtest_jobs_router)
 app.include_router(axiom_router)
 app.include_router(factor_routes_router)
+app.include_router(ml_routes_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)

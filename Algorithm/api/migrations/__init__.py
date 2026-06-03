@@ -806,6 +806,18 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "064_factor_returns_daily",
         lambda cur: cur.execute(Path(__file__).with_name("064_factor_returns_daily.sql").read_text()),
     ),
+    (
+        "065_ml_model_registry",
+        lambda cur: cur.execute(Path(__file__).with_name("065_ml_model_registry.sql").read_text()),
+    ),
+    (
+        "066_ml_signal_predictions",
+        lambda cur: cur.execute(Path(__file__).with_name("066_ml_signal_predictions.sql").read_text()),
+    ),
+    (
+        "067_ml_adjusted_dau",
+        lambda cur: cur.execute(Path(__file__).with_name("067_ml_adjusted_dau.sql").read_text()),
+    ),
 ]
 
 

@@ -213,5 +213,33 @@ def build_axiom_artifact(
         payload["factor_composite_score"] = 50.0
         payload["alpha_decomposition"] = {}
         payload["factor_loadings_summary"] = []
+        _factor_loadings = []
+
+    # ML Signal Layer: build feature vector and run inference
+    try:
+        from api.axiom.ml.feature_builder import build_feature_vector
+        from api.axiom.ml.inference import compute_ml_signal_boost, predict_signal
+        from api.assistant.phase3.common import clamp as _clamp
+
+        _fv = build_feature_vector(payload, _factor_loadings, ic_state=None)
+        _ml_pred = predict_signal(_fv, regime_label=payload.get("regime_label"))
+        _ml_boost = compute_ml_signal_boost(
+            float(payload.get("deployable_alpha_utility") or 0.0), _ml_pred
+        )
+        _ml_adjusted_dau = _clamp(
+            float(payload.get("deployable_alpha_utility") or 0.0) + _ml_boost,
+            0.0,
+            100.0,
+        )
+        payload["ml_adjusted_dau"] = round(_ml_adjusted_dau, 2)
+        payload["ml_signal"] = _ml_pred
+    except Exception:
+        payload["ml_adjusted_dau"] = payload.get("deployable_alpha_utility")
+        payload["ml_signal"] = {
+            "ml_prediction": None,
+            "ml_confidence": None,
+            "ml_model_version": "no_model_trained",
+            "ml_available": False,
+        }
 
     return payload

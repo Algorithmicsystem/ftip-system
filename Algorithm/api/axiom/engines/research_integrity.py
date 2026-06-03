@@ -213,6 +213,9 @@ def score_research_integrity(engine_input: AxiomEngineInput) -> EngineScore:
         flags.append("thin_out_of_sample_history")
     if (support.model_drift_score or 0.0) >= 55.0:
         flags.append("active_model_drift")
+    # Wire ML drift monitor: set flag when drift_monitor reports drift
+    if engine_input.source_context.get("ml_drift_detected") and "active_model_drift" not in flags:
+        flags.append("active_model_drift")
     if bool(support.pause_required):
         flags.append("pause_required")
     if (support.commercialization_risk_score or 0.0) >= 60.0:
