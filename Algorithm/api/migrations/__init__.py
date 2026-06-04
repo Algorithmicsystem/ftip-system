@@ -902,6 +902,22 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "088_macro_intelligence_snapshots",
         lambda cur: cur.execute(Path(__file__).with_name("088_macro_intelligence_snapshots.sql").read_text()),
     ),
+    (
+        "089_webhook_subscriptions",
+        lambda cur: cur.execute(Path(__file__).with_name("089_webhook_subscriptions.sql").read_text()),
+    ),
+    (
+        "090_webhook_deliveries",
+        lambda cur: cur.execute(Path(__file__).with_name("090_webhook_deliveries.sql").read_text()),
+    ),
+    (
+        "091_api_usage_log",
+        lambda cur: cur.execute(Path(__file__).with_name("091_api_usage_log.sql").read_text()),
+    ),
+    (
+        "092_partner_profiles",
+        lambda cur: cur.execute(Path(__file__).with_name("092_partner_profiles.sql").read_text()),
+    ),
 ]
 
 
