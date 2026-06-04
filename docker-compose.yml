@@ -1,36 +1,50 @@
+version: "3.9"
+
 services:
   db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: ftip
-      POSTGRES_USER: ftip
-      POSTGRES_PASSWORD: ftip
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ftip -d ftip"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+    image: postgres:16
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-axiom}
+      POSTGRES_USER: ${POSTGRES_USER:-axiom}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
     ports:
       - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-axiom}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
 
   api:
     build:
-      context: .
+      context: ./Algorithm
       dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://ftip:ftip@db:5432/ftip
+      DATABASE_URL: ${DATABASE_URL:-postgresql://axiom:changeme@db:5432/axiom}
+      FTIP_API_KEY: ${FTIP_API_KEY}
+      POLYGON_API_KEY: ${POLYGON_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       FTIP_DB_ENABLED: "1"
       FTIP_DB_WRITE_ENABLED: "1"
       FTIP_DB_READ_ENABLED: "1"
       FTIP_MIGRATIONS_AUTO: "1"
       FTIP_DB_REQUIRED: "1"
+      AXIOM_ENV: ${AXIOM_ENV:-production}
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
 
 volumes:
   postgres_data:
