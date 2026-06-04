@@ -107,6 +107,19 @@ def compute_sri(as_of_date: dt.date) -> Dict:
         component_values[k] * w for k, w in _SRI_COMPONENTS.items()
     )
     sri = round(clamp(sri_raw, 0.0, 100.0), 2)
+
+    # Optional cross-asset divergence adjustment
+    try:
+        from api.macro.cross_asset_engine import compute_cross_asset_snapshot
+        ca = compute_cross_asset_snapshot({}, "UNKNOWN")
+        ca_conf = ca.cross_asset_confirmation_score
+        if ca_conf < 30:
+            sri = round(clamp(sri + 7.5, 0.0, 100.0), 2)
+        elif ca_conf > 70:
+            sri = round(clamp(sri - 2.5, 0.0, 100.0), 2)
+    except Exception:
+        pass
+
     label = _sri_label(sri)
 
     # Primary driver: component with highest weighted contribution

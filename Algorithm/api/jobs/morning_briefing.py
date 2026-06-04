@@ -54,6 +54,7 @@ class MorningBriefing:
     ml_model_health: Dict[str, Any] = field(default_factory=dict)
     systemic_risk_index: float = 50.0
     briefing_text: str = ""
+    cross_asset_context: Dict[str, Any] = field(default_factory=dict)
 
 
 def compute_systemic_risk_index(as_of_date: dt.date) -> float:
@@ -350,6 +351,21 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         sample_count=sample_count,
     )
 
+    # Cross-asset context
+    cross_asset_ctx: Dict[str, Any] = {}
+    try:
+        from api.macro.cross_asset_engine import compute_cross_asset_snapshot
+        ca = compute_cross_asset_snapshot({}, regime_label)
+        cross_asset_ctx = {
+            "cross_asset_confirmation_score": ca.cross_asset_confirmation_score,
+            "fixed_income_signal": ca.fixed_income_signal,
+            "volatility_signal": ca.volatility_signal,
+            "equity_signal_amplifier": ca.equity_signal_amplifier,
+            "macro_narrative": ca.macro_narrative,
+        }
+    except Exception:
+        pass
+
     briefing = MorningBriefing(
         briefing_date=aod,
         market_session=session,
@@ -363,6 +379,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         ml_model_health=ml_health,
         systemic_risk_index=sri,
         briefing_text=briefing_text,
+        cross_asset_context=cross_asset_ctx,
     )
 
     # Store briefing

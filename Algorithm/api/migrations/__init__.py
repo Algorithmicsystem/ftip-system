@@ -894,6 +894,14 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "086_pipeline_runs",
         lambda cur: cur.execute(Path(__file__).with_name("086_pipeline_runs.sql").read_text()),
     ),
+    (
+        "087_cross_asset_snapshots",
+        lambda cur: cur.execute(Path(__file__).with_name("087_cross_asset_snapshots.sql").read_text()),
+    ),
+    (
+        "088_macro_intelligence_snapshots",
+        lambda cur: cur.execute(Path(__file__).with_name("088_macro_intelligence_snapshots.sql").read_text()),
+    ),
 ]
 
 
