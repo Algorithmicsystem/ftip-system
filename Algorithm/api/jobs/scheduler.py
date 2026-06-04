@@ -68,17 +68,10 @@ def _job_intraday_ic(hour: int) -> None:
 
 
 def _job_full_daily_pipeline() -> None:
-    from api import config
+    from api.orchestration.pipeline_orchestrator import run_full_pipeline
     try:
-        import httpx
-        base = "http://localhost:8000"
-        today = dt.date.today().isoformat()
-        key = config.env("FTIP_API_KEY") or ""
-        headers = {"X-FTIP-API-Key": key}
-        httpx.post(f"{base}/jobs/pnl/compute", json={"as_of_date": today, "horizons": [5, 21, 63], "store": True}, headers=headers, timeout=120)
-        httpx.post(f"{base}/jobs/ic/daily-snapshot", json={"as_of_date": today}, headers=headers, timeout=60)
-        httpx.post(f"{base}/jobs/breadth/daily-snapshot", json={"as_of_date": today}, headers=headers, timeout=60)
-        logger.info("scheduler.full_daily_pipeline done date=%s", today)
+        result = run_full_pipeline()
+        logger.info("scheduler.full_pipeline run_id=%s status=%s", result.run_id, result.overall_status)
     except Exception as exc:
         logger.warning("scheduler.full_daily_pipeline_failed error=%s", exc)
 
