@@ -1,1595 +1,660 @@
 <!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FTIP Institutional Intelligence Terminal</title>
-    <link rel="stylesheet" href="/app/static/styles.css" />
-  </head>
-  <body>
-    <header class="terminal-header">
-      <div>
-        <p class="console-kicker">Fund-grade intelligence platform</p>
-        <h1>FTIP Institutional Intelligence Terminal</h1>
-        <p class="subtitle">
-          Multi-domain analysis, strategy, evidence, evaluation, and grounded narration in one
-          institutional workflow.
-        </p>
-      </div>
-      <div class="header-actions">
-        <div class="header-pill">Official Prosperity v1 preserved</div>
-        <div class="header-pill" id="demo-mode-status">Demo mode off</div>
-        <button id="demo-mode-toggle" class="secondary">Enable Demo Mode</button>
-      </div>
-    </header>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AXIOM Intelligence Terminal</title>
+  <link rel="stylesheet" href="/app/static/design_system.css" />
+  <link rel="stylesheet" href="/app/static/styles.css" />
+  <style>
+    /* ── Layout shell ─────────────────────────────────────────── */
+    body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
 
-    <main>
-      <div class="panel official-controls-panel">
-        <h2>Official v1 Controls</h2>
-        <div class="input-row">
-          <input id="api-key-input" placeholder="X-API-Key (optional for local dev)" />
-          <input id="symbol-input" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
-          <input id="lookback-input" type="number" min="5" max="5000" value="252" />
-          <input id="from-date-input" type="date" />
-          <input id="to-date-input" type="date" />
-          <input id="as-of-date-input" type="date" />
-        </div>
+    .app-shell {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
 
-        <div class="actions-row">
-          <button id="bootstrap-btn">1) Bootstrap</button>
-          <button id="snapshot-btn">2) Run Snapshot</button>
-          <button id="refresh-btn">3/4) Refresh Latest Signal + Features</button>
-          <button id="daily-snapshot-btn" class="secondary">Optional Daily Snapshot Job</button>
-        </div>
+    /* ── Top bar ──────────────────────────────────────────────── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--space-6);
+      height: 52px;
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-default);
+      flex-shrink: 0;
+      gap: var(--space-4);
+    }
 
-        <p class="muted" id="status-line">Ready.</p>
-      </div>
+    .topbar__logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
 
-      <div class="tabs">
-        <button class="tab active" data-tab="signal">Latest Signal (official v1)</button>
-        <button class="tab" data-tab="features">Latest Features (official v1)</button>
-        <button class="tab" data-tab="workspace">Institutional workspace</button>
-        <button class="tab" data-tab="investment">Investment Intelligence</button>
-        <button class="tab" data-tab="pe-dashboard">PE Portfolio</button>
-        <button class="tab" data-tab="smb-dashboard">SMB Intelligence</button>
-      </div>
+    .topbar__wordmark {
+      font-family: var(--font-mono);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent-primary);
+      letter-spacing: 0.05em;
+    }
 
-      <div id="signal" class="panel tab-panel">
-        <h3>Latest Signal</h3>
-        <div class="signal-grid">
-          <div>Symbol: <strong id="signal-symbol">N/A</strong></div>
-          <div>As Of: <strong id="signal-asof">N/A</strong></div>
-          <div>Signal: <strong id="signal-direction">N/A</strong></div>
-          <div>Score: <strong id="signal-score">N/A</strong></div>
-          <div>Confidence: <strong id="signal-confidence">N/A</strong></div>
-          <div>Regime: <strong id="signal-regime">N/A</strong></div>
-        </div>
-        <div class="chart-wrap" id="signal-chart-wrap" style="display:none">
-          <canvas id="signal-score-chart" height="80"></canvas>
-        </div>
-        <pre id="signal-json" class="json-block">{}</pre>
-      </div>
+    .topbar__tagline {
+      font-size: 11px;
+      color: var(--text-muted);
+      display: none;
+    }
 
-      <div id="features" class="panel tab-panel hidden">
-        <h3>Latest Features</h3>
-        <div class="signal-grid">
-          <div>Symbol: <strong id="features-symbol">N/A</strong></div>
-          <div>As Of: <strong id="features-asof">N/A</strong></div>
-          <div>Lookback: <strong id="features-lookback">N/A</strong></div>
-        </div>
-        <pre id="features-json" class="json-block">{}</pre>
-      </div>
+    @media (min-width: 900px) { .topbar__tagline { display: block; } }
 
-      <div id="workspace" class="panel tab-panel hidden">
-          <div class="advanced-console">
-            <div class="advanced-console-head">
-              <div>
-                <p class="console-kicker">Institutional workflow</p>
-                <h3>Research, Strategy, Evidence, and Evaluation Workspace</h3>
-                <p class="muted legacy-note">
-                  This buyer-facing workspace layers the assistant analysis artifact, strategy
-                  engine, grounded narrator, and evaluation stack into a premium institutional
-                  research terminal. The official Prosperity v1 controls remain preserved above.
-                </p>
-              </div>
-              <div class="advanced-console-badges">
-                <span class="legacy-badge">Institutional</span>
-                <span class="legacy-badge">Artifact Grounded</span>
-                <span class="legacy-badge">Demo Ready</span>
-              </div>
-            </div>
+    .topbar__center {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      flex: 1;
+      max-width: 400px;
+    }
 
-          <div class="active-analysis-banner" id="assistant-active-analysis-banner">
-            <div>
-              <div class="active-analysis-kicker">Current Active Analysis</div>
-              <div class="active-analysis-title" id="assistant-active-analysis-title">
-                No report loaded
-              </div>
-              <p class="muted active-analysis-label" id="assistant-analyze-active-label">
-                Active analysis: none yet.
-              </p>
-            </div>
-            <div class="active-analysis-meta" id="assistant-active-analysis-meta">
-              <div class="active-chip">Signal: n/a</div>
-              <div class="active-chip">Freshness: unknown</div>
-              <div class="active-chip">Report: n/a</div>
-            </div>
+    .topbar__right {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .topbar__health {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 4px 10px;
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+    }
+
+    .topbar__api-key {
+      width: 200px;
+      padding: 4px 10px;
+      font-size: 12px;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────── */
+    .sidebar {
+      width: 200px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--border-default);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      overflow-y: auto;
+      padding: var(--space-4) 0;
+    }
+
+    .sidebar__section {
+      padding: var(--space-2) var(--space-4);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-top: var(--space-3);
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 8px var(--space-4);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-secondary);
+      cursor: pointer;
+      border-radius: 0;
+      transition: background var(--transition-fast), color var(--transition-fast);
+      user-select: none;
+      border-left: 2px solid transparent;
+    }
+
+    .nav-item:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+    .nav-item.active {
+      background: rgba(59,130,246,0.08);
+      color: var(--accent-primary);
+      border-left-color: var(--accent-primary);
+    }
+
+    .nav-item__icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
+    .nav-item__label { flex: 1; }
+
+    /* ── Main content ─────────────────────────────────────────── */
+    .main-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-5) var(--space-6);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-5);
+    }
+
+    /* ── Dashboard grid ───────────────────────────────────────── */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: var(--space-5);
+      flex: 1;
+    }
+
+    @media (max-width: 1024px) {
+      .dashboard-grid { grid-template-columns: 1fr 1fr; }
+      .col-span-2 { grid-column: span 1; }
+    }
+
+    @media (max-width: 768px) {
+      .dashboard-grid { grid-template-columns: 1fr; }
+      .col-span-2 { grid-column: span 1; }
+    }
+
+    .col-span-2 { grid-column: span 2; }
+
+    .panel { min-height: 260px; max-height: 440px; }
+
+    /* ── Panel-specific heights ───────────────────────────────── */
+    #panel-briefing    { max-height: 380px; }
+    #panel-symbol      { max-height: 500px; }
+    #panel-pipeline    { max-height: 460px; }
+
+    /* ── Footer ───────────────────────────────────────────────── */
+    .app-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 var(--space-6);
+      height: 30px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-default);
+      flex-shrink: 0;
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    /* ── Opportunities list ───────────────────────────────────── */
+    .opp-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 6px var(--space-3);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background var(--transition-fast);
+    }
+
+    .opp-row:hover { background: var(--bg-elevated); }
+    .opp-row__symbol { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--text-primary); width: 50px; flex-shrink: 0; }
+    .opp-row__bar { flex: 1; }
+    .opp-row__dau { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); min-width: 28px; }
+
+    /* ── Risk gauge grid ──────────────────────────────────────── */
+    .risk-gauges {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: var(--space-3);
+      margin-bottom: var(--space-4);
+    }
+
+    /* ── Cross-asset signals ──────────────────────────────────── */
+    .ca-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 0;
+      font-size: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .ca-row__label { color: var(--text-secondary); }
+    .ca-row__signal { font-weight: 600; }
+    .ca-row__signal.risk_on  { color: var(--signal-buy); }
+    .ca-row__signal.risk_off { color: var(--signal-sell); }
+    .ca-row__signal.neutral  { color: var(--text-muted); }
+
+    /* ── Factor heatmap ───────────────────────────────────────── */
+    .factor-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      padding: 4px 0;
+    }
+    .factor-row__name { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); width: 60px; flex-shrink: 0; }
+    .factor-row__bar  { flex: 1; height: 6px; background: var(--bg-elevated); border-radius: 3px; overflow: hidden; }
+    .factor-row__fill { height: 100%; border-radius: 3px; }
+    .factor-row__fill.favored   { background: var(--signal-buy); }
+    .factor-row__fill.neutral   { background: var(--accent-primary); }
+    .factor-row__fill.unfavored { background: var(--signal-sell); }
+    .factor-row__val { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); min-width: 32px; text-align: right; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════
+     TOP BAR
+     ══════════════════════════════════════════════════════════ -->
+<header class="topbar">
+  <div class="topbar__logo">
+    <div class="topbar__wordmark">AXIOM</div>
+    <div class="topbar__tagline">Institutional Intelligence Terminal</div>
+  </div>
+
+  <div class="topbar__center">
+    <input
+      type="text"
+      id="global-symbol-input"
+      class="topbar__api-key"
+      placeholder="Symbol (e.g. AAPL)"
+      value="AAPL"
+      style="width:120px;"
+    />
+    <button class="btn-primary btn" onclick="handleGlobalSymbolSearch()" style="padding:5px 12px;">Analyze</button>
+  </div>
+
+  <div class="topbar__right">
+    <div class="topbar__health" id="health-indicator" onclick="switchPanel('pipeline')">
+      <span class="health-dot healthy" id="health-dot"></span>
+      <span id="health-label">Healthy</span>
+    </div>
+    <span class="tier-badge pro" id="tier-badge">PRO</span>
+    <input
+      type="text"
+      id="api-key-input"
+      class="topbar__api-key"
+      placeholder="API Key (optional)"
+      style="width:160px;"
+    />
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════
+     APP SHELL
+     ══════════════════════════════════════════════════════════ -->
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar" id="sidebar">
+    <div class="sidebar__section">Markets</div>
+
+    <div class="nav-item active" data-panel="briefing" onclick="switchPanel('briefing')">
+      <span class="nav-item__icon">⊞</span>
+      <span class="nav-item__label">Morning Briefing</span>
+    </div>
+
+    <div class="nav-item" data-panel="opportunities" onclick="switchPanel('opportunities')">
+      <span class="nav-item__icon">◈</span>
+      <span class="nav-item__label">Universe Screen</span>
+    </div>
+
+    <div class="nav-item" data-panel="symbol" onclick="switchPanel('symbol')">
+      <span class="nav-item__icon">◉</span>
+      <span class="nav-item__label">Symbol Intelligence</span>
+    </div>
+
+    <div class="sidebar__section">Risk</div>
+
+    <div class="nav-item" data-panel="risk" onclick="switchPanel('risk')">
+      <span class="nav-item__icon">⚠</span>
+      <span class="nav-item__label">Risk Monitor</span>
+    </div>
+
+    <div class="nav-item" data-panel="factors" onclick="switchPanel('factors')">
+      <span class="nav-item__icon">◧</span>
+      <span class="nav-item__label">Factor Environment</span>
+    </div>
+
+    <div class="sidebar__section">Platforms</div>
+
+    <div class="nav-item" data-panel="pe" onclick="switchPanel('pe')">
+      <span class="nav-item__icon">◆</span>
+      <span class="nav-item__label">PE Intelligence</span>
+    </div>
+
+    <div class="nav-item" data-panel="smb" onclick="switchPanel('smb')">
+      <span class="nav-item__icon">◧</span>
+      <span class="nav-item__label">SMB Intelligence</span>
+    </div>
+
+    <div class="sidebar__section">System</div>
+
+    <div class="nav-item" data-panel="pipeline" onclick="switchPanel('pipeline')">
+      <span class="nav-item__icon">●</span>
+      <span class="nav-item__label">System Status</span>
+    </div>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content" id="main-content">
+
+    <!-- ════════════ DASHBOARD VIEW (default) ════════════ -->
+    <div id="view-dashboard" class="dashboard-grid">
+
+      <!-- PANEL 1 — Morning Briefing (2-col wide) -->
+      <section class="panel col-span-2" id="panel-briefing">
+        <div class="panel-header">
+          <div>
+            <div class="panel-header__title">Morning Intelligence Briefing</div>
+            <div class="panel-header__subtitle" id="briefing-date">Loading...</div>
           </div>
-
-          <datalist id="assistant-horizon-options">
-            <option value="swing"></option>
-            <option value="position"></option>
-            <option value="tactical"></option>
-          </datalist>
-
-          <datalist id="assistant-risk-mode-options">
-            <option value="balanced"></option>
-            <option value="conservative"></option>
-            <option value="aggressive"></option>
-          </datalist>
-
-          <datalist id="assistant-scenario-options">
-            <option value="base"></option>
-            <option value="bull"></option>
-            <option value="bear"></option>
-            <option value="stressed"></option>
-          </datalist>
-
-          <datalist id="assistant-depth-options">
-            <option value="quick"></option>
-            <option value="standard"></option>
-            <option value="deep"></option>
-          </datalist>
-
-          <datalist id="assistant-refresh-options">
-            <option value="use_cache"></option>
-            <option value="refresh_stale"></option>
-            <option value="full_refresh"></option>
-          </datalist>
-
-          <datalist id="assistant-regime-options">
-            <option value="auto"></option>
-            <option value="risk_on"></option>
-            <option value="risk_off"></option>
-            <option value="neutral"></option>
-          </datalist>
-
-          <datalist id="assistant-audience-options">
-            <option value="general"></option>
-            <option value="hedge_fund"></option>
-            <option value="private_equity"></option>
-            <option value="investment_bank"></option>
-            <option value="family_office"></option>
-            <option value="research_team"></option>
-          </datalist>
-
-          <datalist id="assistant-report-profile-options">
-            <option value="trading_focused"></option>
-            <option value="ic_memo"></option>
-            <option value="diligence_focused"></option>
-            <option value="portfolio_review"></option>
-            <option value="risk_committee"></option>
-          </datalist>
-
-          <datalist id="assistant-platform-profile-options">
-            <option value="hf_core"></option>
-            <option value="pe_core"></option>
-            <option value="ib_core"></option>
-            <option value="fo_core"></option>
-            <option value="research_core"></option>
-          </datalist>
-
-          <datalist id="assistant-workflow-template-options">
-            <option value="hedge_fund_research"></option>
-            <option value="hedge_fund_portfolio_review"></option>
-            <option value="private_equity_diligence"></option>
-            <option value="investment_bank_advisory"></option>
-            <option value="family_office_review"></option>
-            <option value="research_watchlist"></option>
-          </datalist>
-
-          <datalist id="assistant-compare-options"></datalist>
-
-          <div class="research-shell">
-            <aside class="research-nav">
-              <div class="nav-kicker">Workspaces</div>
-              <button class="research-tab active" data-research-tab="dashboard">
-                Dashboard
-              </button>
-              <button class="research-tab" data-research-tab="analyze">Analyze</button>
-              <button class="research-tab" data-research-tab="screen">Screen</button>
-              <button class="research-tab" data-research-tab="strategy">Strategy</button>
-              <button class="research-tab" data-research-tab="portfolio">Portfolio</button>
-              <button class="research-tab" data-research-tab="markets">Markets</button>
-              <button class="research-tab" data-research-tab="platform">Platform</button>
-              <button class="research-tab" data-research-tab="evaluation">Evaluation</button>
-              <button class="research-tab" data-research-tab="evidence">Evidence</button>
-              <button class="research-tab" data-research-tab="compare">Compare</button>
-              <button class="research-tab" data-research-tab="watchlist">Watchlist</button>
-              <button class="research-tab" data-research-tab="chat">Narrator</button>
-              <button class="research-tab" data-research-tab="research">
-                Learning Lab
-              </button>
-              <button class="research-tab" data-research-tab="health">Trust / Health</button>
-            </aside>
-
-            <div class="research-main">
-              <section class="research-panel" data-research-panel="dashboard">
-                <div class="workspace-grid dashboard-grid">
-                  <section class="legacy-card dashboard-hero dashboard-wide">
-                    <div class="legacy-card-head">
-                      <h4>Executive Summary</h4>
-                      <span class="legacy-badge">Narrated artifact</span>
-                    </div>
-                    <div id="assistant-dashboard-summary" class="dashboard-summary empty-state-card">
-                      Run Assistant Analyze to populate the executive summary, conviction stack,
-                      and report freshness.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>AXIOM Overview</h4>
-                      <span class="legacy-badge">Institutional core</span>
-                    </div>
-                    <div id="assistant-axiom-overview" class="summary-grid empty-state-card">
-                      AXIOM regime, deployability, evidence status, and engine scorecard will
-                      render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Why This Signal?</h4>
-                      <span class="legacy-badge">Driver drilldown</span>
-                    </div>
-                    <div id="assistant-signal-drilldown" class="drilldown-grid empty-state-card">
-                      The driver panel will list top positives, top negatives, confidence
-                      modifiers, missing-data warnings, and freshness warnings for the active
-                      report.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Workflow / Demo Flow</h4>
-                      <span class="legacy-badge">Guided path</span>
-                    </div>
-                    <div id="assistant-dashboard-workflow" class="drilldown-grid empty-state-card">
-                      The dashboard will surface the buyer-facing workflow once an analysis is
-                      active.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Trust Snapshot</h4>
-                      <span class="legacy-badge">Freshness + auditability</span>
-                    </div>
-                    <div id="assistant-dashboard-trust-strip" class="summary-grid empty-state-card">
-                      Freshness, versions, coverage quality, and evaluation readiness render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card dashboard-wide">
-                    <div class="legacy-card-head">
-                      <h4>Recent Analyses</h4>
-                      <span class="legacy-badge">Quick re-entry</span>
-                    </div>
-                    <div id="assistant-dashboard-recent" class="empty-state-card">
-                      Recent analyzed names will appear here for fast reload, compare, and
-                      watchlist actions.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card dashboard-wide">
-                    <div class="legacy-card-head">
-                      <h4>P&amp;L Attribution</h4>
-                      <span class="legacy-badge">Forward-return tracking</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="pnl-date" type="date" placeholder="As-of date (blank = yesterday)" />
-                      <button id="pnl-compute-btn">Compute P&amp;L</button>
-                      <button id="pnl-summary-btn" class="secondary">Load Summary</button>
-                    </div>
-                    <p class="muted" id="pnl-status">No P&amp;L data loaded.</p>
-                    <div id="pnl-result" style="display:none">
-                      <div id="pnl-horizon-grid" class="summary-grid" style="margin:8px 0"></div>
-                      <div id="pnl-signal-grid" class="summary-grid" style="margin:4px 0 8px"></div>
-                      <div id="pnl-ic-line" style="font-size:0.82rem;color:var(--text-muted);margin-bottom:8px"></div>
-                      <div id="pnl-recent-wrap" style="display:none">
-                        <p style="font-weight:600;margin:8px 0 4px">Recent Outcomes</p>
-                        <table class="workspace-table" style="width:100%">
-                          <thead><tr>
-                            <th>Symbol</th><th>Signal</th><th>Date</th>
-                            <th>Horizon</th><th>Return</th><th>Hit</th>
-                          </tr></thead>
-                          <tbody id="pnl-recent-body"></tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </section>
-
-                  <section class="legacy-card dashboard-wide">
-                    <div class="legacy-card-head">
-                      <h4>Daily Pipeline</h4>
-                      <span class="legacy-badge">Orchestrator</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="daily-run-date" type="date" placeholder="As-of date (blank = yesterday)" />
-                      <button id="daily-run-btn">Run Daily Pipeline</button>
-                    </div>
-                    <p class="muted" id="daily-run-status">No pipeline run yet.</p>
-                    <div id="daily-run-result" style="display:none">
-                      <div id="daily-run-headline" style="margin:8px 0;font-weight:600"></div>
-                      <div id="daily-run-stages" class="summary-grid" style="margin:8px 0"></div>
-                      <div id="daily-run-opps-wrap" style="display:none">
-                        <p style="font-weight:600;margin:8px 0 4px">Top Opportunities</p>
-                        <table class="workspace-table" style="width:100%">
-                          <thead><tr>
-                            <th>#</th><th>Symbol</th><th>Signal</th>
-                            <th>DAU</th><th>Conviction</th><th>Weight</th>
-                            <th>Regime</th>
-                          </tr></thead>
-                          <tbody id="daily-run-opps-body"></tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="analyze">
-                <section class="legacy-card">
-                  <div class="legacy-card-head">
-                    <h4>Analyze Workspace</h4>
-                    <span class="legacy-badge">POST /assistant/analyze</span>
-                  </div>
-                  <div class="input-row advanced-input-row">
-                    <input id="assistant-analyze-symbol" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
-                    <input
-                      id="assistant-analyze-horizon"
-                      list="assistant-horizon-options"
-                      placeholder="Horizon"
-                      value="swing"
-                    />
-                    <input
-                      id="assistant-analyze-risk-mode"
-                      list="assistant-risk-mode-options"
-                      placeholder="Risk mode"
-                      value="balanced"
-                    />
-                    <input
-                      id="assistant-analyze-market-regime"
-                      list="assistant-regime-options"
-                      placeholder="Market regime"
-                      value="auto"
-                    />
-                    <input
-                      id="assistant-analyze-depth"
-                      list="assistant-depth-options"
-                      placeholder="Analysis depth"
-                      value="standard"
-                    />
-                    <input
-                      id="assistant-analyze-refresh-mode"
-                      list="assistant-refresh-options"
-                      placeholder="Refresh mode"
-                      value="refresh_stale"
-                    />
-                    <input
-                      id="assistant-analyze-scenario-mode"
-                      list="assistant-scenario-options"
-                      placeholder="Scenario"
-                      value="base"
-                    />
-                    <input
-                      id="assistant-analyze-audience"
-                      list="assistant-audience-options"
-                      placeholder="Audience"
-                      value="general"
-                    />
-                    <input
-                      id="assistant-analyze-report-profile"
-                      list="assistant-report-profile-options"
-                      placeholder="Report profile"
-                      value="trading_focused"
-                    />
-                    <input
-                      id="assistant-analyze-platform-profile"
-                      list="assistant-platform-profile-options"
-                      placeholder="Platform profile"
-                    />
-                    <input
-                      id="assistant-analyze-workspace-id"
-                      placeholder="Workspace id (optional)"
-                    />
-                    <input
-                      id="assistant-analyze-workflow-template"
-                      list="assistant-workflow-template-options"
-                      placeholder="Workflow template"
-                    />
-                    <input
-                      id="assistant-analyze-dossier-id"
-                      placeholder="Dossier id (optional)"
-                    />
-                    <label class="toggle-inline" for="assistant-analyze-create-dossier">
-                      <input id="assistant-analyze-create-dossier" type="checkbox" />
-                      <span>Create dossier</span>
-                    </label>
-                    <button id="assistant-analyze-btn" class="secondary">Run Analyze</button>
-                  </div>
-                  <p class="muted legacy-status" id="assistant-analyze-status">Ready.</p>
-                  <div id="assistant-analyze-report" class="analysis-report empty">
-                    <div class="analysis-report-empty">
-                      Run Assistant Analyze to generate a grounded system report.
-                    </div>
-                  </div>
-                </section>
-
-                <div class="workspace-grid analysis-workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Signal Summary</h4>
-                      <span class="legacy-badge">Executive thesis</span>
-                    </div>
-                    <div id="assistant-signal-summary-cards" class="summary-grid empty-state-card">
-                      Signal summary cards appear here after analysis runs.
-                    </div>
-                    <div id="assistant-signal-section" class="section-copy empty-state-card">
-                      The signal summary section will explain final action, confidence,
-                      conviction, risks, and scenario framing.
-                    </div>
-                    <div id="assistant-overall-analysis-section" class="section-copy empty-state-card">
-                      Overall thesis and cross-domain synthesis will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Technical + Quant</h4>
-                      <span class="legacy-badge">Structure</span>
-                    </div>
-                    <div id="assistant-technical-section" class="section-copy empty-state-card">
-                      Technical analysis will render here.
-                    </div>
-                    <div id="assistant-statistical-section" class="section-copy empty-state-card">
-                      Statistical / quant analysis will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Fundamental + Narrative</h4>
-                      <span class="legacy-badge">Business + crowd context</span>
-                    </div>
-                    <div id="assistant-fundamental-section" class="section-copy empty-state-card">
-                      Fundamental analysis will render here.
-                    </div>
-                    <div id="assistant-sentiment-section" class="section-copy empty-state-card">
-                      Sentiment / narrative / flow analysis will render here.
-                    </div>
-                    <div id="assistant-macro-section" class="section-copy empty-state-card">
-                      Macro / geopolitical / cross-asset analysis will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Evidence Snapshot</h4>
-                      <span class="legacy-badge">Traceability</span>
-                    </div>
-                    <div id="assistant-evidence-section" class="section-copy empty-state-card">
-                      Evidence provenance and data freshness will render here.
-                    </div>
-                    <div id="assistant-domain-status-grid" class="summary-grid empty-state-card">
-                      Domain freshness and coverage will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Deep Drilldown</h4>
-                      <span class="legacy-badge">Raw artifact</span>
-                    </div>
-                    <div id="assistant-axiom-report-pack" class="drilldown-grid empty-state-card">
-                      AXIOM summary card, IC memo, and risk/deployability memo will render here.
-                    </div>
-                    <details class="report-raw">
-                      <summary>Open raw analysis JSON</summary>
-                      <pre id="assistant-analyze-response" class="json-block response-block">{}</pre>
-                    </details>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Generate IC Memo</h4>
-                      <span class="legacy-badge">Institutional</span>
-                      <span class="legacy-badge">Lineage hash</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="memo-symbol" placeholder="Symbol (e.g. NVDA)" value="NVDA" />
-                      <input id="memo-date" type="date" placeholder="As-of date" />
-                      <input id="memo-signal" placeholder="Signal (BUY / SELL / HOLD)" />
-                      <input id="memo-regime" placeholder="Regime label (optional)" />
-                      <input id="memo-dau" type="number" placeholder="DAU 0–100 (optional)" min="0" max="100" />
-                      <label class="toggle-inline" for="memo-store">
-                        <input id="memo-store" type="checkbox" checked />
-                        <span>Store memo</span>
-                      </label>
-                      <button id="memo-generate-btn">Generate IC Memo</button>
-                    </div>
-                    <p class="muted" id="memo-status">No memo generated yet.</p>
-                    <div id="memo-result-wrap" style="display:none">
-                      <div id="memo-headline" style="font-size:1.05em;font-weight:600;margin-bottom:6px"></div>
-                      <div class="summary-grid" id="memo-meta-grid"></div>
-                      <div style="margin:10px 0">
-                        <span style="font-size:0.8em;color:#64748b">Lineage hash: </span>
-                        <code id="memo-hash" style="font-size:0.8em;color:#94a3b8;word-break:break-all"></code>
-                        <button id="memo-copy-hash-btn" class="secondary" style="margin-left:8px;font-size:0.75em;padding:2px 8px">Copy hash</button>
-                      </div>
-                      <details>
-                        <summary style="cursor:pointer;color:#94a3b8;font-size:0.85em">Full memo JSON</summary>
-                        <pre id="memo-json" class="json-block" style="max-height:320px;overflow:auto">{}</pre>
-                      </details>
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="screen">
-                <div class="workspace-grid">
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Universe Screener</h4>
-                      <span class="legacy-badge">Conviction-ranked</span>
-                      <span class="legacy-badge">All systems</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="screen-date" type="date" placeholder="As-of date (blank = today)" />
-                      <input id="screen-min-dau" type="number" min="0" max="100" value="0" placeholder="Min DAU" style="width:90px" />
-                      <select id="screen-signal-filter">
-                        <option value="">All signals</option>
-                        <option value="BUY">BUY only</option>
-                        <option value="SELL">SELL only</option>
-                        <option value="HOLD">HOLD only</option>
-                      </select>
-                      <input id="screen-min-conviction" type="number" min="0" max="100" value="0" placeholder="Min conviction" style="width:120px" />
-                      <input id="screen-limit" type="number" min="1" max="200" value="50" placeholder="Limit" style="width:70px" />
-                      <button id="screen-run-btn">Run Screen</button>
-                    </div>
-                    <p class="muted" id="screen-status">No screen run yet.</p>
-                    <div class="summary-grid" id="screen-summary" style="display:none;margin:8px 0"></div>
-                    <div id="screen-table-wrap" style="display:none">
-                      <table class="workspace-table">
-                        <thead>
-                          <tr>
-                            <th>#</th>
-                            <th>Symbol</th>
-                            <th>Signal</th>
-                            <th>Conviction</th>
-                            <th>DAU</th>
-                            <th>Weight</th>
-                            <th>Band</th>
-                            <th>Regime</th>
-                            <th>Breadth</th>
-                            <th>Tier</th>
-                          </tr>
-                        </thead>
-                        <tbody id="screen-table-body"></tbody>
-                      </table>
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="strategy">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Strategy View</h4>
-                      <span class="legacy-badge">Scenario-aware</span>
-                    </div>
-                    <div id="assistant-strategy-metrics" class="summary-grid empty-state-card">
-                      Strategy metrics will render here.
-                    </div>
-                    <div id="assistant-strategy-section" class="section-copy empty-state-card">
-                      Strategy framing appears here once a report is active.
-                    </div>
-                    <div id="assistant-strategy-scenarios" class="drilldown-grid empty-state-card">
-                      Base / bull / bear / stress scenarios will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Execution / Risks / Invalidators</h4>
-                      <span class="legacy-badge">Decision discipline</span>
-                    </div>
-                    <div id="assistant-risk-section" class="section-copy empty-state-card">
-                      Risks, weaknesses, and invalidation conditions will render here.
-                    </div>
-                    <div id="assistant-strategy-playbook" class="drilldown-grid empty-state-card">
-                      Execution posture, participant fit, and what would improve or worsen the
-                      setup will render here.
-                    </div>
-                    <div id="assistant-risk-triggers" class="drilldown-grid empty-state-card">
-                      Invalidators, confirmation triggers, deterioration triggers, and vetoes will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Deployment Readiness</h4>
-                      <span class="legacy-badge">Capital discipline</span>
-                    </div>
-                    <div id="assistant-deployment-summary-section" class="section-copy empty-state-card">
-                      Deployment mode, trust tier, live readiness, and staged rollout posture will render here.
-                    </div>
-                    <div id="assistant-deployment-readiness" class="drilldown-grid empty-state-card">
-                      Deployment permission, blockers, and review requirements will render here.
-                    </div>
-                    <div id="assistant-deployment-risk-budget" class="drilldown-grid empty-state-card">
-                      Risk-budget and exposure-caution guidance will render here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="evaluation">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Evaluation Scorecard</h4>
-                      <span class="legacy-badge">Phase 6</span>
-                    </div>
-                    <div id="assistant-evaluation-metrics" class="summary-grid empty-state-card">
-                      Evaluation scorecards will render here after analysis runs.
-                    </div>
-                    <div id="assistant-evaluation-section" class="section-copy empty-state-card">
-                      Historical usefulness and research credibility context will render here.
-                    </div>
-                    <div id="assistant-calibration-section" class="section-copy empty-state-card">
-                      Confidence and calibration evaluation will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Regime / Failure Modes</h4>
-                      <span class="legacy-badge">Cohorts</span>
-                    </div>
-                    <div id="assistant-regime-grid" class="drilldown-grid empty-state-card">
-                      Regime and cohort breakdowns will render here.
-                    </div>
-                    <div id="assistant-failure-modes" class="drilldown-grid empty-state-card">
-                      Failure modes, strongest conditions, and bucket results will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Factor / Component Usefulness</h4>
-                      <span class="legacy-badge">Attribution</span>
-                    </div>
-                    <div id="assistant-evaluation-factors" class="drilldown-grid empty-state-card">
-                      Factor and strategy component usefulness will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>AXIOM Backtest Harness</h4>
-                      <span class="legacy-badge">Historical signal performance</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="bt-from-date" type="date" placeholder="From date" />
-                      <input id="bt-to-date" type="date" placeholder="To date" />
-                      <select id="bt-horizon" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border)">
-                        <option value="5">5-day horizon</option>
-                        <option value="21" selected>21-day horizon</option>
-                        <option value="63">63-day horizon</option>
-                      </select>
-                      <input id="bt-min-dau" type="number" min="0" max="100" value="0" placeholder="Min DAU" style="width:90px" />
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
-                        <input type="checkbox" id="bt-buy" checked /> BUY signals
-                      </label>
-                      <label style="display:flex;align-items:center;gap:6px;font-size:0.85rem">
-                        <input type="checkbox" id="bt-sell" /> SELL signals (short)
-                      </label>
-                      <button id="bt-run-btn">Run Backtest</button>
-                      <button id="bt-history-btn" class="secondary">Load History</button>
-                    </div>
-                    <p class="muted" id="bt-status">Select a date range and click Run Backtest.</p>
-                    <div id="bt-result" style="display:none">
-                      <div id="bt-metrics-grid" class="summary-grid" style="margin:8px 0"></div>
-                      <div id="bt-regime-grid" class="summary-grid" style="margin:4px 0 8px"></div>
-                      <div id="bt-chart-wrap" style="display:none;height:220px;margin:12px 0">
-                        <canvas id="bt-equity-chart"></canvas>
-                      </div>
-                    </div>
-                    <div id="bt-history-wrap" style="display:none;margin-top:12px">
-                      <p style="font-weight:600;margin:4px 0">Recent Runs</p>
-                      <table class="workspace-table" style="width:100%">
-                        <thead><tr>
-                          <th>Date</th><th>From</th><th>To</th><th>Horizon</th>
-                          <th>Signals</th><th>Hit Rate</th><th>Sharpe</th><th>MaxDD</th>
-                        </tr></thead>
-                        <tbody id="bt-history-body"></tbody>
-                      </table>
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="portfolio">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Portfolio Construction</h4>
-                      <span class="legacy-badge">Ranking + fit</span>
-                    </div>
-                    <div id="assistant-portfolio-metrics" class="summary-grid empty-state-card">
-                      Portfolio ranking, classification, and size-band metrics will render here.
-                    </div>
-                    <div id="assistant-portfolio-context-section" class="section-copy empty-state-card">
-                      Portfolio context and candidate ranking logic will render here.
-                    </div>
-                    <div id="assistant-portfolio-fit-section" class="section-copy empty-state-card">
-                      Overlap, redundancy, diversification, and portfolio-fit analysis will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Execution / Exposure Controls</h4>
-                      <span class="legacy-badge">Friction-aware</span>
-                    </div>
-                    <div id="assistant-portfolio-execution-section" class="section-copy empty-state-card">
-                      Execution-quality, friction, and turnover context will render here.
-                    </div>
-                    <div id="assistant-portfolio-controls" class="drilldown-grid empty-state-card">
-                      Size-band, overlap, exposure warnings, and caution logic will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Candidate Ranking / Workflow</h4>
-                      <span class="legacy-badge">Priority and rotation</span>
-                    </div>
-                    <div id="assistant-portfolio-ranking" class="empty-state-card">
-                      Cohort ranking and portfolio-adjusted candidate ordering will render here.
-                    </div>
-                    <div id="assistant-portfolio-workflow" class="drilldown-grid empty-state-card">
-                      Watchlist, blocked reasons, stale review needs, and rotation pressure will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Risk Overlay</h4>
-                      <span class="legacy-badge">Concentration · Sector · Regime</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <textarea id="risk-portfolio-input" rows="5" style="flex:1;font-family:monospace;font-size:0.82rem;resize:vertical" placeholder="One position per line: SYMBOL:WEIGHT&#10;NVDA:0.15&#10;AAPL:0.12&#10;MSFT:0.10"></textarea>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="risk-date" type="date" placeholder="As-of date (blank = yesterday)" />
-                      <button id="risk-run-btn">Run Risk Check</button>
-                    </div>
-                    <p class="muted" id="risk-status">Enter positions above and click Run Risk Check.</p>
-                    <div id="risk-result" style="display:none">
-                      <div id="risk-state-badge" style="display:inline-block;padding:6px 16px;border-radius:8px;font-weight:700;font-size:1rem;margin:8px 0"></div>
-                      <div id="risk-concentration-grid" class="summary-grid" style="margin:8px 0"></div>
-                      <div id="risk-sector-grid" class="summary-grid" style="margin:4px 0 8px"></div>
-                      <div id="risk-flags-wrap" style="display:none;margin-bottom:8px">
-                        <p style="font-weight:600;margin:4px 0">Risk Flags</p>
-                        <div id="risk-flags-list"></div>
-                      </div>
-                      <div id="risk-flips-wrap" style="display:none;margin-bottom:8px">
-                        <p style="font-weight:600;margin:4px 0">Regime Flips</p>
-                        <div id="risk-flips-list"></div>
-                      </div>
-                      <div id="risk-per-symbol-wrap" style="display:none">
-                        <p style="font-weight:600;margin:8px 0 4px">Per-Symbol Detail</p>
-                        <table class="workspace-table" style="width:100%">
-                          <thead><tr>
-                            <th>Symbol</th><th>Weight</th><th>Regime</th>
-                            <th>DAU</th><th>Fragility</th><th>Tier</th><th>Flags</th>
-                          </tr></thead>
-                          <tbody id="risk-per-symbol-body"></tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="markets">
-                <div class="workspace-grid">
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Sector Breadth Heatmap</h4>
-                      <span class="legacy-badge">Rotation Intelligence</span>
-                    </div>
-                    <div class="input-row" style="margin-bottom:8px">
-                      <input id="sector-breadth-date" type="date" placeholder="As-of date (blank = yesterday)" />
-                      <button id="sector-breadth-scan-btn">Run Sector Breadth Scan</button>
-                      <button id="sector-breadth-load-btn" class="secondary">Load Latest</button>
-                    </div>
-                    <p class="muted" id="sector-breadth-status">No sector breadth data loaded.</p>
-                    <div class="chart-wrap" id="sector-breadth-chart-wrap" style="display:none;height:340px;margin:12px 0">
-                      <canvas id="sector-breadth-chart"></canvas>
-                    </div>
-                    <div id="sector-breadth-table-wrap" style="display:none">
-                      <table class="workspace-table">
-                        <thead>
-                          <tr>
-                            <th>Rank</th>
-                            <th>Sector</th>
-                            <th>State</th>
-                            <th>BUY %</th>
-                            <th>Participation %</th>
-                            <th>Symbols</th>
-                            <th>BUY</th>
-                            <th>SELL</th>
-                            <th>HOLD</th>
-                          </tr>
-                        </thead>
-                        <tbody id="sector-breadth-table-body"></tbody>
-                      </table>
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="platform">
-                <div class="workspace-grid">
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Executive Dashboard</h4>
-                      <span class="legacy-badge">Enterprise console</span>
-                    </div>
-                    <div id="assistant-platform-dashboard" class="drilldown-grid empty-state-card">
-                      Executive dashboard metrics, pending approvals, export activity, integration health,
-                      and recent high-DAU dossiers will render here.
-                    </div>
-                    <div id="assistant-platform-overview" class="summary-grid empty-state-card">
-                      Run Analyze with dossier creation enabled, or attach analysis to an
-                      existing dossier, to populate the workspace and workflow overview.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Workflow Template &amp; Profile</h4>
-                      <span class="legacy-badge">Audience-aware defaults</span>
-                    </div>
-                    <div id="assistant-platform-template-profile" class="drilldown-grid empty-state-card">
-                      Workflow-template, platform-profile, and AXIOM emphasis details will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Bootstrap / Provisioning</h4>
-                      <span class="legacy-badge">Pilot skeleton</span>
-                    </div>
-                    <div id="assistant-platform-bootstrap" class="drilldown-grid empty-state-card">
-                      Workspace bootstrap defaults, seeded demo summary, and profile-driven provisioning context will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Readiness</h4>
-                      <span class="legacy-badge">Pilot gate</span>
-                    </div>
-                    <div id="assistant-platform-readiness" class="drilldown-grid empty-state-card">
-                      Deployment readiness categories, warnings, and remediation notes will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Pilot Package</h4>
-                      <span class="legacy-badge">Walkthrough summary</span>
-                    </div>
-                    <div id="assistant-platform-pilot-package" class="drilldown-grid empty-state-card">
-                      Pilot package profile, dossier counts, export counts, collaboration state, and walkthrough hints will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Demo Bundles</h4>
-                      <span class="legacy-badge">Seed catalog</span>
-                    </div>
-                    <div id="assistant-platform-demo-bundles" class="drilldown-grid empty-state-card">
-                      Available demo bundles, seeded objects, and apply status will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Dossiers Console</h4>
-                      <span class="legacy-badge">Institutional objects</span>
-                    </div>
-                    <div id="assistant-platform-dossier-filters" class="summary-grid empty-state-card">
-                      <label>
-                        Workspace
-                        <input id="assistant-platform-filter-workspace" type="text" placeholder="filter workspace" />
-                      </label>
-                      <label>
-                        Workflow Template
-                        <input id="assistant-platform-filter-workflow-template" type="text" placeholder="filter template" />
-                      </label>
-                      <label>
-                        Tier
-                        <input id="assistant-platform-filter-tier" type="text" placeholder="filter tier" />
-                      </label>
-                      <label>
-                        Regime
-                        <input id="assistant-platform-filter-regime" type="text" placeholder="filter regime" />
-                      </label>
-                      <label>
-                        Stage
-                        <input id="assistant-platform-filter-stage" type="text" placeholder="filter stage" />
-                      </label>
-                      <label>
-                        Evidence
-                        <input id="assistant-platform-filter-evidence" type="text" placeholder="filter evidence" />
-                      </label>
-                    </div>
-                    <div id="assistant-platform-dossiers" class="drilldown-grid empty-state-card">
-                      Dossiers linked to the current workspace will render here once the platform
-                      layer is active.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Dossier Detail</h4>
-                      <span class="legacy-badge">AXIOM-linked case file</span>
-                    </div>
-                    <div id="assistant-platform-dossier-detail" class="drilldown-grid empty-state-card">
-                      The current dossier summary, section stack, and linked AXIOM view will
-                      render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Dossier Monitoring &amp; Status</h4>
-                      <span class="legacy-badge">Stage + triggers</span>
-                    </div>
-                    <div id="assistant-platform-monitoring" class="drilldown-grid empty-state-card">
-                      Monitoring triggers, evidence status, and workflow-stage details will
-                      render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Proof / Evidence</h4>
-                      <span class="legacy-badge">Paper-tracked credibility</span>
-                    </div>
-                    <div id="assistant-platform-proof" class="drilldown-grid empty-state-card">
-                      Tracked recommendation counts, supportive vs mixed evidence, maturity level,
-                      and buyer-grade proof summaries will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Outcome Attribution</h4>
-                      <span class="legacy-badge">Realized path</span>
-                    </div>
-                    <div id="assistant-platform-outcomes" class="drilldown-grid empty-state-card">
-                      Horizon outcomes, favorable/adverse excursion, and recommendation outcome assessment will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Calibration Hardening</h4>
-                      <span class="legacy-badge">Buckets + drift</span>
-                    </div>
-                    <div id="assistant-platform-calibration" class="drilldown-grid empty-state-card">
-                      DAU bucket behavior, deployability-tier behavior, drift flags, and sample-quality warnings will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Benchmark / Cohort View</h4>
-                      <span class="legacy-badge">Relative evidence</span>
-                    </div>
-                    <div id="assistant-platform-benchmarks" class="drilldown-grid empty-state-card">
-                      Regime, trade-family, tier, and recommendation-state cohort comparisons will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Approvals / Workflow Console</h4>
-                      <span class="legacy-badge">Decisions and locks</span>
-                    </div>
-                    <div id="assistant-platform-approvals" class="drilldown-grid empty-state-card">
-                      Pending approvals, recent decisions, and stage progression visibility will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Review / Concerns</h4>
-                      <span class="legacy-badge">Structured collaboration</span>
-                    </div>
-                    <div id="assistant-platform-reviews" class="drilldown-grid empty-state-card">
-                      Structured review comments, concern severity, and resolution state will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Assignments / Reviewers</h4>
-                      <span class="legacy-badge">Owner + reviewer slots</span>
-                    </div>
-                    <div id="assistant-platform-assignments" class="drilldown-grid empty-state-card">
-                      Owner, reviewer slots, and assignment coverage will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Committee Decision</h4>
-                      <span class="legacy-badge">Snapshot + conditions</span>
-                    </div>
-                    <div id="assistant-platform-committee" class="drilldown-grid empty-state-card">
-                      Committee outcomes, conditions, evidence gaps, and risk notes will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Recommendation State</h4>
-                      <span class="legacy-badge">Freeze / downgrade / escalation</span>
-                    </div>
-                    <div id="assistant-platform-recommendation-state" class="drilldown-grid empty-state-card">
-                      Recommendation state, lock/freeze status, and recent revision history will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Exports Console</h4>
-                      <span class="legacy-badge">Render and preview</span>
-                    </div>
-                    <div id="assistant-platform-exports" class="drilldown-grid empty-state-card">
-                      Available packs, rendered export formats, approval state, and preview snippets will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Integrations / Health Console</h4>
-                      <span class="legacy-badge">Bindings and execution</span>
-                    </div>
-                    <div id="assistant-platform-integrations" class="drilldown-grid empty-state-card">
-                      Integration bindings, health state, last execution, and connector capabilities will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Workflow Controls / Audit / Exports</h4>
-                      <span class="legacy-badge">Enterprise controls</span>
-                    </div>
-                    <div id="assistant-platform-controls" class="drilldown-grid empty-state-card">
-                      Workflow actions, approval state, audit timeline, export packs, access
-                      visibility, and integration health will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Analytics Console</h4>
-                      <span class="legacy-badge">Cross-workspace view</span>
-                    </div>
-                    <div id="assistant-platform-analytics" class="drilldown-grid empty-state-card">
-                      Cross-workspace analytics, deployability distribution, regime distribution, evidence support,
-                      and export throughput will render here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="evidence">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Evidence / Provenance</h4>
-                      <span class="legacy-badge">Key support</span>
-                    </div>
-                    <div id="assistant-evidence-section" class="section-copy empty-state-card">
-                      Evidence provenance and data freshness will render here.
-                    </div>
-                    <div id="assistant-evidence-supporting" class="drilldown-grid empty-state-card">
-                      Key supporting evidence will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>AXIOM Evidence & Lineage</h4>
-                      <span class="legacy-badge">Direct vs derived</span>
-                    </div>
-                    <div id="assistant-axiom-lineage" class="drilldown-grid empty-state-card">
-                      AXIOM evidence lineage, weakest coverage areas, and source-confidence notes
-                      will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Conflicts / Missingness</h4>
-                      <span class="legacy-badge">Weak points</span>
-                    </div>
-                    <div id="assistant-evidence-conflicts" class="drilldown-grid empty-state-card">
-                      Conflicting evidence, missingness, and freshness caveats will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Freshness / Coverage</h4>
-                      <span class="legacy-badge">Domain completeness</span>
-                    </div>
-                    <div id="assistant-domain-status-grid-evidence" class="summary-grid empty-state-card">
-                      Domain freshness and coverage will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Artifact Ledger</h4>
-                      <span class="legacy-badge">Audit trail</span>
-                    </div>
-                    <div id="assistant-artifact-ledger" class="drilldown-grid empty-state-card">
-                      Report, strategy, evaluation, and provenance metadata will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Deployment Audit Snapshot</h4>
-                      <span class="legacy-badge">Readiness gate</span>
-                    </div>
-                    <div id="assistant-deployment-audit" class="drilldown-grid empty-state-card">
-                      Deployment permission, rollout stage, audit snapshot, and pause conditions will render here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="compare">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Relative Comparison</h4>
-                      <span class="legacy-badge">Active vs peer</span>
-                    </div>
-                    <div class="input-row advanced-input-row">
-                      <input
-                        id="assistant-compare-active-symbol"
-                        placeholder="Active symbol"
-                        readonly
-                        aria-label="Active compare symbol"
-                      />
-                      <input
-                        id="assistant-compare-symbol"
-                        list="assistant-compare-options"
-                        placeholder="Compare symbol (recent or watchlist)"
-                      />
-                      <button id="assistant-compare-load-btn" class="secondary">
-                        Load Comparator
-                      </button>
-                      <button id="assistant-compare-clear-btn" class="secondary">Clear</button>
-                    </div>
-                    <p class="muted legacy-status" id="assistant-compare-status">
-                      Choose a second symbol to compare against the active analysis.
-                    </p>
-                    <div id="assistant-compare-summary" class="summary-grid empty-state-card">
-                      Comparison highlights render here after an active report and comparator are
-                      available.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Decision Matrix</h4>
-                      <span class="legacy-badge">Relative strength</span>
-                    </div>
-                    <div id="assistant-compare-details" class="empty-state-card">
-                      Compare signal, strategy, fragility, conviction, and evaluation snapshots
-                      here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="watchlist">
-                <div class="workspace-grid">
-                  <section class="legacy-card workspace-span-2">
-                    <div class="legacy-card-head">
-                      <h4>Watchlist / Monitoring</h4>
-                      <span class="legacy-badge">Portfolio-style workflow</span>
-                    </div>
-                    <div class="input-row advanced-input-row">
-                      <input
-                        id="assistant-watchlist-symbol"
-                        placeholder="Add symbol to watchlist"
-                        aria-label="Watchlist symbol"
-                      />
-                      <button id="assistant-watchlist-add-btn" class="secondary">Add Symbol</button>
-                      <button id="assistant-watchlist-add-active-btn" class="secondary">
-                        Add Active Symbol
-                      </button>
-                      <button id="assistant-watchlist-clear-btn" class="secondary">
-                        Clear Watchlist
-                      </button>
-                    </div>
-                    <p class="muted legacy-status" id="assistant-watchlist-status">
-                      Watchlist symbols remain local to this browser and use stored analysis
-                      artifacts when available.
-                    </p>
-                    <div id="assistant-watchlist-grid" class="empty-state-card">
-                      Watchlist monitoring rows will render here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="chat">
-                <section class="legacy-card">
-                  <div class="legacy-card-head">
-                    <h4>Narrator / System Voice</h4>
-                    <span class="legacy-badge">POST /assistant/chat</span>
-                  </div>
-                  <p class="muted active-analysis-label" id="assistant-chat-active-label">
-                    Active analysis: none yet.
-                  </p>
-                  <div class="active-analysis-meta compact" id="assistant-chat-analysis-meta">
-                    <div class="active-chip">Signal: n/a</div>
-                    <div class="active-chip">Conviction: unknown</div>
-                    <div class="active-chip">Strategy: n/a</div>
-                    <div class="active-chip">Freshness: unknown</div>
-                    <div class="active-chip">Report: n/a</div>
-                    <div class="active-chip">Session: local</div>
-                  </div>
-                  <p class="muted narrator-grounding-note" id="assistant-chat-grounding-note">
-                    Run Assistant Analyze to establish the active artifact the narrator should use.
-                  </p>
-                  <div class="narrator-prompt-row" id="assistant-chat-suggested-prompts">
-                    <button type="button" class="prompt-chip">Why this signal?</button>
-                    <button type="button" class="prompt-chip">What is the bear case?</button>
-                    <button type="button" class="prompt-chip">What are the invalidators?</button>
-                  </div>
-                  <div class="session-row">
-                    <input
-                      id="assistant-chat-session-id"
-                      placeholder="Session ID"
-                      readonly
-                      aria-label="Assistant chat session ID"
-                    />
-                    <button id="assistant-chat-reset-btn" class="secondary">New Session</button>
-                  </div>
-                  <textarea
-                    id="assistant-chat-message"
-                    rows="4"
-                    placeholder="Ask the narrator to explain the active analysis, strategy, or evaluation..."
-                  ></textarea>
-                  <div class="actions-row">
-                    <button id="assistant-chat-btn" class="secondary">Send</button>
-                  </div>
-                  <p class="muted legacy-status" id="assistant-chat-status">Ready.</p>
-                  <pre id="assistant-chat-response" class="json-block response-block">No grounded narrator messages yet.</pre>
-                </section>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="research">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Learning Overview</h4>
-                      <span class="legacy-badge">Continuous research</span>
-                    </div>
-                    <div id="assistant-learning-metrics" class="summary-grid empty-state-card">
-                      Archetype, cohort, drift, and experiment metrics render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Regime Learnings</h4>
-                      <span class="legacy-badge">Conditional reliability</span>
-                    </div>
-                    <div id="assistant-learning-regimes" class="drilldown-grid empty-state-card">
-                      Regime-conditioned learnings and strongest or weakest environments render
-                      here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Adaptation Queue</h4>
-                      <span class="legacy-badge">Reweighting + hypotheses</span>
-                    </div>
-                    <div id="assistant-learning-adaptations" class="drilldown-grid empty-state-card">
-                      Reweighting candidates, interaction learnings, and research hypotheses render
-                      here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Experiment Registry</h4>
-                      <span class="legacy-badge">Governed changes</span>
-                    </div>
-                    <div id="assistant-learning-experiments" class="drilldown-grid empty-state-card">
-                      Proposed, approved, and under-review experiments render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Archetypes & Motifs</h4>
-                      <span class="legacy-badge">Signal families</span>
-                    </div>
-                    <div id="assistant-learning-archetypes" class="drilldown-grid empty-state-card">
-                      Setup archetypes, active motifs, and failure modes render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Factor Lab</h4>
-                      <span class="legacy-badge">Proprietary layer</span>
-                    </div>
-                    <div id="assistant-factor-grid" class="factor-grid empty-state-card">
-                      Composite scores and factor bundles render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Research Drilldown</h4>
-                      <span class="legacy-badge">Drivers + cohorts</span>
-                    </div>
-                    <div id="assistant-research-drilldown" class="drilldown-grid empty-state-card">
-                      Strategy components, factor attribution, and diagnostic drilldowns will render
-                      here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-
-              <section class="research-panel hidden" data-research-panel="health">
-                <div class="workspace-grid">
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>System Health</h4>
-                      <span class="legacy-badge">Operational</span>
-                    </div>
-                    <div class="actions-row">
-                      <button id="assistant-health-refresh-btn" class="secondary">
-                        Refresh Health
-                      </button>
-                    </div>
-                    <p class="muted legacy-status" id="assistant-health-status">Ready.</p>
-                    <div id="assistant-system-health" class="summary-grid empty-state-card">
-                      Assistant and provider health will render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Audit / Freshness Ledger</h4>
-                      <span class="legacy-badge">Trust layer</span>
-                    </div>
-                    <div id="assistant-system-audit" class="drilldown-grid empty-state-card">
-                      Report, strategy, evaluation, freshness, and coverage audit details render
-                      here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Commercial Readiness</h4>
-                      <span class="legacy-badge">Source governance</span>
-                    </div>
-                    <div id="assistant-commercial-readiness" class="drilldown-grid empty-state-card">
-                      Source profile, commercialization blockers, and clean-stack guidance render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Deployment Governance</h4>
-                      <span class="legacy-badge">Staged rollout</span>
-                    </div>
-                    <div id="assistant-deployment-governance" class="drilldown-grid empty-state-card">
-                      Deployment mode, readiness checkpoint, risk warnings, and rollback guidance render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Operator Workflow</h4>
-                      <span class="legacy-badge">Daily / weekly / monthly</span>
-                    </div>
-                    <div id="assistant-operating-workflow" class="drilldown-grid empty-state-card">
-                      Daily triage, weekly review, monthly refinement, post-mortem focus, and trust maintenance render here.
-                    </div>
-                  </section>
-
-                  <section class="legacy-card">
-                    <div class="legacy-card-head">
-                      <h4>Operator Runbook</h4>
-                      <span class="legacy-badge">Guided workflow</span>
-                    </div>
-                    <div id="assistant-operator-runbook" class="drilldown-grid empty-state-card">
-                      Daily, weekly, monthly, and incident-response runbook guidance renders here.
-                    </div>
-                  </section>
-                </div>
-              </section>
-            </div>
+          <div class="panel-header__actions">
+            <span id="briefing-regime-chip" class="regime-chip unknown">Unknown</span>
+            <button class="btn-icon btn" onclick="loadMorningBriefing()" title="Refresh">↻</button>
           </div>
         </div>
-      </div>
-
-      <!-- ================================================================ -->
-      <!-- Investment Intelligence Dashboard                                  -->
-      <!-- ================================================================ -->
-      <div id="investment" class="panel tab-panel hidden">
-        <h3>Investment Intelligence</h3>
-        <div class="input-row">
-          <input id="inv-symbol-input" placeholder="Symbol (e.g. AAPL)" value="AAPL" />
-          <input id="inv-date-input" type="date" />
-          <button id="inv-load-btn">Load Intelligence</button>
+        <div class="panel-body" id="briefing-body">
+          <div class="loading-skeleton skeleton-line full"></div>
+          <div class="loading-skeleton skeleton-line medium" style="margin-top:8px;"></div>
+          <div class="loading-skeleton skeleton-line short" style="margin-top:8px;"></div>
         </div>
-        <p class="muted" id="inv-status">Enter a symbol and click Load Intelligence.</p>
+      </section>
 
-        <div id="inv-axiom-section" style="display:none">
-          <h4>AXIOM Score</h4>
-          <div class="signal-grid" id="inv-axiom-grid"></div>
-        </div>
-
-        <div id="inv-regime-analogs-section" style="display:none">
-          <h4>Regime Analogs</h4>
-          <div id="inv-analogs-table"></div>
-        </div>
-
-        <div id="inv-peers-section" style="display:none">
-          <h4>Linked Peers</h4>
-          <div id="inv-peers-table"></div>
-        </div>
-
-        <div id="inv-stress-section" style="display:none">
-          <h4>Stress Propagation</h4>
-          <div class="signal-grid" id="inv-stress-grid"></div>
-          <div id="inv-propagation-table"></div>
-        </div>
-      </div>
-
-      <!-- ================================================================ -->
-      <!-- PE Portfolio Dashboard                                             -->
-      <!-- ================================================================ -->
-      <div id="pe-dashboard" class="panel tab-panel hidden">
-        <h3>PE Portfolio Intelligence</h3>
-        <div class="input-row">
-          <input id="pe-org-input" placeholder="Org ID (e.g. FUND001)" value="FUND001" />
-          <button id="pe-load-btn">Load Portfolio</button>
-        </div>
-        <p class="muted" id="pe-status">Enter an Org ID and click Load Portfolio.</p>
-
-        <div id="pe-summary-section" style="display:none">
-          <h4>Portfolio Summary</h4>
-          <div class="signal-grid" id="pe-summary-grid"></div>
-        </div>
-
-        <div id="pe-entities-section" style="display:none">
-          <h4>Portfolio Companies</h4>
-          <div id="pe-entities-table"></div>
-        </div>
-
-        <div id="pe-alerts-section" style="display:none">
-          <h4>Stress Alerts</h4>
-          <div id="pe-alerts-list"></div>
-        </div>
-
-        <div id="pe-entity-detail-section" style="display:none">
-          <h4>Entity Detail: <span id="pe-detail-name"></span></h4>
-          <div class="signal-grid" id="pe-detail-grid"></div>
-          <div id="pe-exit-timing-grid"></div>
-        </div>
-      </div>
-
-      <!-- ================================================================ -->
-      <!-- SMB Intelligence Dashboard                                         -->
-      <!-- ================================================================ -->
-      <div id="smb-dashboard" class="panel tab-panel hidden">
-        <h3>SMB Intelligence</h3>
-        <div class="input-row">
-          <input id="smb-entity-input" placeholder="SMB Entity ID" value="" />
-          <button id="smb-load-btn">Load Intelligence</button>
-        </div>
-        <p class="muted" id="smb-status">Enter an SMB Entity ID and click Load Intelligence.</p>
-
-        <div id="smb-forecast-section" style="display:none">
-          <h4>Cash Flow Forecast (12-Month)</h4>
-          <div class="signal-grid" id="smb-forecast-summary"></div>
-          <div id="smb-forecast-table"></div>
-        </div>
-
-        <div id="smb-risks-section" style="display:none">
-          <h4>Supplier &amp; Cash Risks</h4>
-          <div class="signal-grid" id="smb-risks-summary"></div>
-          <div id="smb-risks-list"></div>
-        </div>
-      </div>
-
-    </main>
-
-    <section id="assistant-copilot-shell" class="assistant-copilot-shell">
-      <div class="assistant-copilot-shell-head">
-        <div class="assistant-copilot-head-primary">
-          <div class="assistant-copilot-mini-kicker">Platform Copilot</div>
-          <div class="assistant-copilot-inline-summary">
-            <h4 id="assistant-copilot-title">FTIP Platform Copilot</h4>
-            <p id="assistant-copilot-inline-context" class="muted assistant-copilot-note">
-              dashboard · no active workflow · no recommendation state
-            </p>
+      <!-- PANEL 2 — Top Opportunities (1-col) -->
+      <section class="panel" id="panel-opportunities">
+        <div class="panel-header">
+          <div>
+            <div class="panel-header__title">Top Opportunities</div>
+            <div class="panel-header__subtitle">Ranked by DAU</div>
+          </div>
+          <div class="panel-header__actions">
+            <button class="btn-icon btn" onclick="loadOpportunities()" title="Refresh">↻</button>
           </div>
         </div>
-        <div class="assistant-copilot-head-actions">
-          <div id="assistant-copilot-context" class="active-analysis-meta compact assistant-copilot-chip-row">
-            <div class="active-chip">Page dashboard</div>
-            <div class="active-chip">Workspace n/a</div>
-            <div class="active-chip">Symbol n/a</div>
-          </div>
-          <span id="assistant-copilot-state" class="legacy-badge">Context live</span>
-          <button id="assistant-copilot-toggle" class="secondary" type="button">
-            Open
-          </button>
+        <div class="panel-body" id="opportunities-body">
+          <div class="loading-skeleton skeleton-line full"></div>
+          <div class="loading-skeleton skeleton-line full" style="margin-top:8px;"></div>
+          <div class="loading-skeleton skeleton-line full" style="margin-top:8px;"></div>
         </div>
-      </div>
-      <div id="assistant-copilot-body" class="assistant-copilot-body">
-        <div id="assistant-copilot-prompts" class="narrator-prompt-row">
-          <button type="button" class="prompt-chip">What matters most on this page?</button>
-        </div>
-        <textarea
-          id="assistant-copilot-message"
-          rows="3"
-          placeholder="Ask the copilot about the current workspace, dossier, export, workflow, or AXIOM artifact..."
-        ></textarea>
-        <div class="actions-row">
-          <button id="assistant-copilot-send" class="secondary" type="button">
-            Ask Copilot
-          </button>
-        </div>
-        <p class="muted legacy-status" id="assistant-copilot-status">Ready.</p>
-        <pre id="assistant-copilot-response" class="json-block response-block">
-Persistent copilot is ready. Run Assistant Analyze or open a dossier-rich platform view for deeper grounded answers.
-        </pre>
-      </div>
-    </section>
+      </section>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-    <script src="/app/static/app.js"></script>
-  </body>
+      <!-- PANEL 3 — Symbol Intelligence (2-col wide) -->
+      <section class="panel col-span-2" id="panel-symbol" style="max-height:500px;">
+        <div class="panel-header">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <div class="panel-header__title">Symbol Intelligence</div>
+            <span id="symbol-signal-badge" class="signal-badge hold">HOLD</span>
+            <span id="symbol-analyst-rating" class="text-muted text-sm">—</span>
+          </div>
+          <div class="panel-header__actions">
+            <input type="text" id="symbol-search" placeholder="Enter symbol..." style="width:120px;padding:4px 10px;font-size:12px;" />
+            <button class="btn-primary btn" onclick="handleSymbolSearch()" style="padding:5px 10px;">Go</button>
+          </div>
+        </div>
+        <div class="panel-body" id="symbol-body">
+          <div class="tab-nav">
+            <div class="tab-nav__item active" onclick="switchTab('intelligence', this)">Intelligence</div>
+            <div class="tab-nav__item" onclick="switchTab('risk-tab', this)">Risk</div>
+            <div class="tab-nav__item" onclick="switchTab('explanation', this)">Explanation</div>
+          </div>
+
+          <!-- Intelligence Tab -->
+          <div class="tab-pane active" id="tab-intelligence">
+            <div id="intelligence-scores"></div>
+            <div id="intelligence-evidence" style="margin-top:12px;"></div>
+          </div>
+
+          <!-- Risk Tab -->
+          <div class="tab-pane" id="tab-risk-tab">
+            <div class="risk-gauges" id="risk-gauges"></div>
+            <div id="risk-invalidation"></div>
+          </div>
+
+          <!-- Explanation Tab -->
+          <div class="tab-pane" id="tab-explanation">
+            <div id="explanation-chain"></div>
+            <div id="explanation-counterfactuals" style="margin-top:12px;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PANEL 4 — Risk Monitor (1-col) -->
+      <section class="panel" id="panel-risk">
+        <div class="panel-header">
+          <div>
+            <div class="panel-header__title">Risk Monitor</div>
+            <div class="panel-header__subtitle">Systemic Risk Index</div>
+          </div>
+          <div class="panel-header__actions">
+            <button class="btn-icon btn" onclick="loadRiskMonitor()" title="Refresh">↻</button>
+          </div>
+        </div>
+        <div class="panel-body" id="risk-body">
+          <div class="loading-skeleton skeleton-line full"></div>
+        </div>
+      </section>
+
+      <!-- PANEL 5 — Factor Environment (1-col) -->
+      <section class="panel" id="panel-factors">
+        <div class="panel-header">
+          <div>
+            <div class="panel-header__title">Factor Environment</div>
+            <div class="panel-header__subtitle" id="factor-regime-label">—</div>
+          </div>
+          <div class="panel-header__actions">
+            <button class="btn-icon btn" onclick="loadFactorEnvironment()" title="Refresh">↻</button>
+          </div>
+        </div>
+        <div class="panel-body" id="factors-body">
+          <div class="loading-skeleton skeleton-line full"></div>
+        </div>
+      </section>
+
+      <!-- PANEL 6 — Pipeline Status (1-col) -->
+      <section class="panel" id="panel-pipeline" style="max-height:460px;">
+        <div class="panel-header">
+          <div>
+            <div class="panel-header__title">System Pipeline Status</div>
+            <div class="panel-header__subtitle" id="pipeline-last-run">—</div>
+          </div>
+          <div class="panel-header__actions">
+            <button class="btn-ghost btn" onclick="triggerPipelineRun()" style="font-size:11px;">Run Pipeline</button>
+            <button class="btn-icon btn" onclick="loadPipelineStatus()" title="Refresh">↻</button>
+          </div>
+        </div>
+        <div class="panel-body" id="pipeline-body">
+          <div class="loading-skeleton skeleton-line full"></div>
+        </div>
+      </section>
+
+    </div><!-- /dashboard-grid -->
+
+    <!-- ════════════ PE INTELLIGENCE VIEW ════════════ -->
+    <div id="view-pe" class="hidden">
+      <section class="panel" id="panel-pe-main" style="max-height:none;min-height:400px;">
+        <div class="panel-header">
+          <div class="panel-header__title">PE Intelligence Dashboard</div>
+          <div class="panel-header__actions">
+            <input type="text" id="pe-org-input" placeholder="Org ID..." style="width:140px;padding:4px 10px;font-size:12px;" />
+            <button class="btn-primary btn" onclick="handlePELoad()" style="padding:5px 10px;">Load</button>
+          </div>
+        </div>
+        <div class="panel-body" id="pe-body">
+          <div class="alert-banner info">Enter an organization ID to load PE intelligence.</div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ════════════ SMB INTELLIGENCE VIEW ════════════ -->
+    <div id="view-smb" class="hidden">
+      <section class="panel" id="panel-smb-main" style="max-height:none;min-height:400px;">
+        <div class="panel-header">
+          <div class="panel-header__title">SMB Intelligence Dashboard</div>
+          <div class="panel-header__actions">
+            <input type="text" id="smb-entity-input" placeholder="Entity ID..." style="width:140px;padding:4px 10px;font-size:12px;" />
+            <button class="btn-primary btn" onclick="handleSMBLoad()" style="padding:5px 10px;">Load</button>
+          </div>
+        </div>
+        <div class="panel-body" id="smb-body">
+          <div class="alert-banner info">Enter an entity ID to load SMB intelligence.</div>
+        </div>
+      </section>
+    </div>
+
+  </main><!-- /main-content -->
+</div><!-- /app-shell -->
+
+<!-- ══════════════════════════════════════════════════════════
+     FOOTER
+     ══════════════════════════════════════════════════════════ -->
+<footer class="app-footer">
+  <span id="footer-updated">Last updated: —</span>
+  <span>AXIOM Intelligence Terminal · API v1</span>
+  <span id="footer-status">Ready</span>
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════
+     LEGACY ASSISTANT COMPATIBILITY LAYER (hidden, used by app.js)
+     ══════════════════════════════════════════════════════════ -->
+<div style="display:none;" aria-hidden="true" id="legacy-assistant-compat">
+  <!-- Controls -->
+  <button id="demo-mode-toggle">Enable Demo Mode</button>
+  <!-- Active analysis labels -->
+  <p id="assistant-analyze-active-label"></p>
+  <p id="assistant-chat-active-label"></p>
+  <p id="assistant-chat-grounding-note"></p>
+  <div id="assistant-chat-suggested-prompts"></div>
+  <!-- Research tabs -->
+  <button data-research-tab="dashboard"></button>
+  <button data-research-tab="analyze"></button>
+  <button data-research-tab="portfolio"></button>
+  <button data-research-tab="evaluation"></button>
+  <button data-research-tab="compare"></button>
+  <button data-research-tab="watchlist"></button>
+  <button data-research-tab="chat"></button>
+  <button data-research-tab="platform"></button>
+  <!-- Dashboard tab panels -->
+  <div id="assistant-dashboard-workflow"></div>
+  <div id="assistant-dashboard-trust-strip"></div>
+  <div id="assistant-dashboard-recent"></div>
+  <div id="assistant-axiom-overview"></div>
+  <div id="assistant-signal-drilldown"></div>
+  <!-- Analyze tab -->
+  <div id="assistant-analyze-report"></div>
+  <input id="assistant-analyze-audience" />
+  <input id="assistant-analyze-report-profile" />
+  <input id="assistant-analyze-platform-profile" />
+  <input id="assistant-analyze-workspace-id" />
+  <input id="assistant-analyze-workflow-template" />
+  <input id="assistant-analyze-dossier-id" />
+  <input id="assistant-analyze-create-dossier" type="checkbox" />
+  <div id="assistant-axiom-report-pack"></div>
+  <!-- Strategy -->
+  <div id="assistant-strategy-metrics"></div>
+  <div id="assistant-strategy-scenarios"></div>
+  <div id="assistant-strategy-playbook"></div>
+  <div id="assistant-risk-triggers"></div>
+  <!-- Deployment -->
+  <div id="assistant-deployment-summary-section"></div>
+  <div id="assistant-deployment-readiness"></div>
+  <div id="assistant-deployment-risk-budget"></div>
+  <div id="assistant-deployment-audit"></div>
+  <div id="assistant-deployment-governance"></div>
+  <!-- Portfolio -->
+  <div id="assistant-portfolio-metrics"></div>
+  <div id="assistant-portfolio-context-section"></div>
+  <div id="assistant-portfolio-fit-section"></div>
+  <div id="assistant-portfolio-execution-section"></div>
+  <div id="assistant-portfolio-controls"></div>
+  <div id="assistant-portfolio-ranking"></div>
+  <div id="assistant-portfolio-workflow"></div>
+  <!-- Evaluation -->
+  <div id="assistant-evaluation-metrics"></div>
+  <div id="assistant-evaluation-section"></div>
+  <div id="assistant-calibration-section"></div>
+  <div id="assistant-regime-grid"></div>
+  <div id="assistant-failure-modes"></div>
+  <div id="assistant-evaluation-factors"></div>
+  <!-- Evidence / AXIOM Evidence &amp; Lineage -->
+  <div id="assistant-evidence-supporting"></div>
+  <div id="assistant-evidence-conflicts"></div>
+  <div id="assistant-axiom-lineage"></div>
+  <div id="assistant-artifact-ledger"></div>
+  <!-- AXIOM Evidence & Lineage marker for app.js -->
+  <span class="legacy-section-label">AXIOM Evidence & Lineage</span>
+  <!-- Compare / Watchlist -->
+  <div id="assistant-compare-summary"></div>
+  <div id="assistant-compare-details"></div>
+  <div id="assistant-watchlist-grid"></div>
+  <!-- Platform -->
+  <div id="assistant-platform-overview"></div>
+  <div id="assistant-platform-dashboard"></div>
+  <div id="assistant-platform-template-profile"></div>
+  <div id="assistant-platform-bootstrap"><h4>Bootstrap / Provisioning</h4></div>
+  <div id="assistant-platform-readiness"></div>
+  <div id="assistant-platform-pilot-package"><h4>Pilot Package</h4></div>
+  <div id="assistant-platform-demo-bundles"><h4>Demo Bundles</h4></div>
+  <div id="assistant-platform-dossier-filters">
+    <input id="assistant-platform-filter-tier" />
+    <input id="assistant-platform-filter-regime" />
+    <input id="assistant-platform-filter-stage" />
+    <input id="assistant-platform-filter-evidence" />
+  </div>
+  <div id="assistant-platform-dossiers"></div>
+  <div id="assistant-platform-dossier-detail"></div>
+  <div id="assistant-platform-monitoring"></div>
+  <div id="assistant-platform-controls"></div>
+  <div id="assistant-platform-approvals"></div>
+  <div id="assistant-platform-reviews"></div>
+  <div id="assistant-platform-assignments"></div>
+  <div id="assistant-platform-committee"></div>
+  <div id="assistant-platform-recommendation-state"></div>
+  <div id="assistant-platform-exports"></div>
+  <div id="assistant-platform-integrations"></div>
+  <div id="assistant-platform-analytics"></div>
+  <div id="assistant-platform-proof"></div>
+  <div id="assistant-platform-outcomes"></div>
+  <div id="assistant-platform-calibration"></div>
+  <div id="assistant-platform-benchmarks"></div>
+  <!-- System / Health -->
+  <div id="assistant-system-health"></div>
+  <div id="assistant-system-audit"></div>
+  <div id="assistant-commercial-readiness"></div>
+  <div id="assistant-operating-workflow"></div>
+  <div id="assistant-operator-runbook"></div>
+  <!-- Learning Lab -->
+  <span>Learning Lab</span>
+  <div id="assistant-learning-metrics"></div>
+  <div id="assistant-learning-regimes"></div>
+  <div id="assistant-learning-adaptations"></div>
+  <div id="assistant-learning-experiments"></div>
+  <div id="assistant-learning-archetypes"></div>
+  <!-- Copilot shell -->
+  <section id="assistant-copilot-shell">
+    <div class="assistant-copilot-mini-kicker">Platform Copilot</div>
+    <h4 id="assistant-copilot-title"></h4>
+    <p id="assistant-copilot-inline-context"></p>
+    <div id="assistant-copilot-context"></div>
+    <span id="assistant-copilot-state"></span>
+    <div id="assistant-copilot-prompts"></div>
+    <input id="assistant-copilot-message" />
+    <button id="assistant-copilot-send"></button>
+    <pre id="assistant-copilot-response"></pre>
+  </section>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════
+     SCRIPTS
+     ══════════════════════════════════════════════════════════ -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="/app/static/js/api_client.js"></script>
+<script src="/app/static/js/charts.js"></script>
+<script src="/app/static/js/panels/morning_briefing.js"></script>
+<script src="/app/static/js/panels/opportunities.js"></script>
+<script src="/app/static/js/panels/symbol_intelligence.js"></script>
+<script src="/app/static/js/panels/risk_monitor.js"></script>
+<script src="/app/static/js/panels/factor_environment.js"></script>
+<script src="/app/static/js/panels/pipeline_status.js"></script>
+<script src="/app/static/js/panels/pe_dashboard.js"></script>
+<script src="/app/static/js/panels/smb_dashboard.js"></script>
+<script src="/app/static/js/dashboard.js"></script>
+
+</body>
 </html>
