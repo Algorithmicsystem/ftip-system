@@ -304,7 +304,7 @@ def build_portfolio_allocation(
 
     sector_breakdown = {k: round(v, 4) for k, v in sorted(sector_weight.items(), key=lambda x: -x[1])}
 
-    return {
+    result = {
         "status": "ok",
         "as_of_date": as_of_date.isoformat(),
         "ic_state": ic_state,
@@ -328,6 +328,25 @@ def build_portfolio_allocation(
         "allocations": [asdict(a) for a in allocations],
         "rejected": [asdict(r) for r in rejected if r.rejection_reason],
     }
+
+    try:
+        from api.compliance.audit_trail import write_audit_record
+        write_audit_record(
+            "portfolio.allocation_computed",
+            "portfolio", f"allocation_{as_of_date.isoformat()}",
+            {"position_count": result["position_count"],
+             "portfolio_weight_total": result["portfolio_weight_total"],
+             "ic_state": result["ic_state"]},
+            as_of_date=as_of_date,
+            output_summary=(
+                f"Portfolio allocation computed: {result['position_count']} positions, "
+                f"{result['portfolio_weight_pct']} deployed"
+            ),
+        )
+    except Exception:
+        pass
+
+    return result
 
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,7 @@ from api.competitive.competitive_routes import router as competitive_router
 from api.macro.macro_routes import router as macro_router
 from api.developer.developer_routes import router as developer_router
 from api.developer.usage_middleware import UsageLoggingMiddleware
+from api.compliance.compliance_routes import router as compliance_router
 
 # =============================================================================
 # App + environment helpers
@@ -1872,6 +1873,7 @@ app.include_router(intel_router)
 app.include_router(competitive_router)
 app.include_router(macro_router)
 app.include_router(developer_router)
+app.include_router(compliance_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)

@@ -333,6 +333,20 @@ def generate_research_report(
     )
 
     _save_report(report, axiom_payload, use_llm)
+
+    try:
+        from api.compliance.audit_trail import write_audit_record
+        write_audit_record(
+            "analysis.report_generated",
+            "report", f"{symbol}_{report.report_date.isoformat()}",
+            {"analyst_rating": report.analyst_rating, "dau": dau, "regime": regime},
+            symbol=symbol,
+            as_of_date=report.report_date,
+            output_summary=f"Research report generated for {symbol}: {report.analyst_rating}",
+        )
+    except Exception:
+        pass
+
     return report
 
 

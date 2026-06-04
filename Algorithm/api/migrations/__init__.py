@@ -918,6 +918,18 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "092_partner_profiles",
         lambda cur: cur.execute(Path(__file__).with_name("092_partner_profiles.sql").read_text()),
     ),
+    (
+        "093_audit_trail",
+        lambda cur: cur.execute(Path(__file__).with_name("093_audit_trail.sql").read_text()),
+    ),
+    (
+        "094_ips_constraints",
+        lambda cur: cur.execute(Path(__file__).with_name("094_ips_constraints.sql").read_text()),
+    ),
+    (
+        "095_data_retention_policies",
+        lambda cur: cur.execute(Path(__file__).with_name("095_data_retention_policies.sql").read_text()),
+    ),
 ]
 
 

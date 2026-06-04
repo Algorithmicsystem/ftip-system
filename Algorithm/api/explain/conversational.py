@@ -255,13 +255,27 @@ def answer_intelligence_query(
 
     # Fallback to programmatic
     answer = _programmatic_answer(intent, context, symbols, query)
-    return {
+    result = {
         "query": query,
         "intent": intent,
         "answer": answer,
         "confidence": confidence,
         "grounded": grounded,
     }
+
+    try:
+        from api.compliance.audit_trail import write_audit_record
+        write_audit_record(
+            "analysis.query_answered",
+            "query", query[:120],
+            {"intent": intent, "grounded": grounded, "confidence": confidence},
+            symbol=symbols[0] if symbols else None,
+            output_summary=f"Query answered: intent={intent}, grounded={grounded}",
+        )
+    except Exception:
+        pass
+
+    return result
 
 
 # ---------------------------------------------------------------------------
