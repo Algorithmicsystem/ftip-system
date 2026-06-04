@@ -57,6 +57,7 @@ from api.jobs.intraday_ic import router as intraday_ic_router
 from api.axiom.risk.risk_routes import router as risk_framework_router
 from api.intelligence.intelligence_routes import router as intelligence_router
 from api.family_office.family_office_routes import router as family_office_router
+from api.explain.explain_routes import router as explain_router
 from api.signals.routes import router as signals_router
 from api.data.routes import router as data_router
 
@@ -1859,6 +1860,7 @@ app.include_router(intraday_ic_router)
 app.include_router(risk_framework_router)
 app.include_router(intelligence_router)
 app.include_router(family_office_router)
+app.include_router(explain_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)
