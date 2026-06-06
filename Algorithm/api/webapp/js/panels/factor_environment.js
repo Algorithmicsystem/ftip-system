@@ -8,8 +8,21 @@ async function loadFactorEnvironment() {
   body.innerHTML = '<div class="loading-skeleton skeleton-line full" style="height:60px;"></div>';
 
   try {
-    const macro = await API.get('/macro/regime').catch(() => null);
-    const cross = await API.get('/macro/cross-asset').catch(() => null);
+    const snapshot = await API.get('/macro/snapshot').catch(() => null);
+    // Reshape snapshot into the two-argument form renderFactorPanel expects
+    const macro = snapshot ? {
+      favored_axiom_factors:   snapshot.macro_intelligence?.favored_factors   || [],
+      unfavored_axiom_factors: snapshot.macro_intelligence?.unfavored_factors || [],
+      equity_macro_score:      snapshot.macro_intelligence?.equity_macro_score ?? 50,
+      macro_regime_label:      snapshot.macro_intelligence?.macro_regime_label || '—',
+    } : null;
+    const cross = snapshot ? {
+      fixed_income_signal: snapshot.cross_asset?.fixed_income_signal,
+      currency_signal:     snapshot.cross_asset?.currency_signal,
+      commodity_signal:    snapshot.cross_asset?.commodity_signal,
+      volatility_signal:   snapshot.cross_asset?.volatility_signal,
+      macro_narrative:     snapshot.cross_asset?.macro_narrative,
+    } : null;
     renderFactorPanel(macro, cross);
     if (regimeEl && macro) {
       regimeEl.textContent = macro.macro_regime_label || '—';

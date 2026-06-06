@@ -329,12 +329,15 @@ def test_factor_env_has_load_fn():
     assert "loadFactorEnvironment" in _read(os.path.join(PANELS_DIR, "factor_environment.js"))
 
 
-def test_factor_env_calls_regime_api():
-    assert "/macro/regime" in _read(os.path.join(PANELS_DIR, "factor_environment.js"))
+def test_factor_env_calls_macro_snapshot_api():
+    # Calls /macro/snapshot which returns both regime and cross-asset data
+    assert "/macro/snapshot" in _read(os.path.join(PANELS_DIR, "factor_environment.js"))
 
 
-def test_factor_env_calls_cross_asset_api():
-    assert "/macro/cross-asset" in _read(os.path.join(PANELS_DIR, "factor_environment.js"))
+def test_factor_env_extracts_cross_asset_signals():
+    src = _read(os.path.join(PANELS_DIR, "factor_environment.js"))
+    assert "cross_asset" in src
+    assert "macro_intelligence" in src
 
 
 def test_factor_env_has_heatmap():

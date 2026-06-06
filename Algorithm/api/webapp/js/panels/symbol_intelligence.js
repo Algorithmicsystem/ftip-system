@@ -28,7 +28,7 @@ async function loadSymbolIntelligence(symbol) {
   try {
     const [intel, explain] = await Promise.all([
       API.get(`/intelligence/universal/${symbol}`).catch(() => null),
-      API.get(`/explain/${symbol}`).catch(() => null),
+      API.get(`/explain/signal/${symbol}`).catch(() => null),
     ]);
 
     renderIntelligenceTab(intel, symbol);

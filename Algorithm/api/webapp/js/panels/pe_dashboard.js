@@ -16,11 +16,13 @@ async function loadPEPortfolio(orgId) {
   ).join('');
 
   try {
-    const [overview, pipeline, lpReport] = await Promise.all([
+    const [overview, stressAlerts, lpReport] = await Promise.all([
       API.get(`/pe/portfolio/${orgId}/overview`).catch(() => null),
-      API.get(`/pe/portfolio/${orgId}/exit-pipeline`).catch(() => null),
+      API.get(`/pe/portfolio/${orgId}/stress-alerts`).catch(() => null),
       API.get(`/pe/portfolio/${orgId}/lp-report`).catch(() => null),
     ]);
+    // stress-alerts is the closest existing route; exit-pipeline data comes from overview
+    const pipeline = overview;
 
     if (!overview && !pipeline && !lpReport) {
       body.innerHTML = `<div class="alert-banner info">No PE data available for org: ${orgId}</div>`;

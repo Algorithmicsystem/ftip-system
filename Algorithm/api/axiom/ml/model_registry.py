@@ -98,11 +98,11 @@ def get_active_model(
             SELECT model_path, metadata
               FROM ml_model_registry
              WHERE is_active = TRUE
-               AND (regime_label = %s OR (regime_label IS NULL AND %s IS NULL))
+               AND regime_label IS NOT DISTINCT FROM %s::text
              ORDER BY trained_at DESC
              LIMIT 1
             """,
-            (regime_label, regime_label),
+            (regime_label,),
         )
         if not row:
             # Fall back to global model

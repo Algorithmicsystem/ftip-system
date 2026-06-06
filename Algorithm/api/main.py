@@ -2371,6 +2371,102 @@ def version() -> Dict[str, Any]:
     return {"railway_git_commit_sha": _git_sha(), "railway_environment": _railway_env()}
 
 
+@app.get("/system/status")
+def system_status() -> Dict[str, Any]:
+    """Production system status — operator view of what's running and healthy."""
+    warnings: List[str] = []
+
+    # DB connectivity
+    db_connected = False
+    migrations_applied = 0
+    latest_migration = "none"
+    if db.db_enabled():
+        try:
+            row = db.safe_fetchone("SELECT 1")
+            db_connected = row is not None
+        except Exception:
+            pass
+        if db_connected:
+            try:
+                mig_row = db.safe_fetchone(
+                    "SELECT COUNT(*), MAX(migration_name) FROM schema_migrations WHERE applied_at IS NOT NULL"
+                )
+                if mig_row:
+                    migrations_applied = int(mig_row[0] or 0)
+                    latest_migration = str(mig_row[1] or "none")
+            except Exception:
+                pass
+
+    # Data counts
+    axiom_count = 0
+    briefings_count = 0
+    if db_connected:
+        try:
+            r = db.safe_fetchone("SELECT COUNT(*) FROM axiom_scores_daily")
+            axiom_count = int(r[0] or 0) if r else 0
+        except Exception:
+            pass
+        try:
+            r = db.safe_fetchone("SELECT COUNT(*) FROM morning_briefings")
+            briefings_count = int(r[0] or 0) if r else 0
+        except Exception:
+            pass
+
+    # ML model
+    ml_trained = False
+    if db_connected:
+        try:
+            r = db.safe_fetchone("SELECT COUNT(*) FROM ml_model_registry WHERE is_active = TRUE")
+            ml_trained = (int(r[0] or 0) if r else 0) > 0
+        except Exception:
+            pass
+
+    # Scheduler
+    scheduler_running = False
+    try:
+        from api.jobs import scheduler as sched_module
+        _sched = getattr(sched_module, "_scheduler", None)
+        scheduler_running = _sched is not None and getattr(_sched, "running", False)
+    except Exception:
+        pass
+
+    # Last pipeline run
+    last_pipeline_run: Optional[str] = None
+    if db_connected:
+        try:
+            r = db.safe_fetchone(
+                "SELECT started_at FROM pipeline_runs ORDER BY started_at DESC LIMIT 1"
+            )
+            if r and r[0]:
+                last_pipeline_run = r[0].isoformat() if hasattr(r[0], "isoformat") else str(r[0])
+        except Exception:
+            pass
+
+    # Warnings
+    if not db_connected:
+        warnings.append("Database not connected — operating in stateless mode")
+    if axiom_count == 0:
+        warnings.append("No AXIOM scores in DB — pipeline has not run yet")
+    if briefings_count == 0:
+        warnings.append("No morning briefings stored — scheduler may not be active")
+    if not ml_trained:
+        warnings.append("No active ML model — run ML training pipeline")
+
+    return {
+        "server": "healthy",
+        "db_connected": db_connected,
+        "migrations_applied": migrations_applied,
+        "latest_migration": latest_migration,
+        "axiom_scores_count": axiom_count,
+        "morning_briefings_count": briefings_count,
+        "ml_model_trained": ml_trained,
+        "scheduler_running": scheduler_running,
+        "last_pipeline_run": last_pipeline_run,
+        "warnings": warnings,
+        "version": "22.0.0",
+    }
+
+
 @app.get("/market/massive/bars")
 def market_massive_bars(
     symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),

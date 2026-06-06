@@ -184,7 +184,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
     sri = compute_systemic_risk_index(aod)
 
     # Default structure for DB-disabled mode
-    if not db.db_read_enabled():
+    if not db.db_enabled():
         return MorningBriefing(
             briefing_date=aod,
             market_session=session,

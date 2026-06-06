@@ -200,7 +200,7 @@ def assemble_universal_intelligence(
 ) -> UniversalIntelligenceResponse:
     as_of_date = as_of_date or dt.date.today()
 
-    if not db.db_read_enabled():
+    if not db.db_enabled():
         return _default_response(symbol, as_of_date)
 
     try:
@@ -253,17 +253,21 @@ def assemble_universal_intelligence(
         sri_val = float(sri_row[0]) if sri_row and sri_row[0] is not None else None
         systemic_risk_index = sri_val or 50.0
 
-        # Step 5: VaR
-        var_row = db.safe_fetchone(
-            """
-            SELECT var_1d_99
-              FROM portfolio_risk_daily
-             WHERE symbol = %s
-             ORDER BY as_of_date DESC LIMIT 1
-            """,
-            (symbol,),
-        )
-        var_1d_99 = float(var_row[0]) if var_row and var_row[0] is not None else None
+        # Step 5: VaR (portfolio_risk_daily uses portfolio_id, symbol may not match)
+        var_1d_99 = None
+        try:
+            var_row = db.safe_fetchone(
+                """
+                SELECT var_99_1d
+                  FROM portfolio_risk_daily
+                 WHERE portfolio_id = %s
+                 ORDER BY as_of_date DESC LIMIT 1
+                """,
+                (symbol,),
+            )
+            var_1d_99 = float(var_row[0]) if var_row and var_row[0] is not None else None
+        except Exception:
+            pass
 
         # Step 6 + 7: From payload
         extracted = _extract_from_payload(payload)

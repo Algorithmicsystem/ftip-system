@@ -392,7 +392,7 @@ def get_analog_alerts(org_id: str) -> Dict[str, Any]:
 def get_lp_report(
     org_id: str,
     quarter: Optional[str] = None,
-    format: str = Query("full", regex="^(full|summary)$"),
+    format: str = Query("full", pattern="^(full|summary)$"),
 ) -> Dict[str, Any]:
     """Generate (or retrieve) quarterly LP report for a portfolio."""
     from api.pe.lp_reporting import generate_lp_report
