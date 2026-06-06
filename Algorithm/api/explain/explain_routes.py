@@ -22,8 +22,9 @@ router = APIRouter(
 
 def _load_axiom_payload(symbol: str) -> Dict[str, Any]:
     """Load latest AXIOM payload from DB, or return minimal stub."""
+    import json
     from api import db
-    if not db.db_read_enabled():
+    if not db.db_enabled():
         return {}
     try:
         row = db.safe_fetchone(
@@ -40,7 +41,25 @@ def _load_axiom_payload(symbol: str) -> Dict[str, Any]:
             (symbol,),
         )
         if row and row[0]:
-            return dict(row[0]) if isinstance(row[0], dict) else {}
+            raw = row[0]
+            if isinstance(raw, dict):
+                payload = raw
+            elif isinstance(raw, str):
+                try:
+                    payload = json.loads(raw)
+                except Exception:
+                    payload = {}
+            else:
+                payload = {}
+            # Derive primary_driver from highest engine score if missing
+            if not payload.get("primary_driver"):
+                engines = (payload.get("engine_scores") or {})
+                if engines:
+                    best = max(engines.items(), key=lambda kv: (kv[1] or {}).get("score", 0) if isinstance(kv[1], dict) else 0, default=(None, None))
+                    if best[0]:
+                        alpha = payload.setdefault("alpha_decomposition", {})
+                        alpha.setdefault("primary_driver", best[0])
+            return payload
     except Exception:
         pass
     return {}

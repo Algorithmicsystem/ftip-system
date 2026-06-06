@@ -8,17 +8,22 @@ let _panelLoadState = {};
 
 // Panel definitions: id → { load: fn, label }
 const PANELS = {
-  briefing:   { load: loadMorningBriefing,   label: 'Morning Briefing' },
-  universe:   { load: loadOpportunities,     label: 'Universe Screen' },
-  symbol:     { load: () => {},              label: 'Symbol Intelligence' },
-  risk:       { load: loadRiskMonitor,       label: 'Risk Monitor' },
-  factors:    { load: loadFactorEnvironment, label: 'Factor Environment' },
-  pipeline:   { load: loadPipelineStatus,    label: 'System Status' },
+  briefing:      { load: loadMorningBriefing,   label: 'Morning Briefing' },
+  opportunities: { load: loadOpportunities,     label: 'Universe Screen' },
+  symbol:        { load: () => {},              label: 'Symbol Intelligence' },
+  risk:          { load: loadRiskMonitor,       label: 'Risk Monitor' },
+  factors:       { load: loadFactorEnvironment, label: 'Factor Environment' },
+  pipeline:      { load: loadPipelineStatus,    label: 'System Status' },
 };
+
+// Grid panels live inside view-dashboard; pe/smb are overlay divs
+const _GRID_PANELS    = new Set(['briefing', 'opportunities', 'symbol', 'risk', 'factors', 'pipeline']);
+const _OVERLAY_PANELS = new Set(['pe', 'smb']);
 
 // ── Initialization ────────────────────────────────────────────────────────────
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await autoConfigureAPIKey();
   initAPIKey();
   setupSidebarNav();
   setupTabNav();
@@ -27,6 +32,21 @@ document.addEventListener('DOMContentLoaded', () => {
   scheduleAutoRefresh();
   startHealthMonitor();
 });
+
+async function autoConfigureAPIKey() {
+  try {
+    const res = await fetch('/config/client');
+    if (!res.ok) return;
+    const cfg = await res.json();
+    if (cfg.api_key) {
+      localStorage.setItem('ftip_api_key', cfg.api_key);
+      const input = document.getElementById('api-key-input');
+      if (input) input.value = cfg.api_key;
+    }
+  } catch (_) {
+    // Server not reachable or no key configured — no-op
+  }
+}
 
 // ── Sidebar Navigation ────────────────────────────────────────────────────────
 
@@ -40,20 +60,31 @@ function setupSidebarNav() {
 }
 
 function switchPanel(panelId) {
-  // Hide all views
-  document.querySelectorAll('.panel-view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-
-  // Show target view
-  const view = document.getElementById(`view-${panelId}`);
-  if (view) view.classList.add('active');
-
   const navItem = document.querySelector(`.nav-item[data-panel="${panelId}"]`);
   if (navItem) navItem.classList.add('active');
 
   _activePanel = panelId;
 
-  // Load panel if not already loaded or if stale
+  if (_OVERLAY_PANELS.has(panelId)) {
+    // Show overlay, hide dashboard grid and other overlays
+    document.getElementById('view-dashboard')?.classList.add('hidden');
+    _OVERLAY_PANELS.forEach(id => {
+      const el = document.getElementById(`view-${id}`);
+      if (el) el.classList.toggle('hidden', id !== panelId);
+    });
+  } else {
+    // Reveal dashboard grid, hide all overlays, scroll to panel
+    document.getElementById('view-dashboard')?.classList.remove('hidden');
+    _OVERLAY_PANELS.forEach(id => document.getElementById(`view-${id}`)?.classList.add('hidden'));
+    const panel = document.getElementById(`panel-${panelId}`);
+    if (panel) {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      panel.style.boxShadow = '0 0 0 2px var(--accent-primary)';
+      setTimeout(() => { panel.style.boxShadow = ''; }, 1500);
+    }
+  }
+
   if (!_panelLoadState[panelId]) {
     loadPanel(panelId);
   }

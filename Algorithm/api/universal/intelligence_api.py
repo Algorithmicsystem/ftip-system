@@ -224,7 +224,16 @@ def assemble_universal_intelligence(
         if not axiom_row or not axiom_row[0]:
             return _default_response(symbol, as_of_date)
 
-        payload = axiom_row[0] if isinstance(axiom_row[0], dict) else {}
+        raw = axiom_row[0]
+        if isinstance(raw, dict):
+            payload = raw
+        elif isinstance(raw, str):
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                payload = {}
+        else:
+            payload = {}
         score_date = axiom_row[1] or as_of_date
         dau = float(axiom_row[2] or 50.0)
         ic_state = str(axiom_row[3] or "INSUFFICIENT")

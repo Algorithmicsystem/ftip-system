@@ -2469,6 +2469,16 @@ def system_status() -> Dict[str, Any]:
     }
 
 
+@app.get("/config/client")
+def client_config() -> Dict[str, Any]:
+    """Public endpoint — returns client config for browser auto-configuration."""
+    return {
+        "api_key": os.environ.get("FTIP_API_KEY") or "",
+        "env": _railway_env(),
+        "version": "26.0.0",
+    }
+
+
 @app.get("/market/massive/bars")
 def market_massive_bars(
     symbol: str = Query(..., description="Ticker symbol (e.g. AAPL)"),
