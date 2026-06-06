@@ -213,6 +213,29 @@ def _fetch_forward_returns(
 # Effective breadth (Grinold-Kahn): per-symbol time-series IC
 # ---------------------------------------------------------------------------
 
+def _fetch_pnl_forward_returns(
+    symbols: List[str],
+    signal_date: dt.date,
+    horizon_days: int = 21,
+) -> Dict[str, Optional[float]]:
+    """Return {symbol: return_pct} from signal_pnl_daily for already-matured signals."""
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT symbol, return_pct
+              FROM signal_pnl_daily
+             WHERE signal_date = %s
+               AND horizon_days = %s
+               AND return_pct IS NOT NULL
+               AND symbol = ANY(%s)
+            """,
+            (signal_date, horizon_days, symbols),
+        ) or []
+        return {str(r[0]): float(r[1]) for r in rows if r[0] and r[1] is not None}
+    except Exception:
+        return {}
+
+
 def _fetch_per_symbol_scores_and_returns(
     symbols: List[str],
     as_of_date: dt.date,
@@ -349,7 +372,10 @@ def compute_ic_snapshot(
     p_value, t_stat, ic_state, effective_breadth}.  Returns {} if no axiom scores
     exist for that date.
     """
-    score_rows = _fetch_axiom_scores(as_of_date)
+    try:
+        score_rows = _fetch_axiom_scores(as_of_date)
+    except Exception:
+        return {}
     if not score_rows:
         return {}
 
@@ -407,6 +433,30 @@ def compute_ic_snapshot(
                 "t_stat": t_stat,
                 "ic_state": "INSUFFICIENT" if ic_val is None else None,  # final state set during store
                 "effective_breadth": effective_breadths.get(horizon_label, 0),
+            }
+
+    # axiom_composite: DAU vs signal_pnl_daily 21d returns (no market bar dependency)
+    pnl_returns = _fetch_pnl_forward_returns(symbols, as_of_date, horizon_days=21)
+    if pnl_returns:
+        dau_scores = field_scores.get("composite", {})
+        pairs = [
+            (dau_scores[sym], pnl_returns[sym])
+            for sym in symbols
+            if dau_scores.get(sym) is not None and pnl_returns.get(sym) is not None
+        ]
+        if len(pairs) >= _MIN_SAMPLE:
+            ic_val, p_val = spearman_ic([p[0] for p in pairs], [p[1] for p in pairs])
+            t_stat = None
+            if ic_val is not None and len(pairs) > 2:
+                denom = math.sqrt(1.0 - ic_val ** 2) if abs(ic_val) < 1.0 else 0.0
+                t_stat = round(ic_val * math.sqrt(len(pairs) - 2) / denom, 4) if denom != 0 else None
+            results[("axiom_composite", "21d")] = {
+                "ic_value": ic_val,
+                "sample_size": len(pairs),
+                "p_value": p_val,
+                "t_stat": t_stat,
+                "ic_state": "INSUFFICIENT" if ic_val is None else None,
+                "effective_breadth": effective_breadths.get("21d", 0),
             }
 
     return results

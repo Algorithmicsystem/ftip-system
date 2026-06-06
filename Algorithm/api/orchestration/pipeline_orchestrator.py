@@ -92,7 +92,7 @@ def _noop_stage() -> Dict[str, Any]:
 
 def _make_db_graceful_stage(name: str) -> Callable[[], Dict[str, Any]]:
     def executor() -> Dict[str, Any]:
-        if not db.db_read_enabled():
+        if not db.db_enabled():
             return {"records_processed": 0}
         try:
             return _real_stage(name)
@@ -104,6 +104,48 @@ def _make_db_graceful_stage(name: str) -> Callable[[], Dict[str, Any]]:
 
 def _real_stage(name: str) -> Dict[str, Any]:
     today = dt.date.today()
+
+    if name == "bar_ingestion":
+        try:
+            import httpx
+            from api import config
+            universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
+            if not universe:
+                from api.universe import AXIOM_UNIVERSE
+                universe = ",".join(AXIOM_UNIVERSE)
+            symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            resp = httpx.post(
+                "http://localhost:8000/prosperity/snapshot/run",
+                json={
+                    "symbols": symbols,
+                    "from_date": (today - dt.timedelta(days=365)).isoformat(),
+                    "to_date": today.isoformat(),
+                    "as_of_date": today.isoformat(),
+                    "lookback": 252,
+                    "concurrency": 2,
+                },
+                headers={"X-FTIP-API-Key": config.env("FTIP_API_KEY") or ""},
+                timeout=300.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"records_processed": len(data.get("symbols_ok", []))}
+        except Exception as exc:
+            logger.debug("bar_ingestion_stage error=%s", exc)
+        return {"records_processed": 0}
+
+    if name in ("feature_computation", "signal_generation", "axiom_scoring"):
+        # Covered by bar_ingestion (prosperity snapshot runs all stages); report axiom count
+        try:
+            rows = db.safe_fetchall(
+                "SELECT COUNT(*)::int FROM axiom_scores_daily WHERE as_of_date = %s",
+                (today,),
+            ) or []
+            count = int(rows[0][0]) if rows else 0
+            return {"records_processed": count}
+        except Exception:
+            return {"records_processed": 0}
+
     if name == "pnl_compute":
         try:
             from api.jobs.pnl import compute_pnl_batch

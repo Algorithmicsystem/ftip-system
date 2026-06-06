@@ -46,6 +46,15 @@ class SelfImprovementTriggerIn(BaseModel):
 _pipeline_run_id: Optional[str] = None
 _pipeline_lock = threading.Lock()
 
+_bootstrap_state: Dict[str, Any] = {
+    "status": "idle",
+    "task_id": None,
+    "started_at": None,
+    "completed_at": None,
+    "result": None,
+}
+_bootstrap_lock = threading.Lock()
+
 
 @orch_router.post("/pipeline/run")
 def trigger_pipeline_run(body: PipelineRunIn, background_tasks: BackgroundTasks) -> Dict[str, Any]:
@@ -73,6 +82,61 @@ def trigger_pipeline_run(body: PipelineRunIn, background_tasks: BackgroundTasks)
 
     background_tasks.add_task(_run)
     return {"status": "triggered", "run_id": run_id}
+
+
+@orch_router.post("/bootstrap")
+def trigger_bootstrap(background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    """Bootstrap full data pipeline — async, idempotent, returns task_id immediately."""
+    import uuid
+    today_str = dt.date.today().isoformat()
+
+    with _bootstrap_lock:
+        if _bootstrap_state["status"] == "running":
+            return {"status": "already_running", "task_id": _bootstrap_state["task_id"]}
+        if (
+            _bootstrap_state["status"] == "completed"
+            and (_bootstrap_state.get("started_at") or "")[:10] == today_str
+        ):
+            return {"status": "already_completed_today", "task_id": _bootstrap_state["task_id"]}
+        task_id = str(uuid.uuid4())
+        _bootstrap_state.update({
+            "status": "running",
+            "task_id": task_id,
+            "started_at": dt.datetime.utcnow().isoformat(),
+            "completed_at": None,
+            "result": None,
+        })
+
+    def _run() -> None:
+        from api.orchestration.pipeline_orchestrator import run_full_pipeline
+        try:
+            result = run_full_pipeline()
+            with _bootstrap_lock:
+                _bootstrap_state.update({
+                    "status": "completed",
+                    "completed_at": dt.datetime.utcnow().isoformat(),
+                    "result": {
+                        "run_id": result.run_id,
+                        "overall_status": result.overall_status,
+                        "symbols_processed": result.symbols_processed,
+                    },
+                })
+        except Exception as exc:
+            with _bootstrap_lock:
+                _bootstrap_state.update({
+                    "status": "failed",
+                    "completed_at": dt.datetime.utcnow().isoformat(),
+                    "result": {"error": str(exc)},
+                })
+
+    background_tasks.add_task(_run)
+    return {"status": "triggered", "task_id": task_id}
+
+
+@orch_router.get("/bootstrap/status")
+def get_bootstrap_status() -> Dict[str, Any]:
+    with _bootstrap_lock:
+        return dict(_bootstrap_state)
 
 
 @orch_router.get("/pipeline/status")

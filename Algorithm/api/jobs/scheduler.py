@@ -24,6 +24,7 @@ _JOB_IDS = {
     "intraday_update_16",
     "full_daily_pipeline",
     "ml_training_check",
+    "outcome_fill",
     "memory_consolidation",
 }
 
@@ -85,6 +86,15 @@ def _job_ml_training_check() -> None:
         logger.warning("scheduler.ml_training_check_failed error=%s", exc)
 
 
+def _job_outcome_fill() -> None:
+    from api.jobs.outcome_fill import run_outcome_fill
+    try:
+        result = run_outcome_fill()
+        logger.info("scheduler.outcome_fill filled=%s skipped=%s", result.get("filled"), result.get("skipped"))
+    except Exception as exc:
+        logger.warning("scheduler.outcome_fill_failed error=%s", exc)
+
+
 def _job_memory_consolidation() -> None:
     aod = dt.date.today()
     try:
@@ -144,6 +154,8 @@ class SchedulerManager:
                   id="full_daily_pipeline", replace_existing=True)
         s.add_job(_job_ml_training_check, CronTrigger(day_of_week="mon-fri", hour=18, minute=30),
                   id="ml_training_check", replace_existing=True)
+        s.add_job(_job_outcome_fill, CronTrigger(day_of_week="mon-fri", hour=18, minute=45),
+                  id="outcome_fill", replace_existing=True)
         s.add_job(_job_memory_consolidation, CronTrigger(day_of_week="mon-fri", hour=19, minute=0),
                   id="memory_consolidation", replace_existing=True)
 

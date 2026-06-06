@@ -14,11 +14,22 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture(autouse=True)
 def reset_db_env():
-    for var in ("FTIP_DB_ENABLED", "FTIP_DB_WRITE_ENABLED", "FTIP_DB_READ_ENABLED"):
+    for var in ("FTIP_DB_ENABLED", "FTIP_DB_WRITE_ENABLED", "FTIP_DB_READ_ENABLED", "FTIP_API_KEY"):
         os.environ.pop(var, None)
+    # Reset security key cache so monkeypatched API keys don't leak between tests
+    try:
+        import api.security as _sec
+        _sec._API_KEYS = None
+    except Exception:
+        pass
     yield
-    for var in ("FTIP_DB_ENABLED", "FTIP_DB_WRITE_ENABLED", "FTIP_DB_READ_ENABLED"):
+    for var in ("FTIP_DB_ENABLED", "FTIP_DB_WRITE_ENABLED", "FTIP_DB_READ_ENABLED", "FTIP_API_KEY"):
         os.environ.pop(var, None)
+    try:
+        import api.security as _sec
+        _sec._API_KEYS = None
+    except Exception:
+        pass
 
 
 @pytest.fixture

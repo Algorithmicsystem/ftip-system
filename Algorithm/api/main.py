@@ -67,6 +67,7 @@ from api.developer.developer_routes import router as developer_router
 from api.developer.usage_middleware import UsageLoggingMiddleware
 from api.compliance.compliance_routes import router as compliance_router
 from api.cloud.cloud_routes import router as cloud_router
+from api.jobs.outcome_fill import router as outcome_fill_router
 
 # =============================================================================
 # App + environment helpers
@@ -1876,6 +1877,7 @@ app.include_router(macro_router)
 app.include_router(developer_router)
 app.include_router(compliance_router)
 app.include_router(cloud_router)
+app.include_router(outcome_fill_router)
 app.include_router(signals_router)
 app.include_router(backtest_router)
 app.include_router(friction_router)

@@ -25,6 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
   setupKeyboardShortcuts();
   switchPanel('briefing');
   scheduleAutoRefresh();
+  startHealthMonitor();
 });
 
 // ── Sidebar Navigation ────────────────────────────────────────────────────────
@@ -179,6 +180,45 @@ function setLoadingState(elementId, loading) {
   } else {
     el.classList.remove('loading');
   }
+}
+
+// ── System Health Monitor ─────────────────────────────────────────────────────
+
+let _healthTimer = null;
+const HEALTH_POLL_MS = 60000; // 1 minute
+
+async function updateSystemHealth() {
+  try {
+    const data = await API.get('/system/status');
+    const dot = document.getElementById('health-dot');
+    const label = document.getElementById('health-label');
+    if (dot) {
+      dot.className = 'health-dot';
+      if (data.server === 'healthy' && data.db_connected) {
+        dot.classList.add('healthy');
+      } else if (data.warnings && data.warnings.length > 0) {
+        dot.classList.add('degraded');
+      } else {
+        dot.classList.add('critical');
+      }
+    }
+    if (label) {
+      label.textContent = data.db_connected ? 'Live' : 'Degraded';
+    }
+    const versionEl = document.getElementById('system-version');
+    if (versionEl && data.version) versionEl.textContent = `v${data.version}`;
+  } catch (err) {
+    const dot = document.getElementById('health-dot');
+    if (dot) { dot.className = 'health-dot critical'; }
+    const label = document.getElementById('health-label');
+    if (label) label.textContent = 'Offline';
+  }
+}
+
+function startHealthMonitor() {
+  updateSystemHealth();
+  if (_healthTimer) clearInterval(_healthTimer);
+  _healthTimer = setInterval(updateSystemHealth, HEALTH_POLL_MS);
 }
 
 function showGlobalError(message) {
