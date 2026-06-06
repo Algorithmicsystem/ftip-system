@@ -289,7 +289,7 @@ def assemble_universal_intelligence(
         # Step 9-10: Dossier
         dossier_row = db.safe_fetchone(
             """
-            SELECT COUNT(*), MAX(intelligence_score)
+            SELECT COUNT(*), MAX(impact_score)
               FROM company_intelligence_archive
              WHERE symbol = %s
             """,

@@ -1558,7 +1558,8 @@ async def snapshot_run(
                     lock_owner=lock_owner,
                 )
                 logger.warning(
-                    "jobs.prosperity.daily_snapshot.symbol_failed",
+                    "jobs.prosperity.daily_snapshot.symbol_failed symbol=%s stage=%s reason=%s",
+                    sym, root_failure_stage, reason_detail or reason_code,
                     extra={
                         "symbol": sym,
                         "reason_code": reason_code,

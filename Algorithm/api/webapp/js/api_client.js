@@ -6,7 +6,7 @@ const API = {
   headers() {
     const key = localStorage.getItem('ftip_api_key') || '';
     const h = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
-    if (key) h['X-API-Key'] = key;
+    if (key) h['X-FTIP-API-Key'] = key;
     return h;
   },
 
