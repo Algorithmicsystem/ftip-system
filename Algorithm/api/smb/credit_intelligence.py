@@ -106,6 +106,55 @@ def compute_borrowing_capacity_score(
     else:
         structure = "sba"
 
+    # Credit rating from capacity score
+    if capacity_score >= 80: credit_rating = "excellent"
+    elif capacity_score >= 65: credit_rating = "good"
+    elif capacity_score >= 50: credit_rating = "adequate"
+    elif capacity_score >= 35: credit_rating = "tight"
+    else: credit_rating = "distressed"
+
+    # DSCR interpretation
+    if dscr >= 2.0:
+        dscr_interpretation = f"DSCR of {dscr:.2f}x is strong — ample cash flow above debt obligations"
+    elif dscr >= 1.25:
+        dscr_interpretation = f"DSCR of {dscr:.2f}x is adequate — meeting debt service with limited buffer"
+    elif dscr >= 1.0:
+        dscr_interpretation = f"DSCR of {dscr:.2f}x is tight — barely covering debt obligations"
+    else:
+        dscr_interpretation = f"DSCR of {dscr:.2f}x is below 1.0 — unable to cover current debt service"
+
+    # Max additional debt
+    MIN_DSCR = 1.25
+    if dscr <= MIN_DSCR or ebitda <= 0:
+        max_additional_debt = 0.0
+        max_additional_debt_formula = f"DSCR of {dscr:.2f}x provides no headroom above 1.25x minimum — additional debt not supported."
+    else:
+        headroom = dscr - MIN_DSCR
+        annual_debt_service_est = ebitda / dscr if dscr > 0 else 0
+        additional_capacity = headroom * annual_debt_service_est
+        max_additional_debt = round(additional_capacity * 4, 2)
+        max_additional_debt_formula = (
+            f"DSCR of {dscr:.2f}x provides {headroom:.2f}x headroom above 1.25x minimum. "
+            f"Existing debt service of ~${annual_debt_service_est:,.0f}/year means "
+            f"${additional_capacity:,.0f}/year available for additional service, "
+            f"supporting ~${max_additional_debt:,.0f} in additional debt at current rates."
+        )
+
+    # Lending recommendation
+    if capacity_score >= 70:
+        lending_recommendation = "Creditworthy — eligible for conventional term loans and lines of credit at market rates."
+    elif capacity_score >= 50:
+        lending_recommendation = "Adequate credit profile — eligible for SBA loans; expect standard covenant requirements."
+    elif capacity_score >= 35:
+        lending_recommendation = "Tight credit — revenue-based financing or secured lending only; reduce leverage before seeking new debt."
+    else:
+        lending_recommendation = "Distressed — lenders will require collateral; focus on cash flow improvement before borrowing."
+
+    # Quick ratio proxy
+    quick_ratio = round((revenue * 0.10) / max(total_debt * 0.20 + revenue * 0.05, 1.0), 2)
+    # CCC proxy
+    ccc_days = round(45.0 * (1.0 - ebitda_margin), 1)
+
     return {
         "borrowing_capacity_score": capacity_score,
         "dscr": round(dscr, 3),
@@ -118,6 +167,14 @@ def compute_borrowing_capacity_score(
             "profitability_score": prof_score,
             "revenue_stability_score": rev_score,
         },
+        "credit_score": capacity_score,
+        "credit_rating": credit_rating,
+        "dscr_interpretation": dscr_interpretation,
+        "max_additional_debt_usd": max_additional_debt,
+        "max_additional_debt_formula": max_additional_debt_formula,
+        "quick_ratio": quick_ratio,
+        "cash_conversion_cycle_days": ccc_days,
+        "lending_recommendation": lending_recommendation,
     }
 
 

@@ -151,6 +151,12 @@ def _job_memory_consolidation() -> None:
         logger.info("scheduler.memory_consolidation dossier_events=%s", r3.get("events_created"))
     except Exception as exc:
         logger.warning("scheduler.memory_consolidation_dossier_failed error=%s", exc)
+    try:
+        from api.pe.deal_flow import run_daily_deal_flow_screen
+        run_daily_deal_flow_screen()
+        logger.info("scheduler.deal_flow_screen_complete")
+    except Exception as exc:
+        logger.warning("scheduler.deal_flow_screen_failed err=%s", exc)
 
 
 # ---------------------------------------------------------------------------

@@ -251,6 +251,139 @@ _SECTOR_MAP = {
 }
 
 
+RESTAURANT_PRIME_COST_TARGETS = {
+    "fast_casual": 0.58,
+    "full_service": 0.63,
+    "fine_dining": 0.67,
+    "fast_food": 0.52,
+    "bar": 0.55,
+    "default": 0.63,
+}
+
+
+def _enrich_restaurant(metrics_dict: Dict, financials: Dict, operating_data: Dict) -> Dict:
+    """Add prime cost benchmarking and action recommendation."""
+    restaurant_type = str(operating_data.get("restaurant_type") or "full_service")
+    target = RESTAURANT_PRIME_COST_TARGETS.get(restaurant_type, RESTAURANT_PRIME_COST_TARGETS["default"])
+    prime_cost = metrics_dict["prime_cost_pct"]
+    gap = round(prime_cost - target, 4)
+
+    if prime_cost < target * 0.95:
+        status = "excellent"
+    elif prime_cost <= target * 1.02:
+        status = "on-target"
+    elif prime_cost <= target * 1.08:
+        status = "watch"
+    else:
+        status = "critical"
+
+    annual_revenue = float(financials.get("revenue") or 0.0) * 12
+    dollar_impact = round(max(0.0, gap * annual_revenue), 2)
+
+    if status == "critical":
+        action = f"Prime cost at {prime_cost*100:.1f}% vs {target*100:.1f}% target — reduce labor by scheduling optimization and food cost by menu engineering."
+    elif status == "watch":
+        action = f"Prime cost slightly elevated ({prime_cost*100:.1f}%). Review food waste and part-time scheduling flexibility."
+    elif status == "excellent":
+        action = f"Prime cost well-controlled at {prime_cost*100:.1f}%. Maintain current discipline."
+    else:
+        action = f"Prime cost on target at {prime_cost*100:.1f}%. Minor optimization opportunities available."
+
+    metrics_dict.update({
+        "prime_cost_target": target,
+        "prime_cost_gap": gap,
+        "prime_cost_status": status,
+        "prime_cost_dollar_impact": dollar_impact,
+        "action": action,
+    })
+    return metrics_dict
+
+
+MANUFACTURING_BENCHMARK_UTILIZATION = 0.85
+
+
+def _enrich_manufacturing(metrics_dict: Dict, financials: Dict, operating_data: Dict) -> Dict:
+    """Add capacity utilization and backlog metrics."""
+    oee = metrics_dict["oee_proxy"]
+    capacity_target = MANUFACTURING_BENCHMARK_UTILIZATION
+    underutil_gap = max(0.0, capacity_target - oee)
+    annual_revenue = float(financials.get("revenue") or 0.0) * 12
+    underutil_cost = round(underutil_gap * annual_revenue, 2)
+
+    backlog = float(operating_data.get("backlog_revenue") or 0.0)
+    monthly_rev = annual_revenue / 12 if annual_revenue > 0 else 1.0
+    backlog_months = round(backlog / monthly_rev, 2) if monthly_rev > 0 else 0.0
+
+    if backlog_months >= 3:
+        backlog_health = "strong"
+    elif backlog_months >= 1.5:
+        backlog_health = "adequate"
+    elif backlog_months >= 0.5:
+        backlog_health = "thin"
+    else:
+        backlog_health = "empty"
+
+    if oee < 0.70:
+        action = f"OEE proxy at {oee*100:.0f}% — well below {capacity_target*100:.0f}% target. Annual underutilization cost ~${underutil_cost:,.0f}. Prioritize demand generation or capacity reduction."
+    elif oee < capacity_target:
+        action = f"OEE proxy at {oee*100:.0f}% — approaching target. Focus on reducing downtime and setup times."
+    else:
+        action = f"Strong utilization at {oee*100:.0f}%. Consider capacity expansion if backlog exceeds 3 months."
+
+    metrics_dict.update({
+        "capacity_utilization_estimate": round(oee, 4),
+        "capacity_utilization_target": capacity_target,
+        "underutilization_cost_usd": underutil_cost,
+        "order_backlog_months": backlog_months,
+        "backlog_health": backlog_health,
+        "action": action,
+    })
+    return metrics_dict
+
+
+PROF_SERVICES_BENCHMARKS = {
+    "Professional Services": 120_000,
+    "Consulting": 150_000,
+    "default": 100_000,
+}
+
+
+def _enrich_profservices(metrics_dict: Dict, financials: Dict, operating_data: Dict) -> Dict:
+    """Add sector benchmark and recurring revenue estimate."""
+    sector = str(operating_data.get("sector") or "Professional Services")
+    benchmark_rpe = PROF_SERVICES_BENCHMARKS.get(sector, PROF_SERVICES_BENCHMARKS["default"])
+    rpe = metrics_dict["revenue_per_employee"]
+
+    ar_growth = float(financials.get("receivables_growth") or 0.0)
+    recurring_pct = max(0.0, min(1.0, 0.50 - ar_growth))  # declining AR growth = more recurring
+
+    cc_risk = metrics_dict["client_concentration_risk"]
+    if cc_risk > 0.60:
+        cc_label = "critical"
+    elif cc_risk > 0.40:
+        cc_label = "elevated"
+    elif cc_risk > 0.25:
+        cc_label = "moderate"
+    else:
+        cc_label = "low"
+
+    if rpe >= benchmark_rpe * 1.2:
+        action = f"Revenue per employee ${rpe:,.0f} exceeds benchmark ${benchmark_rpe:,.0f}. Focus on retention and upsell."
+    elif rpe >= benchmark_rpe * 0.9:
+        action = f"Revenue per employee ${rpe:,.0f} near benchmark. Improve utilization rate to expand margin."
+    else:
+        action = f"Revenue per employee ${rpe:,.0f} below benchmark ${benchmark_rpe:,.0f}. Raise billing rates or increase headcount utilization."
+
+    metrics_dict.update({
+        "sector_benchmark_revenue_per_employee": benchmark_rpe,
+        "utilization_proxy": round(metrics_dict["utilization_estimate"], 4),
+        "recurring_revenue_estimate_pct": round(recurring_pct, 4),
+        "client_concentration_risk_label": cc_label,
+        "action": action,
+    })
+    return metrics_dict
+
+
 def get_sector_module(
     sector: str,
     financials: Dict[str, Any],
@@ -260,4 +393,11 @@ def get_sector_module(
     if fn is None:
         return {"status": "no_module"}
     metrics = fn(financials, operating_data or {})
-    return {"status": "ok", "sector": sector, **dataclasses.asdict(metrics)}
+    result = {"status": "ok", "sector": sector, **dataclasses.asdict(metrics)}
+    if sector == "Restaurant":
+        result = _enrich_restaurant(result, financials, operating_data or {})
+    elif sector == "Manufacturing":
+        result = _enrich_manufacturing(result, financials, operating_data or {})
+    elif sector in ("Professional Services", "Consulting"):
+        result = _enrich_profservices(result, financials, operating_data or {})
+    return result

@@ -214,11 +214,47 @@ def generate_pricing_recommendation(
 
     timing = "immediate" if action == "raise_prices" else "next_quarter" if action == "hold" else "monitor"
 
+    # Action text — plain English
+    if action == "raise_prices" and input_cost_pressure > 60:
+        action_text = (
+            "Raise prices now — your market position supports it and your "
+            "input costs demand it. Target 6-8% at next opportunity."
+        )
+    elif action == "raise_prices":
+        action_text = (
+            "Your pricing power is strong and costs are well-controlled. "
+            "Consider a 4-6% price increase at your next contract renewal."
+        )
+    elif pricing_power_score >= 40:
+        action_text = (
+            "Selective pricing: raise by 2-3% for new customers, hold for "
+            "existing relationships where churn risk is higher."
+        )
+    else:
+        action_text = (
+            "Do not raise prices — focus on cost reduction. Identify the "
+            "2 largest cost categories and target 10% reduction each."
+        )
+
+    # Supporting analysis
+    trend_phrase = {
+        "expanding": "margins are expanding — signal of growing pricing leverage",
+        "stable": "margins are stable — pricing discipline is adequate",
+        "compressing": "margins are compressing — cost or volume pressure detected",
+    }.get(margin_trend, "margin trend is unknown")
+    supporting_analysis = (
+        f"Pricing power score of {pricing_power_score:.0f}/100 with {trend_phrase}. "
+        f"Input cost pressure at {input_cost_pressure:.0f}/100 "
+        f"({'elevated — pass through costs where possible' if input_cost_pressure > 60 else 'manageable'})."
+    )
+
     return {
         "action": action,
         "rationale": _ACTION_RATIONALES.get(action, "Monitor pricing environment."),
         "price_increase_potential_pct": round(clamp(potential, 0.0, 0.30), 4),
         "timing": timing,
+        "action_text": action_text,
+        "supporting_analysis": supporting_analysis,
     }
 
 

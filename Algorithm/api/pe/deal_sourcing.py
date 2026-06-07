@@ -238,3 +238,126 @@ def screen_for_deal_candidates(
 
     candidates.sort(key=lambda c: c.das_score, reverse=True)
     return candidates
+
+
+# ---------------------------------------------------------------------------
+# DealAttractivenessScore — 4-component model (Ilmanen framework)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DealAttractivenessScore:
+    symbol: str
+    strategic_score: float     # 0-25
+    financial_score: float     # 0-25
+    operational_score: float   # 0-25
+    risk_score: float          # 0-25
+    total: float               # 0-100
+    das_grade: str             # A/B/C/D/F
+    investment_thesis: str
+    key_strengths: List[str]
+    key_risks: List[str]
+
+
+def _das_grade(total: float) -> str:
+    if total >= 85: return "A"
+    if total >= 70: return "B"
+    if total >= 55: return "C"
+    if total >= 40: return "D"
+    return "F"
+
+
+def compute_deal_attractiveness_score(
+    symbol: str,
+    fundamentals: Dict,
+    axiom_payload: Dict,
+    market_data: Optional[Dict] = None,
+) -> DealAttractivenessScore:
+    """4-component DAS per Ilmanen Expected Returns framework."""
+    fin = fundamentals or {}
+    md = market_data or {}
+
+    # Component 1: Strategic Fit (0-25)
+    rev_growth = float(fin.get("revenue_growth_yoy") or 0.0)
+    sector_growth = float(fin.get("sector_revenue_growth_median") or 0.05)
+    if rev_growth > sector_growth * 1.5:
+        market_position = 3
+    elif rev_growth > sector_growth * 0.8:
+        market_position = 2
+    else:
+        market_position = 1
+    sector_tailwind = float(axiom_payload.get("macro_score") or 50.0) / 100.0
+    strategic_score = round(min((market_position / 3.0) * 15 + sector_tailwind * 10, 25.0), 2)
+
+    # Component 2: Financial Quality (0-25)
+    nonrecurring_pct = float(fin.get("non_recurring_revenue_pct") or 0.05)
+    revenue_quality = 1.0 - nonrecurring_pct
+    ebitda_margin = float(fin.get("ebitda_margin") or 0.15)
+    cash_conversion = float(fin.get("fcf_to_ebitda") or 0.7)
+    sector_margin = float(fin.get("sector_ebitda_margin_median") or 0.15)
+    margin_premium = (ebitda_margin - sector_margin) / max(sector_margin, 0.01)
+    financial_score = round(min(
+        revenue_quality * 8 + cash_conversion * 8 + clamp(margin_premium + 0.5, 0.0, 1.0) * 9,
+        25.0,
+    ), 2)
+
+    # Component 3: Operational Excellence (0-25)
+    gross_margin = float(fin.get("gross_margin") or 0.40)
+    sector_gm = float(fin.get("sector_gross_margin_median") or 0.40)
+    asset_turnover = float(fin.get("asset_turnover") or 1.0)
+    asset_turnover_trend = float(fin.get("asset_turnover_change_yoy") or 0.0)
+    sector_gm_std = max(sector_gm * 0.2, 0.01)
+    gm_z = (gross_margin - sector_gm) / sector_gm_std
+    operational_score = round(min(
+        clamp((gm_z + 2) / 4.0, 0.0, 1.0) * 12
+        + clamp(asset_turnover / 2.0, 0.0, 1.0) * 7
+        + clamp((asset_turnover_trend + 0.1) / 0.2, 0.0, 1.0) * 6,
+        25.0,
+    ), 2)
+
+    # Component 4: Risk (0-25, higher = lower risk)
+    from api.pe.schilit_analyzer import SchilitForensicEngine
+    schilit = SchilitForensicEngine().analyze(symbol, fin)
+    schilit_pts = {"low": 25, "medium": 17, "high": 8, "critical": 0}.get(schilit.overall_risk, 12)
+    regulatory_risk = float(fin.get("regulatory_risk_score") or 20.0)
+    regulatory_adj = (100 - regulatory_risk) / 100.0 * 10
+    customer_concentration = float(fin.get("customer_concentration_hhi") or 0.3)
+    concentration_adj = (1 - customer_concentration) * 5
+    risk_score = round(min(schilit_pts * 0.60 + regulatory_adj + concentration_adj, 25.0), 2)
+
+    total = round(clamp(strategic_score + financial_score + operational_score + risk_score, 0.0, 100.0), 2)
+    grade = _das_grade(total)
+
+    # Narrative
+    scores_map = {
+        "Strategic Fit": strategic_score,
+        "Financial Quality": financial_score,
+        "Operational Excellence": operational_score,
+        "Risk Profile": risk_score,
+    }
+    sorted_scores = sorted(scores_map.items(), key=lambda x: x[1], reverse=True)
+    key_strengths = [f"{k} ({v:.1f}/25)" for k, v in sorted_scores[:3] if v >= 12.5]
+    key_risks = [f"{k} ({v:.1f}/25)" for k, v in sorted_scores[-3:] if v < 12.5][:3]
+
+    if total >= 70:
+        thesis = (f"{symbol} scores {grade} ({total:.0f}/100) on deal attractiveness. "
+                  f"Strong {sorted_scores[0][0].lower()} and {sorted_scores[1][0].lower()} "
+                  f"support a compelling acquisition thesis. "
+                  f"Accounting quality is {schilit.overall_risk}.")
+    else:
+        thesis = (f"{symbol} scores {grade} ({total:.0f}/100) — "
+                  f"below threshold for immediate acquisition interest. "
+                  f"Primary concern: {sorted_scores[-1][0].lower()} ({sorted_scores[-1][1]:.1f}/25). "
+                  f"Monitor for improvement before committing capital.")
+
+    return DealAttractivenessScore(
+        symbol=symbol,
+        strategic_score=strategic_score,
+        financial_score=financial_score,
+        operational_score=operational_score,
+        risk_score=risk_score,
+        total=total,
+        das_grade=grade,
+        investment_thesis=thesis,
+        key_strengths=key_strengths if key_strengths else [sorted_scores[0][0]],
+        key_risks=key_risks if key_risks else ["No critical risks identified"],
+    )

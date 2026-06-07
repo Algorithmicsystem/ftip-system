@@ -431,15 +431,15 @@ class TestMLRoutes:
 # ===========================================================================
 
 class TestVersionBump:
-    def test_version_bumped_to_28(self):
+    def test_version_bumped_to_29(self):
         r = client.get("/config/client")
         assert r.status_code == 200
         data = r.json()
-        assert "28" in data.get("version", "")
+        assert "29" in data.get("version", "")
 
-    def test_html_version_28(self):
+    def test_html_version_29(self):
         html = (WEBAPP_DIR / "index.html").read_text()
-        assert "v=28" in html
+        assert "v=29" in html
 
 
 # ===========================================================================

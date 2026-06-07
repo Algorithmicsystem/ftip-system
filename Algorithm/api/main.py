@@ -2487,7 +2487,7 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": os.environ.get("FTIP_API_KEY") or "",
         "env": _railway_env(),
-        "version": "28.0.0",
+        "version": "29.0.0",
         "build": "AXIOM Intelligence Terminal",
     }
 

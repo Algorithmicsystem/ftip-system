@@ -385,6 +385,62 @@ def get_analog_alerts(org_id: str) -> Dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Prompt 4: DAS (4-component model) + Deal Flow
+# ---------------------------------------------------------------------------
+
+@router.get("/das/{symbol}")
+def get_deal_attractiveness_score(symbol: str) -> Dict[str, Any]:
+    """4-component Deal Attractiveness Score for a public company."""
+    from api import db
+    from api.pe.deal_sourcing import compute_deal_attractiveness_score
+    if not db.db_read_enabled():
+        return {"symbol": symbol, "status": "db_disabled"}
+    try:
+        row = db.safe_fetchone(
+            "SELECT payload FROM axiom_scores_daily WHERE symbol = %s ORDER BY as_of_date DESC LIMIT 1",
+            (symbol.upper(),),
+        )
+        import json as _json
+        payload = (row[0] if row and row[0] else {})
+        if isinstance(payload, str):
+            payload = _json.loads(payload)
+        das = compute_deal_attractiveness_score(symbol.upper(), {}, payload)
+        return {
+            "symbol": das.symbol,
+            "total": das.total,
+            "das_grade": das.das_grade,
+            "strategic_score": das.strategic_score,
+            "financial_score": das.financial_score,
+            "operational_score": das.operational_score,
+            "risk_score": das.risk_score,
+            "investment_thesis": das.investment_thesis,
+            "key_strengths": das.key_strengths,
+            "key_risks": das.key_risks,
+        }
+    except Exception as exc:
+        return {"symbol": symbol, "status": "error", "error": str(exc)}
+
+
+@router.get("/deal-flow")
+def get_deal_flow(as_of_date: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+    """Daily acquisition candidate screening across AXIOM universe."""
+    from api.pe.deal_flow import run_daily_deal_flow_screen
+    import datetime as _dt
+    aod = _dt.date.fromisoformat(as_of_date) if as_of_date else None
+    return run_daily_deal_flow_screen(aod)
+
+
+@router.get("/portfolio/{org_id}/lp-report-v2")
+def get_lp_report_v2(
+    org_id: str,
+    quarter: Optional[str] = None,
+) -> Dict[str, Any]:
+    """5-section structured LP report."""
+    from api.pe.lp_reporting import build_structured_lp_report
+    return build_structured_lp_report(org_id, quarter)
+
+
+# ---------------------------------------------------------------------------
 # Phase 13: LP reporting
 # ---------------------------------------------------------------------------
 

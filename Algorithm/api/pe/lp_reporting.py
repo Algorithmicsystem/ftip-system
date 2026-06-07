@@ -423,3 +423,132 @@ def generate_lp_report(org_id: str, quarter: Optional[str] = None) -> LPReport:
             logger.warning("lp_report.persist_failed org=%s err=%s", org_id, exc)
 
     return report
+
+
+# ---------------------------------------------------------------------------
+# 5-section structured LP report
+# ---------------------------------------------------------------------------
+
+def build_structured_lp_report(org_id: str, quarter: Optional[str] = None) -> Dict[str, Any]:
+    """Generate a 5-section structured LP report."""
+    base = generate_lp_report(org_id, quarter)
+
+    # --- Section A: Executive Summary ---
+    ps = base.portfolio_summary
+    n = ps.get("total_companies", 0)
+    avg_h = ps.get("avg_health_score", 0.0)
+    on_target = ps.get("companies_on_target", 0)
+    at_risk = ps.get("companies_at_risk", 0)
+    rev_growth = ps.get("portfolio_revenue_growth", 0.0)
+    perf_text = (
+        f"Portfolio of {n} companies averaged a health score of {avg_h:.1f}/100 "
+        f"this quarter. {on_target} companies are tracking above acquisition thesis "
+        f"with {at_risk} requiring attention. "
+        f"Weighted portfolio revenue growth: {rev_growth*100:.1f}%."
+    )
+    key_themes = []
+    if at_risk > n * 0.3:
+        key_themes.append(f"Elevated portfolio stress: {at_risk} companies below health threshold")
+    if ps.get("aggregate_schilit_risk") in ("high", "medium"):
+        key_themes.append("Accounting quality risk requires monitoring")
+    if rev_growth > 0.10:
+        key_themes.append(f"Strong revenue momentum: {rev_growth*100:.1f}% portfolio growth")
+    elif rev_growth < -0.05:
+        key_themes.append(f"Revenue contraction: {abs(rev_growth)*100:.1f}% decline warrants attention")
+    if not key_themes:
+        key_themes.append("Portfolio performing in line with expectations")
+    sri = base.market_context.get("sri", 50.0)
+    outlook = (
+        f"{'Cautious' if sri > 55 else 'Constructive'} outlook: "
+        f"Systemic Risk Index at {sri:.1f}/100. "
+        f"Exit pipeline {'active' if base.exit_pipeline.get('ready_to_exit') else 'building'} "
+        f"with {len(base.exit_pipeline.get('ready_to_exit', []))} companies showing exit readiness above 80."
+    )
+    section_a = {
+        "portfolio_performance_vs_benchmark": perf_text,
+        "key_themes": key_themes[:3],
+        "outlook": outlook,
+    }
+
+    # --- Section B: Portfolio Health Dashboard ---
+    health_rows = []
+    for company in base.individual_company_reports:
+        h = company.get("health_score") or 0.0
+        traffic = "green" if h >= 65 else "yellow" if h >= 40 else "red"
+        health_rows.append({
+            "symbol": company.get("entity_id", ""),
+            "entity_name": company.get("entity_name", ""),
+            "health_composite": round(h, 1),
+            "traffic_light": traffic,
+            "exit_readiness_score": company.get("exit_readiness_score"),
+        })
+    health_rows.sort(key=lambda x: x["health_composite"])  # worst first
+    section_b = health_rows
+
+    # --- Section C: Detailed Company Reviews ---
+    detailed = []
+    for company in base.individual_company_reports:
+        h = company.get("health_score") or 0.0
+        traffic = "green" if h >= 65 else "yellow" if h >= 40 else "red"
+        exit_score = company.get("exit_readiness_score") or 0.0
+
+        if traffic == "green" and exit_score > 70:
+            recommended_action = "prepare_exit"
+        elif traffic == "red":
+            recommended_action = "immediate_attention"
+        elif h > 55:
+            recommended_action = "add_value"
+        else:
+            recommended_action = "monitor"
+
+        detailed.append({
+            "entity_id": company.get("entity_id", ""),
+            "entity_name": company.get("entity_name", ""),
+            "health_score": round(h, 1),
+            "traffic_light": traffic,
+            "exit_readiness_score": round(exit_score, 1),
+            "recommended_action": recommended_action,
+            "key_metrics": {
+                "health_score": round(h, 1),
+                "exit_readiness": round(exit_score, 1),
+            },
+        })
+    section_c = detailed
+
+    # --- Section D: Exit Pipeline ---
+    exit_candidates = [
+        c for c in detailed
+        if c["recommended_action"] == "prepare_exit"
+    ]
+    section_d = {
+        "exit_candidates": exit_candidates,
+        "ready_to_exit": base.exit_pipeline.get("ready_to_exit", []),
+        "approaching_exit": base.exit_pipeline.get("approaching_exit", []),
+        "market_window": base.exit_pipeline.get("optimal_market_window", "unknown"),
+        "candidate_count": len(exit_candidates),
+    }
+
+    # --- Section E: Risk Report ---
+    red_flag_companies = [
+        c for c in detailed if c["traffic_light"] == "red"
+    ]
+    hhi = 1.0 / max(n, 1)  # minimum concentration
+    section_e = {
+        "red_flag_companies": red_flag_companies,
+        "portfolio_risk_flags": base.risk_flags,
+        "portfolio_concentration_risk": round(hhi, 4),
+        "sri": sri,
+        "sri_label": "elevated" if sri > 55 else "normal",
+        "total_at_risk": at_risk,
+    }
+
+    return {
+        "org_id": org_id,
+        "report_quarter": base.report_quarter,
+        "generated_at": base.generated_at.isoformat(),
+        "executive_summary": section_a,
+        "portfolio_health": section_b,
+        "detailed_reviews": section_c,
+        "exit_pipeline": section_d,
+        "risk_report": section_e,
+    }

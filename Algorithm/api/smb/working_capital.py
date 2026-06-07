@@ -90,18 +90,32 @@ def generate_wc_recommendations(
         excess_days = analysis.ar_days - benchmark["ar_days"]
         estimated_release = round(max(0.0, excess_days / 365.0 * annual_revenue), 2)
         recs.append({
+            "opportunity_type": "receivables",
             "action": "accelerate_collections",
             "description": "Implement electronic invoicing and early payment discounts (2/10 net 30)",
+            "current_days": round(analysis.ar_days, 1),
+            "target_days": round(benchmark["ar_days"], 1),
+            "improvement_days": round(excess_days, 1),
+            "cash_released_usd": estimated_release,
+            "cash_released_formula": f"Reducing DSO by {excess_days:.0f} days × ${annual_revenue/365:,.0f} daily revenue = ${estimated_release:,.0f}",
             "estimated_cash_release_usd": estimated_release,
             "complexity": "low",
             "timeframe": "30-60 days",
+            "priority": "high" if excess_days > 20 else "medium",
         })
         recs.append({
+            "opportunity_type": "receivables",
             "action": "invoice_factoring",
             "description": "Consider invoice factoring for immediate cash release on outstanding AR",
+            "current_days": round(analysis.ar_days, 1),
+            "target_days": round(benchmark["ar_days"], 1),
+            "improvement_days": round(excess_days, 1),
+            "cash_released_usd": round(estimated_release * 0.85, 2),
+            "cash_released_formula": f"Invoice factoring at 85% of ${estimated_release:,.0f} AR opportunity = ${estimated_release * 0.85:,.0f}",
             "estimated_cash_release_usd": round(estimated_release * 0.85, 2),
             "complexity": "medium",
             "timeframe": "1-2 weeks",
+            "priority": "medium",
         })
 
     # AP recommendation
@@ -109,11 +123,18 @@ def generate_wc_recommendations(
         gap_days = benchmark["ap_days"] - analysis.ap_days
         estimated_release = round(max(0.0, gap_days / 365.0 * annual_cogs), 2)
         recs.append({
+            "opportunity_type": "payables",
             "action": "extend_payables",
             "description": "Negotiate extended payment terms with top suppliers (net 45-60)",
+            "current_days": round(analysis.ap_days, 1),
+            "target_days": round(benchmark["ap_days"], 1),
+            "improvement_days": round(gap_days, 1),
+            "cash_released_usd": estimated_release,
+            "cash_released_formula": f"Extending DPO by {gap_days:.0f} days × ${annual_cogs/365:,.0f} daily COGS = ${estimated_release:,.0f}",
             "estimated_cash_release_usd": estimated_release,
             "complexity": "medium",
             "timeframe": "60-90 days",
+            "priority": "high" if gap_days > 15 else "medium",
         })
 
     # Inventory recommendation
@@ -122,18 +143,32 @@ def generate_wc_recommendations(
         excess_inv = analysis.inventory_days - bench_inv
         estimated_release = round(max(0.0, excess_inv / 365.0 * annual_cogs), 2)
         recs.append({
+            "opportunity_type": "inventory",
             "action": "reduce_inventory",
             "description": "Implement just-in-time inventory management and reduce safety stock",
+            "current_days": round(analysis.inventory_days, 1),
+            "target_days": round(bench_inv, 1),
+            "improvement_days": round(excess_inv, 1),
+            "cash_released_usd": estimated_release,
+            "cash_released_formula": f"Reducing DIO by {excess_inv:.0f} days × ${annual_cogs/365:,.0f} daily COGS = ${estimated_release:,.0f}",
             "estimated_cash_release_usd": estimated_release,
             "complexity": "high",
             "timeframe": "90-180 days",
+            "priority": "high" if excess_inv > 30 else "medium",
         })
         recs.append({
+            "opportunity_type": "inventory",
             "action": "liquidate_slow_moving",
             "description": "Identify slow-moving SKUs for liquidation or return",
+            "current_days": round(analysis.inventory_days, 1),
+            "target_days": round(bench_inv, 1),
+            "improvement_days": round(excess_inv * 0.4, 1),
+            "cash_released_usd": round(estimated_release * 0.40, 2),
+            "cash_released_formula": f"Liquidating slow-moving inventory at 40% recovery = ${estimated_release * 0.40:,.0f}",
             "estimated_cash_release_usd": round(estimated_release * 0.40, 2),
             "complexity": "low",
             "timeframe": "30-60 days",
+            "priority": "medium",
         })
 
     return recs

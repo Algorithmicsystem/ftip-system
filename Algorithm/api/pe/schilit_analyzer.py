@@ -400,3 +400,93 @@ def run_full_schilit_analysis(
         "audit_risk_flag": triggered_count >= 3,
         "recommendation": recommendation,
     }
+
+
+# ---------------------------------------------------------------------------
+# SchilitReport dataclass and ForensicEngine class
+# ---------------------------------------------------------------------------
+
+@dataclass
+class SchilitReport:
+    symbol: str
+    category_scores: Dict[int, float]       # 0-100 risk per category
+    triggered_flags: List[SchilitFlag]
+    overall_risk: str                        # "low"|"medium"|"high"|"critical"
+    eis_impact: float                        # total, capped at 30
+    red_flags: List[str]
+    green_flags: List[str]
+    forensic_summary: str
+
+
+class SchilitForensicEngine:
+    CATEGORY_NAMES = {
+        1: "Recording Revenue Too Soon",
+        2: "Recording Bogus Revenue",
+        3: "Boosting Income with One-Time Gains",
+        4: "Shifting Current Expenses to Later Period",
+        5: "Employing Other Techniques to Hide Expenses",
+        6: "Shifting Current Income to Later Period",
+        7: "Releasing Previously Recorded Liabilities",
+    }
+    SEVERITY_WEIGHTS = {1: 5.0, 2: 6.0, 3: 4.0, 4: 4.5, 5: 3.5, 6: 3.0, 7: 3.5}
+
+    def analyze(self, symbol: str, financials: dict) -> SchilitReport:
+        result = run_full_schilit_analysis(financials)
+        flags_dict: Dict[int, SchilitFlag] = result["categories"]
+        triggered = [f for f in flags_dict.values() if f.triggered]
+        triggered_count = len(triggered)
+
+        category_scores: Dict[int, float] = {}
+        for cat_num, flag in flags_dict.items():
+            n = len(flag.evidence)
+            category_scores[cat_num] = min(n * 33.0, 100.0) if flag.triggered else 0.0
+
+        eis_raw = result["composite_eis_impact"]
+        eis_impact = round(min(eis_raw, 30.0), 2)
+
+        if triggered_count == 0:
+            overall_risk = "low"
+        elif triggered_count <= 2:
+            overall_risk = "medium"
+        elif triggered_count <= 4:
+            overall_risk = "high"
+        else:
+            overall_risk = "critical"
+
+        red_flags = []
+        for flag in triggered:
+            for ev in flag.evidence:
+                red_flags.append(f"[Cat {flag.category}] {ev}")
+
+        green_flags = []
+        untriggered = [f for f in flags_dict.values() if not f.triggered]
+        for flag in untriggered[:3]:
+            green_flags.append(f"No {flag.category_name.lower()} detected")
+
+        if triggered_count == 0:
+            forensic_summary = (
+                f"No accounting shenanigans detected across all 7 Schilit categories for {symbol}. "
+                "Earnings quality appears sound with no evidence of revenue manipulation, "
+                "expense shifting, or reserve abuse."
+            )
+        else:
+            primary_flag = max(triggered, key=lambda f: f.impact_on_eis)
+            primary_concern = primary_flag.category_name.lower()
+            forensic_summary = (
+                f"{symbol} shows {triggered_count} Schilit warning {'category' if triggered_count == 1 else 'categories'} "
+                f"including {primary_concern}. "
+                f"EIS impact: -{eis_impact:.0f} points. "
+                f"Recommend enhanced due diligence on "
+                f"{'revenue recognition and receivables quality' if primary_flag.category in (1, 2) else 'expense classification and cash flow quality'}."
+            )
+
+        return SchilitReport(
+            symbol=symbol,
+            category_scores=category_scores,
+            triggered_flags=triggered,
+            overall_risk=overall_risk,
+            eis_impact=eis_impact,
+            red_flags=red_flags,
+            green_flags=green_flags,
+            forensic_summary=forensic_summary,
+        )
