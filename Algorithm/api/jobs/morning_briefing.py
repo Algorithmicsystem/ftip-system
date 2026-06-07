@@ -395,26 +395,39 @@ def _build_text(
 ) -> str:
     label = _sri_label(sri)
 
+    # Section A: Market context and regime
+    regime_display = (regime or "unknown").replace("_", " ").title()
+    breadth_display = (breadth_state or "UNKNOWN").replace("_", " ").lower()
     para1 = (
-        f"Today's regime is {regime}. "
-        f"The market is showing {breadth_state} breadth "
-        f"with {n_favorable} of 30 symbols in favorable deployability tiers."
+        f"Market context: The current regime is {regime_display}. "
+        f"Breadth is {breadth_display} with {n_favorable} of 30 universe symbols "
+        f"showing favorable deployability scores. "
+        f"The systemic risk index stands at {sri:.1f} ({label})."
     )
 
+    # Section B: Top signal
     top_str = f"{top_symbol} (DAU {top_dau:.1f})" if top_symbol else "no high-conviction candidate"
-    risk_str = f"{risk_symbol} showing elevated {risk_type}" if risk_symbol else "no critical risk detected"
+    signal_action = "BUY" if top_dau >= 65 else "HOLD"
     para2 = (
-        f"Top opportunity: {top_str} driven by {top_driver}. "
-        f"Key risk: {risk_str}."
+        f"Top signal: {top_str} — recommended action {signal_action}, "
+        f"primary factor driver is {top_driver}."
     )
 
+    # Section C: Regime intelligence
     para3 = (
-        f"Factor environment favors {top_factor}. "
-        f"Systemic risk index is {sri:.1f} ({label}). "
-        f"IC track record: {ic_state} with {sample_count} matured signals."
+        f"Regime intelligence: Factor environment favors {top_factor}. "
+        f"IC track record is {ic_state} based on {sample_count} matured signals."
     )
 
-    return f"{para1}\n\n{para2}\n\n{para3}"
+    # Section D: Risk summary
+    risk_str = f"{risk_symbol} showing {risk_type}" if risk_symbol else "no critical risk signals detected"
+    sri_trend = "elevated" if sri >= _SRI_ELEVATED else "within normal range"
+    para4 = (
+        f"Risk: {risk_str}. "
+        f"Systemic risk is {sri_trend} ({sri:.1f})."
+    )
+
+    return f"{para1}\n\n{para2}\n\n{para3}\n\n{para4}"
 
 
 def _store_briefing(briefing: MorningBriefing) -> None:

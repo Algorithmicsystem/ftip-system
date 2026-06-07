@@ -21,6 +21,10 @@ from api.intelligence.regime_playbook import (
     get_regime_recommendation,
     update_regime_playbook,
 )
+from api.intelligence.regime_transitions import (
+    compute_regime_transition_probabilities,
+    identify_warning_signals,
+)
 from api.intelligence.signal_memory import (
     compute_signal_batting_average,
     get_signal_leaderboard,
@@ -48,18 +52,26 @@ def _moat_strength(days: int) -> str:
 
 def compute_moat_score() -> Dict[str, Any]:
     """Aggregate moat metrics from the intelligence layer."""
+    _empty = {
+        "total_signals_archived": 0,
+        "avg_signal_war": 0.0,
+        "symbols_with_dossiers": 0,
+        "avg_intelligence_quality_score": 0.0,
+        "graph_nodes": 0,
+        "graph_edges": 0,
+        "regime_playbook_coverage": 0,
+        "days_of_live_data": 0,
+        "moat_strength": "building",
+        "components": {
+            "signal_war_database": 0.0,
+            "regime_playbook_depth": 0.0,
+            "dossier_completeness": 0.0,
+            "connection_graph_density": 0.0,
+        },
+        "data_irreproducibility_estimate": 0.0,
+    }
     if not db.db_read_enabled():
-        return {
-            "total_signals_archived": 0,
-            "avg_signal_war": 0.0,
-            "symbols_with_dossiers": 0,
-            "avg_intelligence_quality_score": 0.0,
-            "graph_nodes": 0,
-            "graph_edges": 0,
-            "regime_playbook_coverage": 0,
-            "days_of_live_data": 0,
-            "moat_strength": "building",
-        }
+        return _empty
 
     try:
         sig_row = db.safe_fetchone(
@@ -98,6 +110,22 @@ def compute_moat_score() -> Dict[str, Any]:
         else:
             days_live = 0
 
+        # Component scores (0–100 each)
+        signal_war_component = min(total_signals / 500.0, 1.0) * 100.0
+        playbook_component = min(pb_coverage / 5.0, 1.0) * 100.0
+        dossier_component = min(symbols_with_dossiers / 30.0, 1.0) * 100.0
+        graph_density = round(graph_edges / max(graph_nodes * (graph_nodes - 1) / 2, 1), 4) if graph_nodes > 1 else 0.0
+        graph_component = min(graph_density * 200.0, 100.0)
+
+        # Data irreproducibility: weighted composite of depth and uniqueness
+        data_irr = round(
+            signal_war_component * 0.35
+            + playbook_component * 0.25
+            + dossier_component * 0.25
+            + graph_component * 0.15,
+            2,
+        )
+
         return {
             "total_signals_archived": total_signals,
             "avg_signal_war": avg_war,
@@ -108,20 +136,17 @@ def compute_moat_score() -> Dict[str, Any]:
             "regime_playbook_coverage": pb_coverage,
             "days_of_live_data": days_live,
             "moat_strength": _moat_strength(days_live),
+            "components": {
+                "signal_war_database": round(signal_war_component, 2),
+                "regime_playbook_depth": round(playbook_component, 2),
+                "dossier_completeness": round(dossier_component, 2),
+                "connection_graph_density": round(graph_component, 2),
+            },
+            "data_irreproducibility_estimate": data_irr,
         }
     except Exception as exc:
         logger.warning("compute_moat_score_failed err=%s", exc)
-        return {
-            "total_signals_archived": 0,
-            "avg_signal_war": 0.0,
-            "symbols_with_dossiers": 0,
-            "avg_intelligence_quality_score": 0.0,
-            "graph_nodes": 0,
-            "graph_edges": 0,
-            "regime_playbook_coverage": 0,
-            "days_of_live_data": 0,
-            "moat_strength": "building",
-        }
+        return _empty
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +227,18 @@ def update_playbook(as_of_date: Optional[str] = None):
     return update_regime_playbook(aod)
 
 
+@router.get("/regime-transitions/{regime_label}")
+def get_regime_transitions(regime_label: str, lookback_days: int = Query(504, ge=63, le=2520)):
+    return compute_regime_transition_probabilities(regime_label, lookback_days)
+
+
+@router.get("/regime-warnings")
+def get_regime_warnings(as_of_date: Optional[str] = None):
+    aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    warnings = identify_warning_signals(aod)
+    return {"as_of_date": aod.isoformat(), "warning_count": len(warnings), "warnings": warnings}
+
+
 # ---------------------------------------------------------------------------
 # Company dossier routes
 # ---------------------------------------------------------------------------
@@ -270,6 +307,30 @@ def get_centrality():
     except Exception as exc:
         logger.warning("graph_centrality_failed err=%s", exc)
         return {"centrality": {}}
+
+
+# ---------------------------------------------------------------------------
+# Signal WAR endpoints (full formula)
+# ---------------------------------------------------------------------------
+
+@router.get("/signal-war/{symbol}")
+def get_signal_war(symbol: str, lookback_days: int = Query(252, ge=21, le=1260)):
+    stats = compute_signal_batting_average(symbol.upper(), lookback_days)
+    return {
+        "symbol": symbol.upper(),
+        "signal_war": stats.get("signal_war"),
+        "batting_average_21d": stats.get("batting_average_21d"),
+        "slugging_21d": stats.get("slugging_21d"),
+        "war_ic_component": stats.get("war_ic_component"),
+        "league_avg": stats.get("league_avg"),
+        "sample_count": stats.get("sample_count", 0),
+        "regime_breakdown": stats.get("regime_breakdown", {}),
+    }
+
+
+@router.get("/signal-war/leaderboard")
+def get_war_leaderboard(limit: int = Query(10, ge=1, le=50)):
+    return {"leaderboard": get_signal_leaderboard(limit)}
 
 
 # ---------------------------------------------------------------------------

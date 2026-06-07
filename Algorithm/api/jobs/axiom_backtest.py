@@ -30,6 +30,34 @@ logger = logging.getLogger(__name__)
 
 _SIGNAL_QUERY_LIMIT = 10_000
 
+# ---------------------------------------------------------------------------
+# Fallback friction: fixed cost estimate (round-trip bps) when full engine
+# can't be instantiated without MarketStateInputs/ExecutionPlan/CostModel.
+# ---------------------------------------------------------------------------
+
+_DEFAULT_FRICTION_BPS = 5.0  # 5 bps round-trip (1 spread + 4 impact)
+
+
+class FallbackFriction:
+    """Simple friction estimator used when FrictionEngine cannot be wired."""
+
+    @staticmethod
+    def estimate_bps(dau: Optional[float]) -> float:
+        if dau is None:
+            return _DEFAULT_FRICTION_BPS
+        # Higher DAU → more liquid signals → slightly lower friction
+        if dau >= 75:
+            return 3.0
+        if dau >= 60:
+            return 4.0
+        return _DEFAULT_FRICTION_BPS
+
+
+def compute_net_return(adj_ret: float, dau: Optional[float]) -> tuple:
+    """Return (net_return, friction_bps) after deducting estimated trading costs."""
+    friction_bps = FallbackFriction.estimate_bps(dau)
+    return adj_ret - friction_bps / 10000.0, friction_bps
+
 
 # ---------------------------------------------------------------------------
 # Price helpers
@@ -121,7 +149,8 @@ def compute_backtest_stats(
         raw_ret = (p1 / p0) - 1.0
         # Direction-adjusted: BUY long, SELL short
         adj_ret = raw_ret if signal_label == "BUY" else -raw_ret
-        hit = adj_ret > 0
+        net_ret, friction_bps = compute_net_return(adj_ret, dau)
+        hit = net_ret > 0
 
         results.append({
             "symbol": sym,
@@ -131,6 +160,8 @@ def compute_backtest_stats(
             "regime_label": sig.get("regime_label") or "unknown",
             "raw_return": raw_ret,
             "adj_return": adj_ret,
+            "net_return": net_ret,
+            "friction_bps": friction_bps,
             "hit": hit,
         })
 
@@ -140,11 +171,15 @@ def compute_backtest_stats(
     n = len(results)
     hits = sum(1 for r in results if r["hit"])
     adj_returns = [r["adj_return"] for r in results]
+    net_returns_all = [r["net_return"] for r in results]
+    avg_friction_bps = round(
+        sum(r["friction_bps"] for r in results) / n, 2
+    ) if results else _DEFAULT_FRICTION_BPS
 
-    # Equity curve: group by signal_date, mean adj_return per date
+    # Equity curve: group by signal_date, mean net_return per date
     by_date: Dict[Any, List[float]] = defaultdict(list)
     for r in results:
-        by_date[r["signal_date"]].append(r["adj_return"])
+        by_date[r["signal_date"]].append(r["net_return"])
 
     sorted_dates = sorted(by_date.keys())
     port_returns = [_mean(by_date[d]) for d in sorted_dates]
@@ -153,13 +188,14 @@ def compute_backtest_stats(
     for ret in port_returns:
         equity.append(equity[-1] * (1.0 + ret))
 
-    # Sharpe (annualised from H-day periods)
+    # Sharpe (annualised from H-day periods) — net of friction
     periods_per_year = 252.0 / max(horizon_days, 1)
-    sharpe: Optional[float] = None
+    sharpe_ratio_net: Optional[float] = None
     if len(port_returns) >= 2:
         mu = _mean(port_returns)
         sd = _std(port_returns)
-        sharpe = round(mu / sd * (periods_per_year ** 0.5), 4) if sd > 0 else 0.0
+        sharpe_ratio_net = round(mu / sd * (periods_per_year ** 0.5), 4) if sd > 0 else 0.0
+    sharpe = sharpe_ratio_net  # backwards-compatible alias
 
     mdd = round(_max_drawdown(equity[1:] or equity), 4)
 
@@ -212,7 +248,10 @@ def compute_backtest_stats(
         "signals_with_return": n,
         "hit_rate": round(hits / n, 4),
         "avg_return_pct": round(_mean(adj_returns) * 100, 4),
+        "avg_net_return_pct": round(_mean(net_returns_all) * 100, 4),
         "sharpe": sharpe,
+        "sharpe_ratio_net": sharpe_ratio_net,
+        "friction_applied_bps": avg_friction_bps,
         "max_drawdown": mdd,
         "spearman_ic": ic,
         "by_regime": by_regime,

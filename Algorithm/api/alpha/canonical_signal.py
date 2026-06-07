@@ -333,6 +333,7 @@ def build_signal_from_features(
     if pess_raw > 80.0 and days_to_earnings is not None and days_to_earnings <= 30:
         suppression_flags.append("earnings_risk")
 
+    pre_suppression_action = action  # capture before potential override
     severe_suppression = (
         (event_overhang_score >= 82 and earnings_window_flag)
         or implementation_fragility_score >= 78
@@ -512,6 +513,9 @@ def build_signal_from_features(
             "environment_penalty": environment_penalty,
             "raw_before_penalties": stacked_raw,
         },
+        "pre_suppression_action": pre_suppression_action,
+        "suppression_active": severe_suppression and pre_suppression_action != "HOLD",
+        "suppression_reason": suppression_flags[0] if suppression_flags else "",
         "calibration_loaded": bool(calibration_loaded),
         "calibration_meta": (
             {

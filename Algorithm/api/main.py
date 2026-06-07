@@ -2942,6 +2942,13 @@ def _register_providers_health(app_obj: FastAPI) -> None:
         )
 
 
+@app.get("/axiom/ml/ensemble-status")
+def ensemble_status() -> Dict[str, Any]:
+    """Return current ensemble configuration and IC state."""
+    from api.axiom.ml.ensemble import get_ensemble_status
+    return get_ensemble_status()
+
+
 _register_providers_health(app)
 _providers_paths = {getattr(route, "path", None) for route in app.router.routes}
 logger.info(

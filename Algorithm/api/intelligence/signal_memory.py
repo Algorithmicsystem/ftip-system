@@ -79,7 +79,30 @@ def _compute_stats_from_pnl_rows(rows: List[Dict]) -> Dict:
     slug_21d = _slugging(rows_21d) if rows_21d else _slugging(rows)
 
     overall_ba = _batting(rows) or 0.0
-    signal_war = round(overall_ba - _SPY_BASELINE, 4)
+    n = len(rows)
+
+    # Per-symbol IC: Spearman correlation between DAU proxy (batting) and return
+    # Use return_pct as both score and outcome proxy for now
+    ret_list = [r["return_pct"] for r in rows if r.get("return_pct") is not None]
+    hit_list = [1.0 if r.get("hit") else 0.0 for r in rows if r.get("return_pct") is not None]
+    ic = 0.0
+    if len(ret_list) >= 5:
+        try:
+            import math
+            n_ic = len(ret_list)
+            mean_r = sum(ret_list) / n_ic
+            mean_h = sum(hit_list) / n_ic
+            cov = sum((ret_list[i] - mean_r) * (hit_list[i] - mean_h) for i in range(n_ic))
+            std_r = math.sqrt(sum((x - mean_r) ** 2 for x in ret_list) / n_ic) or 1e-9
+            std_h = math.sqrt(sum((x - mean_h) ** 2 for x in hit_list) / n_ic) or 1e-9
+            ic = cov / (n_ic * std_r * std_h)
+            ic = max(-1.0, min(1.0, ic))
+        except Exception:
+            ic = 0.0
+
+    import math as _math
+    # Full WAR formula: (BA - league_avg) * sqrt(N) * (1 + max(0, IC))
+    signal_war = round((overall_ba - _SPY_BASELINE) * _math.sqrt(max(n, 1)) * (1.0 + max(0.0, ic)), 4)
 
     regime_map: Dict[str, Dict[str, int]] = {}
     for r in rows:
@@ -101,6 +124,8 @@ def _compute_stats_from_pnl_rows(rows: List[Dict]) -> Dict:
         "slugging_5d": round(slug_5d, 4) if slug_5d is not None else None,
         "slugging_21d": round(slug_21d, 4) if slug_21d is not None else None,
         "signal_war": signal_war,
+        "war_ic_component": round(ic, 4),
+        "league_avg": _SPY_BASELINE,
         "sample_count": len(rows),
         "regime_breakdown": regime_breakdown,
     }

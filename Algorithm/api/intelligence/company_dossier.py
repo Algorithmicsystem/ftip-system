@@ -40,6 +40,27 @@ EVENT_TYPES = {
     "management_quality_change",
 }
 
+# Event type weights for IQ scoring (higher = more informative)
+DOSSIER_EVENT_WEIGHTS: Dict[str, float] = {
+    "earnings_beat": 2.0,
+    "earnings_miss": 2.0,
+    "eis_deterioration": 1.8,
+    "eis_recovery": 1.8,
+    "scps_spike": 1.6,
+    "caps_downgrade": 1.5,
+    "caps_upgrade": 1.5,
+    "signal_success": 1.2,
+    "signal_failure": 1.2,
+    "earnings_stress": 1.1,
+    "regime_transition": 1.0,
+    "scps_normalization": 0.8,
+    "insider_activity": 0.8,
+    "sector_rotation": 0.6,
+    "management_quality_change": 0.6,
+}
+
+_RECENCY_HALF_LIFE_DAYS = 90.0
+
 
 @dataclass
 class DossierEvent:
@@ -196,10 +217,30 @@ def _compute_iq_score(
     days_of_data: int,
     event_count: int,
     net_signal_accuracy: float,
+    events: Optional[List[Dict]] = None,
 ) -> float:
-    """Intelligence Quality Score (0–100)."""
+    """Intelligence Quality Score (0–100) with recency-weighted event richness."""
+    import math
     base = min(days_of_data / 252.0, 1.0) * 50.0
-    event_richness = min(event_count / 50.0, 1.0) * 30.0
+
+    # Recency-weighted event richness: each event decays by half-life of 90 days
+    if events:
+        today = dt.date.today()
+        weighted_sum = 0.0
+        for ev in events:
+            ev_type = str(ev.get("event_type") or "")
+            weight = DOSSIER_EVENT_WEIGHTS.get(ev_type, 1.0)
+            try:
+                ev_date = dt.date.fromisoformat(str(ev.get("event_date") or today))
+            except ValueError:
+                ev_date = today
+            age_days = max(0, (today - ev_date).days)
+            decay = math.exp(-age_days * math.log(2) / _RECENCY_HALF_LIFE_DAYS)
+            weighted_sum += weight * decay
+        event_richness = min(weighted_sum / 25.0, 1.0) * 30.0
+    else:
+        event_richness = min(event_count / 50.0, 1.0) * 30.0
+
     accuracy_bonus = net_signal_accuracy * 20.0
     return round(clamp(base + event_richness + accuracy_bonus, 0.0, 100.0), 2)
 
@@ -294,7 +335,7 @@ def get_company_dossier(symbol: str, lookback_days: int = 365) -> Dict:
 
         dossier_start = str(rows[-1][1]) if rows else None
         days_of_data = (dt.date.today() - since).days if rows else 0
-        iq = _compute_iq_score(days_of_data, len(events), net_accuracy)
+        iq = _compute_iq_score(days_of_data, len(events), net_accuracy, events)
 
         return {
             "symbol": symbol,

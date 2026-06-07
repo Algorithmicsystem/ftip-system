@@ -315,11 +315,14 @@ def _load_fundamentals(symbol: str, as_of_date: dt.date) -> Tuple[List[Dict[str,
         FROM fundamentals_quarterly
         WHERE symbol = %s
           AND fiscal_period_end <= %s
-          AND (report_date IS NULL OR report_date <= %s)
+          AND (
+              report_date <= %s
+              OR (report_date IS NULL AND fiscal_period_end <= %s - INTERVAL '45 days')
+          )
         ORDER BY fiscal_period_end DESC
         LIMIT 8
         """,
-        (symbol, as_of_date, as_of_date),
+        (symbol, as_of_date, as_of_date, as_of_date),
     )
     return (
         [
