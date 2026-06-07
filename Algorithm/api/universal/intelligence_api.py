@@ -70,6 +70,11 @@ class UniversalIntelligenceResponse:
     data_freshness_hours: float
     staleness_warning: bool
 
+    # Cross-asset overlay
+    cross_asset_amplifier: float = 0.0
+    cross_asset_adjusted_dau: Optional[float] = None
+    macro_narrative: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -325,6 +330,20 @@ def assemble_universal_intelligence(
         # Step 11: Freshness
         freshness = _compute_freshness_hours(score_date if isinstance(score_date, dt.date) else as_of_date)
 
+        # Step 12: Cross-asset overlay
+        cross_amplifier = 0.0
+        cross_adjusted_dau = None
+        macro_narrative_txt = None
+        try:
+            from api.macro.cross_asset_engine import compute_cross_asset_snapshot
+            from api.assistant.phase3.common import clamp as _clamp
+            ca = compute_cross_asset_snapshot({}, regime_label)
+            cross_amplifier = ca.equity_signal_amplifier
+            cross_adjusted_dau = round(_clamp(dau * (1.0 + cross_amplifier), 0.0, 100.0), 2)
+            macro_narrative_txt = ca.macro_narrative
+        except Exception:
+            pass
+
         # Primary conclusion from reasoning
         primary_conclusion = (
             f"{symbol} receives a {signal_label} signal with DAU {dau:.1f}; "
@@ -365,6 +384,9 @@ def assemble_universal_intelligence(
             moat_score=None,
             data_freshness_hours=freshness,
             staleness_warning=freshness > 24.0,
+            cross_asset_amplifier=cross_amplifier,
+            cross_asset_adjusted_dau=cross_adjusted_dau,
+            macro_narrative=macro_narrative_txt,
         )
 
     except Exception as exc:

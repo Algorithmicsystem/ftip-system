@@ -11,6 +11,40 @@ from api.assistant.phase3.common import clamp
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Static sector groups — guaranteed competitor identification without DB
+# ---------------------------------------------------------------------------
+
+AXIOM_SECTOR_GROUPS: Dict[str, List[str]] = {
+    "Technology": ["AAPL", "MSFT", "NVDA", "GOOG", "GOOGL", "META", "AVGO", "ACN"],
+    "Consumer Discretionary": ["TSLA", "AMZN", "HD", "MCD"],
+    "Consumer Staples": ["WMT", "COST", "PG", "PEP", "KO"],
+    "Healthcare": ["JNJ", "UNH", "MRK", "ABBV", "LLY", "TMO", "DHR"],
+    "Financials": ["JPM", "V", "MA"],
+    "Energy": ["CVX", "XOM"],
+    "Utilities": ["NEE"],
+}
+
+# Reverse mapping: symbol -> sector
+_SYMBOL_TO_SECTOR: Dict[str, str] = {
+    sym: sector
+    for sector, symbols in AXIOM_SECTOR_GROUPS.items()
+    for sym in symbols
+}
+
+
+def get_sector_for_symbol(symbol: str) -> str:
+    """Return sector name from static groups; 'unknown' if not found."""
+    return _SYMBOL_TO_SECTOR.get(symbol.upper(), "unknown")
+
+
+def get_static_competitors(symbol: str, max_competitors: int = 10) -> List[str]:
+    """Return sector peers from static groups (no DB required)."""
+    sector = _SYMBOL_TO_SECTOR.get(symbol.upper())
+    if not sector:
+        return []
+    return [s for s in AXIOM_SECTOR_GROUPS[sector] if s != symbol.upper()][:max_competitors]
+
 
 # ---------------------------------------------------------------------------
 # Dataclasses
@@ -188,47 +222,52 @@ def identify_competitors(
     as_of_date: dt.date,
     max_competitors: int = 10,
 ) -> List[str]:
-    if not db.db_read_enabled():
-        return []
-
     competitors: List[str] = []
 
-    # Method 1: symbol_linkage table
-    try:
-        rows = db.safe_fetchall(
-            """
-            SELECT CASE WHEN symbol_a = %s THEN symbol_b ELSE symbol_a END AS peer
-              FROM symbol_linkage
-             WHERE (symbol_a = %s OR symbol_b = %s)
-               AND link_type IN ('sector_peer', 'competitor')
-             LIMIT %s
-            """,
-            (symbol, symbol, symbol, max_competitors),
-        ) or []
-        competitors = [str(r[0]) for r in rows if r[0] != symbol]
-    except Exception:
-        pass
-
-    # Method 2: sector fallback
-    if len(competitors) < 3:
+    if db.db_enabled():
+        # Method 1: symbol_linkage table
         try:
             rows = db.safe_fetchall(
                 """
-                SELECT DISTINCT symbol
-                  FROM axiom_scores_daily
-                 WHERE payload->>'sector' = %s
-                   AND symbol != %s
-                   AND as_of_date >= %s - interval '7 days'
-                 ORDER BY symbol LIMIT %s
+                SELECT CASE WHEN symbol_a = %s THEN symbol_b ELSE symbol_a END AS peer
+                  FROM symbol_linkage
+                 WHERE (symbol_a = %s OR symbol_b = %s)
+                   AND link_type IN ('sector_peer', 'competitor')
+                 LIMIT %s
                 """,
-                (sector, symbol, as_of_date, max_competitors),
+                (symbol, symbol, symbol, max_competitors),
             ) or []
-            for r in rows:
-                sym = str(r[0])
-                if sym not in competitors:
-                    competitors.append(sym)
+            competitors = [str(r[0]) for r in rows if r[0] != symbol]
         except Exception:
             pass
+
+        # Method 2: DB sector fallback
+        if len(competitors) < 3:
+            try:
+                rows = db.safe_fetchall(
+                    """
+                    SELECT DISTINCT symbol
+                      FROM axiom_scores_daily
+                     WHERE payload->>'sector' = %s
+                       AND symbol != %s
+                       AND as_of_date >= %s - interval '7 days'
+                     ORDER BY symbol LIMIT %s
+                    """,
+                    (sector, symbol, as_of_date, max_competitors),
+                ) or []
+                for r in rows:
+                    sym = str(r[0])
+                    if sym not in competitors:
+                        competitors.append(sym)
+            except Exception:
+                pass
+
+    # Method 3: static sector groups — always works without DB
+    if len(competitors) < 2:
+        static = get_static_competitors(symbol, max_competitors)
+        for s in static:
+            if s not in competitors:
+                competitors.append(s)
 
     return competitors[:max_competitors]
 
@@ -256,8 +295,29 @@ def generate_competitive_intelligence_report(
         competitive_intelligence_score=50.0,
     )
 
-    if not db.db_read_enabled():
-        return default
+    if not db.db_enabled():
+        static_sector = get_sector_for_symbol(symbol)
+        static_peers = get_static_competitors(symbol)
+        profiles = [
+            compute_competitor_profile(symbol, peer, {}, {})
+            for peer in static_peers[:5]
+        ]
+        return CompetitiveIntelligenceReport(
+            symbol=symbol,
+            as_of_date=as_of_date,
+            sector=static_sector,
+            competitor_count=len(profiles),
+            competitors=profiles,
+            sector_dau_rank=1,
+            sector_eis_rank=1,
+            sector_caps_rank=1,
+            sector_size=len(AXIOM_SECTOR_GROUPS.get(static_sector, [symbol])),
+            competitive_position="leader",
+            market_share_momentum="stable",
+            best_competitor=static_peers[0] if static_peers else "unknown",
+            most_dangerous_competitor=static_peers[0] if static_peers else "unknown",
+            competitive_intelligence_score=50.0,
+        )
 
     try:
         row = db.safe_fetchone(

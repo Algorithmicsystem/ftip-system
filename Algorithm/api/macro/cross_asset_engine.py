@@ -146,9 +146,9 @@ def compute_cross_asset_snapshot(
         consistency = "mixed"
 
     if conf_score > 70:
-        amplifier = 0.20
+        amplifier = 0.15
     elif conf_score < 30:
-        amplifier = -0.20
+        amplifier = -0.30
     else:
         amplifier = 0.0
 

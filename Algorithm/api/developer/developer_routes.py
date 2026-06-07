@@ -231,3 +231,128 @@ def get_partner_revenue_share(
 ) -> Dict[str, Any]:
     from api.developer.partner_program import compute_partner_revenue_share
     return compute_partner_revenue_share(partner_id, period)
+
+
+# ---------------------------------------------------------------------------
+# API Key Management
+# ---------------------------------------------------------------------------
+
+@router.get("/keys")
+def list_api_keys(_tenant=Depends(require_tier("free"))) -> Dict[str, Any]:
+    """Return metadata about the caller's active API key."""
+    from api.security import get_allowed_api_keys
+    keys = get_allowed_api_keys()
+    masked = [f"{k[:4]}{'*' * (len(k) - 8)}{k[-4:]}" if len(k) > 8 else "****" for k in keys]
+    return {
+        "key_count": len(masked),
+        "keys": masked,
+        "note": "Keys are masked for security. Use /developer/keys/rotate to issue a new key.",
+    }
+
+
+@router.post("/keys/rotate")
+def rotate_api_key(_tenant=Depends(require_tier("free"))) -> Dict[str, Any]:
+    """Generate a new API key identifier (actual provisioning is ops-side)."""
+    import uuid
+    new_key_id = f"ax_{uuid.uuid4().hex[:24]}"
+    return {
+        "status": "rotation_requested",
+        "new_key_id": new_key_id,
+        "note": "Contact ops@axiom.ftip.io to activate the new key. Old key remains valid for 48h.",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Billing Usage
+# ---------------------------------------------------------------------------
+
+@router.get("/billing/usage")
+def get_billing_usage(
+    tier: str = Query(default="free"),
+    _tenant=Depends(require_tier("free")),
+) -> Dict[str, Any]:
+    """Return billing tier config and usage summary for the current key."""
+    from api.developer.billing import BILLING_TIERS, quota_enforcer
+    from api.security import get_provided_api_key
+    cfg = BILLING_TIERS.get(tier, BILLING_TIERS["free"])
+    return {
+        "tier": tier,
+        "price_usd": cfg["price_usd"],
+        "monthly_calls": cfg["monthly_calls"],
+        "rpm": cfg["rpm"],
+        "features": cfg["features"],
+        "description": cfg["description"],
+    }
+
+
+@router.get("/billing/tiers")
+def list_billing_tiers() -> Dict[str, Any]:
+    from api.developer.billing import BILLING_TIERS
+    return {"tiers": BILLING_TIERS}
+
+
+# ---------------------------------------------------------------------------
+# Revenue Share
+# ---------------------------------------------------------------------------
+
+@router.get("/revenue-share/{partner_type}")
+def get_revenue_share_config(partner_type: str) -> Dict[str, Any]:
+    from api.developer.revenue_share import PARTNER_REVENUE_SHARE
+    cfg = PARTNER_REVENUE_SHARE.get(partner_type)
+    if not cfg:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown partner_type. Valid: {list(PARTNER_REVENUE_SHARE)}",
+        )
+    return {"partner_type": partner_type, **cfg}
+
+
+@router.post("/revenue-share/compute")
+def compute_revenue_share_endpoint(
+    partner_id: str = Query(...),
+    partner_type: str = Query(...),
+    period: str = Query(default="30d"),
+    gross_revenue_usd: Optional[float] = Query(default=None),
+) -> Dict[str, Any]:
+    from api.developer.revenue_share import compute_partner_revenue_share
+    return compute_partner_revenue_share(partner_id, partner_type, period, gross_revenue_usd)
+
+
+# ---------------------------------------------------------------------------
+# Webhook Test
+# ---------------------------------------------------------------------------
+
+@router.post("/webhooks/test")
+def test_webhook(
+    event_type: str = Query(default="signal.buy"),
+) -> Dict[str, Any]:
+    """Fire a test webhook event without triggering actual pipeline logic."""
+    from api.developer.webhooks import WEBHOOK_EVENTS, check_and_fire_webhooks
+    if event_type not in WEBHOOK_EVENTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown event_type. Valid: {WEBHOOK_EVENTS}",
+        )
+    test_payload = {
+        "test": True,
+        "event_type": event_type,
+        "symbol": "AAPL",
+        "dau": 72.5,
+        "signal_label": "BUY",
+        "note": "This is a test delivery from POST /developer/webhooks/test",
+    }
+    deliveries = check_and_fire_webhooks(event_type, test_payload)
+    return {
+        "event_type": event_type,
+        "test_payload": test_payload,
+        "deliveries_attempted": len(deliveries),
+        "deliveries": [
+            {
+                "delivery_id": d.delivery_id,
+                "subscription_id": d.subscription_id,
+                "status": d.status,
+                "http_status_code": d.http_status_code,
+            }
+            for d in deliveries
+        ],
+    }

@@ -69,6 +69,28 @@ def get_head_to_head(symbol: str, competitor: str) -> Dict[str, Any]:
             pass
 
     profile = compute_competitor_profile(symbol.upper(), competitor.upper(), sym_payload, comp_payload)
+
+    # Build narrative
+    sym_u = symbol.upper()
+    comp_u = competitor.upper()
+    pos = profile.competitive_position_score
+    if pos > 60:
+        stance = f"{sym_u} holds a clear competitive edge over {comp_u}"
+    elif pos < 40:
+        stance = f"{comp_u} currently outperforms {sym_u} on AXIOM metrics"
+    else:
+        stance = f"{sym_u} and {comp_u} are closely matched"
+
+    adv_txt = (
+        f"Key advantage: {profile.key_advantage.replace('_', ' ')} (+{abs(profile.dau_advantage):.1f} DAU pts)."
+        if profile.key_advantage != "none" else "No clear AXIOM advantage identified."
+    )
+    vuln_txt = (
+        f"Primary vulnerability: {profile.key_vulnerability.replace('_', ' ')}."
+        if profile.key_vulnerability != "none" else ""
+    )
+    narrative = f"{stance}. {adv_txt} {vuln_txt}".strip()
+
     return {
         "symbol": profile.symbol,
         "competitor": profile.competitor_symbol,
@@ -80,6 +102,7 @@ def get_head_to_head(symbol: str, competitor: str) -> Dict[str, Any]:
         "competitive_position_score": profile.competitive_position_score,
         "key_advantage": profile.key_advantage,
         "key_vulnerability": profile.key_vulnerability,
+        "head_to_head_narrative": narrative,
     }
 
 
@@ -124,6 +147,51 @@ def get_management_quality(symbol: str) -> Dict[str, Any]:
         "mqs_trend": mqs.mqs_trend,
         "red_flags": mqs.management_red_flags,
         "green_flags": mqs.management_green_flags,
+    }
+
+
+@router.get("/sector/{sector}/ranking")
+def get_sector_dau_ranking(sector: str) -> Dict[str, Any]:
+    """Return all symbols in the sector ranked by DAU."""
+    from api import db
+    from api.competitive.competitive_intelligence import AXIOM_SECTOR_GROUPS
+    import datetime as _dt
+
+    symbols = AXIOM_SECTOR_GROUPS.get(sector, [])
+    ranked: List[Dict[str, Any]] = []
+
+    if db.db_read_enabled() and symbols:
+        try:
+            rows = db.safe_fetchall(
+                """
+                SELECT DISTINCT ON (symbol) symbol,
+                       (payload->>'deployable_alpha_utility')::numeric AS dau,
+                       payload->>'regime_label' AS regime
+                  FROM axiom_scores_daily
+                 WHERE symbol = ANY(%s)
+                 ORDER BY symbol, as_of_date DESC
+                """,
+                (symbols,),
+            ) or []
+            by_sym = {str(r[0]): {"dau": float(r[1] or 50), "regime": str(r[2] or "unknown")} for r in rows}
+        except Exception:
+            by_sym = {}
+
+        for sym in symbols:
+            info = by_sym.get(sym, {"dau": 50.0, "regime": "unknown"})
+            ranked.append({"symbol": sym, "dau": info["dau"], "regime": info["regime"]})
+    else:
+        ranked = [{"symbol": sym, "dau": 50.0, "regime": "unknown"} for sym in symbols]
+
+    ranked.sort(key=lambda x: x["dau"], reverse=True)
+    for i, r in enumerate(ranked):
+        r["rank"] = i + 1
+
+    return {
+        "sector": sector,
+        "symbol_count": len(ranked),
+        "as_of_date": _dt.date.today().isoformat(),
+        "rankings": ranked,
     }
 
 

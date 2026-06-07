@@ -17,11 +17,13 @@ async function loadFactorEnvironment() {
       macro_regime_label:      snapshot.macro_intelligence?.macro_regime_label || '—',
     } : null;
     const cross = snapshot ? {
-      fixed_income_signal: snapshot.cross_asset?.fixed_income_signal,
-      currency_signal:     snapshot.cross_asset?.currency_signal,
-      commodity_signal:    snapshot.cross_asset?.commodity_signal,
-      volatility_signal:   snapshot.cross_asset?.volatility_signal,
-      macro_narrative:     snapshot.cross_asset?.macro_narrative,
+      fixed_income_signal:    snapshot.cross_asset?.fixed_income_signal,
+      currency_signal:        snapshot.cross_asset?.currency_signal,
+      commodity_signal:       snapshot.cross_asset?.commodity_signal,
+      volatility_signal:      snapshot.cross_asset?.volatility_signal,
+      macro_narrative:        snapshot.cross_asset?.macro_narrative,
+      equity_signal_amplifier: snapshot.cross_asset?.equity_signal_amplifier,
+      regime_consistency:      snapshot.cross_asset?.regime_consistency,
     } : null;
     renderFactorPanel(macro, cross);
     if (regimeEl && macro) {
@@ -84,6 +86,20 @@ function renderFactorPanel(macro, cross) {
         <span class="ca-row__label">${s.label}</span>
         <span class="ca-row__signal ${s.signal || 'neutral'}">${(s.signal || '—').replace('_', ' ')}</span>
       </div>`).join('')}` : ''}
+
+    <!-- Cross-asset amplifier -->
+    ${cross?.equity_signal_amplifier != null ? (() => {
+      const amp = cross.equity_signal_amplifier;
+      const ampPct = (amp * 100).toFixed(0);
+      const ampCls = amp > 0 ? 'color:var(--signal-buy)' : amp < 0 ? 'color:var(--signal-sell)' : 'color:var(--text-muted)';
+      const consist = cross.regime_consistency || 'mixed';
+      return `
+    <div style="margin-top:10px;display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg-tertiary);border-radius:6px;">
+      <span style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);">Signal Amplifier</span>
+      <span style="font-size:14px;font-weight:700;${ampCls}">${amp > 0 ? '+' : ''}${ampPct}%</span>
+      <span style="font-size:11px;color:var(--text-muted);">${consist}</span>
+    </div>`;
+    })() : ''}
 
     <!-- Macro narrative -->
     ${cross?.macro_narrative ? `

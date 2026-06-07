@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AXIOM Developer Portal</title>
+  <link rel="icon" type="image/svg+xml" href="/app/static/favicon.svg?v=30">
+  <link rel="stylesheet" href="/app/static/design_system.css?v=30" />
+  <link rel="stylesheet" href="/app/static/styles.css?v=30" />
+  <style>
+    body { margin: 0; padding: 0; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-sans); }
+    .dev-header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--border-default);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dev-header__title { font-size: 18px; font-weight: 700; color: var(--accent-primary); font-family: var(--font-mono); }
+    .dev-header__back { font-size: 12px; color: var(--text-muted); text-decoration: none; cursor: pointer; }
+    .dev-header__back:hover { color: var(--text-primary); }
+
+    .dev-main { max-width: 960px; margin: 32px auto; padding: 0 24px; }
+
+    .dev-section { margin-bottom: 32px; }
+    .dev-section__title {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .1em;
+      color: var(--text-muted); margin-bottom: 12px;
+    }
+
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .tier-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .tier-card.highlighted { border-color: var(--accent-primary); }
+    .tier-card__name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+    .tier-card__price { font-size: 20px; font-weight: 700; color: var(--accent-primary); margin-bottom: 8px; }
+    .tier-card__stat { font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; }
+
+    .partner-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+
+    .partner-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .partner-card__name { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+    .partner-card__pct { font-size: 24px; font-weight: 700; color: var(--signal-buy); }
+    .partner-card__desc { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+
+    .key-box {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-default);
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .key-box__key { font-family: var(--font-mono); font-size: 13px; flex: 1; word-break: break-all; color: var(--text-primary); }
+    .key-box__btn { padding: 6px 14px; font-size: 12px; background: var(--accent-primary); border: none; border-radius: 6px; color: #fff; cursor: pointer; }
+    .key-box__btn:hover { opacity: .85; }
+
+    .endpoint-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .endpoint-table th { text-align: left; color: var(--text-muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; padding: 6px 8px; border-bottom: 1px solid var(--border-default); }
+    .endpoint-table td { padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,.04); color: var(--text-secondary); }
+    .endpoint-table td:first-child { font-family: var(--font-mono); color: var(--text-primary); }
+    .method-badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; background: rgba(59,130,246,.15); color: var(--accent-primary); }
+
+    #status-msg { font-size: 12px; color: var(--text-muted); margin-top: 8px; }
+    .alert-box { padding: 10px 14px; border-radius: 6px; font-size: 12px; margin-top: 8px; background: rgba(59,130,246,.1); color: var(--accent-primary); border: 1px solid rgba(59,130,246,.2); }
+  </style>
+</head>
+<body>
+
+<div class="dev-header">
+  <div class="dev-header__title">AXIOM Developer Portal</div>
+  <a class="dev-header__back" onclick="window.location='/app'">&#8592; Back to Terminal</a>
+</div>
+
+<div class="dev-main">
+
+  <!-- Billing Tiers -->
+  <div class="dev-section">
+    <div class="dev-section__title">Billing Tiers</div>
+    <div class="tier-grid" id="tier-grid">
+      <div class="tier-card"><div class="tier-card__name">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- Partner Revenue Share -->
+  <div class="dev-section">
+    <div class="dev-section__title">Partner Revenue Share</div>
+    <div class="partner-grid" id="partner-grid">
+      <div class="partner-card"><div class="partner-card__name">Loading…</div></div>
+    </div>
+  </div>
+
+  <!-- API Key Management -->
+  <div class="dev-section">
+    <div class="dev-section__title">API Key</div>
+    <div class="key-box">
+      <div class="key-box__key" id="api-key-display">Enter your key above to see masked version</div>
+      <button class="key-box__btn" onclick="rotateKey()">Rotate Key</button>
+    </div>
+    <div id="rotate-msg"></div>
+  </div>
+
+  <!-- Webhooks Test -->
+  <div class="dev-section">
+    <div class="dev-section__title">Webhook Test</div>
+    <div style="display:flex;gap:12px;align-items:center;">
+      <select id="webhook-event" style="padding:6px 10px;font-size:12px;background:var(--bg-secondary);border:1px solid var(--border-default);color:var(--text-primary);border-radius:6px;">
+        <option value="signal.buy">signal.buy</option>
+        <option value="signal.sell">signal.sell</option>
+        <option value="risk.sri_alert">risk.sri_alert</option>
+        <option value="signal.regime_change">signal.regime_change</option>
+      </select>
+      <button class="key-box__btn" onclick="fireTestWebhook()">Fire Test</button>
+    </div>
+    <div id="webhook-result"></div>
+  </div>
+
+  <!-- API Endpoints Reference -->
+  <div class="dev-section">
+    <div class="dev-section__title">Key Endpoints</div>
+    <table class="endpoint-table">
+      <thead><tr>
+        <th>Path</th><th>Method</th><th>Description</th><th>Tier</th>
+      </tr></thead>
+      <tbody>
+        <tr><td>/intelligence/universal/{symbol}</td><td><span class="method-badge">GET</span></td><td>Full AXIOM signal with cross-asset amplifier</td><td>free</td></tr>
+        <tr><td>/intelligence/universe/scores</td><td><span class="method-badge">GET</span></td><td>All 30 universe DAU scores sorted by DAU</td><td>free</td></tr>
+        <tr><td>/jobs/briefing/morning</td><td><span class="method-badge">GET</span></td><td>Morning intelligence briefing</td><td>free</td></tr>
+        <tr><td>/macro/snapshot</td><td><span class="method-badge">GET</span></td><td>Cross-asset + macro regime snapshot</td><td>enterprise</td></tr>
+        <tr><td>/macro/equity-implications/{symbol}</td><td><span class="method-badge">GET</span></td><td>Symbol-level cross-asset overlay</td><td>enterprise</td></tr>
+        <tr><td>/competitive/{symbol}</td><td><span class="method-badge">GET</span></td><td>Competitive intelligence report</td><td>enterprise</td></tr>
+        <tr><td>/competitive/{symbol}/vs/{competitor}</td><td><span class="method-badge">GET</span></td><td>Head-to-head analysis with narrative</td><td>enterprise</td></tr>
+        <tr><td>/competitive/sector/{sector}/ranking</td><td><span class="method-badge">GET</span></td><td>Sector DAU rankings</td><td>enterprise</td></tr>
+        <tr><td>/developer/keys</td><td><span class="method-badge">GET</span></td><td>List API keys (masked)</td><td>free</td></tr>
+        <tr><td>/developer/billing/tiers</td><td><span class="method-badge">GET</span></td><td>All billing tier configs</td><td>free</td></tr>
+        <tr><td>/developer/webhooks/test</td><td><span class="method-badge">POST</span></td><td>Fire test webhook delivery</td><td>free</td></tr>
+        <tr><td>/developer/revenue-share/{partner_type}</td><td><span class="method-badge">GET</span></td><td>Partner revenue share config</td><td>free</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+<script src="/app/static/js/api_client.js?v=30"></script>
+<script>
+async function loadTiers() {
+  try {
+    const data = await API.get('/developer/billing/tiers');
+    const tiers = data.tiers || {};
+    const highlighted = 'professional';
+    document.getElementById('tier-grid').innerHTML = Object.entries(tiers).map(([name, cfg]) => `
+      <div class="tier-card ${name === highlighted ? 'highlighted' : ''}">
+        <div class="tier-card__name">${name.charAt(0).toUpperCase() + name.slice(1)}</div>
+        <div class="tier-card__price">${cfg.price_usd === 0 ? 'Free' : '$' + cfg.price_usd.toLocaleString() + '/mo'}</div>
+        <div class="tier-card__stat">${cfg.monthly_calls ? cfg.monthly_calls.toLocaleString() + ' calls/mo' : 'Unlimited'}</div>
+        <div class="tier-card__stat">${cfg.rpm} RPM</div>
+        <div class="tier-card__stat" style="color:var(--text-muted);font-size:11px;margin-top:6px;">${cfg.description}</div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('tier-grid').innerHTML = '<div style="color:var(--text-muted);font-size:12px;">Tier data unavailable.</div>';
+  }
+}
+
+async function loadPartners() {
+  const types = ['referral', 'reseller', 'oem', 'white_label'];
+  const cards = await Promise.all(types.map(async t => {
+    try {
+      const d = await API.get(`/developer/revenue-share/${t}`);
+      return `<div class="partner-card">
+        <div class="partner-card__name">${t.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase())}</div>
+        <div class="partner-card__pct">${d.revenue_share_pct}%</div>
+        <div class="partner-card__desc">${d.description}</div>
+      </div>`;
+    } catch { return ''; }
+  }));
+  document.getElementById('partner-grid').innerHTML = cards.filter(Boolean).join('') || '<div style="color:var(--text-muted);font-size:12px;">Partner data unavailable.</div>';
+}
+
+async function rotateKey() {
+  try {
+    const data = await API.post('/developer/keys/rotate', {});
+    document.getElementById('rotate-msg').innerHTML = `<div class="alert-box">${data.note}<br><strong>New key ID: ${data.new_key_id}</strong></div>`;
+  } catch (e) {
+    document.getElementById('rotate-msg').innerHTML = `<div class="alert-box" style="color:var(--signal-sell)">Rotation requires authentication.</div>`;
+  }
+}
+
+async function fireTestWebhook() {
+  const event = document.getElementById('webhook-event').value;
+  try {
+    const data = await API.post(`/developer/webhooks/test?event_type=${encodeURIComponent(event)}`, {});
+    document.getElementById('webhook-result').innerHTML = `<div class="alert-box">
+      Fired: <strong>${event}</strong> — ${data.deliveries_attempted} subscription(s) notified.
+    </div>`;
+  } catch (e) {
+    document.getElementById('webhook-result').innerHTML = `<div class="alert-box" style="color:var(--text-muted)">No active subscriptions for ${event} (this is normal in dev).</div>`;
+  }
+}
+
+loadTiers();
+loadPartners();
+</script>
+</body>
+</html>

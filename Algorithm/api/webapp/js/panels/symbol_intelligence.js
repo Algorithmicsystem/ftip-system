@@ -168,6 +168,45 @@ function renderExplanationTab(explain, intel) {
     ${counterHTML}`;
 }
 
+async function loadPeersTab(symbol) {
+  const el = document.getElementById('peers-content');
+  if (!el || !symbol) return;
+  el.innerHTML = '<div class="loading-skeleton skeleton-line full" style="height:40px;"></div>';
+  try {
+    const data = await API.get(`/competitive/${symbol}`).catch(() => null);
+    if (!data || !data.competitors || data.competitors.length === 0) {
+      el.innerHTML = `<div class="alert-banner info">No peer data for ${symbol} in sector ${data?.sector || '—'}.</div>`;
+      return;
+    }
+    const rows = data.competitors.map(c => {
+      const advCls = c.dau_advantage > 0 ? 'color:var(--signal-buy)' : 'color:var(--signal-sell)';
+      return `<tr>
+        <td style="font-weight:600;cursor:pointer;" onclick="loadSymbolIntelligence('${c.competitor_symbol}')">${c.competitor_symbol}</td>
+        <td style="${advCls}">${c.dau_advantage > 0 ? '+' : ''}${(c.dau_advantage || 0).toFixed(1)}</td>
+        <td>${(c.competitive_position_score || 0).toFixed(0)}</td>
+        <td style="font-size:11px;color:var(--text-muted)">${c.key_advantage || '—'}</td>
+      </tr>`;
+    }).join('');
+    el.innerHTML = `
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">
+        Sector: <strong>${data.sector}</strong> &nbsp;·&nbsp;
+        Rank: <strong>${data.sector_dau_rank}/${data.sector_size}</strong> &nbsp;·&nbsp;
+        Position: <strong>${data.competitive_position}</strong>
+      </div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse;">
+        <thead><tr style="color:var(--text-muted);font-size:10px;text-transform:uppercase;">
+          <th style="text-align:left;padding:4px 0;">Peer</th>
+          <th style="text-align:left;padding:4px 0;">DAU Adv</th>
+          <th style="text-align:left;padding:4px 0;">Score</th>
+          <th style="text-align:left;padding:4px 0;">Key Edge</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  } catch (err) {
+    el.innerHTML = `<div class="alert-banner warning">Peer data unavailable: ${err.message}</div>`;
+  }
+}
+
 function handleSymbolSearch() {
   const val = document.getElementById('symbol-search')?.value?.trim()?.toUpperCase();
   if (val) loadSymbolIntelligence(val);

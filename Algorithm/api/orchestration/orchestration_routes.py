@@ -270,6 +270,9 @@ def get_universal_intelligence(symbol: str) -> Dict[str, Any]:
         "moat_score": resp.moat_score,
         "data_freshness_hours": resp.data_freshness_hours,
         "staleness_warning": resp.staleness_warning,
+        "cross_asset_amplifier": resp.cross_asset_amplifier,
+        "cross_asset_adjusted_dau": resp.cross_asset_adjusted_dau,
+        "macro_narrative": resp.macro_narrative,
     }
 
 

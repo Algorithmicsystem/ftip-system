@@ -1908,6 +1908,14 @@ def webapp_index() -> FileResponse:
     return FileResponse(WEBAPP_DIR / "index.html")
 
 
+@app.get("/app/developer")
+def developer_dashboard() -> FileResponse:
+    dev_page = WEBAPP_DIR / "pages" / "developer.html"
+    if not dev_page.exists():
+        dev_page = WEBAPP_DIR / "index.html"
+    return FileResponse(dev_page)
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 @app.get("/favicon.svg", include_in_schema=False)
 def favicon() -> FileResponse:
@@ -2487,7 +2495,7 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": os.environ.get("FTIP_API_KEY") or "",
         "env": _railway_env(),
-        "version": "29.0.0",
+        "version": "30.0.0",
         "build": "AXIOM Intelligence Terminal",
     }
 

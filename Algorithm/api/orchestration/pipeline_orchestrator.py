@@ -173,7 +173,14 @@ def _real_stage(name: str) -> Dict[str, Any]:
     if name == "sri_computation":
         try:
             from api.axiom.risk.systemic_risk import compute_sri
-            compute_sri(today)
+            sri_result = compute_sri(today)
+            try:
+                from api.developer.webhooks import check_and_fire_webhooks
+                sri_val = sri_result.sri if hasattr(sri_result, "sri") else (sri_result or 50.0)
+                if isinstance(sri_val, (int, float)) and sri_val >= 70:
+                    check_and_fire_webhooks("risk.sri_alert", {"sri": float(sri_val), "date": today.isoformat()})
+            except Exception:
+                pass
             return {"records_processed": 1}
         except Exception:
             return {"records_processed": 0}
@@ -215,10 +222,23 @@ def _real_stage(name: str) -> Dict[str, Any]:
             rows = db.safe_fetchall(
                 "SELECT DISTINCT symbol FROM axiom_scores_daily ORDER BY symbol LIMIT 100"
             ) or []
+            buy_signals = []
             for row in rows:
                 sym = str(row[0])
                 resp = assemble_universal_intelligence(sym)
                 cache_universal_response(sym, resp)
+                if resp.signal_label == "BUY":
+                    buy_signals.append({"symbol": sym, "dau": resp.dau, "signal_label": resp.signal_label})
+            if buy_signals:
+                try:
+                    from api.developer.webhooks import check_and_fire_webhooks
+                    check_and_fire_webhooks("signal.buy", {
+                        "signals": buy_signals,
+                        "date": today.isoformat(),
+                        "count": len(buy_signals),
+                    })
+                except Exception:
+                    pass
             return {"records_processed": len(rows)}
         except Exception:
             return {"records_processed": 0}

@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AXIOM Intelligence Terminal</title>
-  <link rel="icon" type="image/svg+xml" href="/app/static/favicon.svg?v=29">
-  <link rel="alternate icon" href="/app/static/favicon.svg?v=29">
-  <link rel="stylesheet" href="/app/static/design_system.css?v=29" />
-  <link rel="stylesheet" href="/app/static/styles.css?v=29" />
+  <link rel="icon" type="image/svg+xml" href="/app/static/favicon.svg?v=30">
+  <link rel="alternate icon" href="/app/static/favicon.svg?v=30">
+  <link rel="stylesheet" href="/app/static/design_system.css?v=30" />
+  <link rel="stylesheet" href="/app/static/styles.css?v=30" />
   <style>
     /* ── Layout shell ─────────────────────────────────────────── */
     body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -338,6 +338,11 @@
       <span class="nav-item__icon">●</span>
       <span class="nav-item__label">System Status</span>
     </div>
+
+    <div class="nav-item" data-view="developer" onclick="window.open('/app/developer','_blank')">
+      <span class="nav-item__icon">&#9998;</span>
+      <span class="nav-item__label">Developer</span>
+    </div>
   </nav>
 
   <!-- MAIN CONTENT -->
@@ -401,6 +406,7 @@
             <div class="tab-nav__item active" onclick="switchTab('intelligence', this)">Intelligence</div>
             <div class="tab-nav__item" onclick="switchTab('risk-tab', this)">Risk</div>
             <div class="tab-nav__item" onclick="switchTab('explanation', this)">Explanation</div>
+            <div class="tab-nav__item" onclick="switchTab('peers', this); loadPeersTab(_currentSymbol)">Peers</div>
           </div>
 
           <!-- Intelligence Tab -->
@@ -419,6 +425,11 @@
           <div class="tab-pane" id="tab-explanation">
             <div id="explanation-chain"></div>
             <div id="explanation-counterfactuals" style="margin-top:12px;"></div>
+          </div>
+
+          <!-- Peers Tab -->
+          <div class="tab-pane" id="tab-peers">
+            <div id="peers-content"><div class="text-muted text-sm">Select a symbol and click Peers.</div></div>
           </div>
         </div>
       </section>
@@ -652,19 +663,19 @@
      SCRIPTS
      ══════════════════════════════════════════════════════════ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="/app/static/js/api_client.js?v=29"></script>
-<script src="/app/static/js/charts.js?v=29"></script>
-<script src="/app/static/js/panels/morning_briefing.js?v=29"></script>
-<script src="/app/static/js/panels/opportunities.js?v=29"></script>
-<script src="/app/static/js/panels/symbol_intelligence.js?v=29"></script>
-<script src="/app/static/js/panels/risk_monitor.js?v=29"></script>
-<script src="/app/static/js/panels/factor_environment.js?v=29"></script>
-<script src="/app/static/js/panels/pipeline_status.js?v=29"></script>
-<script src="/app/static/js/panels/universe_screen.js?v=29"></script>
-<script src="/app/static/js/panels/system_status.js?v=29"></script>
-<script src="/app/static/js/panels/pe_dashboard.js?v=29"></script>
-<script src="/app/static/js/panels/smb_dashboard.js?v=29"></script>
-<script src="/app/static/js/dashboard.js?v=29"></script>
+<script src="/app/static/js/api_client.js?v=30"></script>
+<script src="/app/static/js/charts.js?v=30"></script>
+<script src="/app/static/js/panels/morning_briefing.js?v=30"></script>
+<script src="/app/static/js/panels/opportunities.js?v=30"></script>
+<script src="/app/static/js/panels/symbol_intelligence.js?v=30"></script>
+<script src="/app/static/js/panels/risk_monitor.js?v=30"></script>
+<script src="/app/static/js/panels/factor_environment.js?v=30"></script>
+<script src="/app/static/js/panels/pipeline_status.js?v=30"></script>
+<script src="/app/static/js/panels/universe_screen.js?v=30"></script>
+<script src="/app/static/js/panels/system_status.js?v=30"></script>
+<script src="/app/static/js/panels/pe_dashboard.js?v=30"></script>
+<script src="/app/static/js/panels/smb_dashboard.js?v=30"></script>
+<script src="/app/static/js/dashboard.js?v=30"></script>
 
 </body>
 </html>
