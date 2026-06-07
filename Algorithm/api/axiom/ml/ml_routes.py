@@ -21,7 +21,8 @@ from api.axiom.ml.drift_monitor import check_model_drift
 from api.axiom.ml.feature_builder import build_feature_vector, get_feature_names
 from api.axiom.ml.inference import compute_ml_signal_boost, predict_signal
 from api.axiom.ml.model_registry import get_active_model, get_model_version
-from api.axiom.ml.training_job import run_training_job
+from api.axiom.ml.training_data import MINIMUM_SAMPLES_INITIAL, MINIMUM_SAMPLES_PRODUCTION
+from api.axiom.ml.training_job import run_training_job, _KELLY_MAX_BY_QUALITY
 
 router = APIRouter(
     prefix="/axiom/ml",
@@ -33,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/train")
 def ml_train(
-    min_samples: int = Query(default=50, ge=10),
+    min_samples: int = Query(default=MINIMUM_SAMPLES_INITIAL, ge=10),
     regime_models: bool = Query(default=True),
 ) -> Dict[str, Any]:
     """Trigger the ML training job for the current date."""
@@ -63,6 +64,58 @@ def ml_status() -> Dict[str, Any]:
         result["test_roc_auc"] = metadata.get("roc_auc")
 
     return result
+
+
+@router.get("/training-status")
+def ml_training_status() -> Dict[str, Any]:
+    """Return rich training status including quality tier, Kelly cap, next training time."""
+    version = get_model_version()
+    _, metadata = get_active_model(regime_label=None)
+    has_model = version != "no_model_trained"
+
+    model_quality = metadata.get("model_quality", "insufficient") if has_model else "insufficient"
+    sample_count = int(metadata.get("sample_count") or 0)
+    cv_auc = float(metadata.get("roc_auc") or 0.0)
+    feature_count = len(get_feature_names())
+    kelly_max = _KELLY_MAX_BY_QUALITY.get(model_quality, 0.25)
+
+    # Next Monday at 18:30 ET
+    import datetime as _dt
+    try:
+        import zoneinfo
+        tz = zoneinfo.ZoneInfo("America/New_York")
+    except Exception:
+        tz = _dt.timezone.utc
+    now = _dt.datetime.now(tz)
+    days_until_monday = (7 - now.weekday()) % 7 or 7
+    next_monday = (now + _dt.timedelta(days=days_until_monday)).replace(
+        hour=18, minute=30, second=0, microsecond=0
+    )
+    next_training_at = next_monday.isoformat()
+
+    # Ensemble mode
+    ensemble_mode = "axiom_only"
+    try:
+        from api.axiom.ml.ensemble import get_ensemble_status
+        ens = get_ensemble_status()
+        ensemble_mode = ens.get("blend_method", "axiom_only")
+    except Exception:
+        pass
+
+    return {
+        "model_trained": has_model,
+        "model_version": version,
+        "model_quality": model_quality,
+        "training_samples": sample_count,
+        "samples_for_production": MINIMUM_SAMPLES_PRODUCTION,
+        "samples_for_bootstrap": MINIMUM_SAMPLES_INITIAL,
+        "cross_val_auc": round(cv_auc, 4),
+        "feature_count": feature_count,
+        "last_trained_at": metadata.get("trained_at") if has_model else None,
+        "kelly_max_from_quality": kelly_max,
+        "ensemble_mode": ensemble_mode,
+        "next_training_at": next_training_at,
+    }
 
 
 @router.get("/drift")

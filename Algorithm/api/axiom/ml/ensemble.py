@@ -125,6 +125,11 @@ def compute_ensemble_dau(
     )
 
 
+def invalidate_ensemble_cache() -> None:
+    """No-op stub: called after ML training to signal cache should refresh."""
+    pass
+
+
 def get_ensemble_status(as_of_date: Optional[dt.date] = None) -> Dict[str, Any]:
     """Return current ensemble configuration and IC state."""
     aod = as_of_date or dt.date.today()

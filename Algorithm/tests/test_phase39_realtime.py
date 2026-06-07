@@ -77,17 +77,17 @@ class TestIntradayEngine:
     def test_intraday_composite_bounded(self):
         from api.axiom.intraday.intraday_engine import compute_intraday_composite
         # Even extreme values must be in [0, 100]
-        c1 = compute_intraday_composite(200.0, 200.0, 200.0)
+        c1 = compute_intraday_composite(200.0, 200.0, 200.0, 200.0)
         assert 0.0 <= c1 <= 100.0
-        c2 = compute_intraday_composite(-50.0, -50.0, -50.0)
+        c2 = compute_intraday_composite(-50.0, -50.0, -50.0, -50.0)
         assert 0.0 <= c2 <= 100.0
 
     def test_intraday_composite_anchored_to_daily(self):
         from api.axiom.intraday.intraday_engine import compute_intraday_composite, _INTRADAY_BASE_WEIGHT
         # With intraday = 50 (neutral), composite should track daily × base_weight + 50 × remainder
         daily = 70.0
-        composite = compute_intraday_composite(daily, 50.0, 50.0)
-        # = 70 * 0.50 + 50 * 0.30 + 50 * 0.20 = 35 + 15 + 10 = 60
+        composite = compute_intraday_composite(daily, 50.0, 50.0, 50.0)
+        # = 70*0.50 + 50*0.25 + 50*0.15 + 50*0.10 = 35 + 12.5 + 7.5 + 5 = 60
         assert composite == pytest.approx(60.0, abs=0.5)
 
     def test_run_intraday_graceful_empty(self):
@@ -95,7 +95,7 @@ class TestIntradayEngine:
         snapshot = run_intraday_update("AAPL", [], 65.0, 1_000_000.0)
         assert snapshot.symbol == "AAPL"
         assert snapshot.intraday_flow_score is None
-        assert snapshot.intraday_composite is None
+        assert snapshot.intraday_composite == 65.0  # pass-through of daily_axiom_dau when no bars
         assert snapshot.alert_eligible is False
 
     def test_run_intraday_with_bars(self):
@@ -309,6 +309,7 @@ class TestScheduler:
             "ml_training_check",
             "outcome_fill",
             "memory_consolidation",
+            "ws_heartbeat",
         }
         assert _JOB_IDS == expected
 
@@ -334,9 +335,9 @@ class TestScheduler:
         assert "next_run_times" in status
         assert "last_run_results" in status
 
-    def test_job_count_is_ten(self):
+    def test_job_count_is_eleven(self):
         from api.jobs.scheduler import _JOB_IDS
-        assert len(_JOB_IDS) == 10
+        assert len(_JOB_IDS) == 11
 
 
 # ---------------------------------------------------------------------------

@@ -46,21 +46,55 @@ def _engine_score(payload: Dict, engine: str, default: float = 50.0) -> float:
 
 
 def _load_ic_state_bulk(as_of_date: dt.date) -> str:
+    """Load IC state for the Kelly sizer.
+
+    Priority: axiom_composite 21d → any score_field 21d → IC=0.04 prior → INSUFFICIENT.
+    Using a conservative prior (IC=0.04) instead of INSUFFICIENT prevents the sizer
+    from being permanently locked at 0.25× when real IC data hasn't been computed yet.
+    """
     if not db.db_read_enabled():
-        return "INSUFFICIENT"
+        return "WEAK"  # IC=0.04 prior maps to WEAK rather than INSUFFICIENT
     try:
+        # Try axiom_composite first
         row = db.safe_fetchone(
             """
-            SELECT ic_state FROM signal_ic_daily
-            WHERE score_field = 'composite' AND horizon_label = '21d'
-              AND as_of_date <= %s
+            SELECT ic_state, ic_value FROM signal_ic_daily
+            WHERE score_field = 'axiom_composite' AND horizon_label = '21d'
+              AND as_of_date <= %s AND ic_value IS NOT NULL
             ORDER BY as_of_date DESC LIMIT 1
             """,
             (as_of_date,),
         )
-        return str(row[0]) if row and row[0] else "INSUFFICIENT"
+        if row and row[0]:
+            return str(row[0])
+        # Fall back to composite field
+        row = db.safe_fetchone(
+            """
+            SELECT ic_state, ic_value FROM signal_ic_daily
+            WHERE score_field = 'composite' AND horizon_label = '21d'
+              AND as_of_date <= %s AND ic_value IS NOT NULL
+            ORDER BY as_of_date DESC LIMIT 1
+            """,
+            (as_of_date,),
+        )
+        if row and row[0]:
+            return str(row[0])
+        # Fall back to any available IC
+        row = db.safe_fetchone(
+            """
+            SELECT ic_state FROM signal_ic_daily
+            WHERE horizon_label = '21d' AND as_of_date <= %s AND ic_value IS NOT NULL
+            ORDER BY as_of_date DESC LIMIT 1
+            """,
+            (as_of_date,),
+        )
+        if row and row[0]:
+            return str(row[0])
+        # Conservative prior: IC=0.04 is slightly below professional manager threshold
+        # (Grinold-Kahn: IC > 0.05 = professional). Use WEAK to get 0.20× Kelly.
+        return "WEAK"
     except Exception:
-        return "INSUFFICIENT"
+        return "WEAK"
 
 
 def _load_breadth_state_bulk(as_of_date: dt.date) -> str:

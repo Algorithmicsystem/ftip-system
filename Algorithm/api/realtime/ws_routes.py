@@ -19,6 +19,7 @@ from api.realtime.websocket_manager import (
     build_opportunity_alert,
     build_risk_alert,
     manager,
+    ws_manager,
 )
 
 router = APIRouter(tags=["realtime"])
@@ -114,6 +115,41 @@ async def _scan_and_broadcast() -> None:
                 )
                 await manager.broadcast_alert(risk_alert)
                 _last_sri_alert_time = now
+
+
+@router.websocket("/ws/intelligence")
+async def ws_intelligence_endpoint(websocket: WebSocket) -> None:
+    """WebSocket endpoint for the AXIOM intelligence feed.
+
+    Broadcasts typed messages: signal_alert, intraday_update, regime_change,
+    pipeline_complete, ml_model_updated, sri_update, heartbeat.
+    No auth required — clients that have the base URL can connect.
+    """
+    await ws_manager.connect(websocket)
+    try:
+        # Send initial connected message with basic status
+        try:
+            status_payload: Dict[str, Any] = {
+                "type": "connected",
+                "timestamp": dt.datetime.utcnow().isoformat(),
+            }
+            try:
+                from api.axiom.ml.ensemble import get_ensemble_status
+                status_payload["ensemble_mode"] = get_ensemble_status().get("blend_method", "rule_only")
+            except Exception:
+                pass
+            await websocket.send_text(json.dumps(status_payload))
+        except Exception:
+            pass
+
+        while True:
+            raw = await websocket.receive_text()
+            if raw == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception:
+        ws_manager.disconnect(websocket)
 
 
 @router.websocket("/ws/alerts")

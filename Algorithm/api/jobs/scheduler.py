@@ -26,6 +26,7 @@ _JOB_IDS = {
     "ml_training_check",
     "outcome_fill",
     "memory_consolidation",
+    "ws_heartbeat",
 }
 
 
@@ -78,12 +79,47 @@ def _job_full_daily_pipeline() -> None:
 
 
 def _job_ml_training_check() -> None:
+    from api.axiom.ml.training_data import MINIMUM_SAMPLES_INITIAL
     from api.axiom.ml.training_job import run_training_job
     try:
-        result = run_training_job(min_samples=50)
-        logger.info("scheduler.ml_training_check status=%s", result.get("status"))
+        result = run_training_job(min_samples=MINIMUM_SAMPLES_INITIAL)
+        status = result.get("status")
+        logger.info("scheduler.ml_training_check status=%s", status)
+        if status == "trained":
+            # Invalidate ensemble weight cache and broadcast
+            try:
+                from api.axiom.ml.ensemble import invalidate_ensemble_cache
+                invalidate_ensemble_cache()
+            except Exception:
+                pass
+            try:
+                import datetime as _dt
+                from api.realtime.websocket_manager import ws_manager
+                ws_manager.broadcast_from_thread({
+                    "type": "ml_model_updated",
+                    "version": result.get("model_version", ""),
+                    "quality": result.get("model_quality", "bootstrap"),
+                    "cv_auc": round(result.get("test_metrics", {}).get("roc_auc", 0.0), 3),
+                    "samples": result.get("sample_count", 0),
+                    "timestamp": _dt.datetime.utcnow().isoformat(),
+                })
+            except Exception:
+                pass
     except Exception as exc:
         logger.warning("scheduler.ml_training_check_failed error=%s", exc)
+
+
+def _job_ws_heartbeat() -> None:
+    try:
+        import datetime as _dt
+        from api.realtime.websocket_manager import ws_manager
+        ws_manager.broadcast_from_thread({
+            "type": "heartbeat",
+            "timestamp": _dt.datetime.utcnow().isoformat(),
+            "connections": ws_manager.connection_count(),
+        })
+    except Exception as exc:
+        logger.debug("scheduler.ws_heartbeat_failed error=%s", exc)
 
 
 def _job_outcome_fill() -> None:
@@ -158,6 +194,8 @@ class SchedulerManager:
                   id="outcome_fill", replace_existing=True)
         s.add_job(_job_memory_consolidation, CronTrigger(day_of_week="mon-fri", hour=19, minute=0),
                   id="memory_consolidation", replace_existing=True)
+        s.add_job(_job_ws_heartbeat, trigger="interval", seconds=30,
+                  id="ws_heartbeat", replace_existing=True)
 
         s.start()
         self._running = True

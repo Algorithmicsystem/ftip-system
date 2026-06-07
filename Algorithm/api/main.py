@@ -1713,6 +1713,12 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     _startup()
+    # Capture the event loop for thread-safe WebSocket broadcasting from APScheduler jobs
+    try:
+        from api.realtime.websocket_manager import ws_manager
+        ws_manager.set_loop(asyncio.get_event_loop())
+    except Exception:
+        pass
     from api.jobs.scheduler import start_scheduler
     start_scheduler()
     yield
@@ -2481,7 +2487,7 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": os.environ.get("FTIP_API_KEY") or "",
         "env": _railway_env(),
-        "version": "27.0.0",
+        "version": "28.0.0",
         "build": "AXIOM Intelligence Terminal",
     }
 

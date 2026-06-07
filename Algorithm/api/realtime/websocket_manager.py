@@ -1,14 +1,16 @@
 """Phase 10.2: WebSocket Connection Manager and Alert Payload Builders."""
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Connection manager
+# Legacy connection manager (keyed by api_key) — used by /ws/alerts
 # ---------------------------------------------------------------------------
 
 
@@ -16,7 +18,6 @@ class WebSocketManager:
     """Manages WebSocket connections keyed by api_key."""
 
     def __init__(self) -> None:
-        # Maps api_key → list of WebSocket objects
         self.active_connections: Dict[str, List[Any]] = {}
 
     async def connect(self, websocket: Any, api_key: str) -> None:
@@ -52,8 +53,64 @@ class WebSocketManager:
         return sum(len(v) for v in self.active_connections.values())
 
 
-# Module-level singleton
+# Module-level singleton (legacy /ws/alerts feed)
 manager = WebSocketManager()
+
+
+# ---------------------------------------------------------------------------
+# Intelligence feed manager — thread-safe broadcast for /ws/intelligence
+# ---------------------------------------------------------------------------
+
+
+class IntelligenceWebSocketManager:
+    """
+    Thread-safe WebSocket manager for the /ws/intelligence intelligence feed.
+
+    APScheduler runs jobs in background threads, not the async event loop.
+    broadcast_from_thread() uses asyncio.run_coroutine_threadsafe() to safely
+    send messages from those threads to all connected WebSocket clients.
+    """
+
+    def __init__(self) -> None:
+        self._connections: List[Any] = []
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Capture the event loop at startup so background threads can broadcast."""
+        self._loop = loop
+
+    async def connect(self, websocket: Any) -> None:
+        await websocket.accept()
+        self._connections.append(websocket)
+        logger.info("ws.intelligence.connect total=%d", len(self._connections))
+
+    def disconnect(self, websocket: Any) -> None:
+        self._connections = [c for c in self._connections if c is not websocket]
+        logger.info("ws.intelligence.disconnect total=%d", len(self._connections))
+
+    async def broadcast_async(self, message: Dict[str, Any]) -> None:
+        """Broadcast to all connected clients; prune dead connections."""
+        payload = json.dumps(message, default=str)
+        dead = []
+        for ws in list(self._connections):
+            try:
+                await ws.send_text(payload)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect(ws)
+
+    def broadcast_from_thread(self, message: Dict[str, Any]) -> None:
+        """Thread-safe broadcast from APScheduler jobs or other background threads."""
+        if self._loop and not self._loop.is_closed():
+            asyncio.run_coroutine_threadsafe(self.broadcast_async(message), self._loop)
+
+    def connection_count(self) -> int:
+        return len(self._connections)
+
+
+# Module-level singleton for the intelligence feed
+ws_manager = IntelligenceWebSocketManager()
 
 
 # ---------------------------------------------------------------------------

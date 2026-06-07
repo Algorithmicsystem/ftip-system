@@ -22,6 +22,23 @@ logger = logging.getLogger(__name__)
 _REGIME_LABELS = ["TRENDING", "CHOPPY", "HIGH_VOL", "RECOVERY"]
 _MIN_REGIME_SAMPLES = 20
 
+# Kelly cap by training quality tier
+_KELLY_MAX_BY_QUALITY = {
+    "production": 0.50,
+    "bootstrap": 0.30,
+    "insufficient": 0.25,
+}
+
+
+def get_model_quality_tier(sample_count: int) -> str:
+    """Return model quality tier string based on sample count."""
+    from api.axiom.ml.training_data import MINIMUM_SAMPLES_INITIAL, MINIMUM_SAMPLES_PRODUCTION
+    if sample_count >= MINIMUM_SAMPLES_PRODUCTION:
+        return "production"
+    if sample_count >= MINIMUM_SAMPLES_INITIAL:
+        return "bootstrap"
+    return "insufficient"
+
 
 def compute_psi(
     reference_distribution: np.ndarray,
@@ -77,7 +94,7 @@ def _build_model_version(as_of_date: dt.date, regime_label: Optional[str] = None
 
 def run_training_job(
     as_of_date: Optional[dt.date] = None,
-    min_samples: int = 50,
+    min_samples: int = 20,
     retrain_regime_models: bool = True,
 ) -> Dict[str, Any]:
     """Full model training lifecycle.
@@ -102,6 +119,8 @@ def run_training_job(
         }
 
     sample_count = len(X)
+    model_quality = get_model_quality_tier(sample_count)
+    kelly_max = _KELLY_MAX_BY_QUALITY[model_quality]
 
     # Step 2: Split
     X_train, X_test, y_train, y_test = split_train_test_purged(X, y, symbols)
@@ -157,6 +176,8 @@ def run_training_job(
         "regime_label": None,
         "trained_at": as_of.isoformat(),
         "sample_count": sample_count,
+        "model_quality": model_quality,
+        "kelly_max": kelly_max,
         "feature_ref_hist": feature_ref_hist,
         "feature_ref_bins": feature_ref_bins,
         "feature_importances": feature_importances,
@@ -202,10 +223,16 @@ def run_training_job(
             except Exception as exc:
                 logger.warning("training_job.regime_train_failed regime=%s error=%s", regime, exc)
 
+    logger.info(
+        "ml_training.complete quality=%s samples=%d cv_auc=%.3f",
+        model_quality, sample_count, metrics.get("roc_auc", 0.0),
+    )
     return {
         "status": "trained",
         "model_version": model_version,
         "sample_count": sample_count,
+        "model_quality": model_quality,
+        "kelly_max": kelly_max,
         "test_metrics": metrics,
         "regime_models_trained": regime_models_trained,
         "psi_score": round(psi_score, 6),

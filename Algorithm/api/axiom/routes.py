@@ -846,3 +846,68 @@ def conviction_trends(
     """Return conviction velocity (5-day confidence slope) per symbol."""
     date = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
     return _compute_conviction_trends(date, window=window, min_dau=min_dau, limit=limit)
+
+
+@router.get("/allocation/kelly-status")
+def kelly_status(as_of_date: Optional[str] = Query(default=None)) -> Dict[str, Any]:
+    """Return current Kelly sizer IC source, value, and effective position sizing mode.
+
+    Exposes whether the sizer is using live IC, a bootstrap prior, or the default.
+    """
+    aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    from api.axiom.screener import _load_ic_state_bulk
+
+    ic_state = _load_ic_state_bulk(aod)
+
+    # Load numeric IC value from signal_ic_daily
+    ic_value: Optional[float] = None
+    ic_source = "insufficient"
+    sample_count = 0
+
+    if db.db_read_enabled():
+        try:
+            row = db.safe_fetchone(
+                """
+                SELECT ic_value, sample_size FROM signal_ic_daily
+                 WHERE score_field IN ('axiom_composite', 'composite')
+                   AND horizon_label = '21d'
+                   AND as_of_date <= %s
+                   AND ic_value IS NOT NULL
+                 ORDER BY as_of_date DESC LIMIT 1
+                """,
+                (aod,),
+            )
+            if row and row[0] is not None:
+                ic_value = float(row[0])
+                sample_count = int(row[1] or 0)
+                ic_source = "signal_ic_daily"
+        except Exception:
+            pass
+
+    if ic_value is None:
+        ic_value = 0.04  # Grinold-Kahn conservative prior
+        ic_source = "bootstrap_prior"
+
+    confidence_factor = min(sample_count / 50.0, 1.0)
+    adjusted_ic = ic_value * confidence_factor
+
+    from api.axiom.sizer import _IC_KELLY_MULTIPLIER
+    ic_mult = _IC_KELLY_MULTIPLIER.get(ic_state, 0.25)
+
+    kelly_mode = (
+        "live_ic" if ic_source == "signal_ic_daily"
+        else "bootstrap_prior" if ic_source == "bootstrap_prior"
+        else "insufficient_default"
+    )
+
+    return {
+        "ic_source": ic_source,
+        "ic_value": round(ic_value, 4),
+        "ic_state": ic_state,
+        "confidence_factor": round(confidence_factor, 4),
+        "adjusted_ic": round(adjusted_ic, 4),
+        "ic_kelly_multiplier": ic_mult,
+        "position_size_pct": round(ic_mult * 0.5 * 0.10 * 100, 2),  # half-kelly × 10% budget
+        "kelly_mode": kelly_mode,
+        "sample_count": sample_count,
+    }

@@ -23,6 +23,11 @@ from api.axiom.ml.feature_builder import (
 
 logger = logging.getLogger(__name__)
 
+# Grinold-Kahn (2000) Ch. 4: small-sample IC estimates are noisy but directionally
+# useful. 20 samples → SE = 1/sqrt(20) ≈ 0.22; usable for half-Kelly bootstrap.
+MINIMUM_SAMPLES_INITIAL = 20      # bootstrap-quality model threshold
+MINIMUM_SAMPLES_PRODUCTION = 100  # production-quality model threshold
+
 _HORIZON_DAYS: Dict[str, int] = {
     "5d": 5, "21d": 21, "63d": 63,
     "5": 5, "21": 21, "63": 63,

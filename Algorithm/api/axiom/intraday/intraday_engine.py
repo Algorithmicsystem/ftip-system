@@ -12,17 +12,28 @@ from typing import Any, Dict, List, Optional
 from api.assistant.phase3.common import clamp
 
 INTRADAY_UPDATE_TIMES = ["10:00", "12:00", "14:00", "16:00"]
-INTRADAY_FLOW_WEIGHT = 0.30
-INTRADAY_BEHAVIORAL_WEIGHT = 0.20
-_INTRADAY_BASE_WEIGHT = 1.0 - INTRADAY_FLOW_WEIGHT - INTRADAY_BEHAVIORAL_WEIGHT  # 0.50
+# Composite blend weights (must sum to 1.0)
+_BASE_WEIGHT     = 0.50  # daily AXIOM anchor
+_VWAP_WEIGHT     = 0.25  # VWAP signal
+_VOLUME_WEIGHT   = 0.15  # volume surge
+_MOMENTUM_WEIGHT = 0.10  # intraday momentum
 
-_ALERT_COMPOSITE_THRESHOLD = 65.0  # composite must exceed this to be alert-eligible
+# Legacy aliases kept for any callers that reference them
+INTRADAY_FLOW_WEIGHT = _VWAP_WEIGHT
+INTRADAY_BEHAVIORAL_WEIGHT = _MOMENTUM_WEIGHT
+_INTRADAY_BASE_WEIGHT = _BASE_WEIGHT
+
+# Alert eligibility thresholds (Kyle 1985: informed traders show through volume+VWAP)
+_ALERT_DAU_SHIFT_THRESHOLD = 12.0   # 12+ point intraday shift from daily DAU
+_ALERT_VOLUME_SURGE_THRESHOLD = 75.0
+_ALERT_VWAP_DEV_THRESHOLD = 3.0    # 3%+ VWAP deviation
 
 
 @dataclass
 class IntradaySnapshot:
     symbol: str
     timestamp: dt.datetime
+    daily_axiom_dau: Optional[float] = None
     intraday_flow_score: Optional[float] = None
     intraday_behavioral_score: Optional[float] = None
     intraday_composite: Optional[float] = None
@@ -31,20 +42,49 @@ class IntradaySnapshot:
     volume_surge_score: Optional[float] = None
     session_return_pct: Optional[float] = None
     alert_eligible: bool = False
+    alert_type: Optional[str] = None
+    source: str = "no_data"
 
 
 def compute_intraday_composite(
     daily_axiom_dau: float,
-    intraday_flow_score: float,
-    intraday_behavioral_score: float,
+    vwap_signal_score: float,
+    volume_surge_score: float,
+    momentum_score: float,
 ) -> float:
-    """Blend daily AXIOM anchor with intraday engine updates."""
+    """Blend daily AXIOM anchor with intraday signals.
+
+    BASE=0.50 anchors to daily AXIOM; VWAP=0.25, VOLUME=0.15, MOMENTUM=0.10 nudge.
+    """
     composite = (
-        daily_axiom_dau * _INTRADAY_BASE_WEIGHT
-        + intraday_flow_score * INTRADAY_FLOW_WEIGHT
-        + intraday_behavioral_score * INTRADAY_BEHAVIORAL_WEIGHT
+        daily_axiom_dau  * _BASE_WEIGHT
+        + vwap_signal_score  * _VWAP_WEIGHT
+        + volume_surge_score * _VOLUME_WEIGHT
+        + momentum_score     * _MOMENTUM_WEIGHT
     )
     return round(clamp(composite, 0.0, 100.0), 2)
+
+
+def compute_vwap_signal_score(vwap_deviation: float) -> float:
+    """Map VWAP deviation (%) to [0, 100] score. 3× multiplier: ±5% → ±15 points."""
+    return round(clamp(50.0 + vwap_deviation * 3.0, 0.0, 100.0), 2)
+
+
+def determine_alert_type(
+    intraday_composite: float,
+    daily_axiom_dau: float,
+    volume_surge_score: float,
+    vwap_deviation: float,
+) -> Optional[str]:
+    """Return alert type string if alert conditions are met, else None."""
+    delta = intraday_composite - daily_axiom_dau
+    if abs(delta) > _ALERT_DAU_SHIFT_THRESHOLD:
+        return "signal_strengthening" if delta > 0 else "signal_weakening"
+    if volume_surge_score > _ALERT_VOLUME_SURGE_THRESHOLD:
+        return "volume_surge"
+    if abs(vwap_deviation) > _ALERT_VWAP_DEV_THRESHOLD:
+        return "vwap_dislocation"
+    return None
 
 
 def compute_vwap_deviation(bars: List[Dict[str, Any]]) -> float:
@@ -185,9 +225,17 @@ def run_intraday_update(
     now = dt.datetime.now(dt.timezone.utc)
 
     if not intraday_bars:
-        return IntradaySnapshot(symbol=symbol, timestamp=now, alert_eligible=False)
+        return IntradaySnapshot(
+            symbol=symbol,
+            timestamp=now,
+            daily_axiom_dau=daily_axiom_dau,
+            intraday_composite=daily_axiom_dau,  # pass-through when no data
+            alert_eligible=False,
+            source="no_data",
+        )
 
     vwap_dev = compute_vwap_deviation(intraday_bars)
+    vwap_score = compute_vwap_signal_score(vwap_dev)
 
     try:
         session_minutes = max(len(intraday_bars), 1)
@@ -197,16 +245,20 @@ def run_intraday_update(
         current_rate = 0.0
 
     volume_surge = compute_volume_surge_score(current_rate, avg_daily_volume)
-    momentum = _compute_momentum_score(intraday_bars)
+    momentum = _compute_momentum_score(intraday_bars) or 50.0
     session_ret = _compute_session_return(intraday_bars)
     flow_score = _intraday_flow_proxy(intraday_bars, avg_daily_volume)
     behavioral_score = round(clamp(intraday_sentiment_score, 0.0, 100.0), 2)
-    composite = compute_intraday_composite(daily_axiom_dau, flow_score, behavioral_score)
-    alert_eligible = composite >= _ALERT_COMPOSITE_THRESHOLD
+
+    composite = compute_intraday_composite(daily_axiom_dau, vwap_score, volume_surge, momentum)
+
+    alert_type = determine_alert_type(composite, daily_axiom_dau, volume_surge, vwap_dev)
+    alert_eligible = alert_type is not None
 
     return IntradaySnapshot(
         symbol=symbol,
         timestamp=now,
+        daily_axiom_dau=daily_axiom_dau,
         intraday_flow_score=flow_score,
         intraday_behavioral_score=behavioral_score,
         intraday_composite=composite,
@@ -215,4 +267,6 @@ def run_intraday_update(
         volume_surge_score=volume_surge,
         session_return_pct=session_ret,
         alert_eligible=alert_eligible,
+        alert_type=alert_type,
+        source="polygon_1m",
     )
