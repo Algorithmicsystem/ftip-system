@@ -113,7 +113,7 @@ def fetch_grounded_context(
 
         if intent == "regime_query":
             row = db.safe_fetchone(
-                "SELECT regime_label, regime_strength FROM market_breadth_daily ORDER BY as_of_date DESC LIMIT 1"
+                "SELECT payload->>'regime_label' AS regime_label, payload->>'regime_strength' AS regime_strength FROM axiom_scores_daily ORDER BY as_of_date DESC LIMIT 1"
             )
             if row:
                 context["current_regime"] = {"label": row[0], "strength": row[1]}

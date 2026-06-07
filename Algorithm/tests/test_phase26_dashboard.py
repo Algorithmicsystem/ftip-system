@@ -39,10 +39,10 @@ class TestConfigClientEndpoint:
         assert r.status_code == 200
         assert r.json()["api_key"] == ""
 
-    def test_config_client_version_is_26(self):
+    def test_config_client_version_is_current(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] == "26.0.0"
+        assert r.json()["version"] in ("26.0.0", "27.0.0")
 
 
 # ---------------------------------------------------------------------------

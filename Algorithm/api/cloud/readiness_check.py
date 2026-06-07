@@ -157,7 +157,7 @@ def run_production_readiness_check() -> Dict[str, Any]:
     if db_ok:
         try:
             row = db.safe_fetchone(
-                "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(generated_at)))/3600 FROM morning_briefings"
+                "SELECT EXTRACT(EPOCH FROM (NOW() - MAX(created_at)))/3600 FROM morning_briefings"
             )
             hours = float(row[0] or 999) if row and row[0] is not None else 999
             checks["morning_briefing_recent"] = _check(

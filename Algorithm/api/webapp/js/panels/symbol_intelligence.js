@@ -65,12 +65,18 @@ function renderIntelligenceTab(data, symbol) {
     ${data.osms_score != null ? scoreBarHTML('OSMS (Alt Data)', data.osms_score, '#f59e0b') : ''}
     ${data.ias_score != null ? scoreBarHTML('IAS (Insider)', data.ias_score, '#f59e0b') : ''}`;
 
-  const evidenceHTML = (data.key_reasons || []).length > 0
-    ? (data.key_reasons || []).map(r => `
-        <div class="evidence-item supporting">
-          <span class="evidence-item__icon">✓</span>
-          <span class="evidence-item__text">${r}</span>
-        </div>`).join('')
+  const evidenceItems = data.top_supporting_evidence || data.key_reasons || [];
+  const evidenceHTML = evidenceItems.length > 0
+    ? evidenceItems.map(r => {
+        const text = typeof r === 'string' ? r
+          : r.factor ? `${r.factor.replace(/_/g, ' ')}: ${r.contribution > 0 ? '+' : ''}${r.contribution}`
+          : JSON.stringify(r);
+        return `
+          <div class="evidence-item supporting">
+            <span class="evidence-item__icon">✓</span>
+            <span class="evidence-item__text">${text}</span>
+          </div>`;
+      }).join('')
     : `<div class="text-muted text-sm">No evidence items available.</div>`;
 
   el.innerHTML = `

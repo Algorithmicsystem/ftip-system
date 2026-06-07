@@ -25,7 +25,13 @@ async function loadMorningBriefing() {
       chipEl.textContent = data.regime_context?.regime_label || 'Unknown';
     }
   } catch (err) {
-    body.innerHTML = `<div class="alert-banner warning">Could not load morning briefing: ${err.message || 'API unavailable'}</div>`;
+    const status = err.statusCode || 0;
+    const msg = status === 401
+      ? 'Configure your API key in the topbar to view the morning briefing.'
+      : status === 503 || status === 500
+        ? 'Briefing temporarily unavailable — pipeline may be running.'
+        : 'Could not load morning briefing. Refresh to retry.';
+    body.innerHTML = `<div class="alert-banner warning">${msg}</div>`;
   }
 }
 

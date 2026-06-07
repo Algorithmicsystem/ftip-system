@@ -9,11 +9,11 @@ let _panelLoadState = {};
 // Panel definitions: id → { load: fn, label }
 const PANELS = {
   briefing:      { load: loadMorningBriefing,   label: 'Morning Briefing' },
-  opportunities: { load: loadOpportunities,     label: 'Universe Screen' },
+  opportunities: { load: loadUniverseScreen,    label: 'Universe Screen' },
   symbol:        { load: () => {},              label: 'Symbol Intelligence' },
   risk:          { load: loadRiskMonitor,       label: 'Risk Monitor' },
   factors:       { load: loadFactorEnvironment, label: 'Factor Environment' },
-  pipeline:      { load: loadPipelineStatus,    label: 'System Status' },
+  pipeline:      { load: loadSystemStatus,      label: 'System Status' },
 };
 
 // Grid panels live inside view-dashboard; pe/smb are overlay divs

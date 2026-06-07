@@ -331,13 +331,13 @@ def generate_lp_report(org_id: str, quarter: Optional[str] = None) -> LPReport:
         try:
             row = db.safe_fetchone(
                 """
-                SELECT sri, regime_label FROM market_breadth_daily
+                SELECT sri FROM market_breadth_daily
                  ORDER BY as_of_date DESC LIMIT 1
                 """
             )
             if row:
                 market_context = {
-                    "regime": str(row[1] or "unknown"),
+                    "regime": "unknown",
                     "sri": float(row[0] or 50.0),
                 }
         except Exception:

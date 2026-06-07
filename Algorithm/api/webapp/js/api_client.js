@@ -1,5 +1,22 @@
 /* AXIOM API Client — centralized HTTP layer */
 
+// Self-init: fetch server config and populate API key before any panel loads
+(async function axiomSelfInit() {
+  try {
+    const cfg = await fetch('/config/client').then(r => r.json());
+    if (cfg.api_key && cfg.api_key.length > 0) {
+      localStorage.setItem('ftip_api_key', cfg.api_key);
+      const el = document.getElementById('api-key-input');
+      if (el) {
+        el.value = cfg.api_key;
+        el.placeholder = 'Configured';
+      }
+    }
+  } catch (_) {
+    // Server unreachable or key not configured — no-op
+  }
+})();
+
 const API = {
   base: '',
 

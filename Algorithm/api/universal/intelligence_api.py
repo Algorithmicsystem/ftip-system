@@ -136,6 +136,21 @@ def _extract_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     neg = [(k, v) for k, v in factor_contributions.items() if v < 0]
     top_risk = min(neg, key=lambda x: x[1])[0] if neg else "none"
 
+    # Primary driver: prefer stored value; fall back to engine with highest deviation from neutral
+    stored_driver = str(alpha.get("primary_driver") or "").strip()
+    if stored_driver and stored_driver != "unknown":
+        primary_driver = stored_driver
+    elif engines:
+        best = max(
+            ((name, abs(float((data.get("score") or 50.0)) - 50.0))
+             for name, data in engines.items() if isinstance(data, dict)),
+            key=lambda t: t[1],
+            default=(None, 0.0),
+        )
+        primary_driver = best[0] or "unknown"
+    else:
+        primary_driver = "unknown"
+
     return {
         "eis_score": float(fund_comps.get("eis_component") or 50.0),
         "caps_score": float(fund_comps.get("caps_component") or 50.0),
@@ -145,7 +160,7 @@ def _extract_from_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
         "osms_score": float(liq_comps["osms_component"]) if liq_comps.get("osms_component") is not None else None,
         "ias_score": float(liq_comps["ias_component"]) if liq_comps.get("ias_component") is not None else None,
         "pess_score": float(beh_comps.get("pess_component")) if beh_comps.get("pess_component") is not None else None,
-        "primary_driver": str(alpha.get("primary_driver") or "unknown"),
+        "primary_driver": primary_driver,
         "top_supporting_evidence": top_supporting,
         "top_risk": top_risk,
     }

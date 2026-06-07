@@ -1902,6 +1902,12 @@ def webapp_index() -> FileResponse:
     return FileResponse(WEBAPP_DIR / "index.html")
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+@app.get("/favicon.svg", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(WEBAPP_DIR / "favicon.svg", media_type="image/svg+xml")
+
+
 @app.get("/")
 def root() -> Dict[str, Any]:
     return {
@@ -2475,8 +2481,72 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": os.environ.get("FTIP_API_KEY") or "",
         "env": _railway_env(),
-        "version": "26.0.0",
+        "version": "27.0.0",
+        "build": "AXIOM Intelligence Terminal",
     }
+
+
+@app.get("/intelligence/universe/scores")
+def universe_scores() -> List[Dict[str, Any]]:
+    """Public endpoint — returns latest AXIOM scores for all 30 universe symbols."""
+    from api.universe import AXIOM_UNIVERSE
+
+    def _sig(dau):
+        if dau is None:
+            return "NO_DATA"
+        return "BUY" if dau >= 65 else ("SELL" if dau <= 40 else "HOLD")
+
+    if not db.db_enabled():
+        return [
+            {"symbol": s, "signal": "NO_DATA", "dau": None, "regime_label": None,
+             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None}
+            for s in AXIOM_UNIVERSE
+        ]
+
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT DISTINCT ON (symbol)
+                   symbol,
+                   deployable_alpha_utility AS dau,
+                   regime_label,
+                   as_of_date,
+                   payload->>'ic_state' AS ic_state,
+                   (payload->'engine_scores'->'fundamental_reality'->'components'->>'eis_component')::numeric AS eis_score,
+                   (payload->'engine_scores'->'fundamental_reality'->'components'->>'caps_component')::numeric AS caps_score
+              FROM axiom_scores_daily
+             WHERE symbol = ANY(%s)
+             ORDER BY symbol, as_of_date DESC
+            """,
+            (list(AXIOM_UNIVERSE),),
+        ) or []
+    except Exception:
+        rows = []
+
+    result_map: Dict[str, Any] = {}
+    for row in rows:
+        sym = row[0]
+        dau = float(row[1]) if row[1] is not None else None
+        result_map[sym] = {
+            "symbol": sym,
+            "signal": _sig(dau),
+            "dau": dau,
+            "regime_label": row[2],
+            "as_of_date": str(row[3]) if row[3] else None,
+            "ic_state": row[4],
+            "eis_score": float(row[5]) if row[5] is not None else None,
+            "caps_score": float(row[6]) if row[6] is not None else None,
+        }
+
+    results = []
+    for sym in AXIOM_UNIVERSE:
+        results.append(result_map.get(sym) or {
+            "symbol": sym, "signal": "NO_DATA", "dau": None, "regime_label": None,
+            "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None,
+        })
+
+    results.sort(key=lambda x: (x["dau"] is None, -(x["dau"] or 0)))
+    return results
 
 
 @app.get("/market/massive/bars")
