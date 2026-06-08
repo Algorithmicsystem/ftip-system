@@ -456,8 +456,43 @@ def _store_briefing(briefing: MorningBriefing) -> None:
 # Routes
 # ---------------------------------------------------------------------------
 
+def _load_briefing_from_cache(aod: dt.date) -> Optional[Dict[str, Any]]:
+    if not db.db_read_enabled():
+        return None
+    try:
+        row = db.safe_fetchone(
+            "SELECT briefing FROM morning_briefings WHERE date = %s",
+            (aod,),
+        )
+        if row and row[0]:
+            payload = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+            return payload
+    except Exception:
+        pass
+    return None
+
+
 @router.get("/morning")
 def get_morning_briefing(
+    as_of_date: Optional[str] = Query(default=None),
+    force_refresh: bool = Query(default=False),
+) -> Dict[str, Any]:
+    aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    if not force_refresh:
+        cached = _load_briefing_from_cache(aod)
+        if cached:
+            cached["cached"] = True
+            return cached
+    briefing = generate_morning_briefing(aod)
+    import dataclasses
+    result = dataclasses.asdict(briefing)
+    result["briefing_date"] = str(briefing.briefing_date)
+    result["cached"] = False
+    return result
+
+
+@router.post("/morning")
+def trigger_morning_briefing(
     as_of_date: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
     aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
@@ -465,6 +500,7 @@ def get_morning_briefing(
     import dataclasses
     result = dataclasses.asdict(briefing)
     result["briefing_date"] = str(briefing.briefing_date)
+    result["cached"] = False
     return result
 
 
@@ -473,5 +509,9 @@ def get_morning_briefing_text(
     as_of_date: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:
     aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    if not (as_of_date and as_of_date != str(dt.date.today())):
+        cached = _load_briefing_from_cache(aod)
+        if cached:
+            return {"briefing_date": str(aod), "text": cached.get("briefing_text", ""), "cached": True}
     briefing = generate_morning_briefing(aod)
-    return {"briefing_date": str(briefing.briefing_date), "text": briefing.briefing_text}
+    return {"briefing_date": str(briefing.briefing_date), "text": briefing.briefing_text, "cached": False}

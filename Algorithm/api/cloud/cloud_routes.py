@@ -70,11 +70,62 @@ def get_monitoring_thresholds() -> Dict[str, Any]:
 
 @router.get("/performance/report")
 def get_performance_report(lookback_minutes: int = 60) -> Dict[str, Any]:
-    from api.cloud.performance import compute_system_performance_report
-    result = compute_system_performance_report(lookback_minutes)
-    # Serialize PerformanceMetrics dataclasses
-    result["top_endpoints"] = [asdict(m) for m in result["top_endpoints"]]
-    return result
+    from api.cloud.performance import perf_tracker, compute_system_performance_report
+    summary = perf_tracker.get_summary()
+    # Enrich with DB data if available
+    db_enriched = compute_system_performance_report(lookback_minutes)
+    if "db_endpoints" in db_enriched:
+        summary["db_endpoints"] = db_enriched["db_endpoints"]
+    return summary
+
+
+@router.get("/performance/sla")
+def get_performance_sla() -> Dict[str, Any]:
+    from api.cloud.performance import perf_tracker
+    system_p95 = perf_tracker.get_system_p95()
+    sla_target_ms = 200.0
+    meets_sla = system_p95 < sla_target_ms
+    total_requests = sum(perf_tracker._request_counts.values())
+    total_errors = sum(perf_tracker._error_counts.values())
+    return {
+        "sla_target_ms": sla_target_ms,
+        "system_p95_ms": round(system_p95, 1),
+        "meets_sla": meets_sla,
+        "sla_status": "passing" if meets_sla else "breached",
+        "total_requests": total_requests,
+        "total_errors": total_errors,
+        "overall_error_rate_pct": round(total_errors / max(total_requests, 1) * 100, 3),
+        "slowest_endpoints": perf_tracker.get_slowest_endpoints(5),
+        "checked_at": __import__("datetime").datetime.utcnow().isoformat(),
+    }
+
+
+@router.get("/monitoring/dashboard")
+def get_monitoring_dashboard() -> Dict[str, Any]:
+    from dataclasses import asdict as _asdict
+    from api.cloud.monitoring import check_production_health
+    from api.cloud.performance import perf_tracker
+    from api.cloud.readiness_check import run_production_readiness_check
+
+    health = check_production_health()
+    sla = perf_tracker.get_summary()
+    readiness = run_production_readiness_check()
+
+    return {
+        "checked_at": health.get("checked_at"),
+        "overall_status": health["overall_status"],
+        "alerts": [_asdict(a) for a in health["alerts"]],
+        "alert_count": len(health["alerts"]),
+        "system_p95_ms": sla.get("system_p95_ms", 0.0),
+        "meets_sla": sla.get("meets_sla", False),
+        "total_requests": sla.get("total_requests", 0),
+        "overall_error_rate_pct": sla.get("overall_error_rate_pct", 0.0),
+        "data_freshness_hours": health.get("data_freshness_hours"),
+        "deployment_confidence": readiness.get("deployment_confidence", "unknown"),
+        "readiness_passed": readiness.get("passed", 0),
+        "readiness_total": readiness.get("passed", 0) + readiness.get("failed", 0),
+        "recommendation": health["recommendation"],
+    }
 
 
 @router.get("/performance/endpoint/{endpoint_path:path}")

@@ -234,9 +234,19 @@ def get_universal_intelligence(symbol: str) -> Dict[str, Any]:
         UniversalIntelligenceResponse,
         assemble_universal_intelligence,
         cache_universal_response,
+        _get_from_memory_cache,
+        _set_memory_cache,
     )
-    resp = assemble_universal_intelligence(symbol.upper())
-    cache_universal_response(symbol.upper(), resp)
+    sym = symbol.upper()
+
+    # Hot path: check in-memory cache first (sub-1ms)
+    cached = _get_from_memory_cache(sym)
+    if cached is not None:
+        resp = cached
+    else:
+        resp = assemble_universal_intelligence(sym)
+        _set_memory_cache(sym, resp)
+        cache_universal_response(sym, resp)
     return {
         "symbol": resp.symbol,
         "as_of_date": resp.as_of_date.isoformat(),
@@ -274,6 +284,38 @@ def get_universal_intelligence(symbol: str) -> Dict[str, Any]:
         "cross_asset_adjusted_dau": resp.cross_asset_adjusted_dau,
         "macro_narrative": resp.macro_narrative,
     }
+
+
+@intel_router.get("/cache/stats")
+def get_cache_stats() -> Dict[str, Any]:
+    """Return in-memory cache statistics."""
+    from api.universal.intelligence_api import get_cache_stats
+    return get_cache_stats()
+
+
+@intel_router.post("/cache/warm")
+def warm_cache() -> Dict[str, Any]:
+    """Pre-populate the in-memory cache for all 30 AXIOM universe symbols."""
+    from api.universe import AXIOM_UNIVERSE
+    from api.universal.intelligence_api import (
+        assemble_universal_intelligence,
+        _set_memory_cache,
+        cache_universal_response,
+    )
+    import threading
+
+    def _warm():
+        for sym in AXIOM_UNIVERSE:
+            try:
+                resp = assemble_universal_intelligence(sym)
+                _set_memory_cache(sym, resp)
+                cache_universal_response(sym, resp)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_warm, daemon=True)
+    t.start()
+    return {"status": "warming", "symbols": len(AXIOM_UNIVERSE)}
 
 
 @intel_router.get("/universal/batch")

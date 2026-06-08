@@ -61,4 +61,11 @@ class UsageLoggingMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             logger.debug("usage_middleware.log_failed error=%s", exc)
 
+        try:
+            from api.cloud.performance import perf_tracker
+            is_error = response.status_code >= 400
+            perf_tracker.record(path, elapsed_ms, is_error=is_error)
+        except Exception:
+            pass
+
         return response

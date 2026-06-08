@@ -930,6 +930,22 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "095_data_retention_policies",
         lambda cur: cur.execute(Path(__file__).with_name("095_data_retention_policies.sql").read_text()),
     ),
+    (
+        "096_lookahead_bias_fix",
+        lambda cur: cur.execute(Path(__file__).with_name("096_lookahead_bias_fix.sql").read_text()),
+    ),
+    (
+        "097_ml_signal_predictions",
+        lambda cur: cur.execute(Path(__file__).with_name("097_ml_signal_predictions.sql").read_text()),
+    ),
+    (
+        "098_deal_flow_scores",
+        lambda cur: cur.execute(Path(__file__).with_name("098_deal_flow_scores.sql").read_text()),
+    ),
+    (
+        "105_performance_indexes",
+        lambda cur: cur.execute(Path(__file__).with_name("105_performance_indexes.sql").read_text()),
+    ),
 ]
 
 

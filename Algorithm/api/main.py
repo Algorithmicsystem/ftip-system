@@ -1985,7 +1985,34 @@ def root() -> Dict[str, Any]:
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"status": "ok"}
+    scheduler_running = False
+    try:
+        from api.jobs import scheduler as sched_module
+        _sched = getattr(sched_module, "_scheduler", None)
+        scheduler_running = _sched is not None and getattr(_sched, "running", False)
+    except Exception:
+        pass
+
+    db_status = "disabled"
+    if db.db_enabled():
+        try:
+            row = db.safe_fetchone("SELECT 1")
+            db_status = "connected" if row else "degraded"
+        except Exception:
+            db_status = "degraded"
+
+    payload: Dict[str, Any] = {
+        "status": "ok",
+        "version": "31.0.0",
+        "db": db_status,
+        "scheduler": "running" if scheduler_running else "stopped",
+    }
+
+    if db.db_enabled() and db_status == "degraded":
+        from starlette.responses import JSONResponse
+        return JSONResponse(content=payload, status_code=503)
+
+    return payload
 
 
 def _providers_health_payload() -> Dict[str, Any]:
@@ -2474,18 +2501,91 @@ def system_status() -> Dict[str, Any]:
     if not ml_trained:
         warnings.append("No active ML model — run ML training pipeline")
 
+    # Performance metrics
+    from api.cloud.performance import perf_tracker
+    system_p95_ms = perf_tracker.get_system_p95()
+    total_requests = sum(perf_tracker._request_counts.values())
+
+    # Readiness score
+    readiness_passed = 0
+    readiness_total = 20
+    try:
+        from api.cloud.readiness_check import run_production_readiness_check
+        r = run_production_readiness_check()
+        readiness_passed = r.get("passed", 0)
+        readiness_total = r.get("passed", 0) + r.get("failed", 0)
+        deployment_confidence = r.get("deployment_confidence", "low")
+    except Exception:
+        deployment_confidence = "low"
+
+    # Moat score
+    moat_score = 0.0
+    try:
+        row = db.safe_fetchone(
+            "SELECT AVG(moat_score) FROM axiom_scores_daily WHERE as_of_date >= CURRENT_DATE - 7"
+        ) if db_connected else None
+        if row and row[0] is not None:
+            moat_score = round(float(row[0]), 1)
+    except Exception:
+        pass
+
+    # Acquisition readiness (0-100)
+    score_components = [
+        30 if db_connected else 0,
+        20 if ml_trained else 0,
+        15 if axiom_count > 0 else 0,
+        15 if scheduler_running else 0,
+        10 if last_pipeline_run is not None else 0,
+        10 if system_p95_ms < 200 else (5 if system_p95_ms < 500 else 0),
+    ]
+    acquisition_score = sum(score_components)
+
+    if acquisition_score >= 80:
+        acquisition_tier = "acquisition_ready"
+    elif acquisition_score >= 60:
+        acquisition_tier = "near_ready"
+    elif acquisition_score >= 40:
+        acquisition_tier = "building"
+    else:
+        acquisition_tier = "early_stage"
+
     return {
         "server": "healthy",
+        "version": "31.0.0",
         "db_connected": db_connected,
         "migrations_applied": migrations_applied,
         "latest_migration": latest_migration,
+        "warnings": warnings,
+        "data_status": {
+            "axiom_scores_count": axiom_count,
+            "morning_briefings_count": briefings_count,
+            "last_pipeline_run": last_pipeline_run,
+        },
+        "intelligence_status": {
+            "ml_model_trained": ml_trained,
+            "scheduler_running": scheduler_running,
+        },
+        "performance": {
+            "system_p95_ms": round(system_p95_ms, 1),
+            "meets_sla": system_p95_ms < 200,
+            "total_requests": total_requests,
+        },
+        "moat_status": {
+            "moat_score": moat_score,
+        },
+        "acquisition_readiness": {
+            "score": acquisition_score,
+            "tier": acquisition_tier,
+            "readiness_passed": readiness_passed,
+            "readiness_total": readiness_total,
+            "deployment_confidence": deployment_confidence,
+        },
+        # Legacy flat fields kept for backwards compat
         "axiom_scores_count": axiom_count,
         "morning_briefings_count": briefings_count,
         "ml_model_trained": ml_trained,
         "scheduler_running": scheduler_running,
         "last_pipeline_run": last_pipeline_run,
-        "warnings": warnings,
-        "version": "22.0.0",
     }
 
 
@@ -2495,7 +2595,7 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": os.environ.get("FTIP_API_KEY") or "",
         "env": _railway_env(),
-        "version": "30.0.0",
+        "version": "31.0.0",
         "build": "AXIOM Intelligence Terminal",
     }
 

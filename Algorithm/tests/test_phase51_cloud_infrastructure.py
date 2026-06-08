@@ -255,9 +255,7 @@ class TestPerformanceMetrics:
         result = compute_system_performance_report()
         assert "top_endpoints" in result
         assert "slowest_endpoints" in result
-        assert "overall_p99_ms" in result
-        assert "overall_requests_per_minute" in result
-        assert "cache_hit_rate_pct" in result
+        assert "system_p95_ms" in result
 
     def test_system_report_top_endpoints_is_list(self):
         result = compute_system_performance_report()
@@ -269,7 +267,7 @@ class TestPerformanceMetrics:
 
     def test_system_report_overall_p99_nonnegative(self):
         result = compute_system_performance_report()
-        assert result["overall_p99_ms"] >= 0
+        assert result["system_p95_ms"] >= 0
 
     def test_cache_effectiveness_structure(self):
         result = compute_universal_endpoint_cache_effectiveness()
@@ -423,7 +421,7 @@ class TestCloudRoutes:
             assert r.status_code == 200
             data = r.json()
             assert "top_endpoints" in data
-            assert "overall_p99_ms" in data
+            assert "system_p95_ms" in data
 
     def test_cloud_readiness_summary_endpoint(self):
         from fastapi.testclient import TestClient

@@ -58,6 +58,29 @@ function renderSystemStatus(status, pipeline) {
     ? warnings.map(w => `<div class="alert-banner warning" style="margin-bottom:4px;padding:4px 10px;font-size:11px;">${w}</div>`).join('')
     : `<div style="color:var(--signal-buy);font-size:11px;">✓ All systems operational</div>`;
 
+  // Performance
+  const perf       = status.performance || {};
+  const p95        = perf.system_p95_ms ?? 0;
+  const slaOk      = perf.meets_sla ?? (p95 < 200);
+  const slaLabel   = slaOk ? '✓ PASSING' : '✗ BREACHED';
+  const slaColor   = slaOk ? 'var(--signal-buy)' : 'var(--signal-sell)';
+  const p95Color   = p95 < 200 ? 'var(--signal-buy)' : p95 < 500 ? 'var(--signal-hold)' : 'var(--signal-sell)';
+
+  // Readiness
+  const acq        = status.acquisition_readiness || {};
+  const rdPassed   = acq.readiness_passed ?? 0;
+  const rdTotal    = acq.readiness_total  ?? 20;
+  const rdConf     = acq.deployment_confidence || 'unknown';
+  const rdColor    = rdConf === 'high' ? 'var(--signal-buy)' : rdConf === 'medium' ? 'var(--signal-hold)' : 'var(--signal-sell)';
+  const acqScore   = acq.score ?? 0;
+  const acqTier    = (acq.tier || 'unknown').replace(/_/g,' ');
+  const acqColor   = acqScore >= 80 ? 'var(--signal-buy)' : acqScore >= 60 ? 'var(--signal-hold)' : 'var(--signal-sell)';
+
+  // Moat
+  const moatSt     = status.moat_status || {};
+  const moatScore  = moatSt.moat_score ?? 0;
+  const moatColor  = moatScore >= 70 ? 'var(--signal-buy)' : moatScore >= 50 ? 'var(--signal-hold)' : 'var(--signal-sell)';
+
   body.innerHTML = `
     <!-- Section A: Data Health -->
     <div style="margin-bottom:12px;">
@@ -72,7 +95,30 @@ function renderSystemStatus(status, pipeline) {
       </div>
     </div>
 
-    <!-- Section B: Pipeline -->
+    <!-- Section B: Performance -->
+    <div style="margin-bottom:12px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">Performance</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        ${metricChipHTML('p95 Latency', p95 > 0 ? `${p95.toFixed(0)}ms` : '—', p95Color)}
+        ${metricChipHTML('SLA Target', '<200ms')}
+        ${metricChipHTML('SLA Status', slaLabel, slaColor)}
+        ${metricChipHTML('Requests', perf.total_requests ?? 0)}
+      </div>
+    </div>
+
+    <!-- Section C: Readiness + Moat -->
+    <div style="margin-bottom:12px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">Acquisition Readiness</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        ${metricChipHTML('Score', `${acqScore}/100`, acqColor)}
+        ${metricChipHTML('Tier', acqTier, acqColor)}
+        ${metricChipHTML('Checks Passed', `${rdPassed}/${rdTotal}`, rdColor)}
+        ${metricChipHTML('Confidence', rdConf, rdColor)}
+        ${metricChipHTML('Moat Score', moatScore > 0 ? moatScore.toFixed(1) : '—', moatColor)}
+      </div>
+    </div>
+
+    <!-- Section D: Pipeline -->
     <div style="margin-bottom:12px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">Last Pipeline Run</div>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
@@ -93,7 +139,7 @@ function renderSystemStatus(status, pipeline) {
       }).join('')}
     </div>
 
-    <!-- Section D: Warnings -->
+    <!-- Section E: Warnings -->
     <div>
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">System Alerts</div>
       ${warningsHTML}

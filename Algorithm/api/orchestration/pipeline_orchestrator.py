@@ -239,6 +239,12 @@ def _real_stage(name: str) -> Dict[str, Any]:
                     })
                 except Exception:
                     pass
+            # Clear in-memory cache so next request gets fresh assembled data
+            try:
+                from api.universal.intelligence_api import _cache
+                _cache.clear()
+            except Exception:
+                pass
             return {"records_processed": len(rows)}
         except Exception:
             return {"records_processed": 0}

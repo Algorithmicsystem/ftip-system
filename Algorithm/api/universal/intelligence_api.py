@@ -4,12 +4,62 @@ from __future__ import annotations
 import datetime as dt
 import json
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from api import db
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-memory cache with TTL (avoids DB round-trip on hot path)
+# ---------------------------------------------------------------------------
+
+CACHE_TTL_SECONDS = 300  # 5-minute TTL
+
+# {symbol: (timestamp_float, UniversalIntelligenceResponse)}
+_cache: Dict[str, Tuple[float, Any]] = {}
+
+
+def _get_from_memory_cache(symbol: str) -> Optional[Any]:
+    """Return cached response if still within TTL, else evict and return None."""
+    entry = _cache.get(symbol)
+    if entry is None:
+        return None
+    ts, response = entry
+    if time.time() - ts < CACHE_TTL_SECONDS:
+        return response
+    del _cache[symbol]
+    return None
+
+
+def _set_memory_cache(symbol: str, response: Any) -> None:
+    _cache[symbol] = (time.time(), response)
+
+
+def get_cache_stats() -> Dict[str, Any]:
+    now = time.time()
+    live = [(sym, ts, resp) for sym, (ts, resp) in _cache.items()
+            if now - ts < CACHE_TTL_SECONDS]
+    if not live:
+        return {
+            "cache_type": "in_memory",
+            "cache_size": 0,
+            "cache_ttl_seconds": CACHE_TTL_SECONDS,
+            "oldest_entry_age_seconds": None,
+            "newest_entry_age_seconds": None,
+            "hit_rate_estimate": "unknown",
+        }
+    ages = [now - ts for _, ts, _ in live]
+    return {
+        "cache_type": "in_memory",
+        "cache_size": len(live),
+        "cache_ttl_seconds": CACHE_TTL_SECONDS,
+        "oldest_entry_age_seconds": round(max(ages), 1),
+        "newest_entry_age_seconds": round(min(ages), 1),
+        "hit_rate_estimate": "unknown",
+    }
 
 
 # ---------------------------------------------------------------------------

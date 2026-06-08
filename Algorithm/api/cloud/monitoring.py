@@ -95,7 +95,7 @@ def _check_api_metrics() -> List[ProductionAlert]:
         row = db.safe_fetchone(
             """
             SELECT
-                COUNT(*) FILTER (WHERE response_code >= 400)::float /
+                COUNT(*) FILTER (WHERE status_code >= 400)::float /
                     NULLIF(COUNT(*), 0) * 100 AS error_rate_pct,
                 PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY response_time_ms) AS p99_ms
             FROM api_usage_log
@@ -237,6 +237,31 @@ def _check_data_staleness() -> List[ProductionAlert]:
 # Public API
 # ---------------------------------------------------------------------------
 
+def _get_system_p95() -> float:
+    try:
+        from api.cloud.performance import perf_tracker
+        return perf_tracker.get_system_p95()
+    except Exception:
+        return 0.0
+
+
+def _get_data_freshness_hours() -> Optional[float]:
+    if not db.db_read_enabled():
+        return None
+    try:
+        row = db.safe_fetchone(
+            """
+            SELECT EXTRACT(EPOCH FROM (NOW() - MAX(as_of_date::timestamptz))) / 3600
+            FROM axiom_scores_daily
+            """
+        )
+        if row and row[0] is not None:
+            return round(float(row[0]), 1)
+    except Exception:
+        pass
+    return None
+
+
 def check_production_health() -> Dict[str, Any]:
     alerts: List[ProductionAlert] = []
     alerts.extend(_check_api_metrics())
@@ -264,6 +289,9 @@ def check_production_health() -> Dict[str, Any]:
         "thresholds_checked": len(PRODUCTION_THRESHOLDS),
         "thresholds_breached": len(alerts),
         "recommendation": recommendation,
+        "checked_at": dt.datetime.utcnow().isoformat(),
+        "system_p95_ms": _get_system_p95(),
+        "data_freshness_hours": _get_data_freshness_hours(),
     }
 
 
