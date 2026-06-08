@@ -183,7 +183,20 @@ function renderExplanationTab(explain, intel) {
   const batting = intel?.signal_batting_average;
   const invalidConds = explain?.invalidation_conditions || [];
 
+  const aiSynthesis = explain?.ai_synthesis || null;
   el.innerHTML = `
+    ${aiSynthesis ? `
+    <div style="background:linear-gradient(135deg,rgba(59,130,246,0.1),rgba(139,92,246,0.1));
+                border:1px solid rgba(59,130,246,0.3);border-radius:8px;
+                padding:12px;margin-bottom:14px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;
+                  color:var(--accent-primary);margin-bottom:6px;">
+        ✦ AI SYNTHESIS (GPT-4o-mini)
+      </div>
+      <div style="font-size:13px;color:var(--text-primary);line-height:1.7;">
+        ${aiSynthesis}
+      </div>
+    </div>` : ''}
     ${explanationText ? `
     <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;margin-bottom:14px;padding:10px;background:var(--bg-tertiary);border-radius:6px;">
       ${explanationText.split('\n\n').map(p => `<p style="margin-bottom:4px;">${p}</p>`).join('')}

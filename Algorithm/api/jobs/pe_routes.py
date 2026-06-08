@@ -404,9 +404,10 @@ def get_deal_attractiveness_score(symbol: str) -> Dict[str, Any]:
         if isinstance(payload, str):
             payload = _json.loads(payload)
         das = compute_deal_attractiveness_score(symbol.upper(), {}, payload)
-        return {
+        result: Dict[str, Any] = {
             "symbol": das.symbol,
             "total": das.total,
+            "das_score": das.total,
             "das_grade": das.das_grade,
             "strategic_score": das.strategic_score,
             "financial_score": das.financial_score,
@@ -415,7 +416,30 @@ def get_deal_attractiveness_score(symbol: str) -> Dict[str, Any]:
             "investment_thesis": das.investment_thesis,
             "key_strengths": das.key_strengths,
             "key_risks": das.key_risks,
+            "llm_enhanced": False,
         }
+        # OpenAI PE analysis — additive
+        from api import config as _cfg
+        if _cfg.openai_api_key() and das.total is not None:
+            try:
+                from api.llm.openai_client import synthesize_pe_analysis
+                dau_val = float(payload.get("deployable_alpha_utility") or 50.0)
+                sig = "BUY" if dau_val >= 65 else ("SELL" if dau_val <= 40 else "HOLD")
+                ai_text = synthesize_pe_analysis({
+                    "symbol": symbol.upper(),
+                    "signal_label": sig,
+                    "dau": dau_val,
+                    "das_score": float(das.total or 50),
+                    "das_grade": das.das_grade or "B",
+                    "schilit_risk": "moderate",
+                    "investment_thesis": das.investment_thesis or "",
+                })
+                if ai_text:
+                    result["ai_analysis"] = ai_text
+                    result["llm_enhanced"] = True
+            except Exception:
+                pass
+        return result
     except Exception as exc:
         return {"symbol": symbol, "status": "error", "error": str(exc)}
 

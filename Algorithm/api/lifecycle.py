@@ -54,6 +54,38 @@ def _enforce_db_runtime_contract() -> None:
                 )
 
 
+def _check_and_trigger_stale_pipeline() -> None:
+    """If no data today, trigger pipeline automatically after startup."""
+    import datetime as dt
+    import time
+    time.sleep(5)
+    try:
+        if not db.db_enabled():
+            return
+        row = db.safe_fetchone("SELECT MAX(as_of_date) FROM axiom_scores_daily")
+        if not row or not row[0]:
+            return
+        last_date = row[0]
+        today = dt.date.today()
+        if last_date < today:
+            logger.info("startup.data_stale last=%s triggering_pipeline", last_date)
+            try:
+                from api.realtime.websocket_manager import ws_manager
+                ws_manager.broadcast_from_thread({
+                    "type": "pipeline_starting",
+                    "reason": "stale_data",
+                    "last_run": str(last_date),
+                    "message": f"Data from {last_date} — starting pipeline update...",
+                })
+            except Exception:
+                pass
+            from api.jobs.scheduler import _job_full_daily_pipeline
+            import threading
+            threading.Thread(target=_job_full_daily_pipeline, daemon=True).start()
+    except Exception as exc:
+        logger.debug("startup_pipeline_check_failed err=%s", exc)
+
+
 def startup() -> List[str]:
     _enforce_db_runtime_contract()
     if not db.db_enabled():
@@ -67,6 +99,9 @@ def startup() -> List[str]:
         db.ensure_schema()
         if applied:
             logger.info("[startup] applied migrations", extra={"versions": applied})
+        # Kick off stale-data check in background
+        import threading
+        threading.Thread(target=_check_and_trigger_stale_pipeline, daemon=True).start()
         return applied
     except Exception as exc:
         logger.exception("[startup] ensure_schema failed", extra={"error": str(exc)})

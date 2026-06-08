@@ -208,7 +208,7 @@ class TestDueDiligenceEndpoint:
     def test_due_diligence_version_is_33(self):
         with TestClient(app) as client:
             r = client.get("/developer/due-diligence")
-        assert r.json()["version"] in ("33.0.0", "34.0.0")
+        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0")
 
     def test_ip_audit_returns_200(self):
         with TestClient(app) as client:
@@ -309,14 +309,14 @@ class TestVersion33:
     def test_config_client_version_33(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] in ("33.0.0", "34.0.0")
+        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0")
 
     def test_system_status_version_33(self):
         with TestClient(app) as client:
             r = client.get("/system/status")
-        assert r.json()["version"] in ("33.0.0", "34.0.0")
+        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0")
 
     def test_index_html_cache_bust_v33(self):
         html = (WEBAPP / "index.html").read_text()
-        assert "?v=33" in html or "?v=34" in html
+        assert "?v=33" in html or "?v=34" in html or "?v=100" in html
         assert "?v=32" not in html

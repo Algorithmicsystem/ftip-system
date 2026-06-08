@@ -237,6 +237,11 @@ _RATE_LIMIT_EXEMPT_PREFIXES = (
     "/openapi",       # OpenAPI spec
     "/ws/",           # WebSocket connections
     "/health",        # health checks (exact prefix covers /health and sub-paths)
+    "/macro/",        # public macro/factor endpoints — read-only, called on every panel load
+    "/system/",       # system status — public read
+    "/intelligence/universe/", # universe scores — public read
+    "/orchestration/health",   # health check
+    "/orchestration/pipeline/status",  # status check
 )
 
 

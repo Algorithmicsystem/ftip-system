@@ -38,6 +38,8 @@ class ResearchReport:
     reasoning_chain: ReasoningChain
     evidence: Dict[str, Any]
     counterfactuals: List[Dict[str, Any]]
+    llm_synthesis: Optional[str] = None
+    llm_enhanced: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -313,6 +315,26 @@ def generate_research_report(
 
     invalidation_triggers = chain.invalidation_conditions
 
+    # OpenAI synthesis — additive, never blocks
+    _llm_synthesis: Optional[str] = None
+    _llm_enhanced = False
+    if config.openai_api_key():
+        try:
+            from api.llm.openai_client import call_openai, ANALYST_SYSTEM
+            facts = json.dumps({
+                "symbol": symbol, "signal": signal_label, "dau": dau,
+                "eis": eis, "caps": caps, "regime": regime,
+                "primary_driver": primary_driver, "top_risk": top_risk,
+            })
+            _llm_synthesis = call_openai(
+                system_prompt=ANALYST_SYSTEM,
+                user_prompt=f"Write a 3-paragraph institutional research note based on this data:\n{facts}",
+                max_tokens=400,
+            )
+            _llm_enhanced = bool(_llm_synthesis)
+        except Exception:
+            pass
+
     report = ResearchReport(
         symbol=symbol,
         report_date=dt.date.today(),
@@ -330,6 +352,8 @@ def generate_research_report(
         reasoning_chain=chain,
         evidence=evidence_balance,
         counterfactuals=counterfactuals,
+        llm_synthesis=_llm_synthesis,
+        llm_enhanced=_llm_enhanced,
     )
 
     _save_report(report, axiom_payload, use_llm)

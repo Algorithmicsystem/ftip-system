@@ -55,6 +55,7 @@ class MorningBriefing:
     systemic_risk_index: float = 50.0
     briefing_text: str = ""
     cross_asset_context: Dict[str, Any] = field(default_factory=dict)
+    llm_enhanced: bool = False
 
 
 def compute_systemic_risk_index(as_of_date: dt.date) -> float:
@@ -379,6 +380,35 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
     except Exception:
         pass
 
+    # OpenAI enhancement — additive, never blocks
+    _llm_enhanced = False
+    if config.openai_api_key():
+        try:
+            from api.llm.openai_client import synthesize_morning_briefing
+            n_buy = sum(1 for o in top_opportunities if (o.get("dau") or 0) >= 65)
+            n_hold = sum(1 for o in top_opportunities if 40 <= (o.get("dau") or 0) < 65)
+            n_sell = sum(1 for o in top_opportunities if (o.get("dau") or 0) < 40)
+            avg_dau = (sum((o.get("dau") or 50) for o in top_opportunities) / len(top_opportunities)) if top_opportunities else 50.0
+            ai_text = synthesize_morning_briefing({
+                "date": aod.strftime("%A, %B %d, %Y"),
+                "regime": regime_label or "Neutral",
+                "sri": sri,
+                "n_buy": n_buy,
+                "n_hold": n_hold,
+                "n_sell": n_sell,
+                "top_symbol": top_symbol or "No signal",
+                "top_dau": float(top_dau or 50.0),
+                "top_driver": top_factor or "factor composite",
+                "avg_dau": avg_dau,
+                "ic_state": ic_state or "BUILDING",
+                "symbols_ok": len(top_opportunities) or 29,
+            })
+            if ai_text:
+                briefing_text = ai_text + "\n\n" + briefing_text
+                _llm_enhanced = True
+        except Exception:
+            pass
+
     briefing = MorningBriefing(
         briefing_date=aod,
         market_session=session,
@@ -393,6 +423,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         systemic_risk_index=sri,
         briefing_text=briefing_text,
         cross_asset_context=cross_asset_ctx,
+        llm_enhanced=_llm_enhanced,
     )
 
     # Store briefing

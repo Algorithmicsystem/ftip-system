@@ -169,12 +169,18 @@ class CompareIn(BaseModel):
 @router.get("/signal/{symbol}")
 def get_signal_reasoning(symbol: str) -> Dict[str, Any]:
     """Full reasoning chain for the latest signal for a symbol."""
+    import os
     from api.explain.reasoning_engine import build_reasoning_chain
     payload = _load_axiom_payload(symbol)
     dau = float(payload.get("deployable_alpha_utility") or 50.0)
     signal_label = _signal_from_dau(dau)
     chain = build_reasoning_chain(symbol, payload, signal_label)
-    return {
+    engine_scores = payload.get("engine_scores") or {}
+    fund_comps = (engine_scores.get("fundamental_reality") or {}).get("components") or {}
+    alpha_decomp = payload.get("alpha_decomposition") or {}
+    frag = (engine_scores.get("critical_fragility") or {}).get("score")
+
+    response: Dict[str, Any] = {
         "symbol": chain.symbol,
         "as_of_date": chain.as_of_date.isoformat(),
         "signal_label": chain.signal_label,
@@ -197,7 +203,37 @@ def get_signal_reasoning(symbol: str) -> Dict[str, Any]:
         "invalidation_conditions": chain.invalidation_conditions,
         "theoretical_foundations": chain.theoretical_foundations,
         "explanation_text": build_grounded_explanation(symbol, payload),
+        "llm_enhanced": False,
     }
+
+    # OpenAI enhancement — additive, never blocks
+    from api import config as _cfg
+    if _cfg.openai_api_key():
+        try:
+            from api.llm.openai_client import synthesize_signal_explanation
+            frag_val = float(frag) if frag is not None else 50.0
+            top_risk = (
+                f"elevated fragility ({frag_val:.0f}/100)" if frag_val > 65
+                else f"regime ({payload.get('regime_label', 'unknown')})"
+            )
+            ai_text = synthesize_signal_explanation({
+                "symbol": symbol,
+                "signal_label": signal_label,
+                "dau": dau,
+                "eis_score": float(fund_comps.get("eis_component") or 50.0),
+                "caps_score": float(fund_comps.get("caps_component") or 50.0),
+                "factor_composite": float((engine_scores.get("flow_transmission") or {}).get("score") or 50.0),
+                "primary_driver": str(alpha_decomp.get("primary_driver") or "EIF"),
+                "regime_label": str(payload.get("regime_label") or "Neutral"),
+                "top_risk": top_risk,
+            })
+            if ai_text:
+                response["ai_synthesis"] = ai_text
+                response["llm_enhanced"] = True
+        except Exception:
+            pass
+
+    return response
 
 
 @router.get("/evidence/{symbol}")
@@ -287,6 +323,8 @@ def get_research_report(
         "evidence": report.evidence,
         "counterfactuals": report.counterfactuals[:3],
         "explanation_text": build_grounded_explanation(symbol, payload),
+        "llm_synthesis": report.llm_synthesis,
+        "llm_enhanced": report.llm_enhanced,
     }
 
 

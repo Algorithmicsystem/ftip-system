@@ -22,11 +22,11 @@ class TestVersion32:
         with TestClient(app) as client:
             r = client.get("/config/client")
         assert r.status_code == 200
-        assert r.json()["version"] in ("32.0.0", "33.0.0", "34.0.0")
+        assert r.json()["version"] in ("32.0.0", "33.0.0", "34.0.0", "1.0.0")
 
     def test_index_html_cache_bust_is_v32(self):
         html = (WEBAPP / "index.html").read_text()
-        assert "?v=32" in html or "?v=33" in html or "?v=34" in html
+        assert "?v=32" in html or "?v=33" in html or "?v=34" in html or "?v=100" in html
 
     def test_index_html_no_v31(self):
         html = (WEBAPP / "index.html").read_text()
@@ -34,7 +34,7 @@ class TestVersion32:
 
     def test_at_least_17_v32_references_in_html(self):
         html = (WEBAPP / "index.html").read_text()
-        count = html.count("?v=32") + html.count("?v=33") + html.count("?v=34")
+        count = html.count("?v=32") + html.count("?v=33") + html.count("?v=34") + html.count("?v=100")
         assert count >= 17, f"Expected >=17 ?v=32 references, got {count}"
 
 

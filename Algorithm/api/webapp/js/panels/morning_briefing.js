@@ -70,7 +70,10 @@ function renderBriefing(data) {
   const oppsEl = document.getElementById('briefing-opps');
 
   if (textEl) {
-    textEl.innerHTML = briefText.split('\n\n').map(p => `<p style="margin-bottom:6px;">${p}</p>`).join('') || '<p class="text-muted">No briefing text available.</p>';
+    const llmBadge = data.llm_enhanced
+      ? `<span style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--accent-primary);margin-bottom:6px;display:inline-block;">✦ AI-Enhanced</span><br>`
+      : '';
+    textEl.innerHTML = llmBadge + (briefText.split('\n\n').map(p => `<p style="margin-bottom:6px;">${p}</p>`).join('') || '<p class="text-muted">No briefing text available.</p>');
   }
   if (sriEl) {
     sriEl.innerHTML = `

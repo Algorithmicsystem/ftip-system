@@ -100,9 +100,18 @@ function handleFeedMessage(msg) {
       showRegimeChangeToast(msg);
       if (typeof loadFactorEnvironment === 'function') loadFactorEnvironment();
       break;
+    case 'pipeline_starting':
+      showToast({
+        title: '⚡ Pipeline Starting',
+        body: msg.message || 'Updating all 30 symbols — scores refresh in 10-20 min',
+        color: 'var(--accent-primary)',
+        duration: 10000,
+      });
+      break;
     case 'pipeline_complete':
       showPipelineToast(msg);
       if (typeof loadSystemStatus === 'function') loadSystemStatus();
+      if (typeof loadUniverseScreen === 'function') loadUniverseScreen();
       break;
     case 'ml_model_updated':
       showMLToast(msg);

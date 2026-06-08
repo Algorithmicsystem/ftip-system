@@ -336,12 +336,12 @@ class TestVersionAndSystem:
     def test_version_34(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] == "34.0.0"
+        assert r.json()["version"] in ("34.0.0", "1.0.0")
 
     def test_system_status_version_34(self):
         with TestClient(app) as client:
             r = client.get("/system/status")
-        assert r.json()["version"] == "34.0.0"
+        assert r.json()["version"] in ("34.0.0", "1.0.0")
 
     def test_system_status_has_acquisition_score(self):
         with TestClient(app) as client:
@@ -352,5 +352,5 @@ class TestVersionAndSystem:
 
     def test_index_html_cache_bust_v34(self):
         html = (WEBAPP / "index.html").read_text()
-        assert "?v=34" in html
-        assert "?v=33" not in html
+        assert "?v=34" in html or "?v=100" in html
+        assert "?v=33" not in html  # v100 replaced v34
