@@ -29,13 +29,18 @@ async function loadMorningBriefing() {
     renderBriefing(data);
     if (dateEl) dateEl.textContent = data.briefing_date || '';
     if (chipEl) {
-      const regime = (data.regime_context?.regime_label || 'unknown').toLowerCase();
-      chipEl.className = 'regime-chip ' + (
-        regime.includes('trend') ? 'trending' :
-        regime.includes('chop') ? 'choppy' :
-        regime.includes('vol') ? 'high-vol' : 'unknown'
-      );
-      chipEl.textContent = data.regime_context?.regime_label || 'Unknown';
+      const rawRegime = data.regime_context?.regime_label || data.regime_label || '';
+      const regime = rawRegime.toLowerCase();
+      const sri = data.systemic_risk_index ?? 50;
+      const regimeClass =
+        regime.includes('trend') || regime.includes('growth') || regime.includes('low_risk') || regime.includes('low risk') ? 'trending' :
+        regime.includes('chop') || regime.includes('neutral') || regime.includes('moderate') ? 'choppy' :
+        regime.includes('vol') || regime.includes('elevated') || regime.includes('caution') || regime.includes('cautious') ? 'high-vol' : 'unknown';
+      chipEl.className = 'regime-chip ' + regimeClass;
+      const displayRegime = rawRegime && rawRegime.toLowerCase() !== 'unknown'
+        ? rawRegime.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+        : (sri < 40 ? 'Low Risk' : sri < 70 ? 'Neutral' : 'Elevated Risk');
+      chipEl.textContent = displayRegime;
     }
   } catch (err) {
     const status = err.statusCode || 0;

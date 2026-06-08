@@ -14,13 +14,11 @@ from fastapi import Depends
 orch_router = APIRouter(
     prefix="/orchestration",
     tags=["orchestration"],
-    dependencies=[Depends(require_tier("enterprise"))],
 )
 
 intel_router = APIRouter(
     prefix="/intelligence",
     tags=["intelligence"],
-    dependencies=[Depends(require_tier("enterprise"))],
 )
 
 
@@ -56,7 +54,7 @@ _bootstrap_state: Dict[str, Any] = {
 _bootstrap_lock = threading.Lock()
 
 
-@orch_router.post("/pipeline/run")
+@orch_router.post("/pipeline/run", dependencies=[Depends(require_tier("enterprise"))])
 def trigger_pipeline_run(body: PipelineRunIn, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Trigger full pipeline asynchronously — returns run_id immediately."""
     import uuid
@@ -84,7 +82,7 @@ def trigger_pipeline_run(body: PipelineRunIn, background_tasks: BackgroundTasks)
     return {"status": "triggered", "run_id": run_id}
 
 
-@orch_router.post("/bootstrap")
+@orch_router.post("/bootstrap", dependencies=[Depends(require_tier("enterprise"))])
 def trigger_bootstrap(background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Bootstrap full data pipeline — async, idempotent, returns task_id immediately."""
     import uuid

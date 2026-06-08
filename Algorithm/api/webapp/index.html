@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AXIOM Intelligence Terminal</title>
-  <link rel="icon" type="image/svg+xml" href="/app/static/favicon.svg?v=33">
-  <link rel="alternate icon" href="/app/static/favicon.svg?v=33">
-  <link rel="stylesheet" href="/app/static/design_system.css?v=33" />
-  <link rel="stylesheet" href="/app/static/styles.css?v=33" />
+  <link rel="icon" type="image/svg+xml" href="/app/static/favicon.svg?v=34">
+  <link rel="alternate icon" href="/app/static/favicon.svg?v=34">
+  <link rel="stylesheet" href="/app/static/design_system.css?v=34" />
+  <link rel="stylesheet" href="/app/static/styles.css?v=34" />
   <style>
     /* ── Layout shell ─────────────────────────────────────────── */
     body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -500,6 +500,7 @@
           <div class="panel-header__actions">
             <input type="text" id="pe-org-input" placeholder="Org ID..." style="width:140px;padding:4px 10px;font-size:12px;" />
             <button class="btn-primary btn" onclick="handlePELoad()" style="padding:5px 10px;">Load</button>
+            <button class="btn" onclick="loadPEDemo()" style="padding:5px 10px;background:var(--bg-elevated);border:1px solid var(--border-default);border-radius:4px;font-size:11px;cursor:pointer;">Demo</button>
           </div>
         </div>
         <div class="panel-body" id="pe-body">
@@ -516,6 +517,7 @@
           <div class="panel-header__actions">
             <input type="text" id="smb-entity-input" placeholder="Entity ID..." style="width:140px;padding:4px 10px;font-size:12px;" />
             <button class="btn-primary btn" onclick="handleSMBLoad()" style="padding:5px 10px;">Load</button>
+            <button class="btn" onclick="loadSMBDemo()" style="padding:5px 10px;background:var(--bg-elevated);border:1px solid var(--border-default);border-radius:4px;font-size:11px;cursor:pointer;">Demo</button>
           </div>
         </div>
         <div class="panel-body" id="smb-body">
@@ -670,19 +672,19 @@
      SCRIPTS
      ══════════════════════════════════════════════════════════ -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="/app/static/js/api_client.js?v=33"></script>
-<script src="/app/static/js/charts.js?v=33"></script>
-<script src="/app/static/js/panels/morning_briefing.js?v=33"></script>
-<script src="/app/static/js/panels/opportunities.js?v=33"></script>
-<script src="/app/static/js/panels/symbol_intelligence.js?v=33"></script>
-<script src="/app/static/js/panels/risk_monitor.js?v=33"></script>
-<script src="/app/static/js/panels/factor_environment.js?v=33"></script>
-<script src="/app/static/js/panels/pipeline_status.js?v=33"></script>
-<script src="/app/static/js/panels/universe_screen.js?v=33"></script>
-<script src="/app/static/js/panels/system_status.js?v=33"></script>
-<script src="/app/static/js/panels/pe_dashboard.js?v=33"></script>
-<script src="/app/static/js/panels/smb_dashboard.js?v=33"></script>
-<script src="/app/static/js/dashboard.js?v=33"></script>
+<script src="/app/static/js/api_client.js?v=34"></script>
+<script src="/app/static/js/charts.js?v=34"></script>
+<script src="/app/static/js/panels/morning_briefing.js?v=34"></script>
+<script src="/app/static/js/panels/opportunities.js?v=34"></script>
+<script src="/app/static/js/panels/symbol_intelligence.js?v=34"></script>
+<script src="/app/static/js/panels/risk_monitor.js?v=34"></script>
+<script src="/app/static/js/panels/factor_environment.js?v=34"></script>
+<script src="/app/static/js/panels/pipeline_status.js?v=34"></script>
+<script src="/app/static/js/panels/universe_screen.js?v=34"></script>
+<script src="/app/static/js/panels/system_status.js?v=34"></script>
+<script src="/app/static/js/panels/pe_dashboard.js?v=34"></script>
+<script src="/app/static/js/panels/smb_dashboard.js?v=34"></script>
+<script src="/app/static/js/dashboard.js?v=34"></script>
 
 </body>
 </html>

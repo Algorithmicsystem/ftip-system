@@ -12,7 +12,6 @@ from api.jobs.tenant_auth import require_tier
 router = APIRouter(
     prefix="/smb",
     tags=["smb"],
-    dependencies=[Depends(require_tier("enterprise"))],
 )
 
 

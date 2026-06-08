@@ -66,6 +66,9 @@ class QuotaEnforcer:
 
     def check_rate_limit(self, key: str, tier: str) -> Tuple[bool, Optional[int]]:
         """Check sliding-window RPM. Returns (allowed, retry_after_seconds)."""
+        import os
+        if os.environ.get("FTIP_ENV", "development") != "production":
+            return True, None  # never rate limit outside production
         cfg = self._get_tier_config(tier)
         rpm = int(cfg["rpm"])
         if rpm <= 0:

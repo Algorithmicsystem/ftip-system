@@ -2,6 +2,75 @@
 
 let _currentPEOrg = null;
 
+const PE_DEMO_SYMBOLS = ['NVDA', 'AVGO', 'LLY', 'TMO', 'JPM'];
+
+async function loadPEDemo() {
+  const body = document.getElementById('pe-body');
+  if (!body) return;
+  _currentPEOrg = 'DEMO_ORG';
+  body.innerHTML = `
+    <div class="alert-banner info" style="margin-bottom:10px;">DEMO PORTFOLIO — 5 AXIOM Universe Companies. Run the pipeline to populate live scores.</div>
+    ${PE_DEMO_SYMBOLS.map(() => '<div class="loading-skeleton skeleton-line full" style="height:60px;margin-bottom:8px;border-radius:6px;"></div>').join('')}`;
+
+  const results = await Promise.all(
+    PE_DEMO_SYMBOLS.map(async sym => {
+      const [das, intel] = await Promise.all([
+        API.get(`/pe/das/${sym}`).catch(() => null),
+        API.get(`/intelligence/universal/${sym}`).catch(() => null),
+      ]);
+      return { symbol: sym, das, intel };
+    })
+  );
+
+  const demoEntities = results.map(r => ({
+    entity_id: r.symbol,
+    company_name: r.symbol,
+    health_score: r.das?.das_score ?? r.intel?.dau ?? 50,
+    cash_runway_months: 24,
+    schillit_distress_score: r.das?.distress_score ?? 20,
+    exit_readiness_score: r.das?.das_score ?? 50,
+    projected_moic: r.das ? (1.5 + (r.das.das_score ?? 50) / 100).toFixed(2) * 1 : null,
+    exit_route: 'IPO / Strategic',
+    axiom_signal: r.intel?.signal_label ?? 'HOLD',
+    axiom_dau: r.intel?.dau ?? 50,
+  }));
+
+  body.innerHTML = `
+    <div class="alert-banner info" style="margin-bottom:10px;">DEMO PORTFOLIO — 5 AXIOM Universe Companies</div>
+    <div id="pe-demo-grid"></div>
+    <div id="pe-exit-pipeline"></div>
+    <div id="pe-schillit-alerts"></div>`;
+
+  const grid = document.getElementById('pe-demo-grid');
+  if (grid) {
+    grid.innerHTML = `
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:8px;">Portfolio Health — DAS Score / AXIOM Signal</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px;margin-bottom:14px;">
+        ${demoEntities.map(e => {
+          const score = e.health_score ?? 50;
+          const scoreCls = score >= 65 ? 'var(--signal-buy)' : score >= 40 ? 'var(--signal-hold)' : 'var(--signal-sell)';
+          const sigCls = e.axiom_signal === 'BUY' ? 'var(--signal-buy)' : e.axiom_signal === 'SELL' ? 'var(--signal-sell)' : 'var(--signal-hold)';
+          return `
+            <div class="metric-card" style="padding:10px;cursor:pointer;" onclick="loadSymbolIntelligence('${e.entity_id}')">
+              <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:4px;">${e.entity_id}</div>
+              <div style="font-family:var(--font-mono);font-size:22px;font-weight:700;color:${scoreCls};">${score.toFixed(0)}</div>
+              <div style="font-size:10px;color:var(--text-muted);">DAS Score</div>
+              <div style="margin-top:6px;font-size:11px;font-weight:600;color:${sigCls};">${e.axiom_signal} · ${(e.axiom_dau || 0).toFixed(1)}</div>
+            </div>`;
+        }).join('')}
+      </div>`;
+  }
+
+  renderExitPipeline(demoEntities.map(e => ({
+    company_name: e.company_name,
+    entity_id: e.entity_id,
+    exit_readiness_score: e.exit_readiness_score,
+    projected_moic: e.projected_moic,
+    exit_route: e.exit_route,
+  })));
+  renderSchilitAlerts(demoEntities);
+}
+
 async function loadPEPortfolio(orgId) {
   if (!orgId) orgId = document.getElementById('pe-org-input')?.value?.trim();
   if (!orgId) return;

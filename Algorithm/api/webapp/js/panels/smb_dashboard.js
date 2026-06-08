@@ -2,6 +2,74 @@
 
 let _currentSMBEntity = null;
 
+async function loadSMBDemo() {
+  const body = document.getElementById('smb-body');
+  if (!body) return;
+  _currentSMBEntity = 'DEMO_RESTAURANT';
+  body.innerHTML = '<div class="loading-skeleton skeleton-line full" style="height:60px;margin-bottom:8px;border-radius:6px;"></div>'.repeat(3);
+
+  // Hardcoded demo restaurant entity
+  const demoData = {
+    entity_id: 'DEMO_RESTAURANT',
+    entity_name: 'Coastal Kitchen (Demo)',
+    health_score: 68,
+    revenue_trend: 'growing',
+    cash_runway_months: 18,
+    monthly_burn_rate: 45000,
+    gross_margin: 0.62,
+    pricing_intelligence: {
+      pricing_power_score: 68,
+      churn_risk_score: 22,
+      arpu_trend: 'growing',
+      recommendation: 'Pricing power is strong. Recommend 4–6% price increase at next menu refresh. '
+        + 'Current food cost at 34% is 4pp above target — a price increase directly closes this gap.',
+    },
+    cashflow_forecast: Array.from({ length: 6 }, (_, i) => ({
+      net_cash_flow: 12000 + i * 1800 + (Math.random() - 0.3) * 5000,
+    })),
+    supplier_risks: [
+      { supplier_name: 'Prime Foods Co', risk_score: 62, spend_percentage: 38 },
+      { supplier_name: 'Farm Fresh Supply', risk_score: 28, spend_percentage: 22 },
+    ],
+    alerts: [
+      { severity: 'warning', message: 'Food cost 34% vs 30% target — prime cost gap of $168K/yr' },
+      { severity: 'info', message: 'Labor cost 31% — within target range (28–32%)' },
+    ],
+  };
+
+  // Inject credit metrics as a special section
+  body.innerHTML = '';
+  renderSMBDashboard(demoData);
+
+  // Append credit section after main render
+  const body2 = document.getElementById('smb-body');
+  if (body2) {
+    const creditEl = document.createElement('div');
+    creditEl.innerHTML = `
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:14px;">Credit Profile (Demo)</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;">
+        <div class="metric-card" style="text-align:center;padding:8px;">
+          <span class="metric-card__label">Rating</span>
+          <span class="metric-card__value" style="font-size:16px;color:var(--signal-buy);">Good</span>
+        </div>
+        <div class="metric-card" style="text-align:center;padding:8px;">
+          <span class="metric-card__label">DSCR</span>
+          <span class="metric-card__value" style="font-size:16px;color:var(--signal-buy);">2.0x</span>
+        </div>
+        <div class="metric-card" style="text-align:center;padding:8px;">
+          <span class="metric-card__label">Max Add. Debt</span>
+          <span class="metric-card__value" style="font-size:14px;color:var(--signal-hold);">$240K</span>
+        </div>
+      </div>
+      <div style="padding:8px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;color:var(--text-secondary);line-height:1.6;margin-bottom:10px;">
+        Annual debt service capacity: $120K/yr. DSCR 2.0x — strong coverage.
+        Opportunity: payables extension by 15 days releases ~$98K cash.
+      </div>
+      <div class="alert-banner info" style="font-size:11px;">Demo data — enter an Entity ID and click Load for live SMB intelligence.</div>`;
+    body2.appendChild(creditEl);
+  }
+}
+
 async function loadSMBIntelligence(entityId) {
   if (!entityId) entityId = document.getElementById('smb-entity-input')?.value?.trim();
   if (!entityId) return;

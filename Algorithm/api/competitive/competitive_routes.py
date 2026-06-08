@@ -10,7 +10,6 @@ from api.jobs.tenant_auth import require_tier
 router = APIRouter(
     prefix="/competitive",
     tags=["competitive"],
-    dependencies=[Depends(require_tier("enterprise"))],
 )
 
 

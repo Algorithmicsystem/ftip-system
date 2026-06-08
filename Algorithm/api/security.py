@@ -229,11 +229,24 @@ def require_api_key_if_needed(
     return None
 
 
+_RATE_LIMIT_EXEMPT_PREFIXES = (
+    "/app",           # dashboard HTML and all static assets
+    "/config/client", # API key self-config — must never be blocked
+    "/favicon",       # favicon requests
+    "/docs",          # API documentation
+    "/openapi",       # OpenAPI spec
+    "/ws/",           # WebSocket connections
+    "/health",        # health checks (exact prefix covers /health and sub-paths)
+)
+
+
 def enforce_rate_limit(
     request: Request, limiter: RateLimiter, trace_id: str
 ) -> Optional[JSONResponse]:
     path = request.url.path
     if path in {"/health", "/version", "/db/health"}:
+        return None
+    if any(path.startswith(p) for p in _RATE_LIMIT_EXEMPT_PREFIXES):
         return None
 
     key = getattr(request.state, "api_key", None)

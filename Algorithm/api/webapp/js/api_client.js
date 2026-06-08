@@ -2,18 +2,27 @@
 
 // Self-init: fetch server config and populate API key before any panel loads
 (async function axiomSelfInit() {
-  try {
-    const cfg = await fetch('/config/client').then(r => r.json());
-    if (cfg.api_key && cfg.api_key.length > 0) {
-      localStorage.setItem('ftip_api_key', cfg.api_key);
-      const el = document.getElementById('api-key-input');
-      if (el) {
-        el.value = cfg.api_key;
-        el.placeholder = 'Configured';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch('/config/client');
+      if (!res.ok) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
+        continue;
       }
+      const cfg = await res.json();
+      if (cfg.api_key && cfg.api_key.length > 0) {
+        localStorage.setItem('ftip_api_key', cfg.api_key);
+        const el = document.getElementById('api-key-input');
+        if (el) {
+          el.value = '•'.repeat(Math.min(cfg.api_key.length, 20));
+          el.placeholder = 'Configured ✓';
+          el.style.color = 'var(--signal-buy)';
+        }
+      }
+      return; // success
+    } catch (_) {
+      await new Promise(r => setTimeout(r, 400 * (attempt + 1)));
     }
-  } catch (_) {
-    // Server unreachable or key not configured — no-op
   }
 })();
 

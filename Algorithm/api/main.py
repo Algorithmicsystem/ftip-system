@@ -2003,7 +2003,7 @@ def health() -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "status": "ok",
-        "version": "33.0.0",
+        "version": "34.0.0",
         "db": db_status,
         "scheduler": "running" if scheduler_running else "stopped",
     }
@@ -2551,7 +2551,7 @@ def system_status() -> Dict[str, Any]:
 
     return {
         "server": "healthy",
-        "version": "33.0.0",
+        "version": "34.0.0",
         "db_connected": db_connected,
         "migrations_applied": migrations_applied,
         "latest_migration": latest_migration,
@@ -2595,7 +2595,7 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": os.environ.get("FTIP_API_KEY") or "",
         "env": _railway_env(),
-        "version": "33.0.0",
+        "version": "34.0.0",
         "build": "AXIOM Intelligence Terminal",
     }
 

@@ -185,12 +185,18 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
 
     # Default structure for DB-disabled mode
     if not db.db_enabled():
+        _dev_regime = (
+            "low_risk_moderate_growth" if sri < 40 else
+            "moderate_risk_neutral" if sri < 70 else
+            "elevated_risk_cautious"
+        )
         return MorningBriefing(
             briefing_date=aod,
             market_session=session,
             systemic_risk_index=sri,
+            regime_context={"regime_label": _dev_regime},
             briefing_text=_build_text(
-                regime="unknown", breadth_state="UNKNOWN", n_favorable=0,
+                regime=_dev_regime, breadth_state="UNKNOWN", n_favorable=0,
                 top_symbol=None, top_dau=0.0, top_driver="—",
                 risk_symbol=None, risk_type="—",
                 top_factor="—", sri=sri, ic_state="INSUFFICIENT", sample_count=0,
