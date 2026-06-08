@@ -322,6 +322,133 @@ def compute_revenue_share_endpoint(
 # Webhook Test
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Acquisition Package
+# ---------------------------------------------------------------------------
+
+@router.get("/due-diligence")
+def get_due_diligence() -> Dict[str, Any]:
+    """Technical due diligence document for acquirers."""
+    from api.axiom.formula_registry import FORMULA_REGISTRY, get_formula_hash
+    formula_count = len(FORMULA_REGISTRY)
+    formula_hash = get_formula_hash()
+    return {
+        "document_title": "AXIOM Intelligence Platform — Technical Due Diligence",
+        "version": "33.0.0",
+        "sections": {
+            "architecture": {
+                "summary": "FastAPI microservice on Python 3.9+, PostgreSQL 16, Chart.js 4.4 frontend.",
+                "deployment": "Single-process or container; ships as Docker image with migration runner.",
+                "data_layer": "Immutable append-only score tables; 105+ migration files; zero destructive migrations.",
+                "api_surface": "RESTful v1 surface under /prosperity/* (permanent); developer platform at /developer/*.",
+            },
+            "proprietary_ip": {
+                "formula_count": formula_count,
+                "formula_registry_hash": formula_hash,
+                "core_engines": [
+                    "Fundamental Reality Engine (FRE)",
+                    "Critical Fragility Engine (CFE)",
+                    "Prosperity Composite Engine (PCE)",
+                    "Behavioral Finance Engine (BFE)",
+                    "Alternative Signals Engine (ASE)",
+                ],
+                "signal_quality": "AXIOM DAU (Deployable Alpha Utility) — composite 0-100 score fusing 5 engines.",
+                "ml_ensemble": "Gradient boosting + neural net + linear model ensemble with PSI drift monitoring.",
+            },
+            "data_moat": {
+                "universe_symbols": 30,
+                "scoring_history_tables": ["axiom_scores_daily", "signal_pnl_daily", "signal_ic_daily"],
+                "intraday_pipeline": True,
+                "event_intelligence": "company_intelligence_archive with impact scoring",
+                "cross_asset_engine": "Real-time VIX/yield-curve/commodity amplifier; capped ±15%/−30%.",
+            },
+            "commercial_traction": {
+                "billing_tiers": ["free", "starter", "professional", "institutional"],
+                "partner_program": ["referral", "reseller", "oem", "white_label"],
+                "developer_platform": "SDK generation (Python/JS/R), webhooks, key rotation, usage analytics.",
+                "revenue_share_range_pct": "10–40%",
+            },
+            "compliance": {
+                "auth": "X-FTIP-API-Key header; tier-gated access (free → enterprise).",
+                "audit_trail": "Full audit_trail table; every score write logged.",
+                "data_retention": "Append-only; no PII stored.",
+            },
+        },
+        "acquisition_contacts": {
+            "technical": "cto@axiom.ftip.io",
+            "commercial": "bd@axiom.ftip.io",
+        },
+    }
+
+
+@router.get("/ip-audit")
+def get_ip_audit() -> Dict[str, Any]:
+    """Intellectual property audit: formula registry hash, engine list, migration count."""
+    from api.axiom.formula_registry import FORMULA_REGISTRY, get_formula_hash
+    import os
+    migrations_dir = os.path.join(os.path.dirname(__file__), "..", "migrations")
+    try:
+        migration_files = [f for f in os.listdir(migrations_dir) if f.endswith(".sql")]
+        migration_count = len(migration_files)
+    except Exception:
+        migration_count = 0
+    return {
+        "formula_registry_hash": get_formula_hash(),
+        "formula_count": len(FORMULA_REGISTRY),
+        "formulas": list(FORMULA_REGISTRY.keys()),
+        "migration_count": migration_count,
+        "engines": [
+            "fundamental_reality",
+            "critical_fragility",
+            "prosperity_composite",
+            "behavioral_finance",
+            "alternative_signals",
+        ],
+        "ip_categories": list({f["category"] for f in FORMULA_REGISTRY.values()}),
+        "audit_timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@router.get("/formula-registry")
+def list_formula_registry() -> Dict[str, Any]:
+    from api.axiom.formula_registry import FORMULA_REGISTRY, get_formula_hash
+    return {
+        "registry_hash": get_formula_hash(),
+        "formula_count": len(FORMULA_REGISTRY),
+        "formulas": {
+            name: {
+                "description": f["description"],
+                "version": f["version"],
+                "category": f["category"],
+                "parameter_count": len(f["parameters"]),
+            }
+            for name, f in FORMULA_REGISTRY.items()
+        },
+    }
+
+
+@router.get("/formula-registry/{formula_name}")
+def get_formula(formula_name: str) -> Dict[str, Any]:
+    from api.axiom.formula_registry import FORMULA_REGISTRY
+    f = FORMULA_REGISTRY.get(formula_name)
+    if not f:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Formula '{formula_name}' not found. Available: {list(FORMULA_REGISTRY)}",
+        )
+    return {"name": formula_name, **f}
+
+
+@router.get("/formula-hash")
+def get_formula_hash_endpoint() -> Dict[str, Any]:
+    from api.axiom.formula_registry import FORMULA_REGISTRY, get_formula_hash
+    return {
+        "hash": get_formula_hash(),
+        "algorithm": "SHA-256",
+        "formula_count": len(FORMULA_REGISTRY),
+    }
+
+
 @router.post("/webhooks/test")
 def test_webhook(
     event_type: str = Query(default="signal.buy"),

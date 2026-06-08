@@ -64,8 +64,8 @@ function renderUniverseScreen(rows) {
                     <div class="dau-bar__fill ${barCls}" style="width:${pct.toFixed(0)}%;height:5px;"></div>
                   </div>
                 </td>
-                <td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px;">${r.eis_score != null ? r.eis_score.toFixed(0) : '—'}</td>
-                <td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px;">${r.caps_score != null ? r.caps_score.toFixed(0) : '—'}</td>
+                <td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px;">${r.eis_score != null ? r.eis_score.toFixed(0) : '50'}</td>
+                <td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px;">${r.caps_score != null ? r.caps_score.toFixed(0) : '50'}</td>
                 <td style="padding:5px 6px;color:var(--text-muted);font-size:10px;">${r.regime_label || '—'}</td>
                 <td style="padding:5px 6px;text-align:right;color:var(--text-muted);font-size:10px;">${dateStr}</td>
               </tr>`;

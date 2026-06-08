@@ -10,7 +10,6 @@ from api.jobs.tenant_auth import require_tier
 router = APIRouter(
     prefix="/macro",
     tags=["macro"],
-    dependencies=[Depends(require_tier("enterprise"))],
 )
 
 
@@ -65,6 +64,7 @@ def get_macro_snapshot() -> Dict[str, Any]:
             "equity_macro_score": macro.equity_macro_score,
             "macro_environment_score": macro.macro_environment_score,
             "favored_factors": macro.favored_axiom_factors,
+            "unfavored_factors": macro.unfavored_axiom_factors,
             "macro_regime_label": macro.macro_regime_label,
         },
     }

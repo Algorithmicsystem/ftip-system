@@ -120,7 +120,11 @@ function renderSystemStatus(status, pipeline) {
 
     <!-- Section D: Pipeline -->
     <div style="margin-bottom:12px;">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">Last Pipeline Run</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;">
+        <span>Last Pipeline Run</span>
+        <button onclick="triggerPipeline()" style="font-size:10px;padding:3px 10px;background:var(--accent-primary);color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:600;letter-spacing:.04em;">▶ Run Pipeline</button>
+      </div>
+      <div id="pipeline-trigger-status" style="font-size:11px;margin-bottom:6px;"></div>
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
         <span style="font-family:var(--font-mono);font-size:14px;font-weight:700;color:${stsColor};">${overallSts.toUpperCase()}</span>
         <span style="font-size:11px;color:var(--text-muted);">${succeeded}/${stageNames.length} stages succeeded</span>
@@ -140,10 +144,39 @@ function renderSystemStatus(status, pipeline) {
     </div>
 
     <!-- Section E: Warnings -->
-    <div>
+    <div style="margin-bottom:12px;">
       <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">System Alerts</div>
       ${warningsHTML}
+    </div>
+
+    <!-- Section F: Acquisition links -->
+    <div style="margin-top:4px;padding:8px 10px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;">
+      <span style="color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em;font-size:10px;">Due Diligence · </span>
+      <a href="/developer/due-diligence" target="_blank" style="color:var(--accent-primary);text-decoration:none;margin-right:12px;">Technical DD</a>
+      <a href="/developer/ip-audit" target="_blank" style="color:var(--accent-primary);text-decoration:none;margin-right:12px;">IP Audit</a>
+      <a href="/developer/formula-registry" target="_blank" style="color:var(--accent-primary);text-decoration:none;">Formula Registry</a>
     </div>`;
+}
+
+async function triggerPipeline() {
+  const statusEl = document.getElementById('pipeline-trigger-status');
+  if (statusEl) { statusEl.textContent = 'Triggering pipeline…'; statusEl.style.color = 'var(--text-muted)'; }
+  try {
+    const result = await API.post('/orchestration/pipeline/run', {});
+    if (statusEl) {
+      statusEl.textContent = `Pipeline triggered — run ID: ${result.run_id || 'unknown'}`;
+      statusEl.style.color = 'var(--signal-buy)';
+    }
+    setTimeout(loadSystemStatus, 3000);
+  } catch (err) {
+    if (statusEl) {
+      const msg = err?.statusCode === 401 ? 'Unauthorized — pipeline requires authentication.'
+                : err?.statusCode === 403 ? 'Access denied — enterprise tier required.'
+                : `Error: ${err.message || 'unknown error'}`;
+      statusEl.textContent = msg;
+      statusEl.style.color = 'var(--signal-sell)';
+    }
+  }
 }
 
 function metricChipHTML(label, value, valueColor) {

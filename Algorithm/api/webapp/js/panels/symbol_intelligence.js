@@ -46,6 +46,7 @@ async function loadSymbolIntelligence(symbol) {
     }
   } catch (err) {
     if (activePane) activePane.innerHTML = `<div class="alert-banner warning">Could not load intelligence for ${symbol}: ${err.message}</div>`;
+    if (badgeEl) { badgeEl.className = 'signal-badge hold'; badgeEl.textContent = 'HOLD'; }
   }
 }
 
@@ -57,6 +58,9 @@ function renderIntelligenceTab(data, symbol) {
     el.innerHTML = `<div class="alert-banner info">No AXIOM intelligence available for ${symbol}.</div>`;
     return;
   }
+
+  const isDefault = data.ic_state === 'INSUFFICIENT' || (data.intelligence_quality_score === 0) || (data.dau === 50 && data.eis_score === 50 && data.caps_score === 50);
+  const defaultBanner = isDefault ? `<div class="alert-banner info" style="margin-bottom:10px;">Pipeline data not yet available — scores reflect system defaults.</div>` : '';
 
   const scores = `
     ${scoreBarHTML('EIS Score', data.eis_score, '#10b981')}
@@ -80,6 +84,7 @@ function renderIntelligenceTab(data, symbol) {
     : `<div class="text-muted text-sm">No evidence items available.</div>`;
 
   el.innerHTML = `
+    ${defaultBanner}
     <div id="scores-section" style="margin-bottom:14px;">${scores}</div>
     <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Evidence</div>
     <div>${evidenceHTML}</div>

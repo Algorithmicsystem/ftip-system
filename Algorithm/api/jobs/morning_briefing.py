@@ -284,6 +284,13 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
 
     # Regime context
     regime_label = top_opportunities[0]["regime"] if top_opportunities else "unknown"
+    if not regime_label or regime_label.upper() in ("UNKNOWN", ""):
+        if sri < 40:
+            regime_label = "low_risk_moderate_growth"
+        elif sri < 70:
+            regime_label = "moderate_risk_neutral"
+        else:
+            regime_label = "elevated_risk_cautious"
 
     # ML model health
     ml_health: Dict[str, Any] = {}

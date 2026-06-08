@@ -770,11 +770,11 @@ class TestVersionBump:
         import api.main as m
         import inspect
         src = inspect.getsource(m)
-        assert "32.0.0" in src or "31.0.0" in src or "30.0.0" in src or "29.0.0" in src
+        assert "33.0.0" in src or "32.0.0" in src or "31.0.0" in src or "30.0.0" in src
         assert "28.0.0" not in src
 
     def test_index_html_v29(self):
         from pathlib import Path
         html = Path("/Users/macuser/ftip-system/Algorithm/api/webapp/index.html").read_text()
-        assert "?v=29" in html or "?v=30" in html or "?v=31" in html or "?v=32" in html
+        assert "?v=29" in html or "?v=30" in html or "?v=31" in html or "?v=32" in html or "?v=33" in html
         assert "?v=28" not in html
