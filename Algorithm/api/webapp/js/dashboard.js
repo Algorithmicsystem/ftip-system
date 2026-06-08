@@ -283,14 +283,28 @@ function setupTabNav() {
   });
 }
 
-function switchTab(container, tabId) {
-  container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+function switchTab(containerOrTabId, tabIdOrBtn) {
+  let container, tabId, activeBtn;
+
+  if (typeof containerOrTabId === 'string') {
+    // HTML inline form: switchTab('tabId', buttonElement)
+    tabId = containerOrTabId;
+    activeBtn = tabIdOrBtn;
+    container = activeBtn?.closest('.panel-body');
+  } else {
+    // Internal form: switchTab(containerElement, 'tabId')
+    container = containerOrTabId;
+    tabId = tabIdOrBtn;
+    activeBtn = container?.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+  }
+
+  if (!container || !tabId) return;
+
+  container.querySelectorAll('.tab-nav__item, .tab-btn').forEach(b => b.classList.remove('active'));
   container.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
 
-  const btn = container.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+  if (activeBtn) activeBtn.classList.add('active');
   const pane = container.querySelector(`#tab-${tabId}`);
-
-  if (btn)  btn.classList.add('active');
   if (pane) pane.classList.add('active');
 }
 

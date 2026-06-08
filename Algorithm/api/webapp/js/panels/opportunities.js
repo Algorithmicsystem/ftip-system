@@ -43,6 +43,7 @@ function renderOpportunitiesList(symbols) {
       <div class="opp-row" onclick="loadSymbolIntelligence('${item.symbol}')">
         <span class="opp-row__symbol">${item.symbol}</span>
         <span class="signal-badge ${sig}" style="font-size:10px;padding:1px 7px;">${(item.signal || '—').replace('_', ' ')}</span>
+        ${item.regime_label ? `<span style="font-size:9px;color:var(--text-muted);padding:1px 5px;border-radius:3px;background:var(--bg-elevated);margin-left:2px;">${item.regime_label}</span>` : ''}
         <div class="opp-row__bar">
           <div class="dau-bar__track">
             <div class="dau-bar__fill ${barCls}" style="width:${pct.toFixed(0)}%;"></div>

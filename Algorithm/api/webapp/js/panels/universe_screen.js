@@ -33,7 +33,9 @@ function renderUniverseScreen(rows) {
             <th style="text-align:left;padding:4px 6px;font-weight:600;">Symbol</th>
             <th style="text-align:center;padding:4px 6px;font-weight:600;">Signal</th>
             <th style="text-align:right;padding:4px 6px;font-weight:600;">DAU</th>
-            <th style="text-align:left;padding:4px 6px;font-weight:600;min-width:120px;">Bar</th>
+            <th style="text-align:left;padding:4px 6px;font-weight:600;min-width:100px;">Bar</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600;">EIS</th>
+            <th style="text-align:right;padding:4px 6px;font-weight:600;">CAPS</th>
             <th style="text-align:left;padding:4px 6px;font-weight:600;">Regime</th>
             <th style="text-align:right;padding:4px 6px;font-weight:600;">Updated</th>
           </tr>
@@ -62,6 +64,8 @@ function renderUniverseScreen(rows) {
                     <div class="dau-bar__fill ${barCls}" style="width:${pct.toFixed(0)}%;height:5px;"></div>
                   </div>
                 </td>
+                <td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px;">${r.eis_score != null ? r.eis_score.toFixed(0) : '—'}</td>
+                <td style="padding:5px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-muted);font-size:10px;">${r.caps_score != null ? r.caps_score.toFixed(0) : '—'}</td>
                 <td style="padding:5px 6px;color:var(--text-muted);font-size:10px;">${r.regime_label || '—'}</td>
                 <td style="padding:5px 6px;text-align:right;color:var(--text-muted);font-size:10px;">${dateStr}</td>
               </tr>`;

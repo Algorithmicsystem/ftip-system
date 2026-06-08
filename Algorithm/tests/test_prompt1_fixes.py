@@ -31,7 +31,7 @@ class TestAuthFixes:
         data = r.json()
         assert "api_key" in data
         assert "version" in data
-        assert data["version"] in ("30.0.0", "31.0.0")
+        assert data["version"] in ("30.0.0", "31.0.0", "32.0.0")
 
     def test_api_client_sends_correct_header(self):
         src = (WEBAPP / "js" / "api_client.js").read_text()

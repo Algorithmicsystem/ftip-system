@@ -127,6 +127,52 @@ function renderHeatmap(containerId, data) {
 }
 
 /**
+ * renderDAUSparkline — mini DAU history line chart.
+ * @param {string} containerId
+ * @param {{ as_of_date: string, dau: number }[]} dauHistory
+ */
+function renderDAUSparkline(containerId, dauHistory) {
+  const container = document.getElementById(containerId);
+  if (!container || !dauHistory || dauHistory.length === 0) return;
+
+  _destroyChart(containerId);
+  container.innerHTML = '<canvas></canvas>';
+  const canvas = container.querySelector('canvas');
+  canvas.height = 60;
+
+  if (typeof Chart === 'undefined') return;
+
+  const values = dauHistory.map(d => d.dau ?? 0);
+  const labels = dauHistory.map(d => d.as_of_date || '');
+  const last = values[values.length - 1];
+  const first = values[0];
+  const lineColor = last > first ? '#10b981' : last < first ? '#ef4444' : '#3b82f6';
+
+  const ctx = canvas.getContext('2d');
+  _chartInstances[containerId] = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        borderColor: lineColor,
+        borderWidth: 1.5,
+        pointRadius: 0,
+        fill: false,
+        tension: 0.3,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false } },
+    },
+  });
+}
+
+/**
  * renderScoreBar — named horizontal bar inside a container.
  * @param {string} label
  * @param {number} value 0-100

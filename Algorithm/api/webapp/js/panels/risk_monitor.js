@@ -28,7 +28,7 @@ function renderRiskPanel(sri, history) {
   const sriCls = sriVal >= 70 ? 'var(--signal-sell)' : sriVal >= 40 ? 'var(--signal-hold)' : 'var(--signal-buy)';
   const barCls = sriVal >= 85 ? 'critical' : sriVal >= 70 ? 'warning' : sriVal >= 40 ? 'elevated' : 'stable';
 
-  const histValues = (history || []).map(h => h.sri ?? 50);
+  const histValues = (history?.history || []).map(h => h.sri ?? 50);
 
   body.innerHTML = `
     <!-- SRI Gauge -->

@@ -1,5 +1,21 @@
 /* Factor Environment Panel */
 
+const FACTOR_LABELS = {
+  GBF:  'Global Business Fundamentals',
+  EIF:  'Economic Inflection Factor',
+  CMF:  'Capital Market Flow',
+  BAF:  'Behavioral Alpha Factor',
+  KLF:  'Kaleidoscope Liquidity Factor',
+  SCAF: 'Supply Chain Alpha Factor',
+  ICF:  'Information Coefficient Factor',
+  GBF2: 'Global Business Fundamentals II',
+  MTRF: 'Market Technical Regime Factor',
+  MQF:  'Market Quality Factor',
+  VIF:  'Valuation Inflection Factor',
+  RTF:  'Regime Transition Factor',
+  NTFF: 'Near-Term Flow Factor',
+};
+
 async function loadFactorEnvironment() {
   const body = document.getElementById('factors-body');
   const regimeEl = document.getElementById('factor-regime-label');
@@ -49,8 +65,8 @@ function renderFactorPanel(macro, cross) {
   const label    = macro?.macro_regime_label || '—';
 
   const factors = [
-    ...favored.map(f  => ({ name: f, value: 0.6, type: 'favored' })),
-    ...unfavored.map(f => ({ name: f, value: 0.4, type: 'unfavored' })),
+    ...favored.map(f  => ({ name: FACTOR_LABELS[f] || f, value: 0.6, type: 'favored' })),
+    ...unfavored.map(f => ({ name: FACTOR_LABELS[f] || f, value: 0.4, type: 'unfavored' })),
   ].slice(0, 8);
 
   const caSignals = cross ? [

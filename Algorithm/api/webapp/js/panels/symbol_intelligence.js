@@ -102,32 +102,42 @@ function renderRiskTab(data, symbol) {
   const frag = data.fragility_score ?? 0;
   const scps = data.scps_score ?? 0;
   const bfs  = data.bfs_score  ?? 0;
-  const fragCls = frag >= 70 ? 'var(--signal-sell)' : frag >= 50 ? 'var(--signal-hold)' : 'var(--signal-buy)';
-  const scpsCls  = scps >= 65 ? 'var(--signal-sell)' : 'var(--accent-primary)';
+
+  const caAdj = data.cross_asset_adjusted_dau;
+  const rawDau = data.dau ?? 0;
+  const adjDiff = caAdj != null ? (caAdj - rawDau) : null;
+  const adjSign = adjDiff != null && adjDiff > 0 ? '+' : '';
+
+  const conditions = (data.invalidation_conditions && data.invalidation_conditions.length > 0)
+    ? data.invalidation_conditions
+    : [
+        frag >= 60 ? `Fragility already elevated (${frag.toFixed(0)}) — spike above 75 triggers stop` : 'Fragility spike above 70',
+        data.top_risk || 'Regime shift to HIGH_VOL',
+        'IC gate degradation to WEAK',
+      ];
 
   el.innerHTML = `
-    <div class="risk-gauges">
-      <div class="metric-card" style="text-align:center;">
-        <span class="metric-card__label">Fragility</span>
-        <span class="metric-card__value" style="color:${fragCls};font-size:20px;">${frag.toFixed(0)}</span>
-      </div>
-      <div class="metric-card" style="text-align:center;">
-        <span class="metric-card__label">SCPS</span>
-        <span class="metric-card__value" style="color:${scpsCls};font-size:20px;">${scps.toFixed(0)}</span>
-      </div>
-      <div class="metric-card" style="text-align:center;">
-        <span class="metric-card__label">BFS</span>
-        <span class="metric-card__value" style="font-size:20px;">${bfs.toFixed(0)}</span>
-      </div>
+    <div style="margin-bottom:14px;">
+      ${scoreBarHTML('Fragility', frag, frag >= 70 ? '#ef4444' : frag >= 50 ? '#f59e0b' : '#10b981')}
+      ${scoreBarHTML('SCPS', scps, scps >= 65 ? '#ef4444' : '#3b82f6')}
+      ${scoreBarHTML('BFS', bfs, '#8b5cf6')}
     </div>
     ${data.var_1d_99 != null ? `
-      <div class="metric-card" style="flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:10px;">
-        <span class="metric-card__label">VaR 1d 99%</span>
-        <span class="metric-card__value" style="font-size:16px;color:var(--signal-sell);">${(data.var_1d_99 * 100).toFixed(2)}%</span>
-      </div>` : ''}
+    <div class="metric-card" style="flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span class="metric-card__label">VaR 1d 99%</span>
+      <span class="metric-card__value" style="font-size:16px;color:var(--signal-sell);">${(data.var_1d_99 * 100).toFixed(2)}%</span>
+    </div>` : ''}
+    ${caAdj != null ? `
+    <div class="metric-card" style="flex-direction:row;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span class="metric-card__label">Cross-Asset Adj DAU</span>
+      <span style="font-size:13px;font-family:var(--font-mono);">
+        ${caAdj.toFixed(1)}
+        <span style="font-size:11px;color:${adjDiff >= 0 ? 'var(--signal-buy)' : 'var(--signal-sell)'};">(${adjSign}${adjDiff.toFixed(1)})</span>
+      </span>
+    </div>` : ''}
     <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Invalidation Conditions</div>
     <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
-      ${(data.invalidation_conditions || ['Fragility spike above 70', 'Regime shift to HIGH_VOL', 'IC degradation to WEAK']).map(c => `<div>• ${c}</div>`).join('')}
+      ${conditions.map(c => `<div>• ${c}</div>`).join('')}
     </div>`;
 }
 
@@ -140,30 +150,53 @@ function renderExplanationTab(explain, intel) {
     return;
   }
 
-  const chain = explain?.reasoning_chain?.steps || [];
+  const explanationText = explain?.explanation_text || '';
+  const chain = explain?.reasoning_steps || [];
   const chainHTML = chain.length > 0
     ? chain.map((step, i) => `
         <div class="reasoning-step">
           <span class="reasoning-step__num">${i + 1}</span>
           <div class="reasoning-step__content">
-            <div class="reasoning-step__premise">${step.premise || step.factor || '—'}</div>
-            <div class="reasoning-step__conclusion">${step.conclusion || step.reasoning || '—'}</div>
+            <div class="reasoning-step__premise">${step.claim || step.premise || step.factor || '—'}</div>
+            <div class="reasoning-step__conclusion">${step.evidence || step.conclusion || step.reasoning || '—'}</div>
           </div>
         </div>`).join('')
     : `<div class="text-muted text-sm">No reasoning chain available.</div>`;
 
-  const counter = explain?.counterfactuals || [];
+  const counter = explain?.contradicting_factors || explain?.counterfactuals || [];
   const counterHTML = counter.length > 0
-    ? counter.map(c => `
-        <div class="evidence-item contradicting">
-          <span class="evidence-item__icon">↺</span>
-          <span class="evidence-item__text">${c.description || c.scenario || JSON.stringify(c)}</span>
-        </div>`).join('')
-    : `<div class="text-muted text-sm">No counterfactual data available.</div>`;
+    ? counter.map(c => {
+        const text = typeof c === 'string' ? c : c.description || c.scenario || JSON.stringify(c);
+        return `
+          <div class="evidence-item contradicting">
+            <span class="evidence-item__icon">↺</span>
+            <span class="evidence-item__text">${text}</span>
+          </div>`;
+      }).join('')
+    : `<div class="text-muted text-sm">No contradicting factors available.</div>`;
+
+  const batting = intel?.signal_batting_average;
+  const invalidConds = explain?.invalidation_conditions || [];
 
   el.innerHTML = `
+    ${explanationText ? `
+    <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;margin-bottom:14px;padding:10px;background:var(--bg-tertiary);border-radius:6px;">
+      ${explanationText.split('\n\n').map(p => `<p style="margin-bottom:4px;">${p}</p>`).join('')}
+    </div>` : ''}
+    ${batting != null ? `
+    <div style="margin-bottom:14px;">
+      <div class="metric-card" style="text-align:center;">
+        <span class="metric-card__label">Signal Batting Average</span>
+        <span class="metric-card__value" style="font-size:18px;color:var(--signal-buy);">${(batting * 100).toFixed(0)}%</span>
+      </div>
+    </div>` : ''}
     <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Reasoning Chain</div>
     ${chainHTML}
+    ${invalidConds.length > 0 ? `
+    <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-top:14px;margin-bottom:6px;">Invalidation Conditions</div>
+    <div style="font-size:12px;color:var(--text-secondary);line-height:1.7;">
+      ${invalidConds.map(c => `<div>• ${c}</div>`).join('')}
+    </div>` : ''}
     <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-top:14px;margin-bottom:8px;">What Would Flip This Signal?</div>
     ${counterHTML}`;
 }
