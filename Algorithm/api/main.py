@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import time
@@ -1713,7 +1714,6 @@ def backtest_portfolio(req: PortfolioBacktestRequest) -> PortfolioBacktestRespon
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> Any:
     _startup()
-    # Capture the event loop for thread-safe WebSocket broadcasting from APScheduler jobs
     try:
         from api.realtime.websocket_manager import ws_manager
         ws_manager.set_loop(asyncio.get_event_loop())
@@ -1721,9 +1721,14 @@ async def lifespan(app: FastAPI) -> Any:
         pass
     from api.jobs.scheduler import start_scheduler
     start_scheduler()
-    yield
-    from api.jobs.scheduler import scheduler_manager
-    scheduler_manager.stop()
+    try:
+        yield
+    finally:
+        from api.jobs.scheduler import scheduler_manager
+        try:
+            scheduler_manager.stop()
+        except Exception:
+            pass
 
 
 def _startup() -> List[str]:

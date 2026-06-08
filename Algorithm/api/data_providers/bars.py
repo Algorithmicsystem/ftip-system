@@ -469,8 +469,8 @@ def fetch_daily_bars_with_meta(
                     fallback_used=fallback_used,
                 )
             )
-            logger.info(
-                "%s daily failed, falling back",
+            logger.debug(
+                "%s daily rate-limited, trying next provider",
                 provider_name,
                 extra={"symbol": symbol, "reason": exc.reason_detail},
             )
@@ -493,8 +493,8 @@ def fetch_daily_bars_with_meta(
                     fallback_used=fallback_used,
                 )
             )
-            logger.info(
-                "%s daily unexpected error",
+            logger.debug(
+                "%s daily unexpected error, trying next provider",
                 provider_name,
                 extra={"symbol": symbol, "error": str(exc)},
             )
