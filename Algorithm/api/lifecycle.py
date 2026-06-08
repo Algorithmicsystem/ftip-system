@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+import sys
 from typing import List
 
 from api import config, db, migrations
 
 logger = logging.getLogger("ftip.api")
+
+_STALE_PIPELINE_TRIGGERED = False
 
 
 def _missing_v1_tables() -> List[str]:
@@ -56,6 +59,12 @@ def _enforce_db_runtime_contract() -> None:
 
 def _check_and_trigger_stale_pipeline() -> None:
     """If no data today, trigger pipeline automatically after startup."""
+    global _STALE_PIPELINE_TRIGGERED
+    if "pytest" in sys.modules:
+        return
+    if _STALE_PIPELINE_TRIGGERED:
+        return
+    _STALE_PIPELINE_TRIGGERED = True
     import datetime as dt
     import time
     time.sleep(5)
