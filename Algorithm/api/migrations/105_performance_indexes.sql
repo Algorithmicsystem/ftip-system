@@ -20,7 +20,7 @@ CREATE INDEX IF NOT EXISTS idx_axiom_intraday_session_symbol
     ON axiom_intraday_updates (session_date, symbol, update_time DESC);
 
 CREATE INDEX IF NOT EXISTS idx_morning_briefings_date
-    ON morning_briefings (briefing_date DESC);
+    ON morning_briefings (date DESC);
 
 CREATE INDEX IF NOT EXISTS idx_audit_trail_event_created
     ON audit_trail (event_type, created_at DESC);
