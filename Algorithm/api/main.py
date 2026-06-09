@@ -3117,108 +3117,58 @@ def ensemble_status() -> Dict[str, Any]:
     return get_ensemble_status()
 
 
-def _seed_fetch_finnhub_candles(
-    symbol: str, start_date: "dt.date", end_date: "dt.date"
-) -> List[Dict[str, Any]]:
-    """Fetch daily OHLCV candles from Finnhub stock/candle endpoint."""
-    import time as _time
-    import datetime as _dt
-    import httpx as _httpx
-    from api import config as _cfg
-
-    api_key = _cfg.finnhub_api_key()
-    if not api_key:
-        raise ValueError("FINNHUB_API_KEY not set")
-    from_ts = int(_dt.datetime.combine(start_date, _dt.time.min).timestamp())
-    to_ts = int(_dt.datetime.combine(end_date, _dt.time.max).timestamp())
-    resp = _httpx.get(
-        "https://finnhub.io/api/v1/stock/candle",
-        params={"symbol": symbol, "resolution": "D", "from": from_ts, "to": to_ts, "token": api_key},
-        timeout=20,
-    )
-    if resp.status_code != 200:
-        raise ValueError(f"Finnhub HTTP {resp.status_code}")
-    payload = resp.json()
-    if payload.get("s") != "ok":
-        raise ValueError(f"Finnhub status={payload.get('s')}")
-    closes = payload.get("c") or []
-    timestamps = payload.get("t") or []
-    if not closes or not timestamps:
-        raise ValueError("Finnhub returned no candles")
-    rows = []
-    for i, ts in enumerate(timestamps):
-        as_of = _dt.datetime.utcfromtimestamp(ts).date()
-        rows.append({
-            "symbol": symbol,
-            "as_of_date": as_of,
-            "open": float(payload["o"][i]) if payload.get("o") else None,
-            "high": float(payload["h"][i]) if payload.get("h") else None,
-            "low": float(payload["l"][i]) if payload.get("l") else None,
-            "close": float(closes[i]),
-            "volume": int(payload["v"][i]) if payload.get("v") else None,
-            "source": "finnhub",
-        })
-    return rows
-
-
 @app.get("/admin/seed-market-data")
 def seed_market_data() -> Dict[str, Any]:
-    """Seed market_bars_daily with 30 days of OHLCV data for all universe symbols.
+    """Seed market_bars_daily with 365 days of OHLCV data for all universe symbols.
 
-    Provider order: AlphaVantage (primary) → Finnhub (fallback).
-    Sleeps 12 seconds between symbols to respect AlphaVantage 5 calls/minute limit.
-    Idempotent — uses ON CONFLICT DO NOTHING. Intended for Railway cold-start recovery.
-    Expected runtime: ~6–8 minutes for 30 symbols.
+    Uses yfinance — free, no API key, works from any cloud server including Railway.
+    No rate-limit sleep needed. Idempotent — ON CONFLICT DO NOTHING.
+    Intended for Railway cold-start recovery when market_bars_daily has 0 rows.
     """
     import datetime as _dt
-    import time as _time
     from api.universe import AXIOM_UNIVERSE
-    from api.data_providers.alphavantage import fetch_daily_adjusted_bars
+    from api.data_providers.bars import _fetch_daily_yfinance
 
     if not db.db_write_enabled():
         return {"error": "db_write_disabled", "symbols_seeded": 0, "total_bars": 0}
 
     end_date = _dt.date.today()
-    start_date = end_date - _dt.timedelta(days=30)
+    start_date = end_date - _dt.timedelta(days=365)
 
     symbols_seeded = 0
     total_bars = 0
     errors: list = []
 
-    for idx, symbol in enumerate(AXIOM_UNIVERSE):
-        # Rate-limit: 12 s between symbols (5 calls/min AV free tier)
-        if idx > 0:
-            _time.sleep(12)
-
+    for symbol in AXIOM_UNIVERSE:
         # Ensure symbol row exists (FK constraint on market_bars_daily)
         try:
             db.safe_execute(
-                "INSERT INTO market_symbols (symbol) VALUES (%s) ON CONFLICT DO NOTHING",
-                (symbol,),
+                "INSERT INTO market_symbols (symbol, name, sector, universe) "
+                "VALUES (%s, %s, %s, %s) ON CONFLICT (symbol) DO NOTHING",
+                (symbol, symbol, "Unknown", "axiom"),
             )
-        except Exception as exc:
-            errors.append({"symbol": symbol, "phase": "market_symbols_upsert", "error": str(exc)})
-            continue
-
-        # Fetch bars — AlphaVantage first, Finnhub fallback
-        bars = None
-        fetch_error = None
-        try:
-            bars = fetch_daily_adjusted_bars(symbol, start_date, end_date)
-        except Exception as exc:
-            fetch_error = f"alphavantage: {exc}"
-            logger.warning("seed_market_data av_failed symbol=%s err=%s — trying finnhub", symbol, exc)
+        except Exception:
             try:
-                bars = _seed_fetch_finnhub_candles(symbol, start_date, end_date)
-                fetch_error = None
-            except Exception as exc2:
-                fetch_error = f"alphavantage: {exc} | finnhub: {exc2}"
+                db.safe_execute(
+                    "INSERT INTO market_symbols (symbol) VALUES (%s) ON CONFLICT DO NOTHING",
+                    (symbol,),
+                )
+            except Exception as exc:
+                errors.append({"symbol": symbol, "phase": "market_symbols", "error": str(exc)})
+                continue
+
+        # Fetch from yfinance — free, no rate limit, works from Railway
+        try:
+            bars = _fetch_daily_yfinance(symbol, start_date, end_date)
+        except Exception as exc:
+            errors.append({"symbol": symbol, "phase": "yfinance_fetch", "error": str(exc)})
+            continue
 
         if not bars:
-            errors.append({"symbol": symbol, "phase": "fetch", "error": fetch_error or "no bars returned"})
+            errors.append({"symbol": symbol, "phase": "yfinance_fetch", "error": "no bars returned"})
             continue
 
-        # Batch insert
+        # Batch insert all bars
         inserted = 0
         for bar in bars:
             try:
@@ -3237,19 +3187,18 @@ def seed_market_data() -> Dict[str, Any]:
                         bar.get("low"),
                         bar.get("close"),
                         bar.get("volume"),
-                        bar.get("source", "alphavantage"),
+                        bar.get("source", "yfinance"),
                     ),
                 )
                 inserted += 1
             except Exception as exc:
-                errors.append({"symbol": symbol, "phase": "insert", "date": str(bar.get("as_of_date")), "error": str(exc)})
+                errors.append({"symbol": symbol, "phase": "insert",
+                               "date": str(bar.get("as_of_date")), "error": str(exc)})
 
         if inserted > 0:
             symbols_seeded += 1
             total_bars += inserted
             logger.info("seed_market_data symbol=%s bars=%d", symbol, inserted)
-        elif fetch_error is None:
-            errors.append({"symbol": symbol, "phase": "insert", "error": "all inserts conflicted (already seeded)"})
 
     logger.info(
         "seed_market_data_complete symbols=%d total_bars=%d errors=%d",
@@ -3258,8 +3207,34 @@ def seed_market_data() -> Dict[str, Any]:
     return {
         "symbols_seeded": symbols_seeded,
         "total_bars": total_bars,
-        "errors": errors[:20],  # cap to keep response readable
+        "errors": errors[:20],
     }
+
+
+@app.get("/intelligence/congress/{symbol}")
+def congress_intelligence(symbol: str) -> Dict[str, Any]:
+    """Congressional trading intelligence for a symbol."""
+    from api.scrapers.congress_trading import compute_congress_score, fetch_recent_congress_trades
+    trades = fetch_recent_congress_trades(days_back=90)
+    return compute_congress_score(symbol.upper(), trades)
+
+
+@app.get("/intelligence/dark-pool/{symbol}")
+def dark_pool_intelligence(symbol: str) -> Dict[str, Any]:
+    """FINRA dark pool / institutional flow intelligence for a symbol."""
+    from api.scrapers.finra_dark_pool import fetch_finra_otc_data
+    return fetch_finra_otc_data(symbol.upper())
+
+
+@app.get("/intelligence/congress/universe/all")
+def congress_universe() -> Dict[str, Any]:
+    """Congressional trading scores for all 30 universe symbols."""
+    from api.scrapers.congress_trading import compute_congress_score, fetch_recent_congress_trades
+    from api.universe import AXIOM_UNIVERSE
+    trades = fetch_recent_congress_trades(days_back=90)
+    scores = [compute_congress_score(sym, trades) for sym in AXIOM_UNIVERSE]
+    scores.sort(key=lambda x: x["congress_score"], reverse=True)
+    return {"scores": scores, "total_trades": len(trades)}
 
 
 _register_providers_health(app)

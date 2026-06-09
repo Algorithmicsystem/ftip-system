@@ -79,14 +79,15 @@ def _int_scalar_or_none(value: Any) -> Optional[int]:
 
 def _daily_provider_attempts() -> List[Tuple[str, Any]]:
     attempts: List[Tuple[str, Any]] = []
+    # yfinance is first: free, no API key, works from any cloud server
+    if source_allowed("yfinance"):
+        attempts.append(("yfinance", _fetch_daily_yfinance))
     if source_allowed("massive_polygon"):
         attempts.append(("massive_polygon", _fetch_daily_massive))
     if source_allowed("alphavantage"):
         attempts.append(("alphavantage", fetch_daily_adjusted_bars))
     if config.stooq_enabled() and source_allowed("stooq"):
         attempts.append(("stooq", _fetch_daily_stooq))
-    if source_allowed("yfinance"):
-        attempts.append(("yfinance", _fetch_daily_yfinance))
     return attempts
 
 
@@ -336,13 +337,12 @@ def _fetch_daily_yfinance(
             source_type="market_data",
         )
     y_symbol = provider_symbol(symbol, "yfinance")
-    df = yf.download(
-        y_symbol,
+    # ticker.history() is more reliable than yf.download() across yfinance versions
+    ticker = yf.Ticker(y_symbol)
+    df = ticker.history(
         start=start.isoformat(),
         end=(end + dt.timedelta(days=1)).isoformat(),
-        interval="1d",
-        progress=False,
-        auto_adjust=False,
+        auto_adjust=True,
     )
     if df is None or df.empty:
         raise SymbolNoData(
