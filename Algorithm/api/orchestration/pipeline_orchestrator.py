@@ -114,6 +114,24 @@ def _real_stage(name: str) -> Dict[str, Any]:
                 from api.universe import AXIOM_UNIVERSE
                 universe = ",".join(AXIOM_UNIVERSE)
             symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            logger.info(
+                "bar_ingestion_start symbols=%d date=%s",
+                len(symbols), today.isoformat(),
+            )
+            # Log current bar count so we can see if new bars were added
+            try:
+                pre_row = db.safe_fetchone(
+                    "SELECT COUNT(*), MAX(date) FROM prosperity_daily_bars WHERE date = %s",
+                    (today,),
+                )
+                logger.info(
+                    "bar_ingestion_pre_run today_bars=%s latest_date=%s",
+                    pre_row[0] if pre_row else 0,
+                    pre_row[1] if pre_row else None,
+                )
+            except Exception:
+                pass
+
             resp = httpx.post(
                 "http://localhost:8000/prosperity/snapshot/run",
                 json={
@@ -130,13 +148,41 @@ def _real_stage(name: str) -> Dict[str, Any]:
             if resp.status_code == 200:
                 data = resp.json()
                 records = len(data.get("symbols_ok", []))
+                failed = data.get("symbols_failed") or []
+                logger.info(
+                    "bar_ingestion_snapshot_done symbols_ok=%d symbols_failed=%d",
+                    records, len(failed),
+                )
+                if failed:
+                    # Log first 5 failures with their provider context
+                    for f in failed[:5]:
+                        sym_name = f.get("symbol", "?") if isinstance(f, dict) else str(f)
+                        err = f.get("error", "") if isinstance(f, dict) else ""
+                        logger.warning("bar_ingestion_symbol_failed symbol=%s err=%.120s", sym_name, err)
+                # Log total bars written today
+                try:
+                    post_row = db.safe_fetchone(
+                        "SELECT COUNT(*) FROM prosperity_daily_bars WHERE date = %s",
+                        (today,),
+                    )
+                    logger.info(
+                        "bar_ingestion_complete today_bars_in_db=%s symbols_ok=%d",
+                        post_row[0] if post_row else 0, records,
+                    )
+                except Exception:
+                    pass
                 if records == 0:
                     logger.warning(
                         "bar_ingest_zero_records — no market data fetched, pipeline will produce no scores"
                     )
                 return {"records_processed": records}
+            else:
+                logger.error(
+                    "bar_ingestion_snapshot_http_error status=%d body=%.200s",
+                    resp.status_code, resp.text,
+                )
         except Exception as exc:
-            logger.debug("bar_ingestion_stage error=%s", exc)
+            logger.error("bar_ingestion_stage error=%s", exc)
         logger.warning(
             "bar_ingest_zero_records — no market data fetched, pipeline will produce no scores"
         )
