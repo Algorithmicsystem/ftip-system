@@ -108,6 +108,31 @@ def narrator_rate_window_seconds() -> int:
     return env_int("FTIP_NARRATOR_RATE_WINDOW_SECONDS", 600)
 
 
+def get_api_key() -> str:
+    """Primary API key — tries FTIP_API_KEY first, then FTIP_API_KEYS (Railway plural)."""
+    single = os.environ.get("FTIP_API_KEY", "")
+    if single:
+        return single.split(",")[0].strip()
+    plural = os.environ.get("FTIP_API_KEYS", "")
+    if plural:
+        return plural.split(",")[0].strip()
+    # Scan for any FTIP_API*KEY* env var as last resort
+    for k, v in os.environ.items():
+        if k.startswith("FTIP_API") and "KEY" in k and v:
+            return v.split(",")[0].strip()
+    return ""
+
+
+def get_api_keys() -> set:
+    """All valid API keys from both FTIP_API_KEY and FTIP_API_KEYS."""
+    keys: set = set()
+    for var in ("FTIP_API_KEY", "FTIP_API_KEYS"):
+        raw = os.environ.get(var, "")
+        if raw:
+            keys.update(k.strip() for k in raw.split(",") if k.strip())
+    return keys
+
+
 def massive_api_key() -> Optional[str]:
     return env("MASSIVE_API_KEY") or env("POLYGON_API_KEY")
 

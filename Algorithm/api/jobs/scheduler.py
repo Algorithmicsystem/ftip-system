@@ -1,12 +1,14 @@
 """Phase 10.5: Production-Grade Scheduler.
 
 Uses APScheduler BackgroundScheduler with 8 weekday jobs.
-Activated only when FTIP_SCHEDULER_ENABLED=1.
+Starts automatically in production; can be suppressed with FTIP_SCHEDULER_ENABLED=0.
 """
 from __future__ import annotations
 
 import datetime as dt
 import logging
+import sys
+import threading
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter
@@ -51,7 +53,7 @@ def _job_intraday_update(hour_label: str) -> None:
         httpx.post(
             f"{base}/axiom/intraday/run",
             json={"symbols": [], "avg_daily_volume": 1_000_000},
-            headers={"X-FTIP-API-Key": config.env("FTIP_API_KEY") or ""},
+            headers={"X-FTIP-API-Key": config.get_api_key()},
             timeout=60,
         )
         logger.info("scheduler.intraday_update hour=%s", hour_label)
@@ -252,11 +254,30 @@ class SchedulerManager:
 scheduler_manager = SchedulerManager()
 
 
+def _scheduler_heartbeat_loop() -> None:
+    """Log scheduler liveness every 60 seconds so Railway logs confirm it's alive."""
+    import time
+    while True:
+        time.sleep(60)
+        try:
+            status = scheduler_manager.get_status()
+            running = status.get("running", False)
+            n_jobs = len(status.get("next_run_times", {}))
+            logger.info("scheduler.alive running=%s jobs=%d", running, n_jobs)
+        except Exception:
+            pass
+
+
 def start_scheduler() -> None:
-    """Called from main.py lifespan if FTIP_SCHEDULER_ENABLED=1."""
+    """Start the scheduler. Suppressed in pytest; can be disabled via FTIP_SCHEDULER_ENABLED=0."""
+    if "pytest" in sys.modules:
+        return
     from api import config
-    if config.env_bool("FTIP_SCHEDULER_ENABLED", False):
-        scheduler_manager.start()
+    if config.env("FTIP_SCHEDULER_ENABLED") == "0":
+        logger.info("scheduler.disabled FTIP_SCHEDULER_ENABLED=0")
+        return
+    scheduler_manager.start()
+    threading.Thread(target=_scheduler_heartbeat_loop, daemon=True).start()
 
 
 def get_status() -> Dict[str, Any]:

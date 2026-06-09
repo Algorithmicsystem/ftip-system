@@ -19,7 +19,6 @@ from api.assistant.phase3.common import clamp
 router = APIRouter(
     prefix="/jobs/briefing",
     tags=["briefing"],
-    dependencies=[Depends(security.require_prosperity_api_key)],
 )
 logger = logging.getLogger(__name__)
 
@@ -535,7 +534,7 @@ def get_morning_briefing(
     return result
 
 
-@router.post("/morning")
+@router.post("/morning", dependencies=[Depends(security.require_prosperity_api_key)])
 def trigger_morning_briefing(
     as_of_date: Optional[str] = Query(default=None),
 ) -> Dict[str, Any]:

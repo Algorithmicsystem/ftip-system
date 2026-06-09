@@ -44,11 +44,9 @@ async function loadMorningBriefing() {
     }
   } catch (err) {
     const status = err.statusCode || 0;
-    const msg = status === 401
-      ? 'Configure your API key in the topbar to view the morning briefing.'
-      : status === 503 || status === 500
-        ? 'Briefing temporarily unavailable — pipeline may be running.'
-        : 'Could not load morning briefing. Refresh to retry.';
+    const msg = status === 503 || status === 500
+      ? 'Briefing temporarily unavailable — pipeline may be running.'
+      : 'Could not load morning briefing. Refresh to retry.';
     body.innerHTML = `<div class="alert-banner warning">${msg}</div>`;
   }
 }

@@ -100,18 +100,40 @@ def startup() -> List[str]:
     if not db.db_enabled():
         logger.info("[startup] database disabled; skipping migrations")
         return []
-    if not config.migrations_auto():
-        logger.info("[startup] migrations auto disabled; skipping")
-        return []
+    applied: List[str] = []
     try:
         applied = migrations.ensure_schema()
         db.ensure_schema()
         if applied:
-            logger.info("[startup] applied migrations", extra={"versions": applied})
-        # Kick off stale-data check in background
-        import threading
-        threading.Thread(target=_check_and_trigger_stale_pipeline, daemon=True).start()
-        return applied
+            logger.info("[startup] applied %d migrations", len(applied))
+        else:
+            logger.info("[startup] schema up to date")
     except Exception as exc:
-        logger.exception("[startup] ensure_schema failed", extra={"error": str(exc)})
-        raise
+        logger.error("[startup] migration error: %s", exc)
+        # Don't crash — continue so the stale-data check still fires
+    import threading
+    threading.Thread(target=_check_and_trigger_stale_pipeline, daemon=True).start()
+    threading.Thread(target=_trigger_morning_briefing_if_missing, daemon=True).start()
+    return applied
+
+
+def _trigger_morning_briefing_if_missing() -> None:
+    """Generate today's morning briefing if it hasn't been generated yet."""
+    import datetime as dt
+    import time
+    if "pytest" in sys.modules:
+        return
+    time.sleep(10)
+    try:
+        if not db.db_enabled():
+            return
+        today = dt.date.today()
+        row = db.safe_fetchone(
+            "SELECT 1 FROM morning_briefings WHERE briefing_date = %s LIMIT 1", (today,)
+        )
+        if not row:
+            logger.info("startup.morning_briefing_missing triggering generation")
+            from api.jobs.morning_briefing import generate_morning_briefing
+            generate_morning_briefing(today)
+    except Exception as exc:
+        logger.debug("startup_briefing_check_failed err=%s", exc)

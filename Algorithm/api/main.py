@@ -2597,8 +2597,9 @@ def system_status() -> Dict[str, Any]:
 @app.get("/config/client")
 def client_config() -> Dict[str, Any]:
     """Public endpoint — returns client config for browser auto-configuration."""
+    from api import config as _cfg
     return {
-        "api_key": os.environ.get("FTIP_API_KEY") or "",
+        "api_key": _cfg.get_api_key(),
         "env": _railway_env(),
         "version": "1.0.0",
         "build": "AXIOM Intelligence Terminal",

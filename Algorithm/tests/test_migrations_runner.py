@@ -283,8 +283,9 @@ def test_startup_skips_migrations_when_auto_disabled(monkeypatch):
 
     main._startup()
 
-    assert called["migrations"] is False
-    assert called["schema"] is False
+    # Migrations always run when DB is enabled — FTIP_MIGRATIONS_AUTO no longer skips them
+    assert called["migrations"] is True
+    assert called["schema"] is True
 
 
 def test_startup_skips_migrations_when_db_disabled(monkeypatch):

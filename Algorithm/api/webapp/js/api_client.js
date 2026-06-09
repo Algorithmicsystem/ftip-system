@@ -14,9 +14,16 @@
         localStorage.setItem('ftip_api_key', cfg.api_key);
         const el = document.getElementById('api-key-input');
         if (el) {
-          el.value = '•'.repeat(Math.min(cfg.api_key.length, 20));
-          el.placeholder = 'Configured ✓';
-          el.style.color = 'var(--signal-buy)';
+          el.value = '•'.repeat(16);
+          el.placeholder = '✓ Configured';
+          el.style.color = '#22c55e';
+          el.style.borderColor = '#22c55e';
+          el.title = 'API key configured automatically';
+        }
+        const statusEl = document.getElementById('api-key-status');
+        if (statusEl) {
+          statusEl.textContent = '✓';
+          statusEl.style.color = '#22c55e';
         }
       }
       return; // success

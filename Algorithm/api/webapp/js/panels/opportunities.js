@@ -10,10 +10,17 @@ async function loadOpportunities() {
 
   try {
     const rows = await API.get('/intelligence/universe/scores').catch(() => null);
+    console.log('[AXIOM] universe scores:', rows?.length, 'symbols');
     if (rows && rows.length > 0) {
-      // Show top 9 by DAU (those with data first)
       const withData = rows.filter(r => r.dau !== null);
       const noData   = rows.filter(r => r.dau === null);
+      console.log('[AXIOM] symbols with DAU data:', withData.length);
+      if (withData.length === 0) {
+        body.innerHTML = `<div class="alert-banner warning" style="font-size:12px;">
+          Pipeline running — scores will appear in ~15 minutes.
+        </div>`;
+        return;
+      }
       const display  = [...withData.slice(0, 9), ...noData].slice(0, 9);
       renderOpportunitiesList(display);
     } else {
