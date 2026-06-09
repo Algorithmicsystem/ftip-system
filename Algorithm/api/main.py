@@ -2428,9 +2428,6 @@ _STATUS_CACHE: Optional[Dict[str, Any]] = None
 _STATUS_CACHE_AT: float = 0.0
 _STATUS_CACHE_TTL: float = 10.0
 
-_UNIVERSE_CACHE: Optional[List[Dict[str, Any]]] = None
-_UNIVERSE_CACHE_AT: float = 0.0
-_UNIVERSE_CACHE_TTL: float = 300.0  # 5 min
 
 
 @app.get("/system/status")
@@ -2438,7 +2435,11 @@ def system_status() -> Dict[str, Any]:
     """Production system status — operator view of what's running and healthy."""
     global _STATUS_CACHE, _STATUS_CACHE_AT
     if _STATUS_CACHE is not None and (time.time() - _STATUS_CACHE_AT) < _STATUS_CACHE_TTL:
-        return _STATUS_CACHE
+        # Skip stale cache if it shows no scores but DB is reachable (startup race condition)
+        if _STATUS_CACHE.get("axiom_scores_count", 0) == 0 and db.db_enabled():
+            _STATUS_CACHE = None
+        else:
+            return _STATUS_CACHE
 
     warnings: List[str] = []
 
@@ -2468,7 +2469,7 @@ def system_status() -> Dict[str, Any]:
     briefings_count = 0
     if db_connected:
         try:
-            r = db.safe_fetchone("SELECT COUNT(*) FROM axiom_scores_daily")
+            r = db.safe_fetchone("SELECT COUNT(DISTINCT symbol) FROM axiom_scores_daily")
             axiom_count = int(r[0] or 0) if r else 0
         except Exception:
             pass
@@ -2655,14 +2656,6 @@ def llm_chat(req: LLMChatRequest) -> Dict[str, Any]:
 @app.get("/intelligence/universe/scores")
 def universe_scores() -> List[Dict[str, Any]]:
     """Public endpoint — returns latest AXIOM scores for all 30 universe symbols."""
-    global _UNIVERSE_CACHE, _UNIVERSE_CACHE_AT
-    if _UNIVERSE_CACHE is not None and (time.time() - _UNIVERSE_CACHE_AT) < _UNIVERSE_CACHE_TTL:
-        # If cache contains only null/default DAU values, it's stale startup data — re-query
-        has_real = any(r.get("dau") and r["dau"] != 50.0 for r in _UNIVERSE_CACHE)
-        if has_real:
-            return _UNIVERSE_CACHE
-        _UNIVERSE_CACHE = None
-
     from api.universe import AXIOM_UNIVERSE
 
     def _sig(dau):
@@ -2721,8 +2714,6 @@ def universe_scores() -> List[Dict[str, Any]]:
 
     # Sort by signal strength: most extreme DAU (furthest from neutral 50) first
     results.sort(key=lambda x: (x["dau"] is None, -abs((x["dau"] or 50) - 50)))
-    _UNIVERSE_CACHE = results
-    _UNIVERSE_CACHE_AT = time.time()
     return results
 
 

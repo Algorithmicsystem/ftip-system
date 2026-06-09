@@ -12,9 +12,9 @@ async function loadOpportunities() {
     const rows = await API.get('/intelligence/universe/scores').catch(() => null);
     console.log('[AXIOM] universe scores:', rows?.length, 'symbols');
     if (rows && rows.length > 0) {
-      const withData = rows.filter(r => Number(r.dau) > 0);
+      const withData = rows.filter(r => r.dau !== null && r.dau !== undefined && !isNaN(Number(r.dau)));
       console.log('[AXIOM] symbols with DAU data:', withData.length);
-      const noData   = rows.filter(r => !(Number(r.dau) > 0));
+      const noData   = rows.filter(r => r.dau === null || r.dau === undefined || isNaN(Number(r.dau)));
       if (withData.length === 0) {
         body.innerHTML = `<div class="alert-banner warning" style="font-size:12px;">
           Pipeline running — scores will appear in ~15 minutes.

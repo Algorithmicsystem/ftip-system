@@ -37,15 +37,17 @@ class TestUniverseScoresDataFlow:
         src = inspect.getsource(m.universe_scores)
         assert "abs" in src.lower() or "ABS" in src
 
-    def test_universe_scores_cache_exists(self):
+    def test_universe_scores_no_stale_cache(self):
+        # Cache was removed to prevent stale-null data serving on Railway startup
         import api.main as m
-        assert hasattr(m, "_UNIVERSE_CACHE")
-        assert hasattr(m, "_UNIVERSE_CACHE_AT")
-        assert hasattr(m, "_UNIVERSE_CACHE_TTL")
+        assert not hasattr(m, "_UNIVERSE_CACHE_TTL"), "Universe cache removed to prevent stale data"
 
-    def test_universe_scores_cache_ttl_5min(self):
-        import api.main as m
-        assert m._UNIVERSE_CACHE_TTL >= 300
+    def test_universe_scores_consistent_results(self):
+        # Without cache, two calls should still return same data
+        with TestClient(app) as client:
+            r1 = client.get("/intelligence/universe/scores")
+            r2 = client.get("/intelligence/universe/scores")
+        assert r1.json() == r2.json()
 
     def test_universe_scores_cached_on_second_call(self):
         with TestClient(app) as client:
@@ -142,9 +144,10 @@ class TestOpportunitiesAutoRetry:
         assert "setTimeout" in src
         assert "loadOpportunities" in src
 
-    def test_opportunities_js_filter_uses_number(self):
+    def test_opportunities_js_filter_is_null_safe(self):
         src = (JS_DIR / "panels" / "opportunities.js").read_text()
-        assert "Number(r.dau) > 0" in src
+        # Filter must handle null, undefined, and NaN — not just > 0 (negative DAU is valid)
+        assert "isNaN" in src or "!== null" in src
 
     def test_opportunities_js_sort_by_signal_strength(self):
         src = (JS_DIR / "panels" / "opportunities.js").read_text()

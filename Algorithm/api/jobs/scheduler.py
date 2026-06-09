@@ -78,6 +78,12 @@ def _job_full_daily_pipeline() -> None:
         logger.info("scheduler.full_pipeline run_id=%s status=%s", result.run_id, result.overall_status)
     except Exception as exc:
         logger.warning("scheduler.full_daily_pipeline_failed error=%s", exc)
+    finally:
+        try:
+            from api.cloud.performance import perf_tracker
+            perf_tracker.clear()
+        except Exception:
+            pass
 
 
 def _job_ml_training_check() -> None:

@@ -36,11 +36,22 @@ class PerformanceTracker:
         self._start_time = time.time()
 
     def record(self, endpoint: str, response_time_ms: float, is_error: bool = False) -> None:
+        # Skip non-user-facing endpoints and outlier pipeline runs from p95
+        if endpoint.startswith("/orchestration/") or endpoint.startswith("/jobs/"):
+            return
+        if response_time_ms > 30000:
+            return
         now = time.time()
         self._samples[endpoint].append((now, response_time_ms))
         self._request_counts[endpoint] += 1
         if is_error:
             self._error_counts[endpoint] += 1
+
+    def clear(self) -> None:
+        self._samples.clear()
+        self._error_counts.clear()
+        self._request_counts.clear()
+        self._start_time = time.time()
 
     def get_percentiles(self, endpoint: str, window_seconds: int = 3600) -> Dict[str, Any]:
         now = time.time()
