@@ -3117,29 +3117,80 @@ def ensemble_status() -> Dict[str, Any]:
     return get_ensemble_status()
 
 
+def _seed_fetch_finnhub_candles(
+    symbol: str, start_date: "dt.date", end_date: "dt.date"
+) -> List[Dict[str, Any]]:
+    """Fetch daily OHLCV candles from Finnhub stock/candle endpoint."""
+    import time as _time
+    import datetime as _dt
+    import httpx as _httpx
+    from api import config as _cfg
+
+    api_key = _cfg.finnhub_api_key()
+    if not api_key:
+        raise ValueError("FINNHUB_API_KEY not set")
+    from_ts = int(_dt.datetime.combine(start_date, _dt.time.min).timestamp())
+    to_ts = int(_dt.datetime.combine(end_date, _dt.time.max).timestamp())
+    resp = _httpx.get(
+        "https://finnhub.io/api/v1/stock/candle",
+        params={"symbol": symbol, "resolution": "D", "from": from_ts, "to": to_ts, "token": api_key},
+        timeout=20,
+    )
+    if resp.status_code != 200:
+        raise ValueError(f"Finnhub HTTP {resp.status_code}")
+    payload = resp.json()
+    if payload.get("s") != "ok":
+        raise ValueError(f"Finnhub status={payload.get('s')}")
+    closes = payload.get("c") or []
+    timestamps = payload.get("t") or []
+    if not closes or not timestamps:
+        raise ValueError("Finnhub returned no candles")
+    rows = []
+    for i, ts in enumerate(timestamps):
+        as_of = _dt.datetime.utcfromtimestamp(ts).date()
+        rows.append({
+            "symbol": symbol,
+            "as_of_date": as_of,
+            "open": float(payload["o"][i]) if payload.get("o") else None,
+            "high": float(payload["h"][i]) if payload.get("h") else None,
+            "low": float(payload["l"][i]) if payload.get("l") else None,
+            "close": float(closes[i]),
+            "volume": int(payload["v"][i]) if payload.get("v") else None,
+            "source": "finnhub",
+        })
+    return rows
+
+
 @app.get("/admin/seed-market-data")
 def seed_market_data() -> Dict[str, Any]:
-    """Seed market_bars_daily with 90 days of Stooq OHLCV data for all universe symbols.
+    """Seed market_bars_daily with 30 days of OHLCV data for all universe symbols.
 
-    Idempotent — uses ON CONFLICT DO NOTHING. Safe to call multiple times.
-    No auth required; intended for Railway cold-start recovery.
+    Provider order: AlphaVantage (primary) → Finnhub (fallback).
+    Sleeps 12 seconds between symbols to respect AlphaVantage 5 calls/minute limit.
+    Idempotent — uses ON CONFLICT DO NOTHING. Intended for Railway cold-start recovery.
+    Expected runtime: ~6–8 minutes for 30 symbols.
     """
     import datetime as _dt
+    import time as _time
     from api.universe import AXIOM_UNIVERSE
-    from api.data_providers.bars import _fetch_daily_stooq
+    from api.data_providers.alphavantage import fetch_daily_adjusted_bars
 
     if not db.db_write_enabled():
         return {"error": "db_write_disabled", "symbols_seeded": 0, "total_bars": 0}
 
     end_date = _dt.date.today()
-    start_date = end_date - _dt.timedelta(days=90)
+    start_date = end_date - _dt.timedelta(days=30)
 
     symbols_seeded = 0
     total_bars = 0
     errors: list = []
 
-    for symbol in AXIOM_UNIVERSE:
-        # Ensure symbol row exists (FK constraint)
+    for idx, symbol in enumerate(AXIOM_UNIVERSE):
+        # Rate-limit: 12 s between symbols (5 calls/min AV free tier)
+        if idx > 0:
+            _time.sleep(12)
+
+        # Ensure symbol row exists (FK constraint on market_bars_daily)
         try:
             db.safe_execute(
                 "INSERT INTO market_symbols (symbol) VALUES (%s) ON CONFLICT DO NOTHING",
@@ -3149,15 +3200,22 @@ def seed_market_data() -> Dict[str, Any]:
             errors.append({"symbol": symbol, "phase": "market_symbols_upsert", "error": str(exc)})
             continue
 
-        # Fetch bars from Stooq
+        # Fetch bars — AlphaVantage first, Finnhub fallback
+        bars = None
+        fetch_error = None
         try:
-            bars = _fetch_daily_stooq(symbol, start_date, end_date)
+            bars = fetch_daily_adjusted_bars(symbol, start_date, end_date)
         except Exception as exc:
-            errors.append({"symbol": symbol, "phase": "stooq_fetch", "error": str(exc)})
-            continue
+            fetch_error = f"alphavantage: {exc}"
+            logger.warning("seed_market_data av_failed symbol=%s err=%s — trying finnhub", symbol, exc)
+            try:
+                bars = _seed_fetch_finnhub_candles(symbol, start_date, end_date)
+                fetch_error = None
+            except Exception as exc2:
+                fetch_error = f"alphavantage: {exc} | finnhub: {exc2}"
 
         if not bars:
-            errors.append({"symbol": symbol, "phase": "stooq_fetch", "error": "no bars returned"})
+            errors.append({"symbol": symbol, "phase": "fetch", "error": fetch_error or "no bars returned"})
             continue
 
         # Batch insert
@@ -3179,7 +3237,7 @@ def seed_market_data() -> Dict[str, Any]:
                         bar.get("low"),
                         bar.get("close"),
                         bar.get("volume"),
-                        bar.get("source", "stooq"),
+                        bar.get("source", "alphavantage"),
                     ),
                 )
                 inserted += 1
@@ -3190,6 +3248,8 @@ def seed_market_data() -> Dict[str, Any]:
             symbols_seeded += 1
             total_bars += inserted
             logger.info("seed_market_data symbol=%s bars=%d", symbol, inserted)
+        elif fetch_error is None:
+            errors.append({"symbol": symbol, "phase": "insert", "error": "all inserts conflicted (already seeded)"})
 
     logger.info(
         "seed_market_data_complete symbols=%d total_bars=%d errors=%d",
