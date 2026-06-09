@@ -97,7 +97,7 @@ def _make_db_graceful_stage(name: str) -> Callable[[], Dict[str, Any]]:
         try:
             return _real_stage(name)
         except Exception as exc:
-            logger.debug("pipeline_stage_inner_error stage=%s err=%s", name, exc)
+            logger.error("pipeline_stage_inner_error stage=%s err=%s", name, exc)
             return {"records_processed": 0}
     return executor
 

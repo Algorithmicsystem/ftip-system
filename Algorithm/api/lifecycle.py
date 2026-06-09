@@ -111,6 +111,41 @@ def startup() -> List[str]:
     except Exception as exc:
         logger.error("[startup] migration error: %s", exc)
         # Don't crash — continue so the stale-data check still fires
+
+    # Safety net: ensure axiom_scores_daily has all columns the INSERT needs.
+    # Railway may have an older table definition missing columns added after initial deploy.
+    _axiom_cols = [
+        ("deployable_alpha_utility", "numeric"),
+        ("regime_label", "text"),
+        ("payload", "jsonb"),
+        ("outcome_payload", "jsonb"),
+        ("build_meta", "jsonb"),
+        ("signal_version", "text"),
+        ("feature_version", "text"),
+        ("snapshot_version", "text"),
+        ("snapshot_id", "text"),
+        ("evidence_backed_deployability_tier", "text"),
+        ("trade_family", "text"),
+        ("deployability_tier", "text"),
+        ("size_band", "text"),
+        ("gross_opportunity", "numeric"),
+        ("friction_burden", "numeric"),
+        ("validated_edge", "numeric"),
+        ("overall_coverage", "numeric"),
+        ("overall_confidence", "numeric"),
+        ("ml_adjusted_dau", "numeric"),
+        ("moat_score", "numeric"),
+        ("intelligence_quality_score", "numeric"),
+    ]
+    for _col, _typ in _axiom_cols:
+        try:
+            db.safe_execute(
+                f"ALTER TABLE axiom_scores_daily ADD COLUMN IF NOT EXISTS {_col} {_typ}"
+            )
+        except Exception as _e:
+            logger.warning("[startup] schema_fix_failed col=%s err=%s", _col, _e)
+    logger.info("[startup] axiom_scores_daily columns verified")
+
     import threading
     threading.Thread(target=_check_and_trigger_stale_pipeline, daemon=True).start()
     threading.Thread(target=_trigger_morning_briefing_if_missing, daemon=True).start()
