@@ -172,7 +172,7 @@ async function triggerPipeline() {
     if (statusEl) {
       const msg = err?.statusCode === 401 ? 'Unauthorized — pipeline requires authentication.'
                 : err?.statusCode === 403 ? 'Access denied — enterprise tier required.'
-                : `Error: ${err.message || 'unknown error'}`;
+                : 'Pipeline trigger failed — please retry or check system logs.';
       statusEl.textContent = msg;
       statusEl.style.color = 'var(--signal-sell)';
     }

@@ -1735,7 +1735,7 @@ def _startup() -> List[str]:
     return lifecycle.startup()
 
 
-app = FastAPI(title=APP_NAME, version="1.0.0", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="1.0.1", lifespan=lifespan)
 security.add_cors_middleware(app)
 security.log_auth_config(logger)
 app.add_middleware(UsageLoggingMiddleware)
@@ -2008,7 +2008,7 @@ def health() -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "status": "ok",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "db": db_status,
         "scheduler": "running" if scheduler_running else "stopped",
     }
@@ -2556,7 +2556,7 @@ def system_status() -> Dict[str, Any]:
 
     return {
         "server": "healthy",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "db_connected": db_connected,
         "migrations_applied": migrations_applied,
         "latest_migration": latest_migration,
@@ -2601,9 +2601,36 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": _cfg.get_api_key(),
         "env": _railway_env(),
-        "version": "1.0.0",
+        "version": "1.0.1",
         "build": "AXIOM Intelligence Terminal",
     }
+
+
+class LLMChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1000)
+
+
+@app.post("/llm/chat")
+def llm_chat(req: LLMChatRequest) -> Dict[str, Any]:
+    """Server-side LLM proxy — keeps OpenAI API key off the client."""
+    from api.llm.openai_client import call_openai, is_available
+    if not is_available():
+        return {"reply": "AI assistant unavailable — OPENAI_API_KEY not configured."}
+    try:
+        reply = call_openai(
+            system_prompt=(
+                "You are AXIOM, an institutional investment intelligence assistant. "
+                "Help users understand signals, market regimes, risk scores, and portfolio strategy. "
+                "Be precise and concise. Use numbers when available. 3 sentences maximum."
+            ),
+            user_prompt=req.message,
+            max_tokens=300,
+            temperature=0.4,
+        )
+        return {"reply": reply or "No response generated."}
+    except Exception as exc:
+        logger.error("llm_chat_failed err=%s", exc)
+        return {"reply": "Request failed — please try again."}
 
 
 @app.get("/intelligence/universe/scores")

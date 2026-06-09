@@ -242,6 +242,7 @@ _RATE_LIMIT_EXEMPT_PREFIXES = (
     "/intelligence/universe/", # universe scores — public read
     "/orchestration/health",   # health check
     "/orchestration/pipeline/status",  # status check
+    "/llm/",                   # chatbot proxy — API key kept server-side
 )
 
 

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, Query
 
-from api import db, security
+from api import config, db, security
 from api.assistant.phase3.common import clamp
 
 router = APIRouter(

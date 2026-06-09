@@ -440,7 +440,7 @@ class TestVersionBump:
 
     def test_html_version_29(self):
         html = (WEBAPP_DIR / "index.html").read_text()
-        assert "v=29" in html or "v=30" in html or "v=31" in html or "v=32" in html or "v=33" in html or "v=34" in html or "v=100" in html
+        assert "v=29" in html or "v=30" in html or "v=31" in html or "v=32" in html or "v=33" in html or "v=34" in html or "v=100" in html or "v=101" in html
 
 
 # ===========================================================================

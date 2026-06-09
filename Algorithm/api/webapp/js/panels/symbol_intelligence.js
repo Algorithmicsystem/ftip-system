@@ -81,18 +81,17 @@ function renderIntelligenceTab(data, symbol) {
             <span class="evidence-item__text">${text}</span>
           </div>`;
       }).join('')
-    : `<div class="text-muted text-sm">No evidence items available.</div>`;
+    : `<div class="text-muted text-sm">Evidence builds with each pipeline run.</div>`;
 
   el.innerHTML = `
     ${defaultBanner}
     <div id="scores-section" style="margin-bottom:14px;">${scores}</div>
     <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:8px;">Evidence</div>
     <div>${evidenceHTML}</div>
-    ${data.primary_driver ? `
-      <div style="margin-top:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:12px;">
-        <span class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;">Primary Driver · </span>
-        <span style="color:var(--text-primary);">${data.primary_driver}</span>
-      </div>` : ''}`;
+    <div style="margin-top:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:12px;">
+      <span class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;">Primary Driver · </span>
+      <span style="color:var(--text-primary);">${(data.primary_driver && data.primary_driver.toLowerCase() !== 'unknown') ? data.primary_driver : 'Factor Composite'}</span>
+    </div>`;
 }
 
 function renderRiskTab(data, symbol) {
