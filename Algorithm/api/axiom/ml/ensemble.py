@@ -125,6 +125,14 @@ def compute_ensemble_dau(
     )
 
 
+class AxiomEnsemble:
+    """Ensemble configuration singleton — holds training threshold and blend config."""
+    min_training_samples: int = 25
+
+    def get_status(self, as_of_date: Optional[dt.date] = None) -> Dict[str, Any]:
+        return get_ensemble_status(as_of_date)
+
+
 def invalidate_ensemble_cache() -> None:
     """No-op stub: called after ML training to signal cache should refresh."""
     pass

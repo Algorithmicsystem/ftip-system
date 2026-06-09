@@ -1735,7 +1735,7 @@ def _startup() -> List[str]:
     return lifecycle.startup()
 
 
-app = FastAPI(title=APP_NAME, version="1.0.1", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="1.0.2", lifespan=lifespan)
 security.add_cors_middleware(app)
 security.log_auth_config(logger)
 app.add_middleware(UsageLoggingMiddleware)
@@ -2007,7 +2007,7 @@ def health() -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "status": "ok",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "db": db_status,
         "scheduler": "running" if scheduler_running else "stopped",
     }
@@ -2563,7 +2563,7 @@ def system_status() -> Dict[str, Any]:
 
     _status_result: Dict[str, Any] = {
         "server": "healthy",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "db_connected": db_connected,
         "migrations_applied": migrations_applied,
         "latest_migration": latest_migration,
@@ -2611,31 +2611,36 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": _cfg.get_api_key(),
         "env": _railway_env(),
-        "version": "1.0.1",
+        "version": "1.0.2",
         "build": "AXIOM Intelligence Terminal",
     }
 
 
 class LLMChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
+    context: Optional[Dict[str, Any]] = None
 
 
 @app.post("/llm/chat")
 def llm_chat(req: LLMChatRequest) -> Dict[str, Any]:
     """Server-side LLM proxy — keeps OpenAI API key off the client."""
+    import json as _json
     from api.llm.openai_client import call_openai, is_available
     if not is_available():
         return {"reply": "AI assistant unavailable — OPENAI_API_KEY not configured."}
     try:
+        context_str = ""
+        if req.context:
+            context_str = f"\n\nLive AXIOM data:\n{_json.dumps(req.context, indent=2)}"
         reply = call_openai(
             system_prompt=(
                 "You are AXIOM, an institutional investment intelligence assistant. "
-                "Help users understand signals, market regimes, risk scores, and portfolio strategy. "
-                "Be precise and concise. Use numbers when available. 3 sentences maximum."
+                "Use the live data provided to give precise, quantitative answers. "
+                "Always reference specific numbers when available. 2-3 sentences maximum."
             ),
-            user_prompt=req.message,
+            user_prompt=req.message + context_str,
             max_tokens=300,
-            temperature=0.4,
+            temperature=0.3,
         )
         return {"reply": reply or "No response generated."}
     except Exception as exc:
@@ -2669,7 +2674,7 @@ def universe_scores() -> List[Dict[str, Any]]:
                    regime_label,
                    as_of_date,
                    payload->>'ic_state' AS ic_state,
-                   (payload->'engine_scores'->'fundamental_reality'->'components'->>'eis_component')::numeric AS eis_score,
+                   (payload->'engine_scores'->'fundamental_reality'->'components'->>'earnings_quality_component')::numeric AS eis_score,
                    (payload->'engine_scores'->'fundamental_reality'->'components'->>'caps_component')::numeric AS caps_score
               FROM axiom_scores_daily
              WHERE symbol = ANY(%s)

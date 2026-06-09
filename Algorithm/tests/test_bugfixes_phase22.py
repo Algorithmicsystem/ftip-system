@@ -200,7 +200,7 @@ class TestSystemStatusEndpoint:
     def test_system_status_version(self):
         with TestClient(app) as client:
             data = client.get("/system/status").json()
-        assert data["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1")
+        assert data["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
 
     def test_system_status_db_connected_is_bool(self):
         with TestClient(app) as client:

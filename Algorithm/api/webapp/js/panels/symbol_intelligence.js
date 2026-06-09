@@ -60,14 +60,23 @@ function renderIntelligenceTab(data, symbol) {
   }
 
   const isDefault = data.ic_state === 'INSUFFICIENT' || (data.intelligence_quality_score === 0) || (data.dau === 50 && data.eis_score === 50 && data.caps_score === 50);
-  const defaultBanner = isDefault ? `<div class="alert-banner info" style="margin-bottom:10px;">Pipeline data not yet available — scores reflect system defaults.</div>` : '';
+  const defaultBanner = isDefault
+    ? `<div class="alert-banner info" style="margin-bottom:10px;">Pipeline data not yet available — scores reflect system defaults.</div>`
+    : `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+        <span style="font-size:10px;background:rgba(16,185,129,0.15);color:var(--signal-buy);border:1px solid rgba(16,185,129,0.3);border-radius:4px;padding:2px 8px;font-weight:600;letter-spacing:.04em;">✦ LIVE</span>
+        ${data.last_computed ? `<span style="font-size:10px;color:var(--text-muted);">Last computed: ${new Date(data.last_computed).toLocaleString()}</span>` : ''}
+      </div>`;
 
+  function _scoreColor(v) {
+    if (v == null) return '#6b7280';
+    return v >= 65 ? '#10b981' : v >= 45 ? '#f59e0b' : '#ef4444';
+  }
   const scores = `
-    ${scoreBarHTML('EIS Score', data.eis_score, '#10b981')}
-    ${scoreBarHTML('CAPS Score', data.caps_score, '#3b82f6')}
-    ${scoreBarHTML('Factor Composite', data.factor_composite_score, '#8b5cf6')}
-    ${data.osms_score != null ? scoreBarHTML('OSMS (Alt Data)', data.osms_score, '#f59e0b') : ''}
-    ${data.ias_score != null ? scoreBarHTML('IAS (Insider)', data.ias_score, '#f59e0b') : ''}`;
+    ${scoreBarHTML('EIS Score', data.eis_score, _scoreColor(data.eis_score))}
+    ${scoreBarHTML('CAPS Score', data.caps_score, _scoreColor(data.caps_score))}
+    ${scoreBarHTML('Factor Composite', data.factor_composite_score, _scoreColor(data.factor_composite_score))}
+    ${data.osms_score != null ? scoreBarHTML('OSMS (Alt Data)', data.osms_score, _scoreColor(data.osms_score)) : ''}
+    ${data.ias_score != null ? scoreBarHTML('IAS (Insider)', data.ias_score, _scoreColor(data.ias_score)) : ''}`;
 
   const evidenceItems = data.top_supporting_evidence || data.key_reasons || [];
   const evidenceHTML = evidenceItems.length > 0
@@ -91,7 +100,30 @@ function renderIntelligenceTab(data, symbol) {
     <div style="margin-top:12px;padding:8px 12px;background:var(--bg-tertiary);border-radius:6px;font-size:12px;">
       <span class="text-muted" style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;">Primary Driver · </span>
       <span style="color:var(--text-primary);">${(data.primary_driver && data.primary_driver.toLowerCase() !== 'unknown') ? data.primary_driver : 'Factor Composite'}</span>
-    </div>`;
+    </div>
+    ${(() => {
+      const ba = data.signal_batting_average;
+      const war = data.signal_war;
+      const ic = data.ic_composite ?? data.ic_value;
+      return `
+      <div style="margin-top:12px;padding:8px;background:var(--bg-tertiary);border-radius:6px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--text-muted);margin-bottom:6px;">Signal Quality</div>
+        <div style="display:flex;gap:16px;">
+          <div style="text-align:center;">
+            <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">${ba != null ? (ba * 100).toFixed(0) + '%' : '—'}</div>
+            <div style="font-size:10px;color:var(--text-muted);">Batting Avg</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">${war != null ? war.toFixed(2) : '—'}</div>
+            <div style="font-size:10px;color:var(--text-muted);">Signal WAR</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:16px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary);">${ic != null ? ic.toFixed(3) : '—'}</div>
+            <div style="font-size:10px;color:var(--text-muted);">IC</div>
+          </div>
+        </div>
+      </div>`;
+    })()}`;
 }
 
 function renderRiskTab(data, symbol) {

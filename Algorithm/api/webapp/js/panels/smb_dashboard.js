@@ -72,7 +72,19 @@ async function loadSMBDemo() {
 
 async function loadSMBIntelligence(entityId) {
   if (!entityId) entityId = document.getElementById('smb-entity-input')?.value?.trim();
-  if (!entityId) return;
+  if (!entityId) {
+    // Auto-show demo when no entity is selected
+    await loadSMBDemo();
+    const body = document.getElementById('smb-body');
+    if (body) {
+      const banner = document.createElement('div');
+      banner.className = 'alert-banner info';
+      banner.style.cssText = 'margin-bottom:10px;font-size:11px;';
+      banner.textContent = 'DEMO MODE — enter an entity ID above and click Load to analyze a real business';
+      body.prepend(banner);
+    }
+    return;
+  }
 
   _currentSMBEntity = entityId;
 

@@ -131,6 +131,30 @@
       return div;
     }
 
+    async function buildContext(userMessage) {
+      const ctx = {};
+      try {
+        const scores = await fetch('/intelligence/universe/scores').then(r => r.ok ? r.json() : []);
+        const withData = (scores || []).filter(s => s.dau !== null);
+        const buys  = withData.filter(s => (s.dau || 0) >= 65).length;
+        const sells = withData.filter(s => (s.dau || 0) < 40).length;
+        const avgDau = withData.length ? (withData.reduce((a, x) => a + (x.dau || 50), 0) / withData.length).toFixed(1) : 0;
+        ctx.universe_summary = { total: withData.length, buys, sells, avg_dau: Number(avgDau) };
+        ctx.top_signals = withData.sort((a, b) => (b.dau || 0) - (a.dau || 0)).slice(0, 3).map(s => ({
+          symbol: s.symbol, dau: s.dau, signal: s.signal,
+        }));
+      } catch (_) {}
+      const symMatch = userMessage.match(/\b([A-Z]{2,5})\b/);
+      const sym = symMatch?.[1];
+      if (sym && !['I','AND','OR','THE','AI','PE','ML','IC','DAU','SLA','BUY','ETF'].includes(sym)) {
+        try {
+          const intel = await fetch(`/intelligence/universal/${sym}`).then(r => r.ok ? r.json() : null);
+          if (intel && intel.dau) ctx.symbol_intel = { symbol: sym, dau: intel.dau, signal: intel.signal_label, eis: intel.eis_score };
+        } catch (_) {}
+      }
+      return ctx;
+    }
+
     async function sendMessage() {
       const text = inputEl.value.trim();
       if (!text || sendBtn.disabled) return;
@@ -141,10 +165,11 @@
       const thinkingEl = appendMessage('assistant', '…');
 
       try {
+        const context = await buildContext(text);
         const res = await fetch('/llm/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify({ message: text, context }),
         });
         const data = await res.json();
         if (!res.ok) {

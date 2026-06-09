@@ -1,6 +1,10 @@
 /* Morning Briefing Panel */
 
-async function loadMorningBriefing() {
+async function refreshMorningBriefing() {
+  return loadMorningBriefing(true);
+}
+
+async function loadMorningBriefing(force) {
   const body = document.getElementById('briefing-body');
   const dateEl = document.getElementById('briefing-date');
   const chipEl = document.getElementById('briefing-regime-chip');
@@ -25,7 +29,8 @@ async function loadMorningBriefing() {
   }
 
   try {
-    const data = await API.get('/jobs/briefing/morning');
+    const url = force ? '/jobs/briefing/morning?force_refresh=true' : '/jobs/briefing/morning';
+    const data = await API.get(url);
     renderBriefing(data);
     if (dateEl) dateEl.textContent = data.briefing_date || '';
     if (chipEl) {

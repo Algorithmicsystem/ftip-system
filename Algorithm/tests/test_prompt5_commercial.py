@@ -386,7 +386,7 @@ class TestDeveloperEndpoints:
         with TestClient(app) as client:
             r = client.get("/config/client")
         assert r.status_code == 200
-        assert r.json()["version"] in ("30.0.0", "31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1")
+        assert r.json()["version"] in ("30.0.0", "31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
 
 
 # ---------------------------------------------------------------------------

@@ -51,7 +51,7 @@ class TestAPIKeyFallback:
     def test_config_client_version_is_1(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] in ("1.0.0", "1.0.1", "33.0.0", "34.0.0")
+        assert r.json()["version"] in ("1.0.0", "1.0.1", "1.0.2", "33.0.0", "34.0.0")
 
     def test_get_api_keys_returns_set(self):
         os.environ["FTIP_API_KEYS"] = "key1,key2"

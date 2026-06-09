@@ -73,7 +73,19 @@ async function loadPEDemo() {
 
 async function loadPEPortfolio(orgId) {
   if (!orgId) orgId = document.getElementById('pe-org-input')?.value?.trim();
-  if (!orgId) return;
+  if (!orgId) {
+    // Auto-show demo when no org is selected
+    await loadPEDemo();
+    const body = document.getElementById('pe-body');
+    if (body) {
+      const banner = document.createElement('div');
+      banner.className = 'alert-banner info';
+      banner.style.cssText = 'margin-bottom:10px;font-size:11px;';
+      banner.textContent = 'DEMO MODE — enter an org ID above and click Load to analyze a real portfolio';
+      body.prepend(banner);
+    }
+    return;
+  }
 
   _currentPEOrg = orgId;
 
