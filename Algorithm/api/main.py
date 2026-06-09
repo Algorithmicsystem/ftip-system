@@ -2657,7 +2657,11 @@ def universe_scores() -> List[Dict[str, Any]]:
     """Public endpoint — returns latest AXIOM scores for all 30 universe symbols."""
     global _UNIVERSE_CACHE, _UNIVERSE_CACHE_AT
     if _UNIVERSE_CACHE is not None and (time.time() - _UNIVERSE_CACHE_AT) < _UNIVERSE_CACHE_TTL:
-        return _UNIVERSE_CACHE
+        # If cache contains only null/default DAU values, it's stale startup data — re-query
+        has_real = any(r.get("dau") and r["dau"] != 50.0 for r in _UNIVERSE_CACHE)
+        if has_real:
+            return _UNIVERSE_CACHE
+        _UNIVERSE_CACHE = None
 
     from api.universe import AXIOM_UNIVERSE
 
