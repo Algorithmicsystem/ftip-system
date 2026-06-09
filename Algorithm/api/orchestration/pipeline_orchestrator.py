@@ -129,9 +129,17 @@ def _real_stage(name: str) -> Dict[str, Any]:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                return {"records_processed": len(data.get("symbols_ok", []))}
+                records = len(data.get("symbols_ok", []))
+                if records == 0:
+                    logger.warning(
+                        "bar_ingest_zero_records — no market data fetched, pipeline will produce no scores"
+                    )
+                return {"records_processed": records}
         except Exception as exc:
             logger.debug("bar_ingestion_stage error=%s", exc)
+        logger.warning(
+            "bar_ingest_zero_records — no market data fetched, pipeline will produce no scores"
+        )
         return {"records_processed": 0}
 
     if name in ("feature_computation", "signal_generation", "axiom_scoring"):

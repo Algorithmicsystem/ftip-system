@@ -3117,6 +3117,91 @@ def ensemble_status() -> Dict[str, Any]:
     return get_ensemble_status()
 
 
+@app.get("/admin/seed-market-data")
+def seed_market_data() -> Dict[str, Any]:
+    """Seed market_bars_daily with 90 days of Stooq OHLCV data for all universe symbols.
+
+    Idempotent — uses ON CONFLICT DO NOTHING. Safe to call multiple times.
+    No auth required; intended for Railway cold-start recovery.
+    """
+    import datetime as _dt
+    from api.universe import AXIOM_UNIVERSE
+    from api.data_providers.bars import _fetch_daily_stooq
+
+    if not db.db_write_enabled():
+        return {"error": "db_write_disabled", "symbols_seeded": 0, "total_bars": 0}
+
+    end_date = _dt.date.today()
+    start_date = end_date - _dt.timedelta(days=90)
+
+    symbols_seeded = 0
+    total_bars = 0
+    errors: list = []
+
+    for symbol in AXIOM_UNIVERSE:
+        # Ensure symbol row exists (FK constraint)
+        try:
+            db.safe_execute(
+                "INSERT INTO market_symbols (symbol) VALUES (%s) ON CONFLICT DO NOTHING",
+                (symbol,),
+            )
+        except Exception as exc:
+            errors.append({"symbol": symbol, "phase": "market_symbols_upsert", "error": str(exc)})
+            continue
+
+        # Fetch bars from Stooq
+        try:
+            bars = _fetch_daily_stooq(symbol, start_date, end_date)
+        except Exception as exc:
+            errors.append({"symbol": symbol, "phase": "stooq_fetch", "error": str(exc)})
+            continue
+
+        if not bars:
+            errors.append({"symbol": symbol, "phase": "stooq_fetch", "error": "no bars returned"})
+            continue
+
+        # Batch insert
+        inserted = 0
+        for bar in bars:
+            try:
+                db.safe_execute(
+                    """
+                    INSERT INTO market_bars_daily
+                        (symbol, as_of_date, open, high, low, close, volume, source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (symbol, as_of_date) DO NOTHING
+                    """,
+                    (
+                        bar["symbol"],
+                        bar["as_of_date"],
+                        bar.get("open"),
+                        bar.get("high"),
+                        bar.get("low"),
+                        bar.get("close"),
+                        bar.get("volume"),
+                        bar.get("source", "stooq"),
+                    ),
+                )
+                inserted += 1
+            except Exception as exc:
+                errors.append({"symbol": symbol, "phase": "insert", "date": str(bar.get("as_of_date")), "error": str(exc)})
+
+        if inserted > 0:
+            symbols_seeded += 1
+            total_bars += inserted
+            logger.info("seed_market_data symbol=%s bars=%d", symbol, inserted)
+
+    logger.info(
+        "seed_market_data_complete symbols=%d total_bars=%d errors=%d",
+        symbols_seeded, total_bars, len(errors),
+    )
+    return {
+        "symbols_seeded": symbols_seeded,
+        "total_bars": total_bars,
+        "errors": errors[:20],  # cap to keep response readable
+    }
+
+
 _register_providers_health(app)
 _providers_paths = {getattr(route, "path", None) for route in app.router.routes}
 logger.info(
