@@ -20,8 +20,10 @@ client = TestClient(app, raise_server_exceptions=False)
 class TestPerformanceTracker:
 
     def setup_method(self):
+        import time
         from api.cloud.performance import PerformanceTracker
         self.tracker = PerformanceTracker()
+        self.tracker._start_time = time.time() - 60  # simulate post-warmup
 
     def test_record_increments_request_count(self):
         self.tracker.record("/test", 50.0)

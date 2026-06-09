@@ -142,6 +142,25 @@ def require_tier(min_tier: str = "free"):
         if not raw_key:
             return None  # No key provided: fall through to existing auth layer
 
+        # Primary API key (from FTIP_API_KEYS env var) is always enterprise tier —
+        # this ensures the dashboard can always trigger the pipeline with its own key.
+        try:
+            from api.config import get_api_key as _primary_key_fn
+            primary_key = _primary_key_fn()
+            if primary_key and raw_key == primary_key:
+                tenant_primary: Dict[str, Any] = {
+                    "tenant_id": "primary",
+                    "org_name": "Primary",
+                    "tier": "enterprise",
+                    "allowed_sectors": None,
+                    "rpm_limit": 0,
+                    "expires_at": None,
+                }
+                request.state.tenant = tenant_primary
+                return tenant_primary
+        except Exception:
+            pass
+
         tenant = resolve_tenant(raw_key)
         if tenant is None:
             raise HTTPException(status_code=401, detail="Invalid or expired API key")

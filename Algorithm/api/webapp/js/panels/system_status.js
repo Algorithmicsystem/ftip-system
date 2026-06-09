@@ -90,7 +90,11 @@ function renderSystemStatus(status, pipeline) {
         ${metricChipHTML('Universe Coverage', `${coverage}%`)}
         ${metricChipHTML('DB', dbOk, dbColor)}
         ${metricChipHTML('Scheduler', sched, schedColor)}
-        ${metricChipHTML('Migrations', status.migrations_applied ?? '—')}
+        ${(() => {
+          const n = status.migrations_applied ?? 0;
+          const val = n > 0 ? `✓ ${n} applied` : '✓ Up to date';
+          return metricChipHTML('Schema', val, 'var(--signal-buy)');
+        })()}
         ${metricChipHTML('Version', status.version || '—')}
       </div>
     </div>

@@ -209,8 +209,16 @@ class SchedulerManager:
         self._running = True
         logger.info("scheduler.started jobs=%d", len(list(s.get_jobs())))
 
+    @property
+    def running(self) -> bool:
+        if not self._running or self._scheduler is None:
+            return False
+        return bool(getattr(self._scheduler, "running", False))
+
     def stop(self) -> None:
-        if self._scheduler and self._running:
+        if not self._running:
+            return  # never started — nothing to stop
+        if self._scheduler:
             try:
                 self._scheduler.shutdown(wait=False)
             except Exception:
@@ -219,7 +227,7 @@ class SchedulerManager:
         logger.info("scheduler.stopped")
 
     def get_status(self) -> Dict[str, Any]:
-        if not self._running or self._scheduler is None:
+        if not self.running or self._scheduler is None:
             return {"running": False, "next_run_times": {}, "last_run_results": self._last_run_results}
 
         next_runs: Dict[str, Any] = {}
@@ -268,8 +276,30 @@ def _scheduler_heartbeat_loop() -> None:
             pass
 
 
+def _scheduler_watchdog() -> None:
+    """Restart the scheduler if it stops unexpectedly in production."""
+    import os
+    import time
+    while True:
+        time.sleep(30)
+        if "pytest" in sys.modules:
+            break
+        if not scheduler_manager.running:
+            env = os.environ.get("FTIP_ENV") or os.environ.get("RAILWAY_ENVIRONMENT", "")
+            if env == "production":
+                logger.warning("scheduler.watchdog detected stopped scheduler — restarting")
+                try:
+                    scheduler_manager.start()
+                except Exception as exc:
+                    logger.error("scheduler.watchdog restart failed: %s", exc)
+
+
 def start_scheduler() -> None:
-    """Start the scheduler. Suppressed in pytest; can be disabled via FTIP_SCHEDULER_ENABLED=0."""
+    """Start the scheduler. Suppressed in pytest; can be disabled via FTIP_SCHEDULER_ENABLED=0.
+
+    To trigger the pipeline manually from Railway console:
+      python -c "from api.jobs.scheduler import _job_full_daily_pipeline; _job_full_daily_pipeline()"
+    """
     if "pytest" in sys.modules:
         return
     from api import config
@@ -278,6 +308,7 @@ def start_scheduler() -> None:
         return
     scheduler_manager.start()
     threading.Thread(target=_scheduler_heartbeat_loop, daemon=True).start()
+    threading.Thread(target=_scheduler_watchdog, daemon=True).start()
 
 
 def get_status() -> Dict[str, Any]:

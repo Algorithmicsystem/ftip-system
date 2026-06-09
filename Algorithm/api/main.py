@@ -1992,9 +1992,8 @@ def root() -> Dict[str, Any]:
 def health() -> Dict[str, Any]:
     scheduler_running = False
     try:
-        from api.jobs import scheduler as sched_module
-        _sched = getattr(sched_module, "_scheduler", None)
-        scheduler_running = _sched is not None and getattr(_sched, "running", False)
+        from api.jobs.scheduler import scheduler_manager as _sm
+        scheduler_running = _sm.running
     except Exception:
         pass
 
@@ -2425,9 +2424,18 @@ def version() -> Dict[str, Any]:
     return {"railway_git_commit_sha": _git_sha(), "railway_environment": _railway_env()}
 
 
+_STATUS_CACHE: Optional[Dict[str, Any]] = None
+_STATUS_CACHE_AT: float = 0.0
+_STATUS_CACHE_TTL: float = 10.0
+
+
 @app.get("/system/status")
 def system_status() -> Dict[str, Any]:
     """Production system status — operator view of what's running and healthy."""
+    global _STATUS_CACHE, _STATUS_CACHE_AT
+    if _STATUS_CACHE is not None and (time.time() - _STATUS_CACHE_AT) < _STATUS_CACHE_TTL:
+        return _STATUS_CACHE
+
     warnings: List[str] = []
 
     # DB connectivity
@@ -2443,7 +2451,7 @@ def system_status() -> Dict[str, Any]:
         if db_connected:
             try:
                 mig_row = db.safe_fetchone(
-                    "SELECT COUNT(*), MAX(migration_name) FROM schema_migrations WHERE applied_at IS NOT NULL"
+                    "SELECT COUNT(*), MAX(version) FROM schema_migrations WHERE applied_at IS NOT NULL"
                 )
                 if mig_row:
                     migrations_applied = int(mig_row[0] or 0)
@@ -2478,9 +2486,8 @@ def system_status() -> Dict[str, Any]:
     # Scheduler
     scheduler_running = False
     try:
-        from api.jobs import scheduler as sched_module
-        _sched = getattr(sched_module, "_scheduler", None)
-        scheduler_running = _sched is not None and getattr(_sched, "running", False)
+        from api.jobs.scheduler import scheduler_manager as _sm
+        scheduler_running = _sm.running
     except Exception:
         pass
 
@@ -2554,7 +2561,7 @@ def system_status() -> Dict[str, Any]:
     else:
         acquisition_tier = "early_stage"
 
-    return {
+    _status_result: Dict[str, Any] = {
         "server": "healthy",
         "version": "1.0.1",
         "db_connected": db_connected,
@@ -2592,6 +2599,9 @@ def system_status() -> Dict[str, Any]:
         "scheduler_running": scheduler_running,
         "last_pipeline_run": last_pipeline_run,
     }
+    _STATUS_CACHE = _status_result
+    _STATUS_CACHE_AT = time.time()
+    return _status_result
 
 
 @app.get("/config/client")

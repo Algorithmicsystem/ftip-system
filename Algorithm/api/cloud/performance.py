@@ -87,12 +87,16 @@ class PerformanceTracker:
                 })
         return sorted(results, key=lambda x: x["p95_ms"], reverse=True)[:n]
 
-    def get_system_p95(self) -> float:
+    def get_system_p95(self, warmup_seconds: float = 30.0) -> float:
         all_times = []
         now = time.time()
         cutoff = now - 3600
+        warmup_cutoff = self._start_time + warmup_seconds
         for samples in self._samples.values():
-            all_times.extend([ms for ts, ms in samples if ts >= cutoff])
+            all_times.extend([
+                ms for ts, ms in samples
+                if ts >= cutoff and ts >= warmup_cutoff
+            ])
         if not all_times:
             return 0.0
         all_times.sort()
