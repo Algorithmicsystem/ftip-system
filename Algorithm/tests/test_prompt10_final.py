@@ -268,21 +268,21 @@ class TestVersion1:
     def test_config_client_version_1(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] in ("1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_system_status_version_1(self):
         with TestClient(app) as client:
             r = client.get("/system/status")
-        assert r.json()["version"] in ("1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_index_html_cache_bust_v100(self):
         html = (WEBAPP / "index.html").read_text()
-        assert "?v=100" in html or "?v=101" in html or "?v=102" in html
+        assert "?v=100" in html or "?v=101" in html or "?v=102" in html or "?v=103" in html
         assert "?v=34" not in html
 
     def test_index_html_has_enough_v100_references(self):
         html = (WEBAPP / "index.html").read_text()
-        assert html.count("?v=100") + html.count("?v=101") + html.count("?v=102") >= 10
+        assert html.count("?v=100") + html.count("?v=101") + html.count("?v=102") + html.count("?v=103") >= 10
 
 
 # ---------------------------------------------------------------------------

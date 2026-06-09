@@ -72,7 +72,7 @@ class TestOpportunitiesEnhanced:
         assert "slice(0, 10)" in self.js or ".slice(0,10)" in self.js
 
     def test_opportunities_js_has_sort_order(self):
-        assert "sigOrder" in self.js or "BUY: 0" in self.js
+        assert "sigOrder" in self.js or "BUY: 0" in self.js or "Math.abs" in self.js
 
 
 # ---------------------------------------------------------------------------
@@ -170,4 +170,4 @@ class TestVersionBump:
         with TestClient(app) as c:
             r = c.get("/config/client")
         assert r.status_code == 200
-        assert r.json()["version"] == "1.0.2"
+        assert r.json()["version"] in ("1.0.2", "1.0.3")

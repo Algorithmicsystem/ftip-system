@@ -25,7 +25,18 @@ function renderUniverseScreen(rows) {
 
   const sigColor = s => s === 'BUY' ? 'var(--signal-buy)' : s === 'SELL' ? 'var(--signal-sell)' : 'var(--signal-hold)';
 
-  body.innerHTML = `
+  const scored   = rows.filter(r => Number(r.dau) > 0);
+  const unscored = rows.filter(r => !(Number(r.dau) > 0));
+  const avgDau   = scored.length ? (scored.reduce((s, r) => s + (r.dau || 0), 0) / scored.length).toFixed(1) : '—';
+  const unscoredList = unscored.map(r => r.symbol).join(', ') || 'none';
+  const summaryBar = `
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;padding:4px 6px;background:var(--bg-elevated);border-radius:4px;display:flex;gap:12px;flex-wrap:wrap;">
+      <span><strong style="color:var(--text-primary);">${scored.length}</strong> scored</span>
+      ${unscored.length ? `<span><strong style="color:var(--accent-warning);">${unscored.length}</strong> unscored (${unscoredList})</span>` : ''}
+      <span style="margin-left:auto;">Avg DAU: <strong style="color:var(--text-primary);">${avgDau}</strong></span>
+    </div>`;
+
+  body.innerHTML = summaryBar + `
     <div style="overflow-y:auto;max-height:360px;">
       <table style="width:100%;border-collapse:collapse;font-size:11px;">
         <thead>

@@ -203,7 +203,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
             ),
         )
 
-    # Fetch top opportunities
+    # Fetch top opportunities — use latest available date, not today (pipeline may have run days ago)
     top_rows = db.safe_fetchall(
         """
         SELECT symbol,
@@ -211,12 +211,12 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
                payload->>'regime_label' AS regime,
                payload->>'deployability_tier' AS tier
           FROM axiom_scores_daily
-         WHERE as_of_date = %s
+         WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
            AND (payload->>'deployable_alpha_utility')::numeric > 50
          ORDER BY dau DESC
          LIMIT 5
         """,
-        (aod,),
+        (),
     ) or []
 
     top_opportunities = [
@@ -230,12 +230,12 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         SELECT symbol,
                (payload->'engine_scores'->'critical_fragility'->>'score')::numeric AS frag
           FROM axiom_scores_daily
-         WHERE as_of_date = %s
+         WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
            AND (payload->'engine_scores'->'critical_fragility'->>'score')::numeric > 65
          ORDER BY frag DESC
          LIMIT 3
         """,
-        (aod,),
+        (),
     ) or []
     key_risks = [{"symbol": r[0], "fragility_score": float(r[1] or 0)} for r in risk_rows]
 
@@ -246,7 +246,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
                (payload->'engine_scores'->'critical_fragility'->'components'->>'scps_component')::numeric AS scps,
                (payload->'engine_scores'->'critical_fragility'->'components'->>'bfs_component')::numeric AS bfs
           FROM axiom_scores_daily
-         WHERE as_of_date = %s
+         WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
            AND (
                (payload->'engine_scores'->'critical_fragility'->'components'->>'scps_component')::numeric > %s
                OR
@@ -254,7 +254,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
            )
          LIMIT 10
         """,
-        (aod, _BUBBLE_SCPS_THRESHOLD, _BUBBLE_BFS_THRESHOLD),
+        (_BUBBLE_SCPS_THRESHOLD, _BUBBLE_BFS_THRESHOLD),
     ) or []
     bubble_watch = [
         {"symbol": r[0], "scps_score": float(r[1] or 0), "bfs_score": float(r[2] or 0)}
@@ -280,7 +280,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
     n_favorable = 0
     try:
         b_row = db.safe_fetchone(
-            "SELECT breadth_state FROM market_breadth_daily WHERE as_of_date = %s", (aod,)
+            "SELECT breadth_state FROM market_breadth_daily ORDER BY as_of_date DESC LIMIT 1", ()
         )
         if b_row:
             breadth_state = str(b_row[0] or "UNKNOWN").upper()
@@ -317,10 +317,10 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         SELECT COALESCE(m.sector, 'Unknown'), AVG((a.payload->>'deployable_alpha_utility')::numeric)
           FROM axiom_scores_daily a
           LEFT JOIN market_symbols m ON m.symbol = a.symbol
-         WHERE a.as_of_date = %s
+         WHERE a.as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
          GROUP BY 1 ORDER BY 2 DESC NULLS LAST LIMIT 5
         """,
-        (aod,),
+        (),
     ) or []
     sector_rotation = {r[0]: round(float(r[1] or 0), 2) for r in sector_rows}
 
@@ -331,10 +331,10 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
             """
             SELECT factor_name, AVG(loading) AS avg_loading
               FROM factor_exposures_daily
-             WHERE as_of_date = %s
+             WHERE as_of_date = (SELECT MAX(as_of_date) FROM factor_exposures_daily)
              GROUP BY 1 ORDER BY avg_loading DESC NULLS LAST LIMIT 3
             """,
-            (aod,),
+            (),
         )
         if factor_rows:
             factor_env["top_factors"] = [

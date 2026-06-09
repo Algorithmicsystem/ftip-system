@@ -77,7 +77,7 @@ class TestChatbotJS:
 
     def test_index_html_uses_v101(self):
         html = (WEBAPP / "index.html").read_text()
-        assert "?v=101" in html or "?v=102" in html
+        assert "?v=101" in html or "?v=102" in html or "?v=103" in html
         assert "?v=100" not in html
 
     def test_chatbot_handles_errors_gracefully(self):
@@ -119,12 +119,12 @@ class TestVersionBump:
     def test_fastapi_version_is_101(self):
         with TestClient(app) as client:
             r = client.get("/openapi.json")
-        assert r.json()["info"]["version"] in ("1.0.1", "1.0.2")
+        assert r.json()["info"]["version"] in ("1.0.1", "1.0.2", "1.0.3")
 
     def test_config_client_version_is_101(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] in ("1.0.1", "1.0.2")
+        assert r.json()["version"] in ("1.0.1", "1.0.2", "1.0.3")
 
     def test_pipeline_fix_friendly_error(self):
         src = (JS_DIR / "panels" / "system_status.js").read_text()

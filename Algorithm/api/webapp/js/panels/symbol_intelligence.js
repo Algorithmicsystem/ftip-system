@@ -59,7 +59,7 @@ function renderIntelligenceTab(data, symbol) {
     return;
   }
 
-  const isDefault = data.ic_state === 'INSUFFICIENT' || (data.intelligence_quality_score === 0) || (data.dau === 50 && data.eis_score === 50 && data.caps_score === 50);
+  const isDefault = !data.dau || (data.dau === 50 && data.eis_score === 50 && data.caps_score === 50);
   const defaultBanner = isDefault
     ? `<div class="alert-banner info" style="margin-bottom:10px;">Pipeline data not yet available — scores reflect system defaults.</div>`
     : `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">

@@ -32,6 +32,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   scheduleAutoRefresh();
   startHealthMonitor();
   initIntelligenceFeed();
+  // Pre-load opportunities so scores are ready when user switches panel
+  if (typeof loadOpportunities === 'function') loadOpportunities();
 });
 
 // ── WebSocket Intelligence Feed ───────────────────────────────────────────────
@@ -112,6 +114,7 @@ function handleFeedMessage(msg) {
       showPipelineToast(msg);
       if (typeof loadSystemStatus === 'function') loadSystemStatus();
       if (typeof loadUniverseScreen === 'function') loadUniverseScreen();
+      if (typeof loadOpportunities === 'function') loadOpportunities();
       break;
     case 'ml_model_updated':
       showMLToast(msg);

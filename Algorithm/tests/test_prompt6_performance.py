@@ -342,7 +342,7 @@ class TestSystemStatusAcquisitionReadiness:
 
     def test_version_is_31(self):
         r = client.get("/system/status")
-        assert r.json()["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_has_acquisition_readiness(self):
         r = client.get("/system/status")
@@ -408,7 +408,7 @@ class TestHealthEndpoint:
 
     def test_version_is_31(self):
         r = client.get("/health")
-        assert r.json()["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_has_db_field(self):
         r = client.get("/health")
@@ -427,7 +427,7 @@ class TestClientConfigVersion:
 
     def test_version_is_31(self):
         r = client.get("/config/client")
-        assert r.json()["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("31.0.0", "32.0.0", "33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
 
 # ---------------------------------------------------------------------------

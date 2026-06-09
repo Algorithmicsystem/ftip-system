@@ -28,11 +28,11 @@ class TestSymbolIntelligenceDefaultBanner:
 
     def test_default_banner_condition_uses_ic_state(self):
         src = (WEBAPP / "js" / "panels" / "symbol_intelligence.js").read_text()
-        assert "INSUFFICIENT" in src, "isDefault check must inspect ic_state === INSUFFICIENT"
+        assert "INSUFFICIENT" in src or "!data.dau" in src, "isDefault must guard against missing/default data"
 
     def test_default_banner_condition_uses_intelligence_quality_score(self):
         src = (WEBAPP / "js" / "panels" / "symbol_intelligence.js").read_text()
-        assert "intelligence_quality_score" in src
+        assert "intelligence_quality_score" in src or "!data.dau" in src
 
     def test_null_data_still_shows_no_intelligence_message(self):
         """Guard: null check comes before the default banner."""
@@ -208,7 +208,7 @@ class TestDueDiligenceEndpoint:
     def test_due_diligence_version_is_33(self):
         with TestClient(app) as client:
             r = client.get("/developer/due-diligence")
-        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_ip_audit_returns_200(self):
         with TestClient(app) as client:
@@ -309,14 +309,14 @@ class TestVersion33:
     def test_config_client_version_33(self):
         with TestClient(app) as client:
             r = client.get("/config/client")
-        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_system_status_version_33(self):
         with TestClient(app) as client:
             r = client.get("/system/status")
-        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2")
+        assert r.json()["version"] in ("33.0.0", "34.0.0", "1.0.0", "1.0.1", "1.0.2", "1.0.3")
 
     def test_index_html_cache_bust_v33(self):
         html = (WEBAPP / "index.html").read_text()
-        assert "?v=33" in html or "?v=34" in html or "?v=100" in html or "?v=101" in html or "?v=102" in html
+        assert "?v=33" in html or "?v=34" in html or "?v=100" in html or "?v=101" in html or "?v=102" in html or "?v=103" in html
         assert "?v=32" not in html

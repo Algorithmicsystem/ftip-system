@@ -1735,7 +1735,7 @@ def _startup() -> List[str]:
     return lifecycle.startup()
 
 
-app = FastAPI(title=APP_NAME, version="1.0.2", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="1.0.3", lifespan=lifespan)
 security.add_cors_middleware(app)
 security.log_auth_config(logger)
 app.add_middleware(UsageLoggingMiddleware)
@@ -2007,7 +2007,7 @@ def health() -> Dict[str, Any]:
 
     payload: Dict[str, Any] = {
         "status": "ok",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "db": db_status,
         "scheduler": "running" if scheduler_running else "stopped",
     }
@@ -2428,6 +2428,10 @@ _STATUS_CACHE: Optional[Dict[str, Any]] = None
 _STATUS_CACHE_AT: float = 0.0
 _STATUS_CACHE_TTL: float = 10.0
 
+_UNIVERSE_CACHE: Optional[List[Dict[str, Any]]] = None
+_UNIVERSE_CACHE_AT: float = 0.0
+_UNIVERSE_CACHE_TTL: float = 300.0  # 5 min
+
 
 @app.get("/system/status")
 def system_status() -> Dict[str, Any]:
@@ -2534,7 +2538,7 @@ def system_status() -> Dict[str, Any]:
     moat_score = 0.0
     try:
         row = db.safe_fetchone(
-            "SELECT AVG(moat_score) FROM axiom_scores_daily WHERE as_of_date >= CURRENT_DATE - 7"
+            "SELECT AVG(moat_score) FROM axiom_scores_daily WHERE as_of_date >= CURRENT_DATE - 30"
         ) if db_connected else None
         if row and row[0] is not None:
             moat_score = round(float(row[0]), 1)
@@ -2563,7 +2567,7 @@ def system_status() -> Dict[str, Any]:
 
     _status_result: Dict[str, Any] = {
         "server": "healthy",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "db_connected": db_connected,
         "migrations_applied": migrations_applied,
         "latest_migration": latest_migration,
@@ -2611,7 +2615,7 @@ def client_config() -> Dict[str, Any]:
     return {
         "api_key": _cfg.get_api_key(),
         "env": _railway_env(),
-        "version": "1.0.2",
+        "version": "1.0.3",
         "build": "AXIOM Intelligence Terminal",
     }
 
@@ -2651,6 +2655,10 @@ def llm_chat(req: LLMChatRequest) -> Dict[str, Any]:
 @app.get("/intelligence/universe/scores")
 def universe_scores() -> List[Dict[str, Any]]:
     """Public endpoint — returns latest AXIOM scores for all 30 universe symbols."""
+    global _UNIVERSE_CACHE, _UNIVERSE_CACHE_AT
+    if _UNIVERSE_CACHE is not None and (time.time() - _UNIVERSE_CACHE_AT) < _UNIVERSE_CACHE_TTL:
+        return _UNIVERSE_CACHE
+
     from api.universe import AXIOM_UNIVERSE
 
     def _sig(dau):
@@ -2707,7 +2715,10 @@ def universe_scores() -> List[Dict[str, Any]]:
             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None,
         })
 
-    results.sort(key=lambda x: (x["dau"] is None, -(x["dau"] or 0)))
+    # Sort by signal strength: most extreme DAU (furthest from neutral 50) first
+    results.sort(key=lambda x: (x["dau"] is None, -abs((x["dau"] or 50) - 50)))
+    _UNIVERSE_CACHE = results
+    _UNIVERSE_CACHE_AT = time.time()
     return results
 
 

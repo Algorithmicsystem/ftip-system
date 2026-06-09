@@ -12,20 +12,21 @@ async function loadOpportunities() {
     const rows = await API.get('/intelligence/universe/scores').catch(() => null);
     console.log('[AXIOM] universe scores:', rows?.length, 'symbols');
     if (rows && rows.length > 0) {
-      const withData = rows.filter(r => r.dau !== null);
+      const withData = rows.filter(r => Number(r.dau) > 0);
       console.log('[AXIOM] symbols with DAU data:', withData.length);
-      const noData   = rows.filter(r => r.dau === null);
+      const noData   = rows.filter(r => !(Number(r.dau) > 0));
       if (withData.length === 0) {
         body.innerHTML = `<div class="alert-banner warning" style="font-size:12px;">
           Pipeline running — scores will appear in ~15 minutes.
         </div>`;
+        setTimeout(() => loadOpportunities(), 60000);
         return;
       }
-      // Sort: BUY first, then HOLD, then SELL — within each group by DAU desc
-      const sigOrder = { BUY: 0, HOLD: 1, SELL: 2, NO_DATA: 3 };
+      // Sort by signal strength: most extreme DAU (furthest from neutral 50) first
       const sorted = [...withData].sort((a, b) => {
-        const so = (sigOrder[a.signal] ?? 3) - (sigOrder[b.signal] ?? 3);
-        return so !== 0 ? so : (b.dau || 0) - (a.dau || 0);
+        const distA = Math.abs((a.dau || 50) - 50);
+        const distB = Math.abs((b.dau || 50) - 50);
+        return distB - distA;
       });
       const display = [...sorted, ...noData].slice(0, 10);
       renderOpportunitiesList(display, rows);
