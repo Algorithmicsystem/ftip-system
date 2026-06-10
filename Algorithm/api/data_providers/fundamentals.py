@@ -136,6 +136,13 @@ def _fetch_yfinance_quarterly(symbol: str) -> List[Dict[str, object]]:
             source_type="fundamentals",
         )
 
+    # Fetch cash flow data for FCF computation
+    cashflow = None
+    try:
+        cashflow = ticker.quarterly_cashflow
+    except Exception:
+        pass
+
     results: List[Dict[str, object]] = []
     for col in financials.columns:
         try:
@@ -149,6 +156,19 @@ def _fetch_yfinance_quarterly(symbol: str) -> List[Dict[str, object]]:
         revenue = financials.get("Total Revenue", {}).get(col)
         gross_profit = financials.get("Gross Profit", {}).get(col)
         op_income = financials.get("Operating Income", {}).get(col)
+
+        # FCF: prefer explicit Free Cash Flow, else Operating CF - |Capex|
+        fcf = None
+        if cashflow is not None and not cashflow.empty:
+            raw_fcf = cashflow.get("Free Cash Flow", {}).get(col)
+            if raw_fcf is not None:
+                fcf = float(raw_fcf)
+            else:
+                op_cf = cashflow.get("Operating Cash Flow", {}).get(col)
+                capex = cashflow.get("Capital Expenditure", {}).get(col)
+                if op_cf is not None:
+                    fcf = float(op_cf) - abs(float(capex or 0))
+
         results.append(
             {
                 "symbol": symbol,
@@ -165,7 +185,7 @@ def _fetch_yfinance_quarterly(symbol: str) -> List[Dict[str, object]]:
                 "op_margin": (
                     float(op_income) / float(revenue) if revenue and op_income else None
                 ),
-                "fcf": None,
+                "fcf": fcf,
                 "source": "yfinance",
             }
         )

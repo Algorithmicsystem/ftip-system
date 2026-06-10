@@ -10,7 +10,7 @@ let _panelLoadState = {};
 const PANELS = {
   briefing:      { load: loadMorningBriefing,   label: 'Morning Briefing' },
   opportunities: { load: loadUniverseScreen,    label: 'Universe Screen' },
-  symbol:        { load: () => {},              label: 'Symbol Intelligence' },
+  symbol:        { load: () => loadSymbolIntelligence('AAPL'), label: 'Symbol Intelligence' },
   risk:          { load: loadRiskMonitor,       label: 'Risk Monitor' },
   factors:       { load: loadFactorEnvironment, label: 'Factor Environment' },
   pipeline:      { load: loadSystemStatus,      label: 'System Status' },

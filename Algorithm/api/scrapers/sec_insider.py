@@ -19,12 +19,13 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-_TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
-_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+_EFTS_URL = "https://efts.sec.gov/LATEST/search-index?q=%22{symbol}%22&forms=4&dateRange=custom&startdt={start}&enddt={end}&hits.hits.total.value=0&_source=accession_no,entity_id,period_of_report,file_date"
 _EDGAR_ARCHIVE = "https://www.sec.gov/Archives/edgar/data/{cik}/{acc_no_dashes}/{primary_doc}"
+_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 _SEC_HEADERS = {
-    "User-Agent": "FTIP-System contact@ftip.ai",
+    "User-Agent": "AXIOM Financial Intelligence axiom@axiom.ai",
     "Accept-Encoding": "gzip, deflate",
+    "Accept": "application/json",
 }
 
 # Transaction codes: P = open-market purchase, S = open-market sale, M = exercise
@@ -46,57 +47,78 @@ def _get(url: str, timeout: int = 15) -> Optional[Any]:
     return None
 
 
-def _lookup_cik(symbol: str) -> Optional[str]:
-    data = _get(_TICKERS_URL, timeout=20)
-    if not data:
-        return None
-    sym_upper = symbol.upper()
-    for entry in data.values():
-        if isinstance(entry, dict) and entry.get("ticker", "").upper() == sym_upper:
-            cik = str(entry["cik_str"]).zfill(10)
-            return cik
-    return None
+def _search_efts(symbol: str, start: str, end: str) -> List[Dict[str, Any]]:
+    """Query EFTS for Form 4 filings containing the ticker symbol."""
+    try:
+        import httpx
+        url = (
+            f"https://efts.sec.gov/LATEST/search-index"
+            f"?q=%22{symbol.upper()}%22"
+            f"&forms=4"
+            f"&dateRange=custom&startdt={start}&enddt={end}"
+        )
+        resp = httpx.get(url, headers=_SEC_HEADERS, timeout=20, follow_redirects=True)
+        if resp.status_code != 200:
+            logger.debug("sec_insider.efts_failed status=%d symbol=%s", resp.status_code, symbol)
+            return []
+        data = resp.json()
+        hits = (data.get("hits") or {}).get("hits") or []
+        results = []
+        for hit in hits:
+            src = hit.get("_source") or {}
+            acc = src.get("accession_no") or ""
+            cik = str(src.get("entity_id") or "").zfill(10)
+            period = src.get("period_of_report") or src.get("file_date") or ""
+            if acc and cik:
+                results.append({"accession_no": acc, "cik": cik, "period": period})
+        return results
+    except Exception as exc:
+        logger.debug("sec_insider.efts_error symbol=%s err=%s", symbol, exc)
+        return []
+
+
+def _get_primary_doc(cik: str, acc_raw: str) -> str:
+    """Get the primary document filename for a filing from EDGAR submissions."""
+    try:
+        acc_no_dashes = acc_raw.replace("-", "")
+        index_url = f"https://www.sec.gov/Archives/edgar/data/{cik.lstrip('0')}/{acc_no_dashes}/{acc_no_dashes}-index.json"
+        data = _get(index_url, timeout=10)
+        if data:
+            for item in (data.get("directory", {}).get("item") or []):
+                name = item.get("name", "")
+                if name.endswith(".xml") and not name.startswith("R"):
+                    return name
+    except Exception:
+        pass
+    # Fallback: guess the primary doc name from accession
+    acc_no_dashes = acc_raw.replace("-", "")
+    return f"{acc_no_dashes}.xml"
 
 
 def fetch_insider_transactions(symbol: str, days_back: int = 90) -> List[Dict[str, Any]]:
-    """Return recent Form 4 transactions for *symbol* from SEC EDGAR.
+    """Return recent Form 4 transactions for *symbol* from SEC EDGAR via EFTS search.
 
     Each transaction dict has:
       transaction_date, shares, price_per_share, transaction_code,
       is_open_market_buy, is_open_market_sell, reporter_name,
       reporter_title, accession_number
     """
-    cik = _lookup_cik(symbol)
-    if not cik:
-        logger.debug("sec_insider.cik_not_found symbol=%s", symbol)
-        return []
+    today = date.today()
+    start = (today - timedelta(days=days_back)).isoformat()
+    end = today.isoformat()
 
-    submissions = _get(_SUBMISSIONS_URL.format(cik=cik), timeout=20)
-    if not submissions:
+    filings = _search_efts(symbol, start, end)
+    if not filings:
+        logger.debug("sec_insider.no_filings_found symbol=%s days_back=%d", symbol, days_back)
         return []
-
-    cutoff = date.today() - timedelta(days=days_back)
-    filings = (submissions.get("filings") or {}).get("recent") or {}
-    forms = filings.get("form", [])
-    dates = filings.get("filingDate", [])
-    accessions = filings.get("accessionNumber", [])
-    primary_docs = filings.get("primaryDocument", [])
 
     transactions: List[Dict[str, Any]] = []
 
-    for i, form in enumerate(forms):
-        if form != "4":
-            continue
-        try:
-            filing_date = date.fromisoformat(dates[i])
-        except Exception:
-            continue
-        if filing_date < cutoff:
-            continue
-
-        acc_raw = accessions[i]
+    for filing in filings[:30]:  # cap at 30 filings to avoid rate-limit pileup
+        acc_raw = filing["accession_no"]
+        cik = filing["cik"]
         acc_no_dashes = acc_raw.replace("-", "")
-        primary_doc = primary_docs[i] if i < len(primary_docs) else ""
+        primary_doc = _get_primary_doc(cik, acc_raw)
 
         xml_data = _parse_form4_xml(cik, acc_no_dashes, primary_doc)
         if xml_data:
@@ -106,6 +128,7 @@ def fetch_insider_transactions(symbol: str, days_back: int = 90) -> List[Dict[st
 
         time.sleep(0.1)  # be gentle with EDGAR rate limits
 
+    logger.debug("sec_insider.fetched symbol=%s txns=%d", symbol, len(transactions))
     return transactions
 
 

@@ -32,6 +32,21 @@ async function loadMorningBriefing(force) {
     const url = force ? '/jobs/briefing/morning?force_refresh=true' : '/jobs/briefing/morning';
     const data = await API.get(url);
     renderBriefing(data);
+
+    // Auto-regenerate if briefing shows all-zero signals but universe has real scores
+    if (!force) {
+      const text = data.briefing_text || '';
+      const uss = data.universe_signal_summary || {};
+      const hasZeroSignals = /0 BUY/i.test(text) && /0 HOLD/i.test(text) && /0 SELL/i.test(text);
+      const hasRealScores = (uss.n_buy || 0) + (uss.n_hold || 0) + (uss.n_sell || 0) > 0;
+      if (hasZeroSignals && hasRealScores) {
+        try {
+          const regen = await API.post('/jobs/briefing/morning/regenerate', {});
+          if (regen && !regen.error) { renderBriefing(regen); }
+        } catch (_) { /* silent */ }
+      }
+    }
+
     if (dateEl) dateEl.textContent = data.briefing_date || '';
     if (chipEl) {
       const rawRegime = data.regime_context?.regime_label || data.regime_label || '';

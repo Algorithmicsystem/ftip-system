@@ -26,7 +26,7 @@ def _fetch_house_trades(cutoff: dt.date) -> List[Dict[str, Any]]:
         import httpx
         resp = httpx.get(_HOUSE_URL, headers=_CONGRESS_HEADERS, timeout=30, follow_redirects=True)
         if resp.status_code != 200:
-            logger.warning("congress_house_fetch_failed status=%d", resp.status_code)
+            logger.info("congress_s3_unavailable status=%d source=house — cloud IPs blocked, using default scores", resp.status_code)
             return []
         trades = []
         for trade in resp.json():
@@ -61,7 +61,7 @@ def _fetch_house_trades(cutoff: dt.date) -> List[Dict[str, Any]]:
                 continue
         return trades
     except Exception as exc:
-        logger.warning("congress_house_failed err=%s", exc)
+        logger.info("congress_house_unavailable err=%s", exc)
         return []
 
 
@@ -70,7 +70,7 @@ def _fetch_senate_trades(cutoff: dt.date) -> List[Dict[str, Any]]:
         import httpx
         resp = httpx.get(_SENATE_URL, headers=_CONGRESS_HEADERS, timeout=30, follow_redirects=True)
         if resp.status_code != 200:
-            logger.warning("congress_senate_fetch_failed status=%d", resp.status_code)
+            logger.info("congress_s3_unavailable status=%d source=senate — cloud IPs blocked, using default scores", resp.status_code)
             return []
         trades = []
         for trade in resp.json():
@@ -105,7 +105,7 @@ def _fetch_senate_trades(cutoff: dt.date) -> List[Dict[str, Any]]:
                 continue
         return trades
     except Exception as exc:
-        logger.warning("congress_senate_failed err=%s", exc)
+        logger.info("congress_senate_unavailable err=%s", exc)
         return []
 
 

@@ -966,6 +966,40 @@ def _fundamental_domain(
         if not fundamentals
         else "Quarterly filing coverage is present across the recent filing window."
     )
+    # Build normalized_metrics and quality_proxies from available data so
+    # EIS and CAPS engines have real proxy inputs instead of defaulting to 50.
+    latest_gross_margin = latest.get("gross_margin")
+    latest_op_margin = latest.get("op_margin")
+
+    # ROE proxy: operating margin as a directional stand-in when balance sheet unavailable
+    roe_proxy = latest_op_margin if (latest_op_margin is not None and latest_gross_margin and latest_gross_margin > 0) else None
+
+    normalized_metrics_proxy = {
+        "gross_margin": latest_gross_margin,
+        "operating_margin": latest_op_margin,
+        "revenue_growth_yoy": revenue_growth_yoy,
+        "positive_fcf_ratio": positive_fcf_ratio,
+        "return_on_equity": roe_proxy,
+        "gross_margin_stability": 1.0 - min(margin_stability or 0.25, 0.25) / 0.25 if margin_stability is not None else None,
+    }
+
+    # cash_flow_durability proxy: scale positive_fcf_ratio (0-1) to 0-100
+    cfd_proxy = _clamp(positive_fcf_ratio * 100.0, 0.0, 100.0) if positive_fcf_ratio is not None else None
+    # profitability proxy from margins
+    prof_proxy = None
+    if latest_gross_margin is not None and latest_op_margin is not None:
+        _margin_mean = _mean([latest_gross_margin, latest_op_margin])
+        if _margin_mean is not None:
+            prof_proxy = _clamp(_margin_mean / 0.40 * 100.0, 0.0, 100.0)
+
+    quality_proxies_proxy = {
+        "cash_flow_durability": cfd_proxy,
+        "profitability_strength": prof_proxy,
+        "balance_sheet_resilience": None,
+        "reporting_completeness_score": len(fundamentals) / 8.0 * 100.0 if fundamentals else 0.0,
+        "reporting_quality_proxy": None,
+    }
+
     return {
         "latest_quarter": latest,
         "quarterly_series": fundamentals[:4],
@@ -976,6 +1010,8 @@ def _fundamental_domain(
         "margin_stability": margin_stability,
         "positive_fcf_ratio": positive_fcf_ratio,
         "filing_recency_days": filing_recency_days,
+        "normalized_metrics": normalized_metrics_proxy,
+        "quality_proxies": quality_proxies_proxy,
         "fundamentals_ok": quality.get("fundamentals_ok"),
         "meta": {
             "coverage_score": _clamp(coverage_score, 0.0, 1.0),

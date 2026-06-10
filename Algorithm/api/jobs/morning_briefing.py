@@ -554,6 +554,22 @@ def get_morning_briefing(
     if not force_refresh:
         cached = _load_briefing_from_cache(aod)
         if cached:
+            # Regenerate if cached briefing predates the latest axiom scores
+            try:
+                latest_row = db.safe_fetchone(
+                    "SELECT MAX(as_of_date) FROM axiom_scores_daily", ()
+                )
+                if latest_row and latest_row[0]:
+                    cached_date = dt.date.fromisoformat(str(cached.get("briefing_date", aod))[:10])
+                    if cached_date < latest_row[0]:
+                        briefing = generate_morning_briefing(latest_row[0])
+                        import dataclasses
+                        result = dataclasses.asdict(briefing)
+                        result["briefing_date"] = str(briefing.briefing_date)
+                        result["cached"] = False
+                        return result
+            except Exception:
+                pass
             cached["cached"] = True
             return cached
     briefing = generate_morning_briefing(aod)
