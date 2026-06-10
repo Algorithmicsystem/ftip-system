@@ -24,6 +24,8 @@ def fetch_finra_otc_data(symbol: str) -> Dict[str, Any]:
         import httpx
 
         url = "https://api.finra.org/data/group/otcMarket/name/weeklySummary"
+        # sortFields causes 400 unless all partition keys (weekStartDate, tierIdentifier)
+        # are specified as EQUAL filters — omit it and sort client-side.
         payload = {
             "compareFilters": [
                 {
@@ -32,7 +34,6 @@ def fetch_finra_otc_data(symbol: str) -> Dict[str, Any]:
                     "compareType": "EQUAL",
                 }
             ],
-            "sortFields": ["-weekStartDate"],
             "limit": 52,
             "offset": 0,
         }
@@ -47,6 +48,13 @@ def fetch_finra_otc_data(symbol: str) -> Dict[str, Any]:
         records = data if isinstance(data, list) else data.get("data", [])
         if not records:
             return _default_dark_pool_result(symbol)
+
+        # Sort descending by weekStartDate since we can't use sortFields in the request
+        records = sorted(
+            records,
+            key=lambda r: r.get("weekStartDate") or "",
+            reverse=True,
+        )
 
         total_otc_volume = sum(r.get("totalWeeklyShareQuantity", 0) or 0 for r in records[:8])
         avg_volume = total_otc_volume / min(8, len(records)) if records else 0

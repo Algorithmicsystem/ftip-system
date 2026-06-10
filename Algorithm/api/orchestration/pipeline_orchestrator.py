@@ -367,6 +367,13 @@ def _real_stage(name: str) -> Dict[str, Any]:
             run_dossier_update_job(today)
         except Exception:
             pass
+        # Regenerate morning briefing with fresh pipeline data
+        try:
+            from api.jobs.morning_briefing import generate_morning_briefing
+            generate_morning_briefing(today)
+            logger.info("morning_briefing_regenerated date=%s", today.isoformat())
+        except Exception as exc:
+            logger.warning("morning_briefing_regeneration_failed err=%s", exc)
         return {"records_processed": count}
 
     if name == "ml_inference":

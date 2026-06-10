@@ -204,16 +204,17 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
             ),
         )
 
-    # Fetch top opportunities — use latest available date, not today (pipeline may have run days ago)
+    # Fetch top opportunities — use latest available date, not today (pipeline may have run days ago).
+    # Uses real deployable_alpha_utility column rather than JSON payload extraction.
     top_rows = db.safe_fetchall(
         """
         SELECT symbol,
-               (payload->>'deployable_alpha_utility')::numeric AS dau,
+               deployable_alpha_utility AS dau,
                payload->>'regime_label' AS regime,
                payload->>'deployability_tier' AS tier
           FROM axiom_scores_daily
          WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
-           AND (payload->>'deployable_alpha_utility')::numeric > 50
+           AND deployable_alpha_utility > 50
          ORDER BY dau DESC
          LIMIT 5
         """,
@@ -225,16 +226,17 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         for r in top_rows
     ]
 
-    # Universe-wide signal counts across ALL scored symbols (not just top_opportunities)
+    # Universe-wide signal counts across ALL scored symbols (not just top_opportunities).
+    # Uses the real deployable_alpha_utility column, not the JSON payload field.
     signal_summary: Dict[str, Any] = {"n_buy": 0, "n_hold": 0, "n_sell": 0, "total": 0}
     try:
         sig_row = db.safe_fetchone(
             """
             SELECT
-                COUNT(*) FILTER (WHERE (payload->>'deployable_alpha_utility')::numeric >= 60) AS n_buy,
-                COUNT(*) FILTER (WHERE (payload->>'deployable_alpha_utility')::numeric >= 40
-                                 AND (payload->>'deployable_alpha_utility')::numeric < 60) AS n_hold,
-                COUNT(*) FILTER (WHERE (payload->>'deployable_alpha_utility')::numeric < 40) AS n_sell,
+                COUNT(*) FILTER (WHERE deployable_alpha_utility >= 60) AS n_buy,
+                COUNT(*) FILTER (WHERE deployable_alpha_utility >= 40
+                                 AND deployable_alpha_utility < 60) AS n_hold,
+                COUNT(*) FILTER (WHERE deployable_alpha_utility < 40) AS n_sell,
                 COUNT(*) AS total
               FROM axiom_scores_daily
              WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)

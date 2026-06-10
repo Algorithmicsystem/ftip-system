@@ -12,27 +12,24 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
-def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
-    """Fetch recent congressional stock trades from housestockwatcher.com.
+_CONGRESS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (compatible; AXIOM/1.0; +https://axiom.ai)",
+    "Accept": "application/json",
+}
 
-    Returns list of trade dicts with:
-      symbol, transaction_date, politician, party, chamber,
-      transaction_type (buy/sell), amount_range, disclosure_date
-    """
+_HOUSE_URL = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
+_SENATE_URL = "https://senate-stock-watcher-data.s3-us-west-2.amazonaws.com/aggregate/all_transactions.json"
+
+
+def _fetch_house_trades(cutoff: dt.date) -> List[Dict[str, Any]]:
     try:
         import httpx
-
-        url = "https://house-stock-watcher-data.s3-us-west-2.amazonaws.com/data/all_transactions.json"
-        resp = httpx.get(url, timeout=30, follow_redirects=True)
+        resp = httpx.get(_HOUSE_URL, headers=_CONGRESS_HEADERS, timeout=30, follow_redirects=True)
         if resp.status_code != 200:
-            logger.warning("congress_trades_fetch_failed status=%d", resp.status_code)
+            logger.warning("congress_house_fetch_failed status=%d", resp.status_code)
             return []
-
-        all_trades = resp.json()
-        cutoff = dt.date.today() - dt.timedelta(days=days_back)
-
         trades = []
-        for trade in all_trades:
+        for trade in resp.json():
             try:
                 tx_date_str = trade.get("transaction_date", "")
                 if not tx_date_str or tx_date_str == "N/A":
@@ -40,11 +37,9 @@ def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
                 tx_date = dt.date.fromisoformat(tx_date_str[:10])
                 if tx_date < cutoff:
                     continue
-
                 ticker = trade.get("ticker", "").strip().upper()
                 if not ticker or ticker in ("N/A", "--", ""):
                     continue
-
                 tx_type = trade.get("type", "").lower()
                 if "purchase" in tx_type or "buy" in tx_type:
                     direction = "buy"
@@ -52,7 +47,6 @@ def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
                     direction = "sell"
                 else:
                     continue
-
                 trades.append({
                     "symbol": ticker,
                     "transaction_date": tx_date.isoformat(),
@@ -65,13 +59,72 @@ def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
                 })
             except Exception:
                 continue
-
-        logger.info("congress_trades_fetched count=%d days_back=%d", len(trades), days_back)
         return trades
-
     except Exception as exc:
-        logger.warning("congress_trades_failed err=%s", exc)
+        logger.warning("congress_house_failed err=%s", exc)
         return []
+
+
+def _fetch_senate_trades(cutoff: dt.date) -> List[Dict[str, Any]]:
+    try:
+        import httpx
+        resp = httpx.get(_SENATE_URL, headers=_CONGRESS_HEADERS, timeout=30, follow_redirects=True)
+        if resp.status_code != 200:
+            logger.warning("congress_senate_fetch_failed status=%d", resp.status_code)
+            return []
+        trades = []
+        for trade in resp.json():
+            try:
+                tx_date_str = trade.get("transaction_date", "")
+                if not tx_date_str or tx_date_str == "N/A":
+                    continue
+                tx_date = dt.date.fromisoformat(tx_date_str[:10])
+                if tx_date < cutoff:
+                    continue
+                ticker = trade.get("ticker", "").strip().upper()
+                if not ticker or ticker in ("N/A", "--", ""):
+                    continue
+                tx_type = trade.get("type", "").lower()
+                if "purchase" in tx_type or "buy" in tx_type:
+                    direction = "buy"
+                elif "sale" in tx_type or "sell" in tx_type:
+                    direction = "sell"
+                else:
+                    continue
+                trades.append({
+                    "symbol": ticker,
+                    "transaction_date": tx_date.isoformat(),
+                    "politician": trade.get("senator", trade.get("first_name", "") + " " + trade.get("last_name", "")),
+                    "party": trade.get("party", ""),
+                    "chamber": "senate",
+                    "transaction_type": direction,
+                    "amount_range": trade.get("amount", ""),
+                    "disclosure_date": trade.get("disclosure_date", ""),
+                })
+            except Exception:
+                continue
+        return trades
+    except Exception as exc:
+        logger.warning("congress_senate_failed err=%s", exc)
+        return []
+
+
+def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
+    """Fetch recent congressional stock trades from both house and senate watchers.
+
+    Returns list of trade dicts with:
+      symbol, transaction_date, politician, party, chamber,
+      transaction_type (buy/sell), amount_range, disclosure_date
+    """
+    cutoff = dt.date.today() - dt.timedelta(days=days_back)
+    house = _fetch_house_trades(cutoff)
+    senate = _fetch_senate_trades(cutoff)
+    trades = house + senate
+    logger.info(
+        "congress_trades_fetched house=%d senate=%d total=%d days_back=%d",
+        len(house), len(senate), len(trades), days_back,
+    )
+    return trades
 
 
 def compute_congress_score(symbol: str, trades: List[Dict[str, Any]]) -> Dict[str, Any]:

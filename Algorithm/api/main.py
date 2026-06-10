@@ -1877,6 +1877,22 @@ app.include_router(intraday_routes_router)
 app.include_router(ws_alerts_router)
 app.include_router(morning_briefing_router)
 app.include_router(intraday_ic_router)
+# Public (no-auth) SRI endpoints registered BEFORE risk_framework_router so they
+# match first — the Risk Monitor dashboard panel fetches these without an API key.
+@app.get("/axiom/risk/sri", tags=["risk"])
+def get_sri_public(as_of_date: Optional[str] = None) -> Dict[str, Any]:
+    from api.axiom.risk.systemic_risk import compute_sri
+    import datetime as _dt
+    aod = _dt.date.fromisoformat(as_of_date) if as_of_date else _dt.date.today()
+    return compute_sri(aod)
+
+
+@app.get("/axiom/risk/sri/history", tags=["risk"])
+def get_sri_history_public(lookback_days: int = 63) -> Dict[str, Any]:
+    from api.axiom.risk.systemic_risk import get_sri_history
+    return {"lookback_days": lookback_days, "history": get_sri_history(lookback_days)}
+
+
 app.include_router(risk_framework_router)
 app.include_router(intelligence_router)
 app.include_router(family_office_router)

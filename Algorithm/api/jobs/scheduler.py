@@ -274,6 +274,11 @@ scheduler_manager = SchedulerManager()
 # Stable worker identity for this process
 _SCHEDULER_WORKER_ID: Optional[str] = None
 
+# Process-level guard: only ONE thread in this process may call start_scheduler.
+# Prevents the watchdog from racing against itself or multiple lifespan calls.
+_SCHEDULER_THREAD_LOCK = threading.Lock()
+_SCHEDULER_STARTED_IN_THIS_PROCESS = False
+
 
 def _get_worker_id() -> str:
     global _SCHEDULER_WORKER_ID
@@ -367,18 +372,25 @@ def _scheduler_heartbeat_loop() -> None:
 
 
 def _scheduler_watchdog() -> None:
-    """Restart the scheduler if it stops unexpectedly in production."""
-    import os
+    """Restart the scheduler if it stops unexpectedly in production.
+
+    Only restarts if THIS process originally won the scheduler lock (i.e.,
+    _SCHEDULER_STARTED_IN_THIS_PROCESS is True). Workers that lost the
+    initial lock race must never start the scheduler, even via watchdog.
+    """
     import time
     while True:
         time.sleep(30)
         if "pytest" in sys.modules:
             break
+        if not _SCHEDULER_STARTED_IN_THIS_PROCESS:
+            # This process lost the lock race — do nothing, ever.
+            continue
         if not scheduler_manager.running:
             env = os.environ.get("FTIP_ENV") or os.environ.get("RAILWAY_ENVIRONMENT", "")
             if env == "production":
                 if not _should_run_scheduler():
-                    logger.info("scheduler.watchdog skipped — another worker holds the lock")
+                    logger.info("scheduler.watchdog skipped — lost lock to another worker")
                     continue
                 logger.warning("scheduler.watchdog detected stopped scheduler — restarting")
                 try:
@@ -390,19 +402,31 @@ def _scheduler_watchdog() -> None:
 def start_scheduler() -> None:
     """Start the scheduler. Suppressed in pytest; can be disabled via FTIP_SCHEDULER_ENABLED=0.
 
+    Uses a process-level lock so only ONE call per process can start the scheduler,
+    regardless of how many threads or lifespan events trigger it concurrently.
+
     To trigger the pipeline manually from Railway console:
       python -c "from api.jobs.scheduler import _job_full_daily_pipeline; _job_full_daily_pipeline()"
     """
+    global _SCHEDULER_STARTED_IN_THIS_PROCESS
+
     if "pytest" in sys.modules:
         return
     from api import config
     if config.env("FTIP_SCHEDULER_ENABLED") == "0":
         logger.info("scheduler.disabled FTIP_SCHEDULER_ENABLED=0")
         return
-    if not _should_run_scheduler():
-        logger.info("scheduler.skipped — another worker holds the lock")
-        return
-    scheduler_manager.start()
+
+    with _SCHEDULER_THREAD_LOCK:
+        if _SCHEDULER_STARTED_IN_THIS_PROCESS:
+            logger.info("scheduler.already_started_in_this_process")
+            return
+        if not _should_run_scheduler():
+            logger.info("scheduler.skipped — another worker holds the lock")
+            return
+        scheduler_manager.start()
+        _SCHEDULER_STARTED_IN_THIS_PROCESS = True
+
     threading.Thread(target=_scheduler_heartbeat_loop, daemon=True).start()
     threading.Thread(target=_scheduler_watchdog, daemon=True).start()
 
