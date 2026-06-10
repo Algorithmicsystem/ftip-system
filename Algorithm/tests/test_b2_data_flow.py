@@ -123,9 +123,9 @@ class TestSymbolIntelligenceIsDefault:
         src = (JS_DIR / "panels" / "symbol_intelligence.js").read_text()
         assert "intelligence_quality_score === 0" not in src
 
-    def test_isdefault_checks_dau(self):
+    def test_isdefault_checks_error_field(self):
         src = (JS_DIR / "panels" / "symbol_intelligence.js").read_text()
-        assert "!data.dau" in src or "data.dau === 50" in src
+        assert "typeof data.error === 'string'" in src
 
     def test_symbol_intelligence_aapl_returns_200(self):
         with TestClient(app) as client:

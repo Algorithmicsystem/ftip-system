@@ -68,7 +68,8 @@ def test_source_inventory_classifies_sources_and_profiles(monkeypatch) -> None:
     inventory = source_governance.build_source_inventory(profile="buyer_demo")
     indexed = {item["source_name"]: item for item in inventory}
 
-    assert indexed["yfinance"]["source_restriction_flag"] is True
+    # yfinance is GOVERNANCE_REQUIRES_COMMERCIAL_REVIEW — allowed in buyer_demo, not restricted
+    assert indexed["yfinance"]["source_restriction_flag"] is False
     assert indexed["google_news_rss"]["source_restriction_flag"] is True
     assert indexed["massive_polygon"]["buyer_demo_allowed"] is True
     assert indexed["finnhub"]["requires_legal_review"] is True

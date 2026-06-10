@@ -287,6 +287,29 @@ def _real_stage(name: str) -> Dict[str, Any]:
             logger.error("axiom_scoring_stage error=%s", exc)
             return {"records_processed": 0}
 
+    if name == "alt_data_update":
+        from api import config
+        try:
+            from api.scrapers.smart_money_index import compute_smart_money_index
+            universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
+            if not universe:
+                from api.universe import AXIOM_UNIVERSE
+                symbols = list(AXIOM_UNIVERSE)
+            else:
+                symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            refreshed = 0
+            for sym in symbols:
+                try:
+                    compute_smart_money_index(sym)
+                    refreshed += 1
+                except Exception:
+                    pass
+            logger.info("alt_data_update_done symbols=%d", refreshed)
+            return {"records_processed": refreshed}
+        except Exception as exc:
+            logger.warning("alt_data_update_failed error=%s", exc)
+            return {"records_processed": 0}
+
     if name == "pnl_compute":
         try:
             from api.jobs.pnl import compute_pnl_batch

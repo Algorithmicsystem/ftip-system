@@ -55,6 +55,7 @@ class MorningBriefing:
     briefing_text: str = ""
     cross_asset_context: Dict[str, Any] = field(default_factory=dict)
     llm_enhanced: bool = False
+    universe_signal_summary: Dict[str, Any] = field(default_factory=dict)
 
 
 def compute_systemic_risk_index(as_of_date: dt.date) -> float:
@@ -224,6 +225,32 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         for r in top_rows
     ]
 
+    # Universe-wide signal counts across ALL scored symbols (not just top_opportunities)
+    signal_summary: Dict[str, Any] = {"n_buy": 0, "n_hold": 0, "n_sell": 0, "total": 0}
+    try:
+        sig_row = db.safe_fetchone(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE (payload->>'deployable_alpha_utility')::numeric >= 60) AS n_buy,
+                COUNT(*) FILTER (WHERE (payload->>'deployable_alpha_utility')::numeric >= 40
+                                 AND (payload->>'deployable_alpha_utility')::numeric < 60) AS n_hold,
+                COUNT(*) FILTER (WHERE (payload->>'deployable_alpha_utility')::numeric < 40) AS n_sell,
+                COUNT(*) AS total
+              FROM axiom_scores_daily
+             WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
+            """,
+            (),
+        )
+        if sig_row:
+            signal_summary = {
+                "n_buy": int(sig_row[0] or 0),
+                "n_hold": int(sig_row[1] or 0),
+                "n_sell": int(sig_row[2] or 0),
+                "total": int(sig_row[3] or 0),
+            }
+    except Exception:
+        pass
+
     # Key risks (high fragility)
     risk_rows = db.safe_fetchall(
         """
@@ -384,9 +411,9 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
     if config.openai_api_key():
         try:
             from api.llm.openai_client import synthesize_morning_briefing
-            n_buy = sum(1 for o in top_opportunities if (o.get("dau") or 0) >= 65)
-            n_hold = sum(1 for o in top_opportunities if 40 <= (o.get("dau") or 0) < 65)
-            n_sell = sum(1 for o in top_opportunities if (o.get("dau") or 0) < 40)
+            n_buy = signal_summary["n_buy"]
+            n_hold = signal_summary["n_hold"]
+            n_sell = signal_summary["n_sell"]
             avg_dau = (sum((o.get("dau") or 50) for o in top_opportunities) / len(top_opportunities)) if top_opportunities else 50.0
             ai_text = synthesize_morning_briefing({
                 "date": aod.strftime("%A, %B %d, %Y"),
@@ -423,6 +450,7 @@ def generate_morning_briefing(as_of_date: Optional[dt.date] = None) -> MorningBr
         briefing_text=briefing_text,
         cross_asset_context=cross_asset_ctx,
         llm_enhanced=_llm_enhanced,
+        universe_signal_summary=signal_summary,
     )
 
     # Store briefing
@@ -544,6 +572,21 @@ def trigger_morning_briefing(
     result = dataclasses.asdict(briefing)
     result["briefing_date"] = str(briefing.briefing_date)
     result["cached"] = False
+    return result
+
+
+@router.post("/morning/regenerate", dependencies=[Depends(security.require_prosperity_api_key)])
+def regenerate_morning_briefing(
+    as_of_date: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    """Force-regenerate morning briefing, bypassing cache."""
+    aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    briefing = generate_morning_briefing(aod)
+    import dataclasses
+    result = dataclasses.asdict(briefing)
+    result["briefing_date"] = str(briefing.briefing_date)
+    result["cached"] = False
+    result["regenerated"] = True
     return result
 
 

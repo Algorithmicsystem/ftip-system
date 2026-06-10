@@ -7,9 +7,12 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
+import socket
 import sys
 import threading
 from typing import Any, Dict, Optional
+from uuid import uuid4
 
 from fastapi import APIRouter
 
@@ -268,36 +271,99 @@ class SchedulerManager:
 # Module-level singleton
 scheduler_manager = SchedulerManager()
 
+# Stable worker identity for this process
+_SCHEDULER_WORKER_ID: Optional[str] = None
+
+
+def _get_worker_id() -> str:
+    global _SCHEDULER_WORKER_ID
+    if _SCHEDULER_WORKER_ID is None:
+        _SCHEDULER_WORKER_ID = f"{socket.gethostname()}:{os.getpid()}:{uuid4().hex[:8]}"
+    return _SCHEDULER_WORKER_ID
+
+
+def _ensure_scheduler_lock_table() -> None:
+    from api import db
+    try:
+        db.safe_execute(
+            """
+            CREATE TABLE IF NOT EXISTS scheduler_lock (
+                worker_id TEXT PRIMARY KEY,
+                locked_at  TIMESTAMPTZ DEFAULT now(),
+                heartbeat_at TIMESTAMPTZ DEFAULT now()
+            )
+            """,
+            (),
+        )
+    except Exception:
+        pass
+
 
 def _should_run_scheduler() -> bool:
-    """Return True only for the one worker that wins the PostgreSQL advisory lock.
+    """Return True only for the one worker that holds the table-based scheduler lock.
 
-    pg_try_advisory_lock is non-blocking: returns True once across all connections.
-    The lock is held for the connection lifetime and released automatically if the
-    worker dies, so the next healthy worker can claim it on restart.
+    Deletes stale locks (heartbeat >60 s old) then attempts an INSERT … ON CONFLICT
+    DO NOTHING to claim the single row.  Reliable on Railway where advisory locks
+    release when the pooler closes the underlying connection.
     """
     from api import db
     if not db.db_enabled():
         return True
+
+    _ensure_scheduler_lock_table()
+    worker_id = _get_worker_id()
+
     try:
-        result = db.safe_fetchone("SELECT pg_try_advisory_lock(42424242)")
-        return bool(result and result[0])
+        # Evict any stale holder that has stopped updating its heartbeat
+        db.safe_execute(
+            """
+            DELETE FROM scheduler_lock
+            WHERE worker_id != %s
+              AND heartbeat_at < now() - interval '60 seconds'
+            """,
+            (worker_id,),
+        )
+        # Try to claim the lock (no-op if another live worker already holds it)
+        db.safe_execute(
+            """
+            INSERT INTO scheduler_lock (worker_id, locked_at, heartbeat_at)
+            VALUES (%s, now(), now())
+            ON CONFLICT DO NOTHING
+            """,
+            (worker_id,),
+        )
+        # Win only if WE are the sole row
+        row = db.safe_fetchone("SELECT worker_id FROM scheduler_lock LIMIT 1", ())
+        return bool(row and row[0] == worker_id)
     except Exception:
         return True
 
 
 def _scheduler_heartbeat_loop() -> None:
-    """Log scheduler liveness every 60 seconds so Railway logs confirm it's alive."""
+    """Update table-based lock heartbeat every 30 s; log liveness every 60 s."""
     import time
+    tick = 0
     while True:
-        time.sleep(60)
+        time.sleep(30)
+        tick += 1
+        # Keep our lock row alive
         try:
-            status = scheduler_manager.get_status()
-            running = status.get("running", False)
-            n_jobs = len(status.get("next_run_times", {}))
-            logger.info("scheduler.alive running=%s jobs=%d", running, n_jobs)
+            from api import db
+            if db.db_enabled():
+                db.safe_execute(
+                    "UPDATE scheduler_lock SET heartbeat_at = now() WHERE worker_id = %s",
+                    (_get_worker_id(),),
+                )
         except Exception:
             pass
+        if tick % 2 == 0:
+            try:
+                status = scheduler_manager.get_status()
+                running = status.get("running", False)
+                n_jobs = len(status.get("next_run_times", {}))
+                logger.info("scheduler.alive running=%s jobs=%d", running, n_jobs)
+            except Exception:
+                pass
 
 
 def _scheduler_watchdog() -> None:

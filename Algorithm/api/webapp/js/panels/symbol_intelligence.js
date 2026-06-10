@@ -44,6 +44,13 @@ async function loadSymbolIntelligence(symbol) {
     if (intel && ratingEl) {
       ratingEl.textContent = `${symbol} · ${intel.analyst_rating || '—'} · DAU ${(intel.dau || 0).toFixed(1)}`;
     }
+
+    // Load Smart Money Index asynchronously (external API calls — can be slow)
+    const dauForSmi = intel ? intel.dau : undefined;
+    const dauParam = dauForSmi != null ? `?dau=${dauForSmi.toFixed(2)}` : '';
+    API.get(`/intelligence/smart-money/${symbol}${dauParam}`)
+      .then(smi => { if (_currentSymbol === symbol) _renderSmartMoneySection(smi); })
+      .catch(() => { const s = document.getElementById('smi-section'); if (s) s.style.display = 'none'; });
   } catch (err) {
     if (activePane) activePane.innerHTML = `<div class="alert-banner warning">Could not load intelligence for ${symbol}: ${err.message}</div>`;
     if (badgeEl) { badgeEl.className = 'signal-badge hold'; badgeEl.textContent = 'HOLD'; }
@@ -59,7 +66,7 @@ function renderIntelligenceTab(data, symbol) {
     return;
   }
 
-  const isDefault = !data.dau || (data.dau === 50 && data.eis_score === 50 && data.caps_score === 50);
+  const isDefault = typeof data.error === 'string';
   const defaultBanner = isDefault
     ? `<div class="alert-banner info" style="margin-bottom:10px;">Pipeline data not yet available — scores reflect system defaults.</div>`
     : `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
@@ -123,7 +130,46 @@ function renderIntelligenceTab(data, symbol) {
           </div>
         </div>
       </div>`;
-    })()}`;
+    })()}
+    <div id="smi-section" style="margin-top:14px;">
+      <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Smart Money Index</div>
+      <div class="loading-skeleton skeleton-line full" style="margin-bottom:6px;height:10px;border-radius:4px;"></div>
+      <div class="loading-skeleton skeleton-line medium" style="height:10px;border-radius:4px;"></div>
+    </div>`;
+}
+
+function _renderSmartMoneySection(smi) {
+  const el = document.getElementById('smi-section');
+  if (!el) return;
+  if (!smi || smi.error) {
+    el.style.display = 'none';
+    return;
+  }
+
+  function _smiColor(v) {
+    return v >= 60 ? '#10b981' : v >= 40 ? '#f59e0b' : '#ef4444';
+  }
+
+  const divergenceHTML = smi.divergence_detected ? `
+    <div style="margin-top:8px;padding:8px 10px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:6px;font-size:11px;">
+      <span style="font-weight:700;color:#f59e0b;">⚡ ${smi.divergence_type}</span>
+      <div style="color:var(--text-secondary);margin-top:4px;line-height:1.5;">${smi.key_insight}</div>
+    </div>` : '';
+
+  const insightHTML = (!smi.divergence_detected && smi.key_insight) ? `
+    <div style="margin-top:6px;font-size:11px;color:var(--text-muted);line-height:1.5;">${smi.key_insight}</div>` : '';
+
+  el.innerHTML = `
+    <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;">Smart Money Index</div>
+    ${scoreBarHTML('SMI', smi.smi_score, _smiColor(smi.smi_score))}
+    <div style="margin-top:6px;display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+      ${scoreBarHTML('Insider (ICS)', smi.ics_score, _smiColor(smi.ics_score))}
+      ${scoreBarHTML('Congress (CIS)', smi.cis_score, _smiColor(smi.cis_score))}
+      ${scoreBarHTML('Dark Pool (DPS)', smi.dps_score, _smiColor(smi.dps_score))}
+      ${scoreBarHTML('Mgmt Tone (MCS)', smi.mcs_score, _smiColor(smi.mcs_score))}
+    </div>
+    ${divergenceHTML}
+    ${insightHTML}`;
 }
 
 function renderRiskTab(data, symbol) {

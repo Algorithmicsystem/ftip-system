@@ -3297,6 +3297,52 @@ def congress_universe() -> Dict[str, Any]:
     return {"scores": scores, "total_trades": len(trades)}
 
 
+@app.get("/intelligence/insider/{symbol}")
+def insider_intelligence(symbol: str) -> Dict[str, Any]:
+    """SEC EDGAR Form 4 insider transaction intelligence for a symbol."""
+    from api.scrapers.sec_insider import compute_insider_score, fetch_insider_transactions
+    txns = fetch_insider_transactions(symbol.upper(), days_back=90)
+    return compute_insider_score(symbol.upper(), txns)
+
+
+@app.get("/intelligence/smart-money/{symbol}")
+def smart_money_intelligence(symbol: str, dau: Optional[float] = None) -> Dict[str, Any]:
+    """Smart Money Index for a symbol — combines insider, congress, dark pool, and management tone."""
+    from api.scrapers.smart_money_index import compute_smart_money_index
+    return compute_smart_money_index(symbol.upper(), dau=dau)
+
+
+@app.get("/intelligence/smart-money/universe/all")
+def smart_money_universe() -> Dict[str, Any]:
+    """Smart Money Index for all 30 universe symbols."""
+    from api.scrapers.smart_money_index import compute_smart_money_index
+    from api.universe import AXIOM_UNIVERSE
+    results = []
+    for sym in AXIOM_UNIVERSE:
+        try:
+            results.append(compute_smart_money_index(sym))
+        except Exception:
+            results.append({"symbol": sym, "smi_score": 50.0, "smi_signal": "NEUTRAL"})
+    results.sort(key=lambda x: x.get("smi_score", 50.0), reverse=True)
+    return {"results": results, "count": len(results)}
+
+
+@app.post("/admin/refresh-smart-money")
+def refresh_smart_money() -> Dict[str, Any]:
+    """Refresh Smart Money Index for all universe symbols (force re-fetch from EDGAR/FINRA)."""
+    from api.scrapers.smart_money_index import compute_smart_money_index
+    from api.universe import AXIOM_UNIVERSE
+    results = []
+    errors = []
+    for sym in AXIOM_UNIVERSE:
+        try:
+            smi = compute_smart_money_index(sym)
+            results.append({"symbol": sym, "smi_score": smi["smi_score"], "signal": smi["smi_signal"]})
+        except Exception as exc:
+            errors.append({"symbol": sym, "error": str(exc)})
+    return {"status": "ok", "refreshed": len(results), "errors": len(errors), "results": results}
+
+
 _register_providers_health(app)
 _providers_paths = {getattr(route, "path", None) for route in app.router.routes}
 logger.info(
