@@ -46,7 +46,7 @@ _STAGE_DEPS: Dict[str, List[str]] = {
     "bar_ingestion": [],
     "feature_computation": ["bar_ingestion"],
     "signal_generation": ["feature_computation"],
-    "axiom_scoring": ["feature_computation"],
+    "axiom_scoring": ["bar_ingestion"],
     "alt_data_update": [],
     "factor_computation": ["feature_computation"],
     "ml_inference": ["axiom_scoring"],
@@ -195,16 +195,96 @@ def _real_stage(name: str) -> Dict[str, Any]:
         )
         return {"records_processed": 0}
 
-    if name in ("feature_computation", "signal_generation", "axiom_scoring"):
-        # Covered by bar_ingestion (prosperity snapshot runs all stages); report axiom count
+    if name == "feature_computation":
         try:
-            rows = db.safe_fetchall(
+            import httpx
+            from api import config
+            resp = httpx.post(
+                f"{_BASE}/jobs/features/daily",
+                json={"as_of_date": today.isoformat()},
+                headers={"X-FTIP-API-Key": config.get_api_key()},
+                timeout=300.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                records = len(data.get("symbols_ok", []))
+                logger.info("feature_computation_done symbols_ok=%d", records)
+                return {"records_processed": records}
+            logger.error(
+                "feature_computation_http_error status=%d body=%.200s",
+                resp.status_code, resp.text,
+            )
+        except Exception as exc:
+            logger.error("feature_computation_stage error=%s", exc)
+        return {"records_processed": 0}
+
+    if name == "signal_generation":
+        try:
+            import httpx
+            from api import config
+            resp = httpx.post(
+                f"{_BASE}/jobs/signals/daily",
+                json={"as_of_date": today.isoformat()},
+                headers={"X-FTIP-API-Key": config.get_api_key()},
+                timeout=300.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                records = len(data.get("symbols_ok", []))
+                logger.info("signal_generation_done symbols_ok=%d", records)
+                return {"records_processed": records}
+            logger.error(
+                "signal_generation_http_error status=%d body=%.200s",
+                resp.status_code, resp.text,
+            )
+        except Exception as exc:
+            logger.error("signal_generation_stage error=%s", exc)
+        return {"records_processed": 0}
+
+    if name == "axiom_scoring":
+        # run_axiom_replay reads bars directly from DB (market_bars_daily /
+        # prosperity_daily_bars fallback) — no HTTP server dependency.
+        # Use the latest date that has bars rather than strictly today so the
+        # stage works on weekends/holidays and in local dev without a running server.
+        try:
+            from api import config
+            from api.axiom.replay import run_axiom_replay
+            universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
+            if not universe:
+                from api.universe import AXIOM_UNIVERSE
+                universe = ",".join(AXIOM_UNIVERSE)
+            symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            # Resolve target date: prefer today if bars exist, else latest bar date
+            bar_date_row = db.safe_fetchone(
+                """
+                SELECT GREATEST(
+                    COALESCE((SELECT MAX(date) FROM prosperity_daily_bars), %s::date),
+                    COALESCE((SELECT MAX(as_of_date) FROM market_bars_daily), %s::date)
+                )
+                """,
+                (today, today),
+            )
+            target_date = (bar_date_row[0] if (bar_date_row and bar_date_row[0]) else today)
+            logger.info(
+                "axiom_scoring_start symbols=%d date=%s",
+                len(symbols), target_date.isoformat(),
+            )
+            run_axiom_replay(
+                symbols=symbols,
+                start_date=target_date.isoformat(),
+                end_date=target_date.isoformat(),
+                lookback=252,
+                persist=True,
+            )
+            row = db.safe_fetchone(
                 "SELECT COUNT(*)::int FROM axiom_scores_daily WHERE as_of_date = %s",
-                (today,),
-            ) or []
-            count = int(rows[0][0]) if rows else 0
+                (target_date,),
+            )
+            count = int(row[0]) if row else 0
+            logger.info("axiom_scoring_done scores_written=%d date=%s", count, target_date.isoformat())
             return {"records_processed": count}
-        except Exception:
+        except Exception as exc:
+            logger.error("axiom_scoring_stage error=%s", exc)
             return {"records_processed": 0}
 
     if name == "pnl_compute":
