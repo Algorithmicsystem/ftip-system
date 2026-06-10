@@ -148,7 +148,7 @@ def _real_stage(name: str) -> Dict[str, Any]:
                     "lookback": 252,
                     "concurrency": 2,
                 },
-                headers={"X-FTIP-API-Key": config.env("FTIP_API_KEY") or ""},
+                headers={"X-FTIP-API-Key": config.get_api_key()},
                 timeout=300.0,
             )
             if resp.status_code == 200:
