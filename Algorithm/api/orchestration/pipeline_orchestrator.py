@@ -3,11 +3,17 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import os
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from api import db
+
+# Resolve the port Railway (or any deployment) is actually listening on.
+# Railway sets PORT env var (typically 8080); local dev uses 8000.
+_PORT = os.environ.get("PORT", "8000")
+_BASE = f"http://localhost:{_PORT}"
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +139,7 @@ def _real_stage(name: str) -> Dict[str, Any]:
                 pass
 
             resp = httpx.post(
-                "http://localhost:8000/prosperity/snapshot/run",
+                f"{_BASE}/prosperity/snapshot/run",
                 json={
                     "symbols": symbols,
                     "from_date": (today - dt.timedelta(days=365)).isoformat(),

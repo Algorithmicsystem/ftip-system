@@ -48,8 +48,9 @@ def _job_morning_briefing() -> None:
 def _job_intraday_update(hour_label: str) -> None:
     from api import config
     try:
+        import os
         import httpx
-        base = "http://localhost:8000"
+        base = f"http://localhost:{os.environ.get('PORT', '8000')}"
         httpx.post(
             f"{base}/axiom/intraday/run",
             json={"symbols": [], "avg_daily_volume": 1_000_000},
@@ -268,6 +269,23 @@ class SchedulerManager:
 scheduler_manager = SchedulerManager()
 
 
+def _should_run_scheduler() -> bool:
+    """Return True only for the one worker that wins the PostgreSQL advisory lock.
+
+    pg_try_advisory_lock is non-blocking: returns True once across all connections.
+    The lock is held for the connection lifetime and released automatically if the
+    worker dies, so the next healthy worker can claim it on restart.
+    """
+    from api import db
+    if not db.db_enabled():
+        return True
+    try:
+        result = db.safe_fetchone("SELECT pg_try_advisory_lock(42424242)")
+        return bool(result and result[0])
+    except Exception:
+        return True
+
+
 def _scheduler_heartbeat_loop() -> None:
     """Log scheduler liveness every 60 seconds so Railway logs confirm it's alive."""
     import time
@@ -293,6 +311,9 @@ def _scheduler_watchdog() -> None:
         if not scheduler_manager.running:
             env = os.environ.get("FTIP_ENV") or os.environ.get("RAILWAY_ENVIRONMENT", "")
             if env == "production":
+                if not _should_run_scheduler():
+                    logger.info("scheduler.watchdog skipped — another worker holds the lock")
+                    continue
                 logger.warning("scheduler.watchdog detected stopped scheduler — restarting")
                 try:
                     scheduler_manager.start()
@@ -311,6 +332,9 @@ def start_scheduler() -> None:
     from api import config
     if config.env("FTIP_SCHEDULER_ENABLED") == "0":
         logger.info("scheduler.disabled FTIP_SCHEDULER_ENABLED=0")
+        return
+    if not _should_run_scheduler():
+        logger.info("scheduler.skipped — another worker holds the lock")
         return
     scheduler_manager.start()
     threading.Thread(target=_scheduler_heartbeat_loop, daemon=True).start()

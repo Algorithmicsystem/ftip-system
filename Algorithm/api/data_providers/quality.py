@@ -49,6 +49,12 @@ _PROVIDER_CAPABILITY_OVERRIDES: Dict[str, Dict[str, Any]] = {
         "asset_capability": "bars_and_fundamentals",
         "capabilities": ["daily_bars", "reference_bars", "intraday_bars", "quarterly_fundamentals"],
         "fallback_priority": 5,
+        "capability_priorities": {
+            "daily_bars": 5,
+            "reference_bars": 5,
+            "intraday_bars": 5,
+            "quarterly_fundamentals": 35,
+        },
         "connector_slot": "primary_free_market_data",
         "freshness_grade": "daily_free",
         "quality_hint": "primary_free",
@@ -163,7 +169,11 @@ def provider_capability_profile(
         "asset_capability": override.get("asset_capability") or definition.get("provider_type") or "unknown",
         "capabilities": capabilities,
         "requested_capability": resolved_capability,
-        "fallback_priority": int(override.get("fallback_priority") or 99),
+        "fallback_priority": int(
+            (override.get("capability_priorities") or {}).get(resolved_capability)
+            or override.get("fallback_priority")
+            or 99
+        ),
         "connector_slot": override.get("connector_slot") or "unassigned",
         "freshness_grade": override.get("freshness_grade") or "unknown",
         "quality_hint": override.get("quality_hint") or "unclassified",
