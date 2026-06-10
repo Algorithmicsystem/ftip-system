@@ -153,8 +153,9 @@ def _real_stage(name: str) -> Dict[str, Any]:
             )
             if resp.status_code == 200:
                 data = resp.json()
-                records = len(data.get("symbols_ok", []))
-                failed = data.get("symbols_failed") or []
+                result = data.get("result", data)
+                records = len(result.get("symbols_ok", []))
+                failed = result.get("symbols_failed") or []
                 logger.info(
                     "bar_ingestion_snapshot_done symbols_ok=%d symbols_failed=%d",
                     records, len(failed),
