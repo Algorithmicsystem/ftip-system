@@ -3146,21 +3146,25 @@ def seed_market_data() -> Dict[str, Any]:
     """
     import datetime as _dt
     import json as _json
-    import math as _math
     from api.universe import AXIOM_UNIVERSE
     from api.data_providers.bars import _fetch_daily_yfinance
 
-    def _safe_json(obj):
-        if hasattr(obj, 'isoformat'):  # date/datetime
-            return obj.isoformat()
-        if hasattr(obj, 'item'):  # numpy scalar → unwrap to Python native
-            v = obj.item()
-            if isinstance(v, float) and not _math.isfinite(v):
-                return None
-            return v
-        if isinstance(obj, float) and not _math.isfinite(obj):
-            return None
-        return str(obj)
+    def _bar_to_raw_json(bar: dict) -> str:
+        safe = {}
+        for k, v in bar.items():
+            if k == 'source':
+                continue
+            if isinstance(v, (_dt.date, _dt.datetime)):
+                safe[k] = v.isoformat()
+            elif isinstance(v, float):
+                safe[k] = v
+            elif isinstance(v, int):
+                safe[k] = v
+            elif v is None:
+                safe[k] = None
+            else:
+                safe[k] = str(v)
+        return _json.dumps(safe)
 
     if not db.db_write_enabled():
         return {"error": "db_write_disabled", "symbols_seeded": 0, "total_bars": 0}
@@ -3221,10 +3225,7 @@ def seed_market_data() -> Dict[str, Any]:
 
         for bar in bars:
             bar_date = bar["as_of_date"]
-            raw_json = _json.dumps(
-                {k: v for k, v in bar.items() if k != 'source'},
-                default=_safe_json,
-            )
+            raw_json = _bar_to_raw_json(bar)
 
             # ── 3a. Write to prosperity_daily_bars (what the pipeline reads) ──
             try:

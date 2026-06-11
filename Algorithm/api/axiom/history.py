@@ -140,7 +140,7 @@ def build_axiom_history_record(
             mae=rounded(payload.get("mae"), digits=6),
             mfe=rounded(payload.get("mfe"), digits=6),
             invalidation_triggered=payload.get("invalidation_triggered"),
-            signal_half_life_days=payload.get("signal_half_life_days"),
+            signal_half_life_days=int(payload.get("signal_half_life_days")) if payload.get("signal_half_life_days") is not None else None,
             continuation_decay_score=rounded(
                 payload.get("continuation_decay_score"),
                 digits=4,

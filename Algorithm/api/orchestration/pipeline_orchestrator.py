@@ -291,16 +291,18 @@ def _real_stage(name: str) -> Dict[str, Any]:
         from api import config
         try:
             from api.scrapers.smart_money_index import compute_smart_money_index
+            from api.scrapers.congress_trading import fetch_recent_congress_trades
             universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
             if not universe:
                 from api.universe import AXIOM_UNIVERSE
                 symbols = list(AXIOM_UNIVERSE)
             else:
                 symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            congress_trades = fetch_recent_congress_trades(days_back=90)
             refreshed = 0
             for sym in symbols:
                 try:
-                    compute_smart_money_index(sym)
+                    compute_smart_money_index(sym, prefetched_congress_trades=congress_trades)
                     refreshed += 1
                 except Exception:
                     pass

@@ -35,6 +35,7 @@ def compute_smart_money_index(
     symbol: str,
     dau: Optional[float] = None,
     days_back: int = 90,
+    prefetched_congress_trades: list = None,
 ) -> Dict[str, Any]:
     """Compute the Smart Money Index for *symbol*.
 
@@ -68,7 +69,9 @@ def compute_smart_money_index(
     cis_detail: Dict[str, Any] = {}
     try:
         from api.scrapers.congress_trading import compute_congress_score, fetch_recent_congress_trades
-        trades = fetch_recent_congress_trades(days_back=days_back)
+        trades = prefetched_congress_trades
+        if trades is None:
+            trades = fetch_recent_congress_trades(days_back=days_back)
         cis_data = compute_congress_score(symbol, trades)
         cis_score = float(cis_data.get("congress_score") or 50.0)
         cis_detail = {
