@@ -103,15 +103,31 @@ def _load_axiom_payload(symbol: str, as_of_date: Optional[dt.date] = None) -> Di
 
 
 def _load_fundamentals(symbol: str, as_of_date: Optional[dt.date] = None) -> Dict[str, Any]:
-    """Load fundamental data from AXIOM payload fundamental_reality engine scores."""
-    payload = _load_axiom_payload(symbol, as_of_date)
-    engine_scores = payload.get("engine_scores") or {}
-    fund = (engine_scores.get("fundamental_reality") or {}).get("components") or {}
-    return {
-        "ebitda_margin": float(fund.get("ebitda_margin_score") or 0.0) / 100.0 * 0.30,
-        "fcf_yield": float(fund.get("caps_component") or 50.0) / 100.0 * 0.05,
-        "fcf_to_ebitda": float(fund.get("caps_component") or 50.0) / 200.0,
-    }
+    """Load real fundamental data via fundamental_loader, augmented by AXIOM payload."""
+    try:
+        from api.pe.fundamental_loader import load_company_fundamentals
+        real = load_company_fundamentals(symbol)
+        gross_margin = real.get("gross_margin") or 0.0
+        fcf_margin = real.get("fcf_margin") or 0.0
+        op_margin = real.get("op_margin") or 0.0
+        return {
+            "ebitda_margin": op_margin if op_margin > 0 else gross_margin * 0.5,
+            "fcf_yield": fcf_margin,
+            "fcf_to_ebitda": fcf_margin / op_margin if op_margin > 0 else 0.5,
+            "gross_margin": gross_margin,
+            "op_margin": op_margin,
+            "revenue_growth_yoy": real.get("revenue_growth_yoy") or 0.0,
+            "debt_to_equity": real.get("debt_to_equity") or 0.0,
+        }
+    except Exception:
+        payload = _load_axiom_payload(symbol, as_of_date)
+        engine_scores = payload.get("engine_scores") or {}
+        fund = (engine_scores.get("fundamental_reality") or {}).get("components") or {}
+        return {
+            "ebitda_margin": float(fund.get("ebitda_margin_score") or 0.0) / 100.0 * 0.30,
+            "fcf_yield": float(fund.get("caps_component") or 50.0) / 100.0 * 0.05,
+            "fcf_to_ebitda": float(fund.get("caps_component") or 50.0) / 200.0,
+        }
 
 
 def run_daily_deal_flow_screen(as_of_date: Optional[dt.date] = None) -> Dict[str, Any]:
@@ -124,12 +140,37 @@ def run_daily_deal_flow_screen(as_of_date: Optional[dt.date] = None) -> Dict[str
         fundamentals = _load_fundamentals(symbol, aod)
         score = score_acquisition_candidate(symbol, axiom_data, fundamentals)
         if score >= 30:
+            # Compute DAS using real fundamentals
+            das_score = score
+            das_grade = "unknown"
+            try:
+                from api.pe.das_engine import compute_das_score
+                full_fund = {**fundamentals}
+                full_fund["axiom_dau"] = axiom_data.get("dau") or axiom_data.get("deployable_alpha_utility")
+                full_fund["axiom_eis"] = (
+                    (axiom_data.get("engine_scores") or {})
+                    .get("fundamental_reality", {})
+                    .get("components", {})
+                    .get("eis_component")
+                )
+                full_fund["axiom_caps"] = (
+                    (axiom_data.get("engine_scores") or {})
+                    .get("fundamental_reality", {})
+                    .get("components", {})
+                    .get("caps_component")
+                )
+                das_result = compute_das_score(symbol, full_fund)
+                das_score = das_result.das_score
+                das_grade = das_result.das_grade
+            except Exception:
+                pass
             candidates.append({
                 "symbol": symbol,
                 "acquisition_score": score,
+                "das_score": das_score,
+                "das_grade": das_grade,
                 "dau": float(axiom_data.get("dau") or axiom_data.get("deployable_alpha_utility") or 50.0),
                 "schilit_risk": str(axiom_data.get("schilit_overall_risk") or "unknown"),
-                "das_grade": str(axiom_data.get("das_grade") or "unknown"),
                 "rationale": _build_deal_rationale(symbol, score, axiom_data, fundamentals),
             })
 

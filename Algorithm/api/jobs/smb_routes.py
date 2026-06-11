@@ -283,7 +283,13 @@ def get_intelligence_dashboard(
 
     history = _load_monthly_history(entity_id, n=12)
     if not history:
-        return {"status": "no_data", "entity_id": entity_id}
+        # Fall back to real public market data for ticker symbols
+        try:
+            from api.smb.public_intelligence import compute_smb_intelligence
+            result = compute_smb_intelligence(entity_id)
+            return result
+        except Exception:
+            return {"status": "no_data", "entity_id": entity_id}
 
     recent = history[0]
     rev = float(recent.get("revenue") or 0.0)

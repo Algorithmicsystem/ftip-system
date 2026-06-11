@@ -444,6 +444,38 @@ def get_deal_attractiveness_score(symbol: str) -> Dict[str, Any]:
         return {"symbol": symbol, "status": "error", "error": str(exc)}
 
 
+@router.get("/forensic/{symbol}")
+def get_forensic_analysis(symbol: str) -> Dict[str, Any]:
+    """Schilit forensic analysis for a public company using real yfinance fundamentals."""
+    from api.pe.schilit_analyzer import SchilitForensicEngine
+    from api.pe.fundamental_loader import load_company_fundamentals
+    sym = symbol.upper()
+    try:
+        fund = load_company_fundamentals(sym)
+        financials = {
+            "revenue_growth_yoy": fund.get("revenue_growth_yoy") or 0.0,
+            "gross_margin": fund.get("gross_margin") or 0.0,
+            "op_margin": fund.get("op_margin") or 0.0,
+        }
+        engine = SchilitForensicEngine()
+        report = engine.analyze(sym, financials)
+        return {
+            "symbol": sym,
+            "overall_risk": report.overall_risk,
+            "forensic_summary": report.forensic_summary,
+            "red_flags": report.red_flags,
+            "green_flags": report.green_flags,
+            "eis_impact": report.eis_impact,
+            "category_scores": report.category_scores,
+            "report": {
+                "overall_risk": report.overall_risk,
+                "forensic_summary": report.forensic_summary,
+            },
+        }
+    except Exception as exc:
+        return {"symbol": sym, "status": "error", "error": str(exc)}
+
+
 @router.get("/deal-flow")
 def get_deal_flow(as_of_date: Optional[str] = Query(default=None)) -> Dict[str, Any]:
     """Daily acquisition candidate screening across AXIOM universe."""

@@ -3,71 +3,8 @@
 let _currentSMBEntity = null;
 
 async function loadSMBDemo() {
-  const body = document.getElementById('smb-body');
-  if (!body) return;
-  _currentSMBEntity = 'DEMO_RESTAURANT';
-  body.innerHTML = '<div class="loading-skeleton skeleton-line full" style="height:60px;margin-bottom:8px;border-radius:6px;"></div>'.repeat(3);
-
-  // Hardcoded demo restaurant entity
-  const demoData = {
-    entity_id: 'DEMO_RESTAURANT',
-    entity_name: 'Coastal Kitchen (Demo)',
-    health_score: 68,
-    revenue_trend: 'growing',
-    cash_runway_months: 18,
-    monthly_burn_rate: 45000,
-    gross_margin: 0.62,
-    pricing_intelligence: {
-      pricing_power_score: 68,
-      churn_risk_score: 22,
-      arpu_trend: 'growing',
-      recommendation: 'Pricing power is strong. Recommend 4–6% price increase at next menu refresh. '
-        + 'Current food cost at 34% is 4pp above target — a price increase directly closes this gap.',
-    },
-    cashflow_forecast: Array.from({ length: 6 }, (_, i) => ({
-      net_cash_flow: 12000 + i * 1800 + (Math.random() - 0.3) * 5000,
-    })),
-    supplier_risks: [
-      { supplier_name: 'Prime Foods Co', risk_score: 62, spend_percentage: 38 },
-      { supplier_name: 'Farm Fresh Supply', risk_score: 28, spend_percentage: 22 },
-    ],
-    alerts: [
-      { severity: 'warning', message: 'Food cost 34% vs 30% target — prime cost gap of $168K/yr' },
-      { severity: 'info', message: 'Labor cost 31% — within target range (28–32%)' },
-    ],
-  };
-
-  // Inject credit metrics as a special section
-  body.innerHTML = '';
-  renderSMBDashboard(demoData);
-
-  // Append credit section after main render
-  const body2 = document.getElementById('smb-body');
-  if (body2) {
-    const creditEl = document.createElement('div');
-    creditEl.innerHTML = `
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:14px;">Credit Profile (Demo)</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px;">
-        <div class="metric-card" style="text-align:center;padding:8px;">
-          <span class="metric-card__label">Rating</span>
-          <span class="metric-card__value" style="font-size:16px;color:var(--signal-buy);">Good</span>
-        </div>
-        <div class="metric-card" style="text-align:center;padding:8px;">
-          <span class="metric-card__label">DSCR</span>
-          <span class="metric-card__value" style="font-size:16px;color:var(--signal-buy);">2.0x</span>
-        </div>
-        <div class="metric-card" style="text-align:center;padding:8px;">
-          <span class="metric-card__label">Max Add. Debt</span>
-          <span class="metric-card__value" style="font-size:14px;color:var(--signal-hold);">$240K</span>
-        </div>
-      </div>
-      <div style="padding:8px;background:var(--bg-tertiary);border-radius:6px;font-size:11px;color:var(--text-secondary);line-height:1.6;margin-bottom:10px;">
-        Annual debt service capacity: $120K/yr. DSCR 2.0x — strong coverage.
-        Opportunity: payables extension by 15 days releases ~$98K cash.
-      </div>
-      <div class="alert-banner info" style="font-size:11px;">Demo data — enter an Entity ID and click Load for live SMB intelligence.</div>`;
-    body2.appendChild(creditEl);
-  }
+  // Auto-load COST as the default ticker example
+  await loadSMBIntelligence('COST');
 }
 
 async function loadSMBIntelligence(entityId) {
@@ -113,66 +50,109 @@ function renderSMBDashboard(data) {
   const body = document.getElementById('smb-body');
   if (!body) return;
 
-  const health  = data.health_score ?? 50;
+  // Support both private SMB entities and public ticker fallback
+  const isPublicTicker = data.dscr != null || data.credit_score != null;
+  const health  = data.health_score ?? data.credit_score ?? data.overall_health_score ?? 50;
   const runway  = data.cash_runway_months;
-  const revenue = data.revenue_trend || 'stable';
-  const entity  = data.entity_name || data.entity_id || '—';
+  const revenue = data.revenue_trend || (data.revenue_growth_pct > 3 ? 'growing' : data.revenue_growth_pct < -1 ? 'declining' : 'stable');
+  const entity  = data.entity_name || data.symbol || data.entity_id || '—';
+
+  // Credit metrics: prefer top-level from public_intelligence, else modules.credit
+  const dscr = data.dscr ?? data.modules?.credit?.dscr ?? null;
+  const creditScore = data.credit_score ?? null;
+  const maxDebt = data.max_additional_debt_usd ?? null;
+  const grossMarginPct = data.gross_margin_pct ?? (data.gross_margin != null ? data.gross_margin * 100 : null);
+  const revGrowthPct = data.revenue_growth_pct ?? null;
+  const pricingPower = data.pricing_power_score ?? data.modules?.pricing?.score ?? null;
+  const axiomDau = data.axiom_dau;
+  const axiomSig = data.axiom_signal;
 
   const healthCls = health >= 70 ? 'var(--signal-buy)' : health >= 40 ? 'var(--signal-hold)' : 'var(--signal-sell)';
   const revCls = revenue === 'growing' ? 'var(--signal-buy)' : revenue === 'declining' ? 'var(--signal-sell)' : 'var(--text-muted)';
+  const dscrCls = dscr != null ? (dscr >= 1.5 ? 'var(--signal-buy)' : dscr >= 1.0 ? 'var(--signal-hold)' : 'var(--signal-sell)') : 'var(--text-muted)';
 
   body.innerHTML = `
-    <!-- Header metrics -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px;">
       <div>
-        <div class="metric-card__label">Entity</div>
-        <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-top:2px;">${entity}</div>
+        <div class="metric-card__label">Entity / Symbol</div>
+        <div style="font-size:14px;font-weight:600;color:var(--text-primary);margin-top:2px;">${entity}${isPublicTicker && data.sector ? ` <span style="font-size:10px;color:var(--text-muted);font-weight:400;">${data.sector}</span>` : ''}</div>
       </div>
-      <div style="text-align:center;">
-        <div class="metric-card__label">Health Score</div>
-        <div style="font-family:var(--font-mono);font-size:24px;font-weight:700;color:${healthCls};">${health.toFixed(0)}</div>
-      </div>
+      ${axiomSig ? `<div style="text-align:center;"><div class="metric-card__label">AXIOM Signal</div><div style="font-size:14px;font-weight:700;color:${axiomSig==='BUY'?'var(--signal-buy)':axiomSig==='SELL'?'var(--signal-sell)':'var(--signal-hold)'};">${axiomSig} ${axiomDau!=null?`· ${axiomDau.toFixed(1)}`:''}` + `</div></div>` : ''}
       <div style="text-align:right;">
         <div class="metric-card__label">Revenue Trend</div>
-        <div style="font-size:13px;font-weight:600;color:${revCls};margin-top:2px;text-transform:capitalize;">${revenue}</div>
+        <div style="font-size:13px;font-weight:600;color:${revCls};margin-top:2px;text-transform:capitalize;">${revenue}${revGrowthPct!=null?` (${revGrowthPct>0?'+':''}${revGrowthPct.toFixed(1)}%)`:''}` + `</div>
       </div>
     </div>
 
-    <!-- Key metrics row -->
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px;">
-      <div class="metric-card" style="text-align:center;padding:8px;">
-        <span class="metric-card__label">Cash Runway</span>
-        <span class="metric-card__value" style="font-size:16px;color:${runway != null && runway < 6 ? 'var(--signal-sell)' : runway != null && runway < 12 ? 'var(--signal-hold)' : 'var(--signal-buy)'};">${runway != null ? `${runway}mo` : '—'}</span>
-      </div>
-      <div class="metric-card" style="text-align:center;padding:8px;">
-        <span class="metric-card__label">Burn Rate</span>
-        <span class="metric-card__value" style="font-size:16px;">${data.monthly_burn_rate != null ? `$${(data.monthly_burn_rate/1000).toFixed(0)}K` : '—'}</span>
-      </div>
-      <div class="metric-card" style="text-align:center;padding:8px;">
+    <!-- Credit & pricing row -->
+    <div style="display:grid;grid-template-columns:repeat(${isPublicTicker?4:3},1fr);gap:8px;margin-bottom:14px;">
+      ${dscr != null ? `<div class="metric-card" style="text-align:center;padding:8px;">
+        <span class="metric-card__label">DSCR</span>
+        <span class="metric-card__value" style="font-size:16px;color:${dscrCls};">${dscr.toFixed(2)}x</span>
+      </div>` : ''}
+      ${grossMarginPct != null ? `<div class="metric-card" style="text-align:center;padding:8px;">
         <span class="metric-card__label">Gross Margin</span>
-        <span class="metric-card__value" style="font-size:16px;">${data.gross_margin != null ? `${(data.gross_margin*100).toFixed(1)}%` : '—'}</span>
-      </div>
+        <span class="metric-card__value" style="font-size:16px;">${grossMarginPct.toFixed(1)}%</span>
+      </div>` : ''}
+      ${pricingPower != null ? `<div class="metric-card" style="text-align:center;padding:8px;">
+        <span class="metric-card__label">Pricing Power</span>
+        <span class="metric-card__value" style="font-size:16px;color:${pricingPower>=65?'var(--signal-buy)':pricingPower>=45?'var(--signal-hold)':'var(--signal-sell)'};">${pricingPower.toFixed(0)}</span>
+      </div>` : ''}
+      ${maxDebt != null ? `<div class="metric-card" style="text-align:center;padding:8px;">
+        <span class="metric-card__label">Max Add. Debt</span>
+        <span class="metric-card__value" style="font-size:${maxDebt>1e9?'13':'16'}px;">${maxDebt>=1e9?`$${(maxDebt/1e9).toFixed(1)}B`:maxDebt>=1e6?`$${(maxDebt/1e6).toFixed(0)}M`:`$${(maxDebt/1000).toFixed(0)}K`}</span>
+      </div>` : (runway!=null ? `<div class="metric-card" style="text-align:center;padding:8px;">
+        <span class="metric-card__label">Cash Runway</span>
+        <span class="metric-card__value" style="font-size:16px;color:${runway<6?'var(--signal-sell)':runway<12?'var(--signal-hold)':'var(--signal-buy)'};">${runway}mo</span>
+      </div>` : '')}
     </div>
 
-    <!-- Sub-sections rendered into placeholders -->
+    <!-- Sub-sections -->
     <div id="smb-cashflow-section"></div>
     <div id="smb-supplier-section"></div>
     <div id="smb-pricing-section"></div>
     <div id="smb-alerts-section"></div>`;
 
-  renderCashFlowForecast(data.cashflow_forecast || data.cash_flow_forecast);
+  // Cash flow forecast
+  const forecastData = data.cashflow_forecast || data.cash_flow_forecast;
+  if (forecastData) {
+    const months = Array.isArray(forecastData)
+      ? forecastData.map(m => ({ net_cash_flow: m.projected_fcf ?? m.net_cash_flow ?? m.value ?? 0 }))
+      : (forecastData.months || []);
+    renderCashFlowForecast(months);
+  }
   renderSupplierRisks(data.supplier_risks || []);
-  renderPricingIntelligence(data.pricing_intelligence || data.pricing);
+
+  // Pricing: support both private SMB format and public_intelligence format
+  const pricingRaw = data.pricing_intelligence || data.pricing;
+  if (pricingRaw) {
+    const pricingNorm = {
+      pricing_power_score: pricingRaw.pricing_power_score ?? pricingPower ?? 50,
+      churn_risk_score: pricingRaw.churn_risk_score ?? 0,
+      arpu_trend: pricingRaw.arpu_trend || (pricingRaw.revenue_growth_pct > 3 ? 'growing' : 'stable'),
+      recommendation: pricingRaw.recommendation || pricingRaw.pricing_action || '',
+    };
+    renderPricingIntelligence(pricingNorm);
+  }
 
   // Alerts
   const alertsEl = document.getElementById('smb-alerts-section');
-  if (alertsEl && data.alerts && data.alerts.length > 0) {
-    alertsEl.innerHTML = `
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:14px;">Active Alerts</div>
-      ${data.alerts.map(a => `
-        <div class="alert-banner ${a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warning' : 'info'}" style="font-size:11px;margin-bottom:4px;">
-          ${a.message || a.description || JSON.stringify(a)}
-        </div>`).join('')}`;
+  if (alertsEl) {
+    const alerts = data.alerts || [];
+    if (alerts.length > 0) {
+      alertsEl.innerHTML = `
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:14px;">Active Alerts</div>
+        ${alerts.map(a => `
+          <div class="alert-banner ${a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warning' : 'info'}" style="font-size:11px;margin-bottom:4px;">
+            ${a.message || a.description || JSON.stringify(a)}
+          </div>`).join('')}`;
+    } else if (isPublicTicker && data.recommendation) {
+      const recCls = data.recommendation === 'strong_buy_signals' ? 'success' : data.recommendation === 'caution_review_needed' ? 'warning' : 'info';
+      alertsEl.innerHTML = `
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:14px;">Assessment</div>
+        <div class="alert-banner ${recCls}" style="font-size:11px;">${data.recommendation.replace(/_/g,' ')}</div>`;
+    }
   }
 }
 
