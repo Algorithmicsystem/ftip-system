@@ -287,29 +287,46 @@ def _get_worker_id() -> str:
     return _SCHEDULER_WORKER_ID
 
 
+_LOCK_TABLE_ENSURED = False
+
+
 def _ensure_scheduler_lock_table() -> None:
+    """Migrate to single-row lock schema (lock_id=1 pattern) if needed."""
+    global _LOCK_TABLE_ENSURED
+    if _LOCK_TABLE_ENSURED:
+        return
     from api import db
     try:
+        # Check for old schema (no lock_id column → worker_id TEXT PRIMARY KEY)
+        row = db.safe_fetchone(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'scheduler_lock' AND column_name = 'lock_id'"
+        )
+        if row is None:
+            # Old schema or missing table — drop and recreate (transient data, safe)
+            db.safe_execute("DROP TABLE IF EXISTS scheduler_lock")
         db.safe_execute(
             """
             CREATE TABLE IF NOT EXISTS scheduler_lock (
-                worker_id TEXT PRIMARY KEY,
-                locked_at  TIMESTAMPTZ DEFAULT now(),
-                heartbeat_at TIMESTAMPTZ DEFAULT now()
+                lock_id      INTEGER PRIMARY KEY DEFAULT 1,
+                worker_id    TEXT NOT NULL,
+                locked_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+                heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                CHECK (lock_id = 1)
             )
-            """,
-            (),
+            """
         )
+        _LOCK_TABLE_ENSURED = True
     except Exception:
         pass
 
 
 def _should_run_scheduler() -> bool:
-    """Return True only for the one worker that holds the table-based scheduler lock.
+    """Return True only if this worker holds the single-row scheduler lock.
 
-    Deletes stale locks (heartbeat >60 s old) then attempts an INSERT … ON CONFLICT
-    DO NOTHING to claim the single row.  Reliable on Railway where advisory locks
-    release when the pooler closes the underlying connection.
+    Uses a UPSERT on lock_id=1 that is safe under pgbouncer transaction pooling:
+    only one row can ever exist, so the conflict is globally atomic — unlike the
+    old worker_id-per-row pattern where each worker won its own INSERT.
     """
     from api import db
     if not db.db_enabled():
@@ -319,27 +336,28 @@ def _should_run_scheduler() -> bool:
     worker_id = _get_worker_id()
 
     try:
-        # Evict any stale holder that has stopped updating its heartbeat
-        db.safe_execute(
+        # Claim the single lock row only if no other live worker holds it
+        # (heartbeat_at < 90s means the current holder is still alive)
+        row = db.safe_fetchone(
             """
-            DELETE FROM scheduler_lock
-            WHERE worker_id != %s
-              AND heartbeat_at < now() - interval '60 seconds'
+            INSERT INTO scheduler_lock (lock_id, worker_id, locked_at, heartbeat_at)
+            VALUES (1, %s, now(), now())
+            ON CONFLICT (lock_id) DO UPDATE
+                SET worker_id    = EXCLUDED.worker_id,
+                    locked_at    = now(),
+                    heartbeat_at = now()
+                WHERE scheduler_lock.heartbeat_at < now() - interval '90 seconds'
+            RETURNING worker_id
             """,
             (worker_id,),
         )
-        # Try to claim the lock (no-op if another live worker already holds it)
-        db.safe_execute(
-            """
-            INSERT INTO scheduler_lock (worker_id, locked_at, heartbeat_at)
-            VALUES (%s, now(), now())
-            ON CONFLICT DO NOTHING
-            """,
-            (worker_id,),
+        if row is not None:
+            return str(row[0]) == worker_id
+        # UPSERT skipped (another live worker holds it) — check if it's us
+        existing = db.safe_fetchone(
+            "SELECT worker_id FROM scheduler_lock WHERE lock_id = 1"
         )
-        # Win only if WE are the sole row
-        row = db.safe_fetchone("SELECT worker_id FROM scheduler_lock LIMIT 1", ())
-        return bool(row and row[0] == worker_id)
+        return bool(existing and str(existing[0]) == worker_id)
     except Exception:
         return True
 
@@ -356,7 +374,7 @@ def _scheduler_heartbeat_loop() -> None:
             from api import db
             if db.db_enabled():
                 db.safe_execute(
-                    "UPDATE scheduler_lock SET heartbeat_at = now() WHERE worker_id = %s",
+                    "UPDATE scheduler_lock SET heartbeat_at = now() WHERE lock_id = 1 AND worker_id = %s",
                     (_get_worker_id(),),
                 )
         except Exception:
@@ -384,8 +402,8 @@ def _scheduler_watchdog() -> None:
         if "pytest" in sys.modules:
             break
         if not _SCHEDULER_STARTED_IN_THIS_PROCESS:
-            # This process lost the lock race — do nothing, ever.
-            continue
+            # This process lost the lock race — exit the watchdog thread entirely.
+            return
         if not scheduler_manager.running:
             env = os.environ.get("FTIP_ENV") or os.environ.get("RAILWAY_ENVIRONMENT", "")
             if env == "production":

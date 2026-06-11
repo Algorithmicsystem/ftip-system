@@ -28,6 +28,12 @@ def fetch_fundamentals_quarterly(symbol: str) -> List[Dict[str, object]]:
     return rows
 
 
+def fetch_quarterly_fundamentals(symbol: str, quarters: int = 4) -> List[Dict[str, object]]:
+    """Alias for fetch_fundamentals_quarterly with optional quarter limit."""
+    rows = fetch_fundamentals_quarterly(symbol)
+    return rows[:quarters] if rows else rows
+
+
 def fetch_fundamentals_quarterly_with_meta(
     symbol: str,
 ) -> Tuple[List[Dict[str, object]], Dict[str, Any]]:

@@ -13,6 +13,58 @@ router = APIRouter(
 )
 
 
+def _fetch_fred_macro_inputs() -> Dict[str, Any]:
+    """Fetch live FRED series and translate into macro regime inputs.
+
+    DGS10     → fed_funds_rate (10yr Treasury as rate proxy)
+    CPIAUCSL  → cpi_yoy (YoY % change)
+    UNRATE    → gdp_growth proxy (low UNRATE → expansion)
+    VIXCLS    → vix_level for cross-asset context
+    """
+    from api.data_providers.fred import fetch_series
+    result: Dict[str, Any] = {}
+
+    try:
+        dgs10 = fetch_series("DGS10", limit=13)
+        obs = [o["value"] for o in dgs10.get("observations", []) if o.get("value") is not None]
+        if obs:
+            result["fed_funds_rate"] = obs[0]
+            result["fed_funds_rate_1y_ago"] = obs[-1] if len(obs) >= 12 else obs[0]
+    except Exception:
+        pass
+
+    try:
+        cpi = fetch_series("CPIAUCSL", limit=13)
+        obs = [o["value"] for o in cpi.get("observations", []) if o.get("value") is not None]
+        if len(obs) >= 12:
+            yoy = (obs[0] / obs[11] - 1.0) * 100.0
+            result["cpi_yoy"] = round(yoy, 2)
+        elif len(obs) >= 2:
+            result["cpi_yoy"] = round((obs[0] / obs[-1] - 1.0) * 100.0 / max(len(obs) - 1, 1) * 12, 2)
+    except Exception:
+        pass
+
+    try:
+        unrate = fetch_series("UNRATE", limit=2)
+        obs = [o["value"] for o in unrate.get("observations", []) if o.get("value") is not None]
+        if obs:
+            ur = obs[0]
+            # Low UNRATE (< 4%) → expansion; high (> 6%) → contraction
+            result["gdp_growth"] = round(max(-2.0, (6.0 - ur) * 0.5), 2)
+    except Exception:
+        pass
+
+    try:
+        vix = fetch_series("VIXCLS", limit=2)
+        obs = [o["value"] for o in vix.get("observations", []) if o.get("value") is not None]
+        if obs:
+            result["vix_level"] = obs[0]
+    except Exception:
+        pass
+
+    return result
+
+
 class MacroClassifyIn(BaseModel):
     gdp_growth: float
     cpi_yoy: float
@@ -37,7 +89,14 @@ def get_macro_snapshot() -> Dict[str, Any]:
         except Exception:
             pass
 
-    snapshot = compute_cross_asset_snapshot({}, "UNKNOWN")
+    # Fall back to live FRED data when DB is empty
+    if not macro_meta:
+        macro_meta = _fetch_fred_macro_inputs()
+
+    snapshot = compute_cross_asset_snapshot(
+        {}, "UNKNOWN",
+        vix_level=macro_meta.get("vix_level"),
+    )
     macro = classify_macro_regime(
         gdp_growth=float(macro_meta.get("gdp_growth", 2.0)),
         cpi_yoy=float(macro_meta.get("cpi_yoy", 2.5)),

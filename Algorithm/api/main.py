@@ -2495,6 +2495,27 @@ def system_status() -> Dict[str, Any]:
         except Exception:
             pass
 
+    # Data staleness, universe coverage, pipeline health
+    data_staleness_hours: Optional[float] = None
+    universe_coverage_pct: float = 0.0
+    if db_connected:
+        try:
+            r = db.safe_fetchone(
+                "SELECT EXTRACT(EPOCH FROM (now() - MAX(as_of_date::timestamptz))) / 3600 "
+                "FROM axiom_scores_daily"
+            )
+            if r and r[0] is not None:
+                data_staleness_hours = round(float(r[0]), 1)
+        except Exception:
+            pass
+        try:
+            r = db.safe_fetchone("SELECT COUNT(*) FROM prosperity_universe WHERE active = TRUE")
+            universe_size = int(r[0] or 0) if r else 0
+            if universe_size > 0:
+                universe_coverage_pct = round(axiom_count / universe_size * 100.0, 1)
+        except Exception:
+            pass
+
     # ML model
     ml_trained = False
     if db_connected:
@@ -2562,6 +2583,11 @@ def system_status() -> Dict[str, Any]:
     except Exception:
         pass
 
+    pipeline_health = (
+        "healthy" if last_pipeline_run is not None
+        else ("no_db" if not db_connected else "pending")
+    )
+
     # Acquisition readiness (0-100)
     score_components = [
         30 if db_connected else 0,
@@ -2613,6 +2639,15 @@ def system_status() -> Dict[str, Any]:
             "readiness_total": readiness_total,
             "deployment_confidence": deployment_confidence,
         },
+        "data_health": {
+            "data_staleness_hours": data_staleness_hours,
+            "universe_coverage_pct": universe_coverage_pct,
+            "pipeline_health": pipeline_health,
+        },
+        # Flat fields for direct access
+        "data_staleness_hours": data_staleness_hours,
+        "universe_coverage_pct": universe_coverage_pct,
+        "pipeline_health": pipeline_health,
         # Legacy flat fields kept for backwards compat
         "axiom_scores_count": axiom_count,
         "morning_briefings_count": briefings_count,

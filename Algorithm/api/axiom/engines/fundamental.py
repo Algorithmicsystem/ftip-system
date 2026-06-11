@@ -37,8 +37,12 @@ def compute_eis(financials: dict) -> float:
         cer = cfo / abs(net_income)
         cash_earnings_score = clamp((cer / 2.0) * 100.0, 0.0, 100.0)
     else:
-        # Proxy via cash_flow_durability (already 0–100)
-        cash_earnings_score = clamp(float(financials.get("cash_flow_durability") or 50.0), 0.0, 100.0)
+        # FCF margin proxy: healthy FCF margin ~15–25% of revenue
+        fcf_margin = financials.get("free_cash_flow_margin")
+        if fcf_margin is not None:
+            cash_earnings_score = clamp((float(fcf_margin) / 0.25) * 100.0, 0.0, 100.0)
+        else:
+            cash_earnings_score = clamp(float(financials.get("cash_flow_durability") or 50.0), 0.0, 100.0)
 
     # Accruals quality: lower accruals ratio = higher integrity
     if accruals_ratio is not None:
@@ -53,10 +57,26 @@ def compute_eis(financials: dict) -> float:
         # bounded [0, 0.50]; inverted
         receivables_score = clamp(((0.20 - float(receivables_growth)) / 0.40) * 100.0, 0.0, 100.0)
     else:
-        beat_rate = float(financials.get("earnings_beat_rate_4q") or 0.5)
-        receivables_score = clamp(beat_rate * 100.0, 0.0, 100.0)
+        # Earnings surprise proxy: positive surprises signal clean revenue recognition
+        surprise = financials.get("earnings_avg_surprise_pct")
+        if surprise is not None:
+            receivables_score = clamp(50.0 + float(surprise) * 500.0, 0.0, 100.0)
+        else:
+            beat_rate = float(financials.get("earnings_beat_rate_4q") or 0.5)
+            receivables_score = clamp(beat_rate * 100.0, 0.0, 100.0)
 
     base_eis = cash_earnings_score * 0.30 + accruals_score * 0.40 + receivables_score * 0.30
+
+    # Revenue quality adjustment: growing revenue with healthy gross margin = integrity bonus
+    revenue_growth = financials.get("revenue_growth_yoy")
+    gross_margin = financials.get("gross_margin")
+    if revenue_growth is not None and gross_margin is not None:
+        growth_quality = (
+            clamp((float(revenue_growth) + 0.05) / 0.35, 0.0, 1.0) * 0.5
+            + clamp(float(gross_margin) / 0.60, 0.0, 1.0) * 0.5
+        )
+        base_eis = clamp(base_eis + (growth_quality - 0.5) * 10.0, 0.0, 100.0)
+
     base_eis = round(clamp(base_eis, 0.0, 100.0), 2)
 
     # Apply Schilit penalty when sufficient full-financial fields are present
@@ -129,6 +149,13 @@ def compute_caps(financials: dict, sector_context: dict) -> float:
         + reinvest_score * 0.20
         + sector_adv_score * 0.15
     )
+
+    # Debt burden penalty: high leverage compresses the competitive advantage period
+    debt_to_equity = financials.get("debt_to_equity")
+    if debt_to_equity is not None:
+        debt_penalty = clamp((float(debt_to_equity) - 0.5) / 2.0, 0.0, 1.0) * 15.0
+        caps = clamp(caps - debt_penalty, 0.0, 100.0)
+
     return round(clamp(caps, 0.0, 100.0), 2)
 
 
@@ -174,11 +201,15 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
             (bounded_score(candidate.quarterly_earnings_growth_yoy, low=-0.1, high=0.4), 0.1),
         ]
     )
-    # EIS replaces raw earnings_quality — uses same fields as proxies
+    # EIS — wire in EDGAR-quality fundamental signals for differentiation
     _eis_inputs = {
         "cash_flow_durability": candidate.cash_flow_durability,
         "positive_fcf_ratio": candidate.positive_fcf_ratio,
         "earnings_beat_rate_4q": candidate.earnings_beat_rate_4q,
+        "free_cash_flow_margin": candidate.free_cash_flow_margin,
+        "earnings_avg_surprise_pct": candidate.earnings_avg_surprise_pct,
+        "revenue_growth_yoy": candidate.revenue_growth_yoy,
+        "gross_margin": candidate.gross_margin,
     }
     eis_score = compute_eis(_eis_inputs)
     earnings_quality_component = eis_score
@@ -204,6 +235,10 @@ def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
         "gross_margin": candidate.gross_margin,
         "operating_margin": candidate.operating_margin,
         "revenue_growth_yoy": candidate.revenue_growth_yoy,
+        # Debt burden and reinvestment quality for full CAPS differentiation
+        "debt_to_equity": candidate.debt_to_equity,
+        "free_cash_flow_margin": candidate.free_cash_flow_margin,
+        "return_on_assets": candidate.return_on_assets,
     }
     _sector = str(engine_input.source_context.get("symbol_meta", {}).get("sector") or "").lower()
     _SECTOR_WACC = {

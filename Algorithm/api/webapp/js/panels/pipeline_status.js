@@ -15,12 +15,13 @@ async function loadPipelineStatus() {
   body.innerHTML = '<div class="loading-skeleton skeleton-line full" style="margin-bottom:6px;height:20px;"></div>'.repeat(5);
 
   try {
-    const [health, pipelineRun] = await Promise.all([
+    const [health, pipelineRun, sysStatus] = await Promise.all([
       API.get('/orchestration/health').catch(() => null),
       API.get('/orchestration/pipeline/status').catch(() => null),
+      API.get('/system/status').catch(() => null),
     ]);
 
-    renderPipelinePanel(health, pipelineRun);
+    renderPipelinePanel(health, pipelineRun, sysStatus);
 
     if (lastRunEl && pipelineRun?.started_at) {
       lastRunEl.textContent = `Last run: ${new Date(pipelineRun.started_at).toLocaleString()}`;
@@ -35,7 +36,7 @@ async function loadPipelineStatus() {
   }
 }
 
-function renderPipelinePanel(health, run) {
+function renderPipelinePanel(health, run, sysStatus) {
   const body = document.getElementById('pipeline-body');
   if (!body) return;
 
@@ -103,7 +104,42 @@ function renderPipelinePanel(health, run) {
     <div style="margin-top:10px;font-size:11px;color:var(--text-muted);">
       Health score: <span style="color:${health.overall_score >= 70 ? 'var(--signal-buy)' : 'var(--signal-hold)'};font-family:var(--font-mono);">${(health.overall_score||0).toFixed(0)}</span> ·
       Status: <span style="color:var(--text-secondary);">${health.overall_status || 'unknown'}</span>
-    </div>` : ''}`;
+    </div>` : ''}
+
+    <!-- DATA HEALTH -->
+    ${sysStatus ? (() => {
+      const stale = sysStatus.data_staleness_hours;
+      const cov   = sysStatus.universe_coverage_pct ?? 0;
+      const ph    = sysStatus.pipeline_health ?? 'unknown';
+      const staleColor = stale == null ? 'var(--text-muted)' :
+                         stale < 24    ? 'var(--signal-buy)' :
+                         stale < 72    ? 'var(--signal-hold)' : 'var(--signal-sell)';
+      const phColor = ph === 'healthy' ? 'var(--signal-buy)' :
+                      ph === 'pending' ? 'var(--signal-hold)' : 'var(--signal-sell)';
+      return `
+    <div style="margin-top:12px;border-top:1px solid var(--border-muted);padding-top:10px;">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;">Data Health</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+        <div class="metric-card" style="padding:6px 8px;">
+          <div class="metric-card__label">AXIOM Scores</div>
+          <div class="metric-card__value" style="font-size:13px;">${sysStatus.axiom_scores_count ?? '—'}</div>
+        </div>
+        <div class="metric-card" style="padding:6px 8px;">
+          <div class="metric-card__label">Data Freshness</div>
+          <div class="metric-card__value" style="font-size:13px;color:${staleColor};">
+            ${stale != null ? stale.toFixed(1) + 'h' : '—'}
+          </div>
+        </div>
+        <div class="metric-card" style="padding:6px 8px;">
+          <div class="metric-card__label">Pipeline</div>
+          <div class="metric-card__value" style="font-size:13px;color:${phColor};">${ph.toUpperCase()}</div>
+        </div>
+      </div>
+      <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">
+        Universe coverage: <span style="font-family:var(--font-mono);color:${cov >= 80 ? 'var(--signal-buy)' : 'var(--signal-hold)'};">${cov.toFixed(1)}%</span>
+      </div>
+    </div>`;
+    })() : ''}`;
 }
 
 async function triggerPipelineRun() {

@@ -604,6 +604,26 @@ def upsert_universe(
     return received, len(unique)
 
 
+def get_pool_stats() -> Dict[str, Any]:
+    """Return current connection pool statistics."""
+    if not db_enabled():
+        return {"error": "database disabled", "total_connections": 0}
+    try:
+        pool = get_pool()
+        stats = pool.get_stats() if hasattr(pool, "get_stats") else {}
+        total = int(stats.get("pool_max", stats.get("pool_size", 0)) or 0)
+        available = int(stats.get("pool_available", 0) or 0)
+        in_use = max(0, total - available)
+        return {
+            "total_connections": total,
+            "connections_in_use": in_use,
+            "connections_available": available,
+            "pool_utilization_pct": round(in_use / total * 100.0 if total > 0 else 0.0, 1),
+        }
+    except Exception as exc:
+        return {"error": str(exc), "total_connections": 0}
+
+
 def get_universe(*, active_only: bool = True, limit: Optional[int] = None) -> List[str]:
     where = "WHERE active = TRUE" if active_only else ""
     limit_sql = "LIMIT %s" if limit else ""
@@ -628,6 +648,7 @@ __all__ = [
     "db_write_enabled",
     "db_read_enabled",
     "get_pool",
+    "get_pool_stats",
     "with_connection",
     "safe_execute",
     "safe_fetchall",
