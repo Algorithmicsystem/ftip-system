@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import hashlib
+import math
 import statistics
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -60,9 +61,12 @@ def _safe_float(value: Any) -> Optional[float]:
     if value in (None, ""):
         return None
     try:
-        return float(value)
+        number = float(value)
     except (TypeError, ValueError):
         return None
+    if not math.isfinite(number):
+        return None
+    return number
 
 
 def _safe_int(value: Any) -> Optional[int]:
@@ -710,14 +714,14 @@ def _load_breadth_context(
     dispersion = None
     if len(non_null_ret_21d) >= 2:
         try:
-            dispersion = float(statistics.pstdev(non_null_ret_21d))
-        except statistics.StatisticsError:
+            dispersion = float(statistics.pstdev([float(v) for v in non_null_ret_21d]))
+        except Exception:
             dispersion = None
     sector_dispersion = None
     if len(sector_ret_21d) >= 2:
         try:
-            sector_dispersion = float(statistics.pstdev(sector_ret_21d))
-        except statistics.StatisticsError:
+            sector_dispersion = float(statistics.pstdev([float(v) for v in sector_ret_21d]))
+        except Exception:
             sector_dispersion = None
 
     sorted_rets = sorted(non_null_ret_21d)
@@ -748,10 +752,13 @@ def _load_breadth_context(
     if leader_momentum and non_null_ret_21d:
         try:
             leadership_rotation = min(
-                abs(statistics.fmean(leader_momentum[-10:]) - statistics.fmean(non_null_ret_21d[-10:])),
+                abs(
+                    statistics.fmean([float(v) for v in leader_momentum[-10:]])
+                    - statistics.fmean([float(v) for v in non_null_ret_21d[-10:]])
+                ),
                 1.0,
             )
-        except statistics.StatisticsError:
+        except Exception:
             leadership_rotation = None
 
     leadership_instability = None
