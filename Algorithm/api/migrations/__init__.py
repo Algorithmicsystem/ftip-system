@@ -946,6 +946,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "105_performance_indexes",
         lambda cur: cur.execute(Path(__file__).with_name("105_performance_indexes.sql").read_text()),
     ),
+    (
+        "107_extraction_audit",
+        lambda cur: cur.execute(Path(__file__).with_name("107_extraction_audit.sql").read_text()),
+    ),
 ]
 
 

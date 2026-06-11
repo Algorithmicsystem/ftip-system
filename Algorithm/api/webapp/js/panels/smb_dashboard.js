@@ -41,6 +41,28 @@ async function loadSMBIntelligence(entityId) {
     }
 
     renderSMBDashboard(data);
+    // Upload zone for SMB financials (appended after dashboard renders)
+    requestAnimationFrame(() => {
+      const body2 = document.getElementById('smb-body');
+      if (body2 && typeof createUploadZone === 'function') {
+        const uploadSection = document.createElement('div');
+        uploadSection.innerHTML = `
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:18px;">Connect Your Financials</div>
+          <div id="smb-upload-zone"></div>
+          <div style="text-align:center;font-size:11px;color:var(--text-muted);margin:8px 0;">— OR —</div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:var(--text-secondary);">QuickBooks</span>
+            <button onclick="alert('QuickBooks integration coming soon')"
+                    style="padding:4px 10px;font-size:11px;background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border-subtle);border-radius:4px;cursor:pointer;">
+              Connect
+            </button>
+          </div>`;
+        body2.appendChild(uploadSection);
+        createUploadZone('smb-upload-zone', entityId, 'smb_entity', (extraction, intel) => {
+          if (intel && typeof renderSMBDashboard === 'function') renderSMBDashboard(intel);
+        });
+      }
+    });
   } catch (err) {
     body.innerHTML = `<div class="alert-banner warning">Could not load SMB intelligence: ${err.message}</div>`;
   }

@@ -29,6 +29,15 @@ def is_available() -> bool:
     return bool(config.openai_api_key())
 
 
+def get_openai_client():
+    """Return a configured OpenAI SDK client instance."""
+    import openai
+    api_key = config.openai_api_key()
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not configured")
+    return openai.OpenAI(api_key=api_key)
+
+
 def call_openai(
     system_prompt: str,
     user_prompt: str,

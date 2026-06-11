@@ -30,7 +30,9 @@ async function loadPEDemo() {
       <div id="pe-deal-grid"></div>
       <div id="pe-exit-pipeline"></div>
       <div id="pe-schillit-alerts"></div>
-      <div id="pe-forensic-result"></div>`;
+      <div id="pe-forensic-result"></div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted);margin-bottom:6px;margin-top:18px;">Upload Portfolio Company Financials</div>
+      <div id="pe-upload-zone"></div>`;
 
     const grid = document.getElementById('pe-deal-grid');
     if (grid) {
@@ -69,6 +71,16 @@ async function loadPEDemo() {
       company_name: c.symbol,
       schillit_distress_score: c.schilit_risk === 'high' ? 75 : c.schilit_risk === 'medium' ? 45 : 15,
     })));
+    // Upload zone for portco financials
+    if (typeof createUploadZone === 'function') {
+      createUploadZone('pe-upload-zone', '', 'pe_portco', (extraction, intel) => {
+        const el = document.getElementById('pe-forensic-result');
+        if (el && intel) {
+          el.innerHTML = `<div class="alert-banner success" style="font-size:11px;">
+            Document processed — Forensic: ${intel.forensic_risk || '—'} · DAS: ${intel.das_score?.toFixed(0) || '—'} (${intel.das_grade || '—'})</div>`;
+        }
+      });
+    }
   } catch (err) {
     body.innerHTML = `<div class="alert-banner warning">Could not load deal flow: ${err.message}</div>`;
   }
