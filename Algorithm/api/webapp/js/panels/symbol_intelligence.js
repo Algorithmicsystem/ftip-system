@@ -350,3 +350,11 @@ function handleGlobalSymbolSearch() {
     loadSymbolIntelligence(val);
   }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(() => {
+    if (typeof loadSymbolIntelligence === 'function') {
+      loadSymbolIntelligence('AAPL');
+    }
+  }, 1500);
+});

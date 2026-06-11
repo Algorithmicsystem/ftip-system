@@ -34,6 +34,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   initIntelligenceFeed();
   // Pre-load opportunities so scores are ready when user switches panel
   if (typeof loadOpportunities === 'function') loadOpportunities();
+  // Pre-load always-visible grid panels so they don't stay blank
+  loadPanel('risk');
+  loadPanel('factors');
+  loadPanel('pipeline');
 });
 
 // ── WebSocket Intelligence Feed ───────────────────────────────────────────────

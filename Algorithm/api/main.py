@@ -2532,7 +2532,7 @@ def system_status() -> Dict[str, Any]:
     if briefings_count == 0:
         warnings.append("No morning briefings stored — scheduler may not be active")
     if not ml_trained:
-        warnings.append("No active ML model — run ML training pipeline")
+        warnings.append("ML model in bootstrap phase — accumulating signal history (available after 21 days of pipeline runs)")
 
     # Performance metrics
     from api.cloud.performance import perf_tracker
