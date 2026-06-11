@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import json
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Tuple
 
@@ -14,6 +15,31 @@ from api.data_providers.bars import fetch_daily_bars_with_meta
 from api.data_providers.errors import ProviderError
 from api.data_providers.quality import provider_result_metadata
 from api.research import build_research_snapshot_from_bars
+
+
+def _safe_json(obj: Any) -> Any:
+    """JSON default encoder: handles date/datetime, numpy scalars, and NaN/Inf floats."""
+    if hasattr(obj, 'isoformat'):
+        return obj.isoformat()
+    if hasattr(obj, 'item'):  # numpy scalar
+        v = obj.item()
+        if isinstance(v, float) and not math.isfinite(v):
+            return None
+        return v
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return None
+    return str(obj)
+
+
+def _raw_to_json(raw: Any) -> str:
+    """Serialize a bar's raw dict to JSON, replacing NaN/Inf floats with null."""
+    if not isinstance(raw, dict):
+        raw = {}
+    cleaned = {
+        k: (None if isinstance(v, float) and not math.isfinite(v) else v)
+        for k, v in raw.items()
+    }
+    return json.dumps(cleaned, default=_safe_json)
 
 
 # Utility hashing
@@ -230,7 +256,7 @@ def ingest_bars(
                     payload.get("adj_close"),
                     payload.get("volume"),
                     payload.get("source") or source,
-                    json.dumps(payload.get("raw") or {}, default=str),
+                    _raw_to_json(payload.get("raw")),
                 ),
             )
             if day in missing_set:
