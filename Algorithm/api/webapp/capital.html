@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXIOM CAPITAL — PE & VC Intelligence Terminal</title>
+<link rel="icon" href="/app/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/static/axiom-design-system.css">
+<style>
+  :root { --ax-accent: #bc8cff; }
+  .ax-brand-name { color: #bc8cff; }
+  .ax-topbar-logo span { color: #bc8cff; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="ax-body">
+
+<!-- Top Bar -->
+<header class="ax-topbar">
+  <div class="ax-topbar-left">
+    <div class="ax-topbar-logo">AXIOM <span>CAPITAL</span></div>
+    <div id="cap-market-status" class="ax-market-status ax-market-closed">● LOADING</div>
+  </div>
+  <div class="ax-macro-strip" id="cap-macro-strip">Loading...</div>
+  <div class="ax-topbar-right">
+    <span id="cap-clock" class="ax-clock"></span>
+    <div style="position:relative;">
+      <input id="cap-search" placeholder="Symbol / portco…" class="ax-search-input" autocomplete="off">
+      <div id="cap-search-results" class="ax-search-results"></div>
+    </div>
+  </div>
+</header>
+
+<!-- Tab Bar -->
+<nav class="ax-tabbar" data-tab-group="capital">
+  <button class="ax-tab ax-tab--active" data-panel="cap-dealflow">Deal Flow</button>
+  <button class="ax-tab" data-panel="cap-forensic">Forensic Analysis</button>
+  <button class="ax-tab" data-panel="cap-lbo">LBO / DCF</button>
+  <button class="ax-tab" data-panel="cap-comps">Comps</button>
+  <button class="ax-tab" data-panel="cap-exit">Exit Pipeline</button>
+  <button class="ax-tab" data-panel="cap-portfolio">Portfolio Monitor</button>
+  <button class="ax-tab" data-panel="cap-docs">Document Intelligence</button>
+  <button class="ax-tab" data-panel="cap-lp">LP Reports</button>
+  <button class="ax-tab" data-panel="cap-macro">Macro & Factors</button>
+  <button class="ax-tab" data-panel="cap-reglog">Risk Register</button>
+  <button class="ax-tab" data-panel="cap-ai">AI Engine</button>
+</nav>
+
+<main class="ax-main">
+
+  <!-- Deal Flow -->
+  <section id="cap-dealflow" class="ax-panel">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Live Deal Flow Screen</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadDealFlow()">Refresh</button>
+    </div>
+    <div id="cap-df-table"></div>
+  </section>
+
+  <!-- Forensic Analysis -->
+  <section id="cap-forensic" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Forensic Analysis — Schilit Framework</h2>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="cap-for-sym" class="ax-search-input" placeholder="Symbol…" style="width:110px;">
+        <button class="ax-btn" onclick="loadForensic()">Run Analysis</button>
+      </div>
+    </div>
+    <div id="cap-forensic-content"><div class="ax-empty-state">Enter a symbol to run Schilit forensic + DAS analysis.</div></div>
+  </section>
+
+  <!-- LBO / DCF -->
+  <section id="cap-lbo" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">LBO / DCF Workbench</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="ax-card">
+        <h3 class="ax-section-label">LBO Assumptions</h3>
+        <div class="ax-form-grid">
+          <label class="ax-label">Entry EV ($M)</label>
+          <input id="lbo-ev" type="number" class="ax-input" value="500">
+          <label class="ax-label">Entry EBITDA ($M)</label>
+          <input id="lbo-ebitda" type="number" class="ax-input" value="50">
+          <label class="ax-label">Debt / EBITDA</label>
+          <input id="lbo-leverage" type="number" class="ax-input" value="5" step="0.5">
+          <label class="ax-label">Hold Period (yr)</label>
+          <input id="lbo-years" type="number" class="ax-input" value="5">
+          <label class="ax-label">Revenue CAGR %</label>
+          <input id="lbo-cagr" type="number" class="ax-input" value="8">
+          <label class="ax-label">Exit Multiple (x EBITDA)</label>
+          <input id="lbo-exit-mult" type="number" class="ax-input" value="10">
+        </div>
+        <button class="ax-btn" style="margin-top:12px;" onclick="runLBO()">Run LBO</button>
+      </div>
+      <div class="ax-card" id="lbo-results">
+        <h3 class="ax-section-label">LBO Results</h3>
+        <div class="ax-empty-state">Configure assumptions and click Run LBO.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comps -->
+  <section id="cap-comps" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Public Comps — Universe Multiples</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadComps()">Refresh</button>
+    </div>
+    <div id="cap-comps-table"></div>
+  </section>
+
+  <!-- Exit Pipeline -->
+  <section id="cap-exit" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Exit Pipeline Tracker</h2>
+    </div>
+    <div id="cap-exit-content">
+      <div class="ax-alert-info" style="font-size:12px;">Track portco exits here. Upload portco documents via Document Intelligence to populate exit signals.</div>
+      <div id="cap-exit-table" style="margin-top:12px;"></div>
+    </div>
+  </section>
+
+  <!-- Portfolio Monitor -->
+  <section id="cap-portfolio" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Portfolio Monitor</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadPortfolio()">Refresh</button>
+    </div>
+    <div id="cap-portfolio-content"></div>
+    <div style="height:200px;margin-top:12px;"><canvas id="cap-port-chart"></canvas></div>
+  </section>
+
+  <!-- Document Intelligence -->
+  <section id="cap-docs" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Document Intelligence — AI Extraction</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="ax-card">
+        <h3 class="ax-section-label">Upload Portco Document</h3>
+        <div style="margin-bottom:10px;">
+          <label class="ax-label">Portco Symbol / ID</label>
+          <input id="cap-doc-entity" class="ax-input" placeholder="e.g. AAPL or portco-123" style="margin-top:4px;">
+        </div>
+        <div id="cap-upload-zone"></div>
+      </div>
+      <div class="ax-card">
+        <h3 class="ax-section-label">Extraction Review Queue</h3>
+        <div id="cap-review-queue"></div>
+        <button class="ax-btn ax-btn--sm" style="margin-top:8px;" onclick="loadReviewQueue()">Refresh Queue</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- LP Reports -->
+  <section id="cap-lp" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">LP Reporting</h2>
+    </div>
+    <div class="ax-alert-info" style="font-size:12px;margin-bottom:12px;">LP report generation draws from portfolio data and AI-extracted portco financials.</div>
+    <div id="cap-lp-content"></div>
+    <button class="ax-btn" onclick="generateLPReport()">Generate LP Summary</button>
+  </section>
+
+  <!-- Macro & Factors -->
+  <section id="cap-macro" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Macro & Factor Environment</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadCapMacro()">Refresh</button>
+    </div>
+    <div id="cap-macro-content"></div>
+  </section>
+
+  <!-- Risk Register -->
+  <section id="cap-reglog" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Risk Register & SRI</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadCapRisk()">Refresh</button>
+    </div>
+    <div id="cap-risk-content"></div>
+  </section>
+
+  <!-- AI Engine -->
+  <section id="cap-ai" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">AI Engine Status</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadCapAI()">Refresh</button>
+    </div>
+    <div id="cap-ai-content"></div>
+  </section>
+
+</main>
+
+<script src="/app/static/axiom-core.js"></script>
+<script>
+let _dfData = [];
+let _compsData = [];
+
+(async () => {
+  await axiomBoot({ clockEl: 'cap-clock', marketEl: 'cap-market-status', macroEl: 'cap-macro-strip' });
+  initTabs('[data-tab-group="capital"] .ax-tab', panel => {
+    if (panel === 'cap-dealflow') loadDealFlow();
+    if (panel === 'cap-comps') loadComps();
+    if (panel === 'cap-portfolio') loadPortfolio();
+    if (panel === 'cap-macro') loadCapMacro();
+    if (panel === 'cap-reglog') loadCapRisk();
+    if (panel === 'cap-ai') loadCapAI();
+    if (panel === 'cap-docs') initDocUpload();
+    if (panel === 'cap-lp') loadLPData();
+    if (panel === 'cap-exit') loadExitPipeline();
+  });
+  new AxiomSearch('cap-search', 'cap-search-results', sym => {
+    document.getElementById('cap-for-sym').value = sym;
+    activateCap('cap-forensic');
+    loadForensic();
+  });
+  loadDealFlow();
+})();
+
+function activateCap(panelId) {
+  document.querySelectorAll('[data-tab-group="capital"] .ax-tab').forEach(t => {
+    if (t.dataset.panel === panelId) t.click();
+  });
+}
+
+// ── Deal Flow ──────────────────────────────────────────────────
+async function loadDealFlow() {
+  try {
+    const d = await axiomFetch('/pe/deal-flow');
+    const candidates = d.candidates || d.deals || d || [];
+    _dfData = candidates;
+    buildSortableTable('cap-df-table', [
+      { label: 'Symbol', render: v => `<strong style="color:#bc8cff;cursor:pointer;" onclick="openForensic('${v}')">${v}</strong>` },
+      { label: 'Signal', render: v => renderSignalBadge(v) },
+      { label: 'DAS Score', render: v => v != null ? renderScoreBar(v, 100, '#bc8cff') : '—' },
+      { label: 'Grade', render: v => v ? `<span class="ax-badge">${v}</span>` : '—' },
+      { label: 'DAU', render: v => v != null ? renderScoreBar(v * 100) : '—' },
+      { label: 'Rationale', render: v => `<span style="font-size:11px;color:var(--ax-text-muted);">${(v || '').slice(0, 80)}${(v||'').length > 80 ? '…' : ''}</span>` },
+    ], candidates.map(c => [
+      c.symbol || c.ticker,
+      c.signal,
+      c.das_score,
+      c.das_grade,
+      c.dau || c.axiom_dau,
+      c.rationale || c.thesis || '',
+    ]), {
+      defaultSort: 2, defaultDir: 'desc',
+      onRowClick: row => openForensic(row[0]),
+    });
+  } catch (e) {
+    document.getElementById('cap-df-table').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+function openForensic(sym) {
+  document.getElementById('cap-for-sym').value = sym;
+  activateCap('cap-forensic');
+  loadForensic();
+}
+
+// ── Forensic Analysis ─────────────────────────────────────────
+async function loadForensic() {
+  const sym = document.getElementById('cap-for-sym')?.value?.trim()?.toUpperCase();
+  if (!sym) return;
+  const el = document.getElementById('cap-forensic-content');
+  el.innerHTML = `<div class="ax-skel" style="height:260px;border-radius:6px;"></div>`;
+  try {
+    const [forensic, das] = await Promise.allSettled([
+      axiomFetch(`/pe/forensic/${sym}`),
+      axiomFetch(`/pe/das/${sym}`),
+    ]);
+    const f = forensic.status === 'fulfilled' ? forensic.value : null;
+    const d = das.status === 'fulfilled' ? das.value : null;
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        ${f ? `<div class="ax-card">
+          <h3 class="ax-section-label">Schilit Forensic — ${sym}</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+            <div class="ax-kpi"><div class="ax-kpi__label">Overall Risk</div><div class="ax-kpi__value">${renderRiskBadge(f.overall_risk)}</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Earnings Quality</div><div class="ax-kpi__value">${renderRiskBadge(f.earnings_quality_risk)}</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Revenue Manip.</div><div class="ax-kpi__value">${renderRiskBadge(f.revenue_manipulation_risk)}</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Cash Flow Risk</div><div class="ax-kpi__value">${renderRiskBadge(f.cash_flow_risk)}</div></div>
+          </div>
+          ${f.flags?.length ? `<div style="margin-top:10px;font-size:11px;color:#d29922;">Flags: ${f.flags.join(' · ')}</div>` : ''}
+          ${f.notes ? `<p style="font-size:11px;color:var(--ax-text-muted);margin-top:8px;">${f.notes}</p>` : ''}
+        </div>` : '<div class="ax-alert-warn">Forensic unavailable.</div>'}
+        ${d ? `<div class="ax-card">
+          <h3 class="ax-section-label">DAS Score — ${sym}</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+            <div class="ax-kpi"><div class="ax-kpi__label">DAS Total</div><div class="ax-kpi__value" style="color:#bc8cff;font-size:22px;">${d.das_score ?? '—'}</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Grade</div><div class="ax-kpi__value"><span class="ax-badge ax-badge--lg">${d.das_grade || '—'}</span></div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Strategic</div><div class="ax-kpi__value">${d.strategic_score ?? '—'}/25</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Financial</div><div class="ax-kpi__value">${d.financial_score ?? '—'}/25</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Operational</div><div class="ax-kpi__value">${d.operational_score ?? '—'}/25</div></div>
+            <div class="ax-kpi"><div class="ax-kpi__label">Risk</div><div class="ax-kpi__value">${d.risk_score ?? '—'}/25</div></div>
+          </div>
+          ${d.investment_thesis ? `<p style="font-size:11px;color:var(--ax-text-muted);margin-top:10px;">${d.investment_thesis}</p>` : ''}
+          ${d.key_strengths?.length ? `<div style="font-size:11px;color:#3fb950;margin-top:6px;">✓ ${d.key_strengths.join(' · ')}</div>` : ''}
+          ${d.key_risks?.length ? `<div style="font-size:11px;color:#f85149;margin-top:4px;">⚠ ${d.key_risks.join(' · ')}</div>` : ''}
+        </div>` : '<div class="ax-alert-warn">DAS unavailable.</div>'}
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+document.getElementById('cap-for-sym')?.addEventListener('keydown', e => { if (e.key === 'Enter') loadForensic(); });
+
+// ── LBO Engine ────────────────────────────────────────────────
+function runLBO() {
+  const ev = parseFloat(document.getElementById('lbo-ev').value);
+  const ebitda = parseFloat(document.getElementById('lbo-ebitda').value);
+  const leverage = parseFloat(document.getElementById('lbo-leverage').value);
+  const years = parseInt(document.getElementById('lbo-years').value);
+  const cagr = parseFloat(document.getElementById('lbo-cagr').value) / 100;
+  const exitMult = parseFloat(document.getElementById('lbo-exit-mult').value);
+
+  const debt = ebitda * leverage;
+  const equity = ev - debt;
+  const exitEbitda = ebitda * Math.pow(1 + cagr, years);
+  const exitEV = exitEbitda * exitMult;
+  const debtAtExit = debt * 0.7; // assume 30% paydown
+  const exitEquity = exitEV - debtAtExit;
+  const moic = exitEquity / equity;
+  const irr = Math.pow(moic, 1 / years) - 1;
+
+  document.getElementById('lbo-results').innerHTML = `
+    <h3 class="ax-section-label">LBO Results</h3>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+      <div class="ax-kpi"><div class="ax-kpi__label">Entry Equity</div><div class="ax-kpi__value">${Fmt.currency(equity * 1e6)}</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">Entry Debt</div><div class="ax-kpi__value">${Fmt.currency(debt * 1e6)}</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">Exit EV</div><div class="ax-kpi__value">${Fmt.currency(exitEV * 1e6)}</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">Exit Equity</div><div class="ax-kpi__value">${Fmt.currency(exitEquity * 1e6)}</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">MOIC</div><div class="ax-kpi__value" style="color:${moic >= 2 ? '#3fb950' : moic >= 1.5 ? '#d29922' : '#f85149'}">${moic.toFixed(2)}x</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">IRR</div><div class="ax-kpi__value" style="color:${irr >= 0.2 ? '#3fb950' : irr >= 0.15 ? '#d29922' : '#f85149'}">${Fmt.pct(irr * 100, 1)}</div></div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--ax-text-muted);">
+      Entry: ${ev / ebitda}x EBITDA | Exit: ${exitMult}x EBITDA | CAGR: ${(cagr*100).toFixed(1)}% | ${years}yr hold
+    </div>`;
+}
+
+// ── Comps ─────────────────────────────────────────────────────
+async function loadComps() {
+  try {
+    const d = await axiomFetch('/intelligence/universe/scores');
+    const rows = Array.isArray(d) ? d : (d.scores || d.data || []);
+    _compsData = rows;
+    buildSortableTable('cap-comps-table', [
+      { label: 'Symbol', render: v => `<strong style="color:#bc8cff;">${v}</strong>` },
+      { label: 'Signal', render: v => renderSignalBadge(v) },
+      { label: 'EIS (Quality)', render: v => v != null ? renderScoreBar(v * 100, 100, '#bc8cff') : '—' },
+      { label: 'CAPS (Catalyst)', render: v => v != null ? renderScoreBar(v * 100, 100, '#3fb950') : '—' },
+      { label: 'DAU (Momentum)', render: v => v != null ? renderScoreBar(v * 100) : '—' },
+      { label: 'Regime', render: v => `<span class="ax-badge">${v || '—'}</span>` },
+    ], rows.map(r => [r.symbol || r.ticker, r.signal, r.eis_score, r.caps_score, r.dau, r.regime_label]), {
+      defaultSort: 2, defaultDir: 'desc',
+    });
+  } catch (e) {
+    document.getElementById('cap-comps-table').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Portfolio Monitor ─────────────────────────────────────────
+async function loadPortfolio() {
+  try {
+    const d = await axiomFetch('/pe/deal-flow');
+    const candidates = d.candidates || d.deals || d || [];
+    const el = document.getElementById('cap-portfolio-content');
+    const buys = candidates.filter(c => c.signal === 'BUY' || (c.das_score || 0) >= 60);
+    el.innerHTML = `<div style="font-size:12px;color:var(--ax-text-muted);margin-bottom:10px;">${buys.length} high-conviction holdings from deal flow</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${buys.slice(0,12).map(c => `
+          <div class="ax-kpi" style="min-width:120px;">
+            <div class="ax-kpi__label">${c.symbol}</div>
+            <div class="ax-kpi__value" style="font-size:13px;">${c.das_score != null ? `DAS: ${c.das_score}` : ''}</div>
+            <div>${renderSignalBadge(c.signal)}</div>
+          </div>`).join('')}
+      </div>`;
+    if (buys.length) {
+      buildDonutChart('cap-port-chart',
+        buys.slice(0, 8).map(c => c.symbol),
+        buys.slice(0, 8).map(c => c.das_score || 50),
+        ['#bc8cff','#58a6ff','#3fb950','#d29922','#f0883e','#f85149','#79c0ff','#a5d6ff']);
+    }
+  } catch (e) {
+    document.getElementById('cap-portfolio-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Document Intelligence ─────────────────────────────────────
+function initDocUpload() {
+  const entityId = document.getElementById('cap-doc-entity')?.value || 'portco';
+  if (document.getElementById('cap-upload-zone')?.innerHTML) return;
+  new AxiomUpload('cap-upload-zone', entityId, 'pe_portco', (ext, intel) => {
+    Toast.show(`Extraction saved. Confidence: ${Math.round((ext.overall_confidence || 0) * 100)}%`, 'success');
+  });
+  loadReviewQueue();
+}
+
+async function loadReviewQueue() {
+  try {
+    const d = await axiomFetch('/extract/review-queue');
+    const items = Array.isArray(d) ? d : (d.items || d.queue || []);
+    const el = document.getElementById('cap-review-queue');
+    if (!items.length) { el.innerHTML = '<div class="ax-empty-state">No items pending review.</div>'; return; }
+    el.innerHTML = items.slice(0, 5).map(item => `
+      <div style="padding:8px;border-bottom:1px solid var(--ax-border);font-size:11px;">
+        <div style="font-weight:600;color:var(--ax-text);">${item.filename || 'Document'}</div>
+        <div style="color:var(--ax-text-muted);">${item.entity_id || ''} · ${item.document_type || ''} · ${item.overall_confidence != null ? Math.round(item.overall_confidence * 100) + '% conf' : ''}</div>
+        <div style="color:${item.status === 'pending' ? '#d29922' : '#3fb950'};margin-top:2px;">${item.status?.toUpperCase() || ''}</div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('cap-review-queue').innerHTML = `<div style="font-size:11px;color:#f85149;">${e.message}</div>`;
+  }
+}
+
+// ── LP Reports ────────────────────────────────────────────────
+async function loadLPData() {
+  const el = document.getElementById('cap-lp-content');
+  el.innerHTML = `<div style="font-size:12px;color:var(--ax-text-muted);margin-bottom:12px;">LP report summarizes portfolio performance and AXIOM signals for limited partners.</div>`;
+}
+
+async function generateLPReport() {
+  const el = document.getElementById('cap-lp-content');
+  el.innerHTML = `<div class="ax-skel" style="height:100px;border-radius:6px;"></div>`;
+  try {
+    const d = await axiomFetch('/pe/deal-flow');
+    const candidates = d.candidates || d.deals || d || [];
+    const buyCount = candidates.filter(c => c.signal === 'BUY').length;
+    const avgDas = candidates.reduce((s, c) => s + (c.das_score || 0), 0) / (candidates.length || 1);
+    el.innerHTML = `
+      <div class="ax-card">
+        <h3 class="ax-section-label">LP Report — ${new Date().toLocaleDateString('en-US', {month:'long',year:'numeric'})}</h3>
+        <p style="font-size:13px;color:var(--ax-text-muted);margin-top:8px;line-height:1.7;">
+          AXIOM CAPITAL screened <strong>${candidates.length}</strong> public comps this period.
+          <strong>${buyCount}</strong> companies meet BUY threshold criteria.
+          Average DAS score across the universe: <strong style="color:#bc8cff;">${avgDas.toFixed(1)}/100</strong>.
+        </p>
+        <div style="display:flex;gap:8px;margin-top:10px;">
+          <button class="ax-btn ax-btn--sm" onclick="ExportManager.toJSON(${JSON.stringify(candidates)},'lp-report.json')">Export JSON</button>
+          <button class="ax-btn ax-btn--sm" onclick="ExportManager.toCSV(${JSON.stringify(candidates)},'lp-report.csv')">Export CSV</button>
+        </div>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Exit Pipeline ─────────────────────────────────────────────
+async function loadExitPipeline() {
+  try {
+    const d = await axiomFetch('/pe/deal-flow');
+    const candidates = d.candidates || d.deals || d || [];
+    const exitCandidates = candidates.filter(c => (c.das_score || 0) >= 70);
+    buildSortableTable('cap-exit-table', [
+      { label: 'Symbol', render: v => `<strong style="color:#bc8cff;">${v}</strong>` },
+      { label: 'Signal', render: v => renderSignalBadge(v) },
+      { label: 'DAS', render: v => v != null ? renderScoreBar(v, 100, '#bc8cff') : '—' },
+      { label: 'Exit Thesis', render: v => `<span style="font-size:11px;color:var(--ax-text-muted);">${v || 'Strong fundamentals'}</span>` },
+    ], exitCandidates.map(c => [c.symbol, c.signal, c.das_score, c.investment_thesis || c.rationale]), {
+      defaultSort: 2, defaultDir: 'desc',
+    });
+  } catch (e) {
+    document.getElementById('cap-exit-table').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Macro ─────────────────────────────────────────────────────
+async function loadCapMacro() {
+  try {
+    const [snap, factors] = await Promise.allSettled([
+      axiomFetch('/macro/snapshot'),
+      axiomFetch('/macro/factor-overlay'),
+    ]);
+    const el = document.getElementById('cap-macro-content');
+    const s = snap.status === 'fulfilled' ? snap.value : null;
+    const f = factors.status === 'fulfilled' ? factors.value : null;
+    el.innerHTML = `
+      ${s ? `<div class="ax-card" style="margin-bottom:12px;">
+        <h3 class="ax-section-label">Macro Intelligence</h3>
+        <p style="font-size:12px;color:var(--ax-text-muted);margin-top:8px;">${s.macro_intelligence?.summary || JSON.stringify(s.macro_intelligence || s).slice(0, 300)}</p>
+      </div>` : ''}
+      ${f ? `<div class="ax-card">
+        <h3 class="ax-section-label">Factor Overlay</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-top:8px;">
+          ${Object.entries(f.factors || f.factor_scores || f || {}).map(([k, v]) =>
+            `<div class="ax-kpi"><div class="ax-kpi__label">${k.replace(/_/g,' ')}</div>
+            <div class="ax-kpi__value">${typeof v === 'number' ? renderScoreBar(v * 100, 100, '#bc8cff') : v}</div></div>`).join('')}
+        </div>
+      </div>` : ''}`;
+  } catch (e) {
+    document.getElementById('cap-macro-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Risk Register ─────────────────────────────────────────────
+async function loadCapRisk() {
+  try {
+    const d = await axiomFetch('/axiom/risk/sri');
+    const el = document.getElementById('cap-risk-content');
+    const score = d.sri_score ?? d.score ?? 0;
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;">
+        <div class="ax-kpi"><div class="ax-kpi__label">SRI Score</div><div class="ax-kpi__value">${renderScoreBar(score * 100)}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Risk Level</div><div class="ax-kpi__value">${renderRiskBadge(d.risk_level)}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Regime</div><div class="ax-kpi__value"><span class="ax-badge">${d.regime || '—'}</span></div></div>
+      </div>
+      ${d.notes ? `<p style="font-size:12px;color:var(--ax-text-muted);">${d.notes}</p>` : ''}`;
+  } catch (e) {
+    document.getElementById('cap-risk-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── AI Engine ─────────────────────────────────────────────────
+async function loadCapAI() {
+  try {
+    const d = await axiomFetch('/axiom/ml/ensemble-status');
+    const el = document.getElementById('cap-ai-content');
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;">
+        <div class="ax-kpi"><div class="ax-kpi__label">Ensemble Accuracy</div><div class="ax-kpi__value" style="color:#3fb950">${d.accuracy != null ? Fmt.pct(d.accuracy) : '—'}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Sharpe</div><div class="ax-kpi__value" style="color:#bc8cff">${d.sharpe != null ? Fmt.num(d.sharpe) : '—'}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Win Rate</div><div class="ax-kpi__value">${d.win_rate != null ? Fmt.pct(d.win_rate) : '—'}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Models</div><div class="ax-kpi__value">${(d.models || []).length || d.active_models || '—'}</div></div>
+      </div>
+      <pre style="font-size:10px;color:var(--ax-text-muted);background:var(--ax-surface2,#161b22);padding:10px;border-radius:6px;overflow-x:auto;">${JSON.stringify(d, null, 2).slice(0, 800)}</pre>`;
+  } catch (e) {
+    document.getElementById('cap-ai-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>

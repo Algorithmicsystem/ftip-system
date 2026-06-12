@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXIOM — AI-Powered Financial Intelligence</title>
+<link rel="icon" href="/app/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/static/axiom-design-system.css">
+<style>
+  .landing-body {
+    min-height: 100vh;
+    background: #0d1117;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    padding: 40px 20px;
+  }
+  .landing-logo {
+    font-size: 13px;
+    letter-spacing: 0.25em;
+    color: #8b949e;
+    margin-bottom: 8px;
+  }
+  .landing-headline {
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 700;
+    color: #e6edf3;
+    text-align: center;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .landing-sub {
+    font-size: 14px;
+    color: #8b949e;
+    text-align: center;
+    max-width: 520px;
+    line-height: 1.7;
+    margin-bottom: 48px;
+  }
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    max-width: 920px;
+    width: 100%;
+  }
+  @media (max-width: 700px) { .product-grid { grid-template-columns: 1fr; } }
+  .product-card {
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 12px;
+    padding: 28px 24px;
+    text-decoration: none;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: border-color .2s, transform .15s, box-shadow .2s;
+    cursor: pointer;
+  }
+  .product-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px rgba(0,0,0,.4);
+  }
+  .product-card.signal:hover { border-color: #58a6ff; box-shadow: 0 12px 40px #58a6ff18; }
+  .product-card.capital:hover { border-color: #bc8cff; box-shadow: 0 12px 40px #bc8cff18; }
+  .product-card.cfo:hover { border-color: #3fb950; box-shadow: 0 12px 40px #3fb95018; }
+  .product-icon { font-size: 28px; }
+  .product-name { font-size: 11px; letter-spacing: .2em; font-weight: 700; }
+  .product-name.signal { color: #58a6ff; }
+  .product-name.capital { color: #bc8cff; }
+  .product-name.cfo { color: #3fb950; }
+  .product-desc { font-size: 13px; color: #8b949e; line-height: 1.6; flex: 1; }
+  .product-audience { font-size: 10px; color: #484f58; letter-spacing: .08em; text-transform: uppercase; }
+  .product-features { display: flex; flex-direction: column; gap: 4px; }
+  .product-feature { font-size: 11px; color: #6e7681; }
+  .product-feature::before { content: '→ '; }
+  .product-cta {
+    margin-top: 4px;
+    padding: 8px 0;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    text-align: center;
+    border: none;
+    cursor: pointer;
+    letter-spacing: .05em;
+    text-decoration: none;
+    display: block;
+  }
+  .signal .product-cta { background: #58a6ff18; color: #58a6ff; }
+  .capital .product-cta { background: #bc8cff18; color: #bc8cff; }
+  .cfo .product-cta { background: #3fb95018; color: #3fb950; }
+  .product-card:hover .product-cta { opacity: 0.85; }
+  .landing-footer {
+    margin-top: 40px;
+    font-size: 11px;
+    color: #484f58;
+    text-align: center;
+    letter-spacing: .04em;
+  }
+  .landing-footer a { color: #6e7681; text-decoration: none; }
+  .landing-footer a:hover { color: #8b949e; }
+  .landing-axiom-glyph {
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 20px;
+    background: linear-gradient(135deg, #58a6ff22, #bc8cff22, #3fb95022);
+    border: 1px solid #21262d;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 800;
+    color: #e6edf3;
+    letter-spacing: -0.05em;
+  }
+</style>
+</head>
+<body class="landing-body">
+
+  <div class="landing-axiom-glyph">AX</div>
+  <div class="landing-logo">AXIOM INTELLIGENCE PLATFORM</div>
+  <h1 class="landing-headline">Choose your terminal.</h1>
+  <p class="landing-sub">
+    AI-powered financial intelligence for every decision layer —
+    from individual trades to institutional deals to business operations.
+  </p>
+
+  <div class="product-grid">
+
+    <!-- AXIOM SIGNAL -->
+    <a href="/signal" class="product-card signal">
+      <div class="product-icon">📡</div>
+      <div class="product-name signal">AXIOM SIGNAL</div>
+      <div class="product-desc">Institutional-grade market intelligence for active traders and retail investors.</div>
+      <div class="product-features">
+        <div class="product-feature">30-symbol universe screen</div>
+        <div class="product-feature">Smart money flow analysis</div>
+        <div class="product-feature">DAU · EIS · CAPS signals</div>
+        <div class="product-feature">Real-time risk monitor</div>
+        <div class="product-feature">Factor environment overlay</div>
+      </div>
+      <div class="product-audience">Traders · Retail Investors · RIAs</div>
+      <span class="product-cta">Open SIGNAL Terminal →</span>
+    </a>
+
+    <!-- AXIOM CAPITAL -->
+    <a href="/capital" class="product-card capital">
+      <div class="product-icon">🏛️</div>
+      <div class="product-name capital">AXIOM CAPITAL</div>
+      <div class="product-desc">Full-stack deal intelligence for PE firms, VCs, and institutional investors.</div>
+      <div class="product-features">
+        <div class="product-feature">Live deal flow screening</div>
+        <div class="product-feature">Schilit forensic analysis</div>
+        <div class="product-feature">DAS scoring (4-component)</div>
+        <div class="product-feature">LBO / DCF workbench</div>
+        <div class="product-feature">AI document extraction</div>
+      </div>
+      <div class="product-audience">PE Firms · VCs · Institutional</div>
+      <span class="product-cta">Open CAPITAL Terminal →</span>
+    </a>
+
+    <!-- AXIOM CFO -->
+    <a href="/cfo" class="product-card cfo">
+      <div class="product-icon">📊</div>
+      <div class="product-name cfo">AXIOM CFO</div>
+      <div class="product-desc">Business intelligence platform for founders, CFOs, and business owners.</div>
+      <div class="product-features">
+        <div class="product-feature">Credit & debt capacity</div>
+        <div class="product-feature">Pricing power scoring</div>
+        <div class="product-feature">DSCR & cash flow forecast</div>
+        <div class="product-feature">Scenario planning engine</div>
+        <div class="product-feature">AI financial document reader</div>
+      </div>
+      <div class="product-audience">CFOs · Founders · Business Owners</div>
+      <span class="product-cta">Open CFO Terminal →</span>
+    </a>
+
+  </div>
+
+  <div class="landing-footer">
+    <a href="/app">Admin Dashboard</a>
+    &nbsp;·&nbsp;
+    Powered by AXIOM AI
+    &nbsp;·&nbsp;
+    Not investment advice
+  </div>
+
+</body>
+</html>

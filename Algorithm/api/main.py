@@ -1939,6 +1939,21 @@ def developer_dashboard() -> FileResponse:
     return FileResponse(dev_page)
 
 
+@app.get("/signal")
+def axiom_signal_terminal() -> FileResponse:
+    return FileResponse(WEBAPP_DIR / "signal.html")
+
+
+@app.get("/capital")
+def axiom_capital_terminal() -> FileResponse:
+    return FileResponse(WEBAPP_DIR / "capital.html")
+
+
+@app.get("/cfo")
+def axiom_cfo_terminal() -> FileResponse:
+    return FileResponse(WEBAPP_DIR / "cfo.html")
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 @app.get("/favicon.svg", include_in_schema=False)
 def favicon() -> FileResponse:
@@ -1946,64 +1961,8 @@ def favicon() -> FileResponse:
 
 
 @app.get("/")
-def root() -> Dict[str, Any]:
-    return {
-        "name": APP_NAME,
-        "status": "ok",
-        "db_enabled": bool(db.db_enabled()),
-        "db_pool_ready": _db_pool_ready(),
-        "official_v1": {
-            "description": "FTIP official API v1 surface",
-            "sequence": [
-                "POST /prosperity/bootstrap",
-                "POST /prosperity/snapshot/run",
-                "GET /prosperity/latest/signal",
-                "GET /prosperity/latest/features",
-                "POST /jobs/prosperity/daily-snapshot (optional)",
-            ],
-            "docs": "/docs",
-        },
-        "official_v1_endpoints": [
-            "/prosperity/bootstrap",
-            "/prosperity/snapshot/run",
-            "/prosperity/latest/signal",
-            "/prosperity/latest/features",
-            "/jobs/prosperity/daily-snapshot",
-        ],
-        "other_endpoints": [
-            "/health",
-            "/docs",
-            "/ready",
-            "/providers/health",
-            "/db/health",
-            "/db/save_signal",
-            "/db/save_signals",
-            "/db/run_snapshot",
-            "/db/save_portfolio_backtest",
-            "/db/universe/load_default",
-            "/version",
-            "/signals/* (legacy, non-v1)",
-            "/signal",
-            "/portfolio_signals",
-            "/portfolio_backtest",
-            "/walk_forward",
-            "/calibrate",
-            "/run_backtest",
-            "/market/massive/bars",
-            "/universe/upsert",
-            "/universe/top",
-            "/assistant/health",
-            "/assistant/chat",
-            "/assistant/explain/signal",
-            "/assistant/explain/backtest",
-            "/assistant/title_session",
-            "/narrator/signal",
-            "/narrator/portfolio",
-            "/narrator/ask",
-            "/narrator/health",
-            "/narrator/explain-signal",
-        ],
-    }
+def root() -> FileResponse:
+    return FileResponse(WEBAPP_DIR / "landing.html")
 
 
 @app.get("/health")

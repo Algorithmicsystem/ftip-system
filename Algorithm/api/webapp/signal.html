@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXIOM SIGNAL — Retail Intelligence Terminal</title>
+<link rel="icon" href="/app/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/static/axiom-design-system.css">
+<style>
+  :root { --ax-accent: #58a6ff; }
+  .ax-brand-name { color: #58a6ff; }
+  .ax-topbar-logo span { color: #58a6ff; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="ax-body">
+
+<!-- Top Bar -->
+<header class="ax-topbar">
+  <div class="ax-topbar-left">
+    <div class="ax-topbar-logo">AXIOM <span>SIGNAL</span></div>
+    <div id="sig-market-status" class="ax-market-status ax-market-closed">● LOADING</div>
+  </div>
+  <div class="ax-macro-strip" id="sig-macro-strip">Loading...</div>
+  <div class="ax-topbar-right">
+    <span id="sig-clock" class="ax-clock"></span>
+    <div id="sig-search-wrap" style="position:relative;">
+      <input id="sig-search" placeholder="Symbol search..." class="ax-search-input" autocomplete="off">
+      <div id="sig-search-results" class="ax-search-results"></div>
+    </div>
+  </div>
+</header>
+
+<!-- Tab Bar -->
+<nav class="ax-tabbar" data-tab-group="signal">
+  <button class="ax-tab ax-tab--active" data-panel="sig-briefing">Morning Briefing</button>
+  <button class="ax-tab" data-panel="sig-universe">Universe Screen</button>
+  <button class="ax-tab" data-panel="sig-symbol">Symbol Intelligence</button>
+  <button class="ax-tab" data-panel="sig-smartmoney">Smart Money</button>
+  <button class="ax-tab" data-panel="sig-risk">Risk Monitor</button>
+  <button class="ax-tab" data-panel="sig-factor">Factor Environment</button>
+  <button class="ax-tab" data-panel="sig-track">Track Record</button>
+</nav>
+
+<!-- Panels -->
+<main class="ax-main">
+
+  <!-- Morning Briefing -->
+  <section id="sig-briefing" class="ax-panel">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Morning Briefing</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadBriefing()">Refresh</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;" id="sig-brief-kpis">
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+    </div>
+    <div id="sig-brief-text" class="ax-prose" style="max-width:900px;"></div>
+    <div style="margin-top:16px;">
+      <h3 class="ax-section-label">Signal Summary</h3>
+      <div id="sig-brief-signals" class="ax-skel" style="height:120px;border-radius:6px;"></div>
+    </div>
+  </section>
+
+  <!-- Universe Screen -->
+  <section id="sig-universe" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Universe Screen — 30 Symbols</h2>
+      <div style="display:flex;gap:8px;">
+        <select id="sig-univ-filter" class="ax-select">
+          <option value="">All Signals</option>
+          <option value="BUY">BUY</option>
+          <option value="SELL">SELL</option>
+          <option value="HOLD">HOLD</option>
+        </select>
+        <button class="ax-btn ax-btn--sm" onclick="ExportManager.toCSV(_univData,'axiom-universe.csv')">Export CSV</button>
+      </div>
+    </div>
+    <div id="sig-univ-table"></div>
+  </section>
+
+  <!-- Symbol Intelligence -->
+  <section id="sig-symbol" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Symbol Intelligence</h2>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="sig-sym-input" class="ax-search-input" placeholder="Enter symbol…" style="width:120px;">
+        <button class="ax-btn" onclick="loadSymbolIntel()">Analyze</button>
+      </div>
+    </div>
+    <div id="sig-symbol-content">
+      <div class="ax-empty-state">Enter a symbol above to load intelligence.</div>
+    </div>
+  </section>
+
+  <!-- Smart Money -->
+  <section id="sig-smartmoney" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Smart Money Flows</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadSmartMoney()">Refresh</button>
+    </div>
+    <div id="sig-sm-table"></div>
+  </section>
+
+  <!-- Risk Monitor -->
+  <section id="sig-risk" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Systemic Risk Monitor</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadRisk()">Refresh</button>
+    </div>
+    <div id="sig-risk-content"></div>
+    <div style="margin-top:16px;height:200px;"><canvas id="sig-risk-chart"></canvas></div>
+  </section>
+
+  <!-- Factor Environment -->
+  <section id="sig-factor" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Factor Environment</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadFactors()">Refresh</button>
+    </div>
+    <div id="sig-factor-content"></div>
+  </section>
+
+  <!-- Track Record -->
+  <section id="sig-track" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">AXIOM Track Record</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadMLStatus()">Refresh</button>
+    </div>
+    <div id="sig-track-content"></div>
+    <div style="margin-top:16px;height:220px;"><canvas id="sig-ml-chart"></canvas></div>
+  </section>
+
+</main>
+
+<script src="/app/static/axiom-core.js"></script>
+<script>
+let _univData = [];
+let _smData = [];
+
+// ── Boot ──────────────────────────────────────────────────────
+(async () => {
+  await axiomBoot({ clockEl: 'sig-clock', marketEl: 'sig-market-status', macroEl: 'sig-macro-strip' });
+  initTabs('[data-tab-group="signal"] .ax-tab', (panel) => {
+    if (panel === 'sig-briefing' && !_briefingLoaded) loadBriefing();
+    if (panel === 'sig-universe') loadUniverse();
+    if (panel === 'sig-smartmoney') loadSmartMoney();
+    if (panel === 'sig-risk') loadRisk();
+    if (panel === 'sig-factor') loadFactors();
+    if (panel === 'sig-track') loadMLStatus();
+  });
+  new AxiomSearch('sig-search', 'sig-search-results', sym => {
+    document.getElementById('sig-sym-input').value = sym;
+    activateTab('sig-symbol');
+    loadSymbolIntel();
+  });
+  loadBriefing();
+  loadUniverse();
+})();
+
+let _briefingLoaded = false;
+
+function activateTab(panelId) {
+  document.querySelectorAll('[data-tab-group="signal"] .ax-tab').forEach(t => {
+    if (t.dataset.panel === panelId) t.click();
+  });
+}
+
+// ── Morning Briefing ──────────────────────────────────────────
+async function loadBriefing() {
+  _briefingLoaded = true;
+  try {
+    const d = await axiomFetch('/jobs/briefing/morning');
+    const kpis = document.getElementById('sig-brief-kpis');
+    const signals = d.signal_summary || {};
+    kpis.innerHTML = `
+      <div class="ax-kpi">
+        <div class="ax-kpi__label">BUY Signals</div>
+        <div class="ax-kpi__value" style="color:#3fb950">${signals.buy_count ?? '—'}</div>
+      </div>
+      <div class="ax-kpi">
+        <div class="ax-kpi__label">SELL Signals</div>
+        <div class="ax-kpi__value" style="color:#f85149">${signals.sell_count ?? '—'}</div>
+      </div>
+      <div class="ax-kpi">
+        <div class="ax-kpi__label">Avg DAU Score</div>
+        <div class="ax-kpi__value" style="color:#58a6ff">${signals.avg_dau ? Fmt.score(signals.avg_dau) : '—'}</div>
+      </div>`;
+    document.getElementById('sig-brief-text').innerHTML =
+      `<p style="font-size:13px;line-height:1.8;color:var(--ax-text-muted);">${d.briefing_text || 'No briefing available.'}</p>`;
+    const sigBox = document.getElementById('sig-brief-signals');
+    const topSym = d.top_signals || [];
+    sigBox.innerHTML = topSym.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:8px;">${topSym.slice(0,12).map(s =>
+          `<div class="ax-tag">${s.symbol} ${renderSignalBadge(s.signal)}</div>`).join('')}</div>`
+      : '<div class="ax-empty-state">No signals today.</div>';
+  } catch (e) {
+    document.getElementById('sig-brief-text').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+    document.getElementById('sig-brief-kpis').innerHTML = '';
+  }
+}
+
+// ── Universe Screen ───────────────────────────────────────────
+async function loadUniverse() {
+  const filter = document.getElementById('sig-univ-filter')?.value || '';
+  try {
+    const d = await axiomFetch('/intelligence/universe/scores');
+    let rows = Array.isArray(d) ? d : (d.scores || d.data || []);
+    _univData = rows.map(s => ({
+      symbol: s.symbol || s.ticker || '',
+      signal: s.signal || '',
+      dau: s.dau ?? s.dau_score ?? null,
+      eis: s.eis_score ?? null,
+      caps: s.caps_score ?? null,
+      regime: s.regime_label || '',
+    }));
+    if (filter) _univData = _univData.filter(r => r.signal?.toUpperCase() === filter);
+    buildSortableTable('sig-univ-table', [
+      { label: 'Symbol', render: v => `<strong style="color:var(--ax-accent)">${v}</strong>` },
+      { label: 'Signal', render: v => renderSignalBadge(v) },
+      { label: 'DAU Score', render: v => v != null ? renderScoreBar(v * 100) : '—' },
+      { label: 'EIS Score', render: v => v != null ? renderScoreBar(v * 100, 100, '#bc8cff') : '—' },
+      { label: 'CAPS Score', render: v => v != null ? renderScoreBar(v * 100, 100, '#3fb950') : '—' },
+      { label: 'Regime', render: v => `<span class="ax-badge">${v || '—'}</span>` },
+    ], _univData.map(r => [r.symbol, r.signal, r.dau, r.eis, r.caps, r.regime]), {
+      defaultSort: 2, defaultDir: 'desc',
+      onRowClick: (row) => {
+        document.getElementById('sig-sym-input').value = row[0];
+        activateTab('sig-symbol');
+        loadSymbolIntel();
+      },
+    });
+  } catch (e) {
+    document.getElementById('sig-univ-table').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+document.getElementById('sig-univ-filter')?.addEventListener('change', loadUniverse);
+
+// ── Symbol Intelligence ───────────────────────────────────────
+async function loadSymbolIntel() {
+  const sym = document.getElementById('sig-sym-input')?.value?.trim()?.toUpperCase();
+  if (!sym) return;
+  const el = document.getElementById('sig-symbol-content');
+  el.innerHTML = `<div class="ax-skel" style="height:200px;border-radius:6px;"></div>`;
+  try {
+    const [sm, univ] = await Promise.allSettled([
+      axiomFetch(`/intelligence/smart-money/${sym}`),
+      axiomFetch('/intelligence/universe/scores'),
+    ]);
+    const smData = sm.status === 'fulfilled' ? sm.value : null;
+    const univRows = univ.status === 'fulfilled' ? (Array.isArray(univ.value) ? univ.value : (univ.value.scores || [])) : [];
+    const univEntry = univRows.find(r => (r.symbol || r.ticker) === sym);
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">Signal</div>
+          <div class="ax-kpi__value">${renderSignalBadge(univEntry?.signal || smData?.signal || 'HOLD')}</div>
+        </div>
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">DAU Score</div>
+          <div class="ax-kpi__value" style="color:#58a6ff">${univEntry?.dau != null ? Fmt.score(univEntry.dau) : '—'}</div>
+        </div>
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">EIS Score</div>
+          <div class="ax-kpi__value" style="color:#bc8cff">${univEntry?.eis_score != null ? Fmt.score(univEntry.eis_score) : '—'}</div>
+        </div>
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">CAPS Score</div>
+          <div class="ax-kpi__value" style="color:#3fb950">${univEntry?.caps_score != null ? Fmt.score(univEntry.caps_score) : '—'}</div>
+        </div>
+      </div>
+      ${smData ? `
+      <div class="ax-card" style="margin-bottom:12px;">
+        <h3 class="ax-section-label">Smart Money Flow</h3>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:8px;">
+          <div class="ax-kpi"><div class="ax-kpi__label">Institutional %</div><div class="ax-kpi__value">${smData.institutional_pct != null ? Fmt.pct(smData.institutional_pct) : '—'}</div></div>
+          <div class="ax-kpi"><div class="ax-kpi__label">Flow Score</div><div class="ax-kpi__value" style="color:#58a6ff">${smData.flow_score != null ? Fmt.score(smData.flow_score) : '—'}</div></div>
+          <div class="ax-kpi"><div class="ax-kpi__label">Momentum</div><div class="ax-kpi__value">${smData.momentum || '—'}</div></div>
+        </div>
+        ${smData.notes ? `<p style="font-size:11px;color:var(--ax-text-muted);margin-top:8px;">${smData.notes}</p>` : ''}
+      </div>` : ''}
+      ${univEntry?.regime_label ? `<div class="ax-badge ax-badge--lg" style="margin-top:4px;">Regime: ${univEntry.regime_label}</div>` : ''}`;
+  } catch (e) {
+    el.innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+document.getElementById('sig-sym-input')?.addEventListener('keydown', e => { if (e.key === 'Enter') loadSymbolIntel(); });
+
+// ── Smart Money ────────────────────────────────────────────────
+async function loadSmartMoney() {
+  try {
+    const d = await axiomFetch('/intelligence/smart-money/universe/all');
+    _smData = Array.isArray(d) ? d : (d.flows || d.data || []);
+    buildSortableTable('sig-sm-table', [
+      { label: 'Symbol', render: v => `<strong style="color:var(--ax-accent)">${v}</strong>` },
+      { label: 'Signal', render: v => renderSignalBadge(v) },
+      { label: 'Flow Score', render: v => v != null ? renderScoreBar(v * 100, 100, '#58a6ff') : '—' },
+      { label: 'Inst. %', render: v => Fmt.pct(v) },
+      { label: 'Momentum', render: v => v || '—' },
+    ], _smData.map(s => [s.symbol || s.ticker, s.signal, s.flow_score, s.institutional_pct, s.momentum]), {
+      defaultSort: 2, defaultDir: 'desc',
+    });
+  } catch (e) {
+    document.getElementById('sig-sm-table').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Risk Monitor ──────────────────────────────────────────────
+async function loadRisk() {
+  try {
+    const d = await axiomFetch('/axiom/risk/sri');
+    const el = document.getElementById('sig-risk-content');
+    const score = d.sri_score ?? d.score ?? 0;
+    const level = d.risk_level || (score > 0.7 ? 'high' : score > 0.4 ? 'medium' : 'low');
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px;">
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">SRI Score</div>
+          <div class="ax-kpi__value">${renderScoreBar(score * 100)}</div>
+        </div>
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">Risk Level</div>
+          <div class="ax-kpi__value">${renderRiskBadge(level)}</div>
+        </div>
+        <div class="ax-kpi">
+          <div class="ax-kpi__label">Regime</div>
+          <div class="ax-kpi__value"><span class="ax-badge">${d.regime || '—'}</span></div>
+        </div>
+      </div>
+      ${d.components ? `<div style="display:flex;flex-direction:column;gap:6px;">${
+        Object.entries(d.components).map(([k, v]) =>
+          `<div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;">
+            <span class="ax-label">${k}</span>${renderScoreBar(v * 100)}
+          </div>`).join('')
+      }</div>` : ''}
+      ${d.notes ? `<p style="font-size:11px;color:var(--ax-text-muted);margin-top:10px;">${d.notes}</p>` : ''}`;
+    const hist = d.history || [];
+    if (hist.length) {
+      buildLineChart('sig-risk-chart',
+        hist.map(p => Fmt.date(p.date)),
+        [{ label: 'SRI', data: hist.map(p => p.score * 100), color: '#f85149' }]);
+    }
+  } catch (e) {
+    document.getElementById('sig-risk-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Factor Environment ────────────────────────────────────────
+async function loadFactors() {
+  try {
+    const d = await axiomFetch('/macro/factor-overlay');
+    const el = document.getElementById('sig-factor-content');
+    const factors = d.factors || d.factor_scores || d;
+    if (typeof factors === 'object' && !Array.isArray(factors)) {
+      el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">
+        ${Object.entries(factors).map(([k, v]) => `
+          <div class="ax-kpi">
+            <div class="ax-kpi__label">${k.replace(/_/g,' ').toUpperCase()}</div>
+            <div class="ax-kpi__value">${typeof v === 'number' ? renderScoreBar(v * 100) : v}</div>
+          </div>`).join('')}
+      </div>`;
+    } else {
+      el.innerHTML = `<pre style="font-size:11px;color:var(--ax-text-muted);">${JSON.stringify(d, null, 2)}</pre>`;
+    }
+  } catch (e) {
+    document.getElementById('sig-factor-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Track Record ──────────────────────────────────────────────
+async function loadMLStatus() {
+  try {
+    const d = await axiomFetch('/axiom/ml/ensemble-status');
+    const el = document.getElementById('sig-track-content');
+    const models = d.models || d.ensemble || [];
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px;">
+        <div class="ax-kpi"><div class="ax-kpi__label">Ensemble Accuracy</div><div class="ax-kpi__value" style="color:#3fb950">${d.accuracy != null ? Fmt.pct(d.accuracy) : '—'}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Sharpe Ratio</div><div class="ax-kpi__value" style="color:#58a6ff">${d.sharpe != null ? Fmt.num(d.sharpe) : '—'}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Win Rate</div><div class="ax-kpi__value">${d.win_rate != null ? Fmt.pct(d.win_rate) : '—'}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Models Active</div><div class="ax-kpi__value">${models.length || d.active_models || '—'}</div></div>
+      </div>
+      ${models.length ? `<div style="display:flex;flex-direction:column;gap:5px;">${models.map(m =>
+        `<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:6px 0;border-bottom:1px solid var(--ax-border);">
+          <span class="ax-label">${m.name || m.model_id || 'Model'}</span>
+          <span>${m.accuracy != null ? Fmt.pct(m.accuracy) : ''}</span>
+          <span class="ax-badge">${m.status || 'active'}</span>
+        </div>`).join('')}</div>` : ''}`;
+    const hist = d.performance_history || [];
+    if (hist.length) {
+      buildLineChart('sig-ml-chart',
+        hist.map(p => Fmt.date(p.date)),
+        [{ label: 'Accuracy', data: hist.map(p => p.accuracy * 100), color: '#3fb950' }],
+        { legend: false });
+    }
+  } catch (e) {
+    document.getElementById('sig-track-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>

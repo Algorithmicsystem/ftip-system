@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXIOM CFO — Business Intelligence Terminal</title>
+<link rel="icon" href="/app/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app/static/axiom-design-system.css">
+<style>
+  :root { --ax-accent: #3fb950; }
+  .ax-brand-name { color: #3fb950; }
+  .ax-topbar-logo span { color: #3fb950; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body class="ax-body">
+
+<!-- Top Bar -->
+<header class="ax-topbar">
+  <div class="ax-topbar-left">
+    <div class="ax-topbar-logo">AXIOM <span>CFO</span></div>
+  </div>
+  <div class="ax-macro-strip" id="cfo-macro-strip">Loading...</div>
+  <div class="ax-topbar-right">
+    <span id="cfo-clock" class="ax-clock"></span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <label class="ax-label" style="white-space:nowrap;">Entity / Ticker</label>
+      <input id="cfo-entity" class="ax-search-input" placeholder="COST or entity-id" style="width:140px;">
+      <button class="ax-btn" onclick="loadCFOEntity()">Load</button>
+    </div>
+  </div>
+</header>
+
+<!-- Tab Bar -->
+<nav class="ax-tabbar" data-tab-group="cfo">
+  <button class="ax-tab ax-tab--active" data-panel="cfo-dash">Dashboard</button>
+  <button class="ax-tab" data-panel="cfo-pl">P&L</button>
+  <button class="ax-tab" data-panel="cfo-cash">Cash Flow</button>
+  <button class="ax-tab" data-panel="cfo-pricing">Pricing Intel</button>
+  <button class="ax-tab" data-panel="cfo-customers">Customers</button>
+  <button class="ax-tab" data-panel="cfo-suppliers">Suppliers</button>
+  <button class="ax-tab" data-panel="cfo-bench">Benchmarks</button>
+  <button class="ax-tab" data-panel="cfo-scenarios">Scenarios</button>
+  <button class="ax-tab" data-panel="cfo-owner">Owner</button>
+  <button class="ax-tab" data-panel="cfo-risk">Risk</button>
+  <button class="ax-tab" data-panel="cfo-ai">AI Advisor</button>
+</nav>
+
+<main class="ax-main">
+
+  <!-- Dashboard -->
+  <section id="cfo-dash" class="ax-panel">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title" id="cfo-dash-title">Business Dashboard</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadCFOEntity()">Refresh</button>
+    </div>
+    <div id="cfo-dash-kpis" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+      <div class="ax-kpi ax-skel" style="height:70px;"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="ax-card">
+        <h3 class="ax-section-label">Credit & Debt Capacity</h3>
+        <div id="cfo-credit-block" style="margin-top:8px;"></div>
+      </div>
+      <div class="ax-card">
+        <h3 class="ax-section-label">Pricing Power</h3>
+        <div id="cfo-pricing-block" style="margin-top:8px;"></div>
+      </div>
+    </div>
+    <div style="margin-top:12px;" id="cfo-signal-block"></div>
+  </section>
+
+  <!-- P&L -->
+  <section id="cfo-pl" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">P&L Statement</h2>
+      <button class="ax-btn ax-btn--sm" onclick="ExportManager.toCSV(_cfoRaw ? [_cfoRaw] : [],'pl.csv')">Export</button>
+    </div>
+    <div id="cfo-pl-content"></div>
+    <div style="height:200px;margin-top:12px;"><canvas id="cfo-pl-chart"></canvas></div>
+  </section>
+
+  <!-- Cash Flow -->
+  <section id="cfo-cash" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Cash Flow Analysis</h2>
+    </div>
+    <div id="cfo-cash-content"></div>
+    <div style="height:200px;margin-top:12px;"><canvas id="cfo-cash-chart"></canvas></div>
+  </section>
+
+  <!-- Pricing Intel -->
+  <section id="cfo-pricing" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Pricing Intelligence</h2>
+    </div>
+    <div id="cfo-pricing-content"></div>
+  </section>
+
+  <!-- Customers -->
+  <section id="cfo-customers" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Customer Intelligence</h2>
+    </div>
+    <div id="cfo-customers-content">
+      <div class="ax-alert-info" style="font-size:12px;">Upload a CRM or sales CSV via AI Advisor to extract customer concentration and retention metrics.</div>
+      <div id="cfo-cust-upload" style="margin-top:12px;max-width:420px;"></div>
+    </div>
+  </section>
+
+  <!-- Suppliers -->
+  <section id="cfo-suppliers" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Supplier & COGS Intelligence</h2>
+    </div>
+    <div id="cfo-suppliers-content">
+      <div class="ax-alert-info" style="font-size:12px;">Upload AP reports or vendor statements to extract COGS composition and supplier concentration.</div>
+      <div id="cfo-supp-upload" style="margin-top:12px;max-width:420px;"></div>
+    </div>
+  </section>
+
+  <!-- Benchmarks -->
+  <section id="cfo-bench" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Peer Benchmarks</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadBenchmarks()">Refresh</button>
+    </div>
+    <div id="cfo-bench-content"></div>
+  </section>
+
+  <!-- Scenarios -->
+  <section id="cfo-scenarios" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Scenario Planner</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      <div class="ax-card">
+        <h3 class="ax-section-label">Base Case</h3>
+        <div class="ax-form-grid" id="sc-base">
+          <label class="ax-label">Revenue Growth %</label>
+          <input id="sc-base-cagr" type="number" class="ax-input" value="8">
+          <label class="ax-label">Gross Margin %</label>
+          <input id="sc-base-gm" type="number" class="ax-input" value="35">
+          <label class="ax-label">EBITDA Margin %</label>
+          <input id="sc-base-ebitda" type="number" class="ax-input" value="12">
+        </div>
+      </div>
+      <div class="ax-card">
+        <h3 class="ax-section-label">Bear Case</h3>
+        <div class="ax-form-grid">
+          <label class="ax-label">Revenue Growth %</label>
+          <input id="sc-bear-cagr" type="number" class="ax-input" value="2">
+          <label class="ax-label">Gross Margin %</label>
+          <input id="sc-bear-gm" type="number" class="ax-input" value="30">
+          <label class="ax-label">EBITDA Margin %</label>
+          <input id="sc-bear-ebitda" type="number" class="ax-input" value="7">
+        </div>
+      </div>
+      <div class="ax-card">
+        <h3 class="ax-section-label">Bull Case</h3>
+        <div class="ax-form-grid">
+          <label class="ax-label">Revenue Growth %</label>
+          <input id="sc-bull-cagr" type="number" class="ax-input" value="15">
+          <label class="ax-label">Gross Margin %</label>
+          <input id="sc-bull-gm" type="number" class="ax-input" value="40">
+          <label class="ax-label">EBITDA Margin %</label>
+          <input id="sc-bull-ebitda" type="number" class="ax-input" value="18">
+        </div>
+      </div>
+    </div>
+    <button class="ax-btn" style="margin-top:12px;" onclick="runScenarios()">Run Scenarios</button>
+    <div id="cfo-sc-results" style="margin-top:12px;"></div>
+  </section>
+
+  <!-- Owner -->
+  <section id="cfo-owner" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Owner Economics</h2>
+    </div>
+    <div id="cfo-owner-content"></div>
+  </section>
+
+  <!-- Risk -->
+  <section id="cfo-risk" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">Business Risk Monitor</h2>
+      <button class="ax-btn ax-btn--sm" onclick="loadCFORisk()">Refresh</button>
+    </div>
+    <div id="cfo-risk-content"></div>
+  </section>
+
+  <!-- AI Advisor -->
+  <section id="cfo-ai" class="ax-panel" style="display:none;">
+    <div class="ax-panel-header">
+      <h2 class="ax-panel-title">AI Financial Advisor</h2>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+      <div class="ax-card">
+        <h3 class="ax-section-label">Upload Financial Document</h3>
+        <p style="font-size:11px;color:var(--ax-text-muted);margin:6px 0 10px;">Upload P&L, balance sheet, bank statements, or tax returns. AXIOM AI extracts and reconciles.</p>
+        <div id="cfo-ai-upload"></div>
+      </div>
+      <div class="ax-card">
+        <h3 class="ax-section-label">Extraction Log</h3>
+        <div id="cfo-ai-log"></div>
+        <button class="ax-btn ax-btn--sm" style="margin-top:8px;" onclick="loadCFOQueue()">Refresh Log</button>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<script src="/app/static/axiom-core.js"></script>
+<script>
+let _cfoRaw = null;
+let _cfoEntity = 'COST';
+
+(async () => {
+  await axiomBoot({ clockEl: 'cfo-clock', macroEl: 'cfo-macro-strip' });
+  initTabs('[data-tab-group="cfo"] .ax-tab', panel => {
+    if (panel === 'cfo-pl') renderPL();
+    if (panel === 'cfo-cash') renderCash();
+    if (panel === 'cfo-pricing') renderPricingIntel();
+    if (panel === 'cfo-customers') initCustomerUpload();
+    if (panel === 'cfo-suppliers') initSupplierUpload();
+    if (panel === 'cfo-bench') loadBenchmarks();
+    if (panel === 'cfo-owner') renderOwner();
+    if (panel === 'cfo-risk') loadCFORisk();
+    if (panel === 'cfo-ai') initAIAdvisor();
+  });
+  const saved = localStorage.getItem('cfo_entity');
+  if (saved) document.getElementById('cfo-entity').value = saved;
+  await loadCFOEntity();
+})();
+
+// ── Load Entity ───────────────────────────────────────────────
+async function loadCFOEntity() {
+  const rawEntity = document.getElementById('cfo-entity')?.value?.trim() || 'COST';
+  _cfoEntity = rawEntity;
+  localStorage.setItem('cfo_entity', _cfoEntity);
+  document.getElementById('cfo-dash-title').textContent = `Business Dashboard — ${_cfoEntity}`;
+  renderSkeletons('cfo-dash-kpis', 4);
+  try {
+    const d = await axiomFetch(`/smb/entity/${encodeURIComponent(_cfoEntity)}/intelligence-dashboard`);
+    _cfoRaw = d;
+    renderDashboard(d);
+  } catch (e) {
+    document.getElementById('cfo-dash-kpis').innerHTML = `<div class="ax-alert-warn" style="grid-column:1/-1;">${e.message}</div>`;
+  }
+}
+
+function renderDashboard(d) {
+  const kpis = document.getElementById('cfo-dash-kpis');
+  const rev = d.revenue || d.revenue_annual || d.revenue_ttm;
+  const gm = d.gross_margin_pct ?? d.gross_margin;
+  const dscr = d.dscr;
+  const sig = d.axiom_signal || d.signal;
+  kpis.innerHTML = `
+    <div class="ax-kpi">
+      <div class="ax-kpi__label">Revenue</div>
+      <div class="ax-kpi__value" style="color:#3fb950">${rev != null ? Fmt.currency(rev) : '—'}</div>
+    </div>
+    <div class="ax-kpi">
+      <div class="ax-kpi__label">Gross Margin</div>
+      <div class="ax-kpi__value">${gm != null ? Fmt.pct(gm > 1 ? gm : gm * 100, 1) : '—'}</div>
+    </div>
+    <div class="ax-kpi">
+      <div class="ax-kpi__label">DSCR</div>
+      <div class="ax-kpi__value" style="color:${(dscr || 0) >= 1.25 ? '#3fb950' : '#f85149'}">${dscr != null ? Fmt.num(dscr) : '—'}x</div>
+    </div>
+    <div class="ax-kpi">
+      <div class="ax-kpi__label">AXIOM Signal</div>
+      <div class="ax-kpi__value">${renderSignalBadge(sig || 'HOLD')}</div>
+    </div>`;
+
+  // Credit block
+  const credit = d.credit || {};
+  const maxDebt = d.max_additional_debt_usd ?? credit.max_additional_debt_usd;
+  const creditScore = d.credit_score ?? credit.credit_score;
+  document.getElementById('cfo-credit-block').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span class="ax-label">Credit Score</span>
+        <span style="color:${(creditScore||0) >= 700 ? '#3fb950' : (creditScore||0) >= 600 ? '#d29922' : '#f85149'};font-weight:600;">${creditScore ?? '—'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span class="ax-label">Max Add'l Debt</span>
+        <span style="color:#3fb950;font-weight:600;">${maxDebt != null ? Fmt.currency(maxDebt) : '—'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span class="ax-label">DSCR</span>
+        <span style="font-weight:600;">${dscr != null ? Fmt.num(dscr) + 'x' : '—'}</span>
+      </div>
+    </div>
+    ${credit.recommendation || d.recommendation ? `<p style="font-size:11px;color:var(--ax-text-muted);margin-top:8px;">${credit.recommendation || d.recommendation}</p>` : ''}`;
+
+  // Pricing block
+  const pp = d.pricing_power_score ?? d.pricing_intelligence?.pricing_power;
+  const ppPct = pp != null ? (pp > 1 ? pp : pp * 100) : null;
+  document.getElementById('cfo-pricing-block').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div style="display:flex;justify-content:space-between;font-size:12px;">
+        <span class="ax-label">Pricing Power</span>
+        <span style="color:${(ppPct||0) >= 70 ? '#3fb950' : (ppPct||0) >= 40 ? '#d29922' : '#f85149'};font-weight:600;">${ppPct != null ? ppPct.toFixed(0) + '/100' : '—'}</span>
+      </div>
+      ${ppPct != null ? renderScoreBar(ppPct, 100, '#3fb950') : ''}
+    </div>
+    ${d.pricing_intelligence?.recommendation ? `<p style="font-size:11px;color:var(--ax-text-muted);margin-top:8px;">${d.pricing_intelligence.recommendation}</p>` : ''}`;
+
+  // Signal block
+  const dau = d.axiom_dau;
+  document.getElementById('cfo-signal-block').innerHTML = dau != null ? `
+    <div class="ax-card">
+      <h3 class="ax-section-label">AXIOM Intelligence</h3>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">
+        <div class="ax-kpi"><div class="ax-kpi__label">DAU Score</div><div class="ax-kpi__value">${renderScoreBar(dau * 100)}</div></div>
+        ${d.revenue_growth_pct != null ? `<div class="ax-kpi"><div class="ax-kpi__label">Rev Growth</div><div class="ax-kpi__value" style="color:${d.revenue_growth_pct >= 0 ? '#3fb950' : '#f85149'}">${Fmt.pct(d.revenue_growth_pct > 1 ? d.revenue_growth_pct : d.revenue_growth_pct * 100, 1)}</div></div>` : ''}
+      </div>
+    </div>` : '';
+}
+
+// ── P&L ───────────────────────────────────────────────────────
+function renderPL() {
+  const d = _cfoRaw;
+  if (!d) { document.getElementById('cfo-pl-content').innerHTML = '<div class="ax-empty-state">Load an entity first.</div>'; return; }
+  const rev = d.revenue || d.revenue_annual || d.revenue_ttm;
+  const gm = d.gross_margin_pct ?? d.gross_margin;
+  const gmAbs = rev && gm ? rev * (gm > 1 ? gm / 100 : gm) : null;
+  const ebitda = d.ebitda || d.ebitda_annual;
+  const netIncome = d.net_income;
+  document.getElementById('cfo-pl-content').innerHTML = `
+    <table class="ax-table" style="width:100%;border-collapse:collapse;">
+      <tbody>
+        <tr><td style="padding:8px;font-weight:600;">Revenue</td><td style="text-align:right;color:#3fb950;">${rev != null ? Fmt.currency(rev) : '—'}</td></tr>
+        <tr><td style="padding:8px;">Gross Profit</td><td style="text-align:right;">${gmAbs != null ? Fmt.currency(gmAbs) : '—'}</td></tr>
+        <tr><td style="padding:8px;color:var(--ax-text-muted);">Gross Margin %</td><td style="text-align:right;color:var(--ax-text-muted);">${gm != null ? Fmt.pct(gm > 1 ? gm : gm * 100, 1) : '—'}</td></tr>
+        <tr><td style="padding:8px;">EBITDA</td><td style="text-align:right;">${ebitda != null ? Fmt.currency(ebitda) : '—'}</td></tr>
+        <tr><td style="padding:8px;font-weight:600;">Net Income</td><td style="text-align:right;font-weight:600;color:${(netIncome||0) >= 0 ? '#3fb950' : '#f85149'}">${netIncome != null ? Fmt.currency(netIncome) : '—'}</td></tr>
+      </tbody>
+    </table>`;
+  const labels = ['Revenue', 'Gross Profit', 'EBITDA', 'Net Income'];
+  const values = [rev, gmAbs, ebitda, netIncome].map(v => v != null ? Math.abs(v) / 1e6 : 0);
+  buildBarChart('cfo-pl-chart', labels, values, '#3fb950');
+}
+
+// ── Cash Flow ─────────────────────────────────────────────────
+function renderCash() {
+  const d = _cfoRaw;
+  if (!d) { document.getElementById('cfo-cash-content').innerHTML = '<div class="ax-empty-state">Load an entity first.</div>'; return; }
+  const fcf = d.free_cash_flow || d.fcf;
+  const forecast = d.cash_flow_forecast || [];
+  document.getElementById('cfo-cash-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+      <div class="ax-kpi"><div class="ax-kpi__label">Free Cash Flow</div><div class="ax-kpi__value" style="color:${(fcf||0)>=0?'#3fb950':'#f85149'}">${fcf != null ? Fmt.currency(fcf) : '—'}</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">DSCR</div><div class="ax-kpi__value">${d.dscr != null ? Fmt.num(d.dscr) + 'x' : '—'}</div></div>
+      <div class="ax-kpi"><div class="ax-kpi__label">Max Debt Capacity</div><div class="ax-kpi__value" style="color:#3fb950">${d.max_additional_debt_usd != null ? Fmt.currency(d.max_additional_debt_usd) : '—'}</div></div>
+    </div>`;
+  if (forecast.length) {
+    buildLineChart('cfo-cash-chart',
+      forecast.map((_, i) => `Q${i+1}`),
+      [{ label: 'FCF Forecast', data: forecast.map(v => v / 1e6), color: '#3fb950', fill: true }],
+      { legend: false });
+  } else {
+    document.getElementById('cfo-cash-chart').closest('div').style.display = 'none';
+  }
+}
+
+// ── Pricing Intel ─────────────────────────────────────────────
+function renderPricingIntel() {
+  const d = _cfoRaw;
+  if (!d) { document.getElementById('cfo-pricing-content').innerHTML = '<div class="ax-empty-state">Load an entity first.</div>'; return; }
+  const pi = d.pricing_intelligence || {};
+  const pp = d.pricing_power_score ?? pi.pricing_power;
+  const ppPct = pp != null ? (pp > 1 ? pp : pp * 100) : null;
+  document.getElementById('cfo-pricing-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <div class="ax-card">
+        <h3 class="ax-section-label">Pricing Power Score</h3>
+        <div style="margin-top:10px;">
+          ${ppPct != null ? `
+            <div style="font-size:32px;font-weight:700;color:${ppPct >= 70 ? '#3fb950' : ppPct >= 40 ? '#d29922' : '#f85149'}">${ppPct.toFixed(0)}</div>
+            <div style="font-size:11px;color:var(--ax-text-muted);">out of 100</div>
+            <div style="margin-top:10px;">${renderScoreBar(ppPct, 100, '#3fb950')}</div>` : '<div class="ax-empty-state">No pricing data available.</div>'}
+        </div>
+        ${pi.recommendation ? `<p style="font-size:12px;color:var(--ax-text-muted);margin-top:10px;">${pi.recommendation}</p>` : ''}
+      </div>
+      <div class="ax-card">
+        <h3 class="ax-section-label">Gross Margin Context</h3>
+        <div style="margin-top:10px;">
+          ${d.gross_margin_pct != null ? `
+            <div style="font-size:28px;font-weight:700;color:#3fb950;">${Fmt.pct(d.gross_margin_pct > 1 ? d.gross_margin_pct : d.gross_margin_pct * 100, 1)}</div>
+            <div style="font-size:11px;color:var(--ax-text-muted);">Gross Margin (TTM)</div>
+            ${d.revenue_growth_pct != null ? `
+              <div style="margin-top:10px;font-size:12px;">Revenue Growth: <strong style="color:${d.revenue_growth_pct >= 0 ? '#3fb950' : '#f85149'}">${Fmt.pct(d.revenue_growth_pct > 1 ? d.revenue_growth_pct : d.revenue_growth_pct * 100, 1)}</strong></div>` : ''}` : '<div class="ax-empty-state">No margin data available.</div>'}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── Uploads ───────────────────────────────────────────────────
+function initCustomerUpload() {
+  if (document.getElementById('cfo-cust-upload')?.children?.length) return;
+  new AxiomUpload('cfo-cust-upload', _cfoEntity, 'smb_entity', (ext) => {
+    Toast.show('Customer document extracted.', 'success');
+  });
+}
+
+function initSupplierUpload() {
+  if (document.getElementById('cfo-supp-upload')?.children?.length) return;
+  new AxiomUpload('cfo-supp-upload', _cfoEntity, 'smb_entity', (ext) => {
+    Toast.show('Supplier document extracted.', 'success');
+  });
+}
+
+// ── Benchmarks ────────────────────────────────────────────────
+async function loadBenchmarks() {
+  try {
+    const d = await axiomFetch('/intelligence/universe/scores');
+    const rows = Array.isArray(d) ? d : (d.scores || d.data || []);
+    buildSortableTable('cfo-bench-content', [
+      { label: 'Symbol', render: v => `<strong style="color:#3fb950;">${v}</strong>` },
+      { label: 'Signal', render: v => renderSignalBadge(v) },
+      { label: 'EIS Score', render: v => v != null ? renderScoreBar(v * 100, 100, '#3fb950') : '—' },
+      { label: 'DAU Score', render: v => v != null ? renderScoreBar(v * 100) : '—' },
+      { label: 'Regime', render: v => `<span class="ax-badge">${v || '—'}</span>` },
+    ], rows.map(r => [r.symbol || r.ticker, r.signal, r.eis_score, r.dau, r.regime_label]), {
+      defaultSort: 2, defaultDir: 'desc',
+    });
+  } catch (e) {
+    document.getElementById('cfo-bench-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── Owner Economics ───────────────────────────────────────────
+function renderOwner() {
+  const d = _cfoRaw;
+  if (!d) { document.getElementById('cfo-owner-content').innerHTML = '<div class="ax-empty-state">Load an entity first.</div>'; return; }
+  const rev = d.revenue || d.revenue_annual || d.revenue_ttm;
+  const gm = d.gross_margin_pct ?? d.gross_margin;
+  const ebitda = d.ebitda || d.ebitda_annual;
+  const ebitdaMargin = (ebitda && rev) ? ebitda / rev : null;
+  document.getElementById('cfo-owner-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+      <div class="ax-kpi">
+        <div class="ax-kpi__label">EBITDA Margin</div>
+        <div class="ax-kpi__value" style="color:${(ebitdaMargin||0) >= 0.15 ? '#3fb950' : (ebitdaMargin||0) >= 0.08 ? '#d29922' : '#f85149'}">
+          ${ebitdaMargin != null ? Fmt.pct(ebitdaMargin * 100, 1) : '—'}
+        </div>
+      </div>
+      <div class="ax-kpi">
+        <div class="ax-kpi__label">Owner's FCF</div>
+        <div class="ax-kpi__value" style="color:#3fb950">${d.free_cash_flow != null ? Fmt.currency(d.free_cash_flow) : ebitda != null ? Fmt.currency(ebitda * 0.8) : '—'}</div>
+      </div>
+      <div class="ax-kpi">
+        <div class="ax-kpi__label">Business Value Est.</div>
+        <div class="ax-kpi__value" style="color:#3fb950">${ebitda != null ? Fmt.currency(ebitda * 7) : '—'}</div>
+        <div class="ax-kpi__sublabel" style="font-size:9px;color:var(--ax-text-muted);">7x EBITDA</div>
+      </div>
+    </div>
+    <div class="ax-card" style="margin-top:12px;">
+      <h3 class="ax-section-label">Owner Takeaway</h3>
+      <p style="font-size:12px;color:var(--ax-text-muted);margin-top:8px;line-height:1.7;">
+        At current margins, this business generates strong owner economics.
+        ${d.credit_score && d.credit_score >= 700 ? 'Credit profile supports expansion financing.' : ''}
+        ${d.pricing_power_score && d.pricing_power_score * 100 >= 65 ? 'Pricing power is above industry median — margin expansion is possible.' : ''}
+      </p>
+    </div>`;
+}
+
+// ── Scenarios ─────────────────────────────────────────────────
+function runScenarios() {
+  const rev = (_cfoRaw?.revenue || _cfoRaw?.revenue_annual || _cfoRaw?.revenue_ttm || 100e6) / 1e6;
+  const cases = [
+    { name: 'Base', cagrEl: 'sc-base-cagr', gmEl: 'sc-base-gm', ebitdaEl: 'sc-base-ebitda', color: '#58a6ff' },
+    { name: 'Bear', cagrEl: 'sc-bear-cagr', gmEl: 'sc-bear-gm', ebitdaEl: 'sc-bear-ebitda', color: '#f85149' },
+    { name: 'Bull', cagrEl: 'sc-bull-cagr', gmEl: 'sc-bull-gm', ebitdaEl: 'sc-bull-ebitda', color: '#3fb950' },
+  ].map(c => ({
+    ...c,
+    cagr: parseFloat(document.getElementById(c.cagrEl)?.value || 8) / 100,
+    gm: parseFloat(document.getElementById(c.gmEl)?.value || 35) / 100,
+    ebitdaMargin: parseFloat(document.getElementById(c.ebitdaEl)?.value || 12) / 100,
+  }));
+
+  document.getElementById('cfo-sc-results').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+      ${cases.map(c => {
+        const rev5 = rev * Math.pow(1 + c.cagr, 5);
+        const ebitda5 = rev5 * c.ebitdaMargin;
+        return `<div class="ax-card">
+          <h3 class="ax-section-label" style="color:${c.color}">${c.name} Case</h3>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:5px;">
+            <div style="display:flex;justify-content:space-between;font-size:12px;"><span class="ax-label">5yr Revenue</span><span style="color:${c.color};font-weight:600;">${Fmt.currency(rev5 * 1e6)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;"><span class="ax-label">CAGR</span><span>${Fmt.pct(c.cagr * 100, 1)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;"><span class="ax-label">Gross Margin</span><span>${Fmt.pct(c.gm * 100, 1)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;"><span class="ax-label">5yr EBITDA</span><span style="font-weight:600;">${Fmt.currency(ebitda5 * 1e6)}</span></div>
+            <div style="display:flex;justify-content:space-between;font-size:12px;"><span class="ax-label">Business Value</span><span style="color:${c.color};font-weight:600;">${Fmt.currency(ebitda5 * 7 * 1e6)}</span></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+}
+
+// ── Risk ──────────────────────────────────────────────────────
+async function loadCFORisk() {
+  try {
+    const d = await axiomFetch('/axiom/risk/sri');
+    const score = d.sri_score ?? d.score ?? 0;
+    document.getElementById('cfo-risk-content').innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;">
+        <div class="ax-kpi"><div class="ax-kpi__label">Market Risk (SRI)</div><div class="ax-kpi__value">${renderScoreBar(score * 100)}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Risk Level</div><div class="ax-kpi__value">${renderRiskBadge(d.risk_level)}</div></div>
+        <div class="ax-kpi"><div class="ax-kpi__label">Regime</div><div class="ax-kpi__value"><span class="ax-badge">${d.regime || '—'}</span></div></div>
+      </div>
+      ${d.notes ? `<p style="font-size:12px;color:var(--ax-text-muted);margin-top:10px;">${d.notes}</p>` : ''}`;
+  } catch (e) {
+    document.getElementById('cfo-risk-content').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+}
+
+// ── AI Advisor ────────────────────────────────────────────────
+function initAIAdvisor() {
+  if (document.getElementById('cfo-ai-upload')?.children?.length) return;
+  new AxiomUpload('cfo-ai-upload', _cfoEntity, 'smb_entity', (ext, intel) => {
+    _cfoRaw = intel || _cfoRaw;
+    if (intel) renderDashboard(intel);
+    Toast.show('Document extracted and applied to dashboard.', 'success');
+    loadCFOQueue();
+  });
+  loadCFOQueue();
+}
+
+async function loadCFOQueue() {
+  try {
+    const d = await axiomFetch('/extract/review-queue');
+    const items = Array.isArray(d) ? d : (d.items || d.queue || []);
+    const el = document.getElementById('cfo-ai-log');
+    if (!items.length) { el.innerHTML = '<div class="ax-empty-state">No extractions yet.</div>'; return; }
+    el.innerHTML = items.slice(0, 6).map(item => `
+      <div style="padding:7px 0;border-bottom:1px solid var(--ax-border);font-size:11px;">
+        <div style="font-weight:600;">${item.filename || 'Document'}</div>
+        <div style="color:var(--ax-text-muted);">${item.entity_id || ''} · ${item.document_type || ''} · ${item.overall_confidence != null ? Math.round(item.overall_confidence * 100) + '%' : ''}</div>
+        <div style="color:${item.status === 'pending' ? '#d29922' : '#3fb950'}">${item.status?.toUpperCase() || ''}</div>
+      </div>`).join('');
+  } catch (e) {
+    document.getElementById('cfo-ai-log').innerHTML = `<div style="font-size:11px;color:#f85149;">${e.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>
