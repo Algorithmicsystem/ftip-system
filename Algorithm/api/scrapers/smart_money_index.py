@@ -36,6 +36,8 @@ def compute_smart_money_index(
     dau: Optional[float] = None,
     days_back: int = 90,
     prefetched_congress_trades: list = None,
+    prefetched_dark_pool: Optional[Dict[str, Any]] = None,
+    prefetched_insider_transactions: Optional[list] = None,
 ) -> Dict[str, Any]:
     """Compute the Smart Money Index for *symbol*.
 
@@ -52,7 +54,11 @@ def compute_smart_money_index(
     ics_detail: Dict[str, Any] = {}
     try:
         from api.scrapers.sec_insider import compute_insider_score, fetch_insider_transactions
-        txns = fetch_insider_transactions(symbol, days_back=days_back)
+        txns = (
+            prefetched_insider_transactions
+            if prefetched_insider_transactions is not None
+            else fetch_insider_transactions(symbol, days_back=days_back)
+        )
         ics_data = compute_insider_score(symbol, txns)
         ics_score = float(ics_data.get("ics_score") or 50.0)
         ics_detail = {
@@ -87,7 +93,11 @@ def compute_smart_money_index(
     dps_detail: Dict[str, Any] = {}
     try:
         from api.scrapers.finra_dark_pool import fetch_finra_otc_data
-        dps_data = fetch_finra_otc_data(symbol)
+        dps_data = (
+            prefetched_dark_pool
+            if prefetched_dark_pool is not None
+            else fetch_finra_otc_data(symbol)
+        )
         dps_score = float(dps_data.get("dark_pool_score") or 50.0)
         dps_detail = {
             "dark_pool_volume_pct": dps_data.get("dark_pool_volume_pct"),

@@ -182,6 +182,44 @@ def _xml_value(text: str, tag: str) -> Optional[str]:
     return m.group(1).strip() if m else None
 
 
+def fetch_insider_transactions_bulk(
+    symbols: List[str],
+    days_back: int = 90,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Fetch insider transactions for all symbols in parallel.
+
+    Instead of sequential per-symbol fetching, runs up to 10 concurrent
+    EDGAR queries with a 0.1s delay per worker (~10 req/s total).
+
+    Returns: {symbol: [transaction, ...]}
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: Dict[str, List] = {}
+
+    def _fetch_one(sym: str) -> tuple:
+        time.sleep(0.1)
+        try:
+            txns = fetch_insider_transactions(sym, days_back=days_back)
+            return sym, txns
+        except Exception:
+            return sym, []
+
+    n_workers = min(10, len(symbols))
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_fetch_one, sym): sym for sym in symbols}
+        for future in as_completed(futures):
+            sym, txns = future.result()
+            results[sym] = txns
+
+    logger.info(
+        "insider_bulk_fetch symbols=%d symbols_with_data=%d",
+        len(symbols),
+        sum(1 for v in results.values() if v),
+    )
+    return results
+
+
 def compute_insider_score(symbol: str, transactions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Compute Insider Confidence Score (ICS) 0-100 from Form 4 transactions.
 

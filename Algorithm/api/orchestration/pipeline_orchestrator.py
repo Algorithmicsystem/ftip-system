@@ -310,28 +310,46 @@ def _real_stage(name: str) -> Dict[str, Any]:
             return {"records_processed": 0}
 
     if name == "alt_data_update":
-        from api import config
         try:
-            from api.scrapers.smart_money_index import compute_smart_money_index
+            from api.universe import get_pipeline_universe
             from api.scrapers.congress_trading import fetch_recent_congress_trades
-            universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
-            if not universe:
-                from api.universe import get_pipeline_universe
-                symbols = get_pipeline_universe()
-            else:
-                symbols = [s.strip() for s in universe.split(",") if s.strip()]
+            from api.scrapers.finra_dark_pool import fetch_dark_pool_data
+            from api.scrapers.sec_insider import fetch_insider_transactions_bulk
+            from api.scrapers.smart_money_index import compute_smart_money_index
+
+            symbols = get_pipeline_universe()
+
+            logger.info("alt_data_universe_fetch_start symbols=%d", len(symbols))
+
             congress_trades = fetch_recent_congress_trades(days_back=90)
-            refreshed = 0
-            for sym in symbols:
+            dark_pool_data = fetch_dark_pool_data(symbols)
+            insider_data = fetch_insider_transactions_bulk(symbols, days_back=90)
+
+            logger.info(
+                "alt_data_fetched congress=%d dark_pool=%d insider_symbols=%d",
+                len(congress_trades or []),
+                len(dark_pool_data),
+                sum(1 for v in insider_data.values() if v),
+            )
+
+            ok = 0
+            for symbol in symbols:
                 try:
-                    compute_smart_money_index(sym, prefetched_congress_trades=congress_trades)
-                    refreshed += 1
-                except Exception:
-                    pass
-            logger.info("alt_data_update_done symbols=%d", refreshed)
-            return {"records_processed": refreshed}
+                    compute_smart_money_index(
+                        symbol,
+                        prefetched_congress_trades=congress_trades,
+                        prefetched_dark_pool=dark_pool_data.get(symbol),
+                        prefetched_insider_transactions=insider_data.get(symbol, []),
+                    )
+                    ok += 1
+                except Exception as exc:
+                    logger.debug("alt_data_symbol_failed sym=%s err=%s", symbol, exc)
+
+            logger.info("alt_data_update_done symbols_ok=%d", ok)
+            return {"records_processed": ok}
+
         except Exception as exc:
-            logger.warning("alt_data_update_failed error=%s", exc)
+            logger.error("alt_data_update_stage error=%s", exc)
             return {"records_processed": 0}
 
     if name == "pnl_compute":
@@ -398,6 +416,13 @@ def _real_stage(name: str) -> Dict[str, Any]:
             logger.info("morning_briefing_regenerated date=%s", today.isoformat())
         except Exception as exc:
             logger.warning("morning_briefing_regeneration_failed err=%s", exc)
+        # Generate sector briefings from today's scored universe
+        try:
+            from api.jobs.morning_briefing import generate_sector_briefings
+            briefs = generate_sector_briefings(today)
+            logger.info("sector_briefings_generated sectors=%d", len(briefs))
+        except Exception as exc:
+            logger.warning("sector_briefings_generation_failed err=%s", exc)
         return {"records_processed": count}
 
     if name == "ml_inference":

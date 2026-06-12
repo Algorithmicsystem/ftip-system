@@ -619,3 +619,261 @@ def get_morning_briefing_text(
             return {"briefing_date": str(aod), "text": cached.get("briefing_text", ""), "cached": True}
     briefing = generate_morning_briefing(aod)
     return {"briefing_date": str(briefing.briefing_date), "text": briefing.briefing_text, "cached": False}
+
+
+# ---------------------------------------------------------------------------
+# Sector briefings
+# ---------------------------------------------------------------------------
+
+def generate_sector_briefings(aod: dt.date) -> Dict[str, Any]:
+    """Generate one brief per GICS sector from today's scores.
+
+    Requires axiom_scores_daily joined with axiom_universe_registry.
+    Returns {sector: brief_text}.
+    """
+    if not db.db_enabled():
+        return {}
+
+    rows = db.safe_fetchall(
+        """
+        SELECT
+            s.symbol,
+            s.deployable_alpha_utility AS dau,
+            s.regime_label,
+            r.sector
+        FROM axiom_scores_daily s
+        JOIN axiom_universe_registry r ON r.symbol = s.symbol
+        WHERE s.as_of_date = %s
+          AND r.sector IS NOT NULL
+          AND r.active = TRUE
+        ORDER BY r.sector, s.deployable_alpha_utility DESC
+        """,
+        (aod,),
+    )
+
+    sectors: Dict[str, list] = {}
+    for row in (rows or []):
+        sym, dau, regime, sector = row
+        sectors.setdefault(sector, []).append({
+            "symbol": sym,
+            "dau": float(dau or 50),
+            "regime": regime,
+        })
+
+    briefs: Dict[str, Any] = {}
+    for sector, syms in sectors.items():
+        if not syms:
+            continue
+        n_buy  = sum(1 for s in syms if s["dau"] >= 60)
+        n_sell = sum(1 for s in syms if s["dau"] < 40)
+        n_hold = len(syms) - n_buy - n_sell
+        avg    = sum(s["dau"] for s in syms) / len(syms)
+        top    = syms[0]["symbol"]
+
+        brief_text = (
+            f"{sector}: {len(syms)} symbols — {n_buy} BUY / {n_hold} HOLD / {n_sell} SELL. "
+            f"Avg DAU {avg:.1f}. Top signal: {top}. "
+            f"Regime: {syms[0].get('regime') or 'unknown'}."
+        )
+
+        if config.openai_api_key():
+            try:
+                from api.llm.openai_client import call_openai
+                prompt = (
+                    f"Write a 60-word institutional-grade sector intelligence brief for "
+                    f"the {sector} sector. Data: {len(syms)} symbols covered, "
+                    f"{n_buy} BUY / {n_hold} HOLD / {n_sell} SELL signals, "
+                    f"average DAU {avg:.1f}, top symbol {top}. "
+                    f"Regime: {syms[0].get('regime','unknown')}. "
+                    f"Be specific, analytical, and actionable. No filler phrases."
+                )
+                ai_text = call_openai(
+                    system_prompt=(
+                        "You are an institutional equity analyst. "
+                        "Write concise sector briefings."
+                    ),
+                    user_prompt=prompt,
+                    max_tokens=120,
+                )
+                if ai_text:
+                    brief_text = ai_text
+            except Exception as exc:
+                logger.warning("sector_brief_llm_failed sector=%s err=%s", sector, exc)
+
+        signal_summary = {
+            "n_buy": n_buy, "n_hold": n_hold, "n_sell": n_sell,
+            "avg_dau": round(avg, 1), "top_symbol": top,
+            "n_symbols": len(syms),
+        }
+        briefs[sector] = {"brief_text": brief_text, "signal_summary": signal_summary}
+
+        if db.db_enabled():
+            try:
+                db.safe_execute(
+                    """
+                    INSERT INTO axiom_sector_briefings
+                        (briefing_date, sector, brief_text, signal_summary)
+                    VALUES (%s, %s, %s, %s::jsonb)
+                    ON CONFLICT (briefing_date, sector) DO UPDATE SET
+                        brief_text     = EXCLUDED.brief_text,
+                        signal_summary = EXCLUDED.signal_summary,
+                        generated_at   = now()
+                    """,
+                    (aod, sector, brief_text, json.dumps(signal_summary)),
+                )
+            except Exception as exc:
+                logger.warning("sector_brief_store_failed sector=%s err=%s", sector, exc)
+
+    logger.info("sector_briefings_generated sectors=%d date=%s", len(briefs), aod.isoformat())
+    return briefs
+
+
+def check_signal_alerts(aod: dt.date) -> List[Dict[str, Any]]:
+    """Check for significant signal changes in Tier 1 symbols.
+
+    Triggers on: new BUY/SELL threshold crossings, or DAU move > 15 pts.
+    Returns list of alert dicts.
+    """
+    if not db.db_enabled():
+        return []
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT
+                t.symbol,
+                t.deployable_alpha_utility AS today_dau,
+                y.deployable_alpha_utility AS yesterday_dau,
+                r.tier,
+                ABS(t.deployable_alpha_utility
+                    - COALESCE(y.deployable_alpha_utility, 50)) AS dau_change
+            FROM axiom_scores_daily t
+            LEFT JOIN axiom_scores_daily y
+                ON y.symbol = t.symbol
+                AND y.as_of_date = t.as_of_date - INTERVAL '1 day'
+            JOIN axiom_universe_registry r ON r.symbol = t.symbol
+            WHERE t.as_of_date = %s
+              AND r.tier = 1
+              AND (
+                  (t.deployable_alpha_utility >= 60
+                   AND (y.deployable_alpha_utility IS NULL
+                        OR y.deployable_alpha_utility < 60))
+                  OR
+                  (t.deployable_alpha_utility < 40
+                   AND (y.deployable_alpha_utility IS NULL
+                        OR y.deployable_alpha_utility >= 40))
+                  OR
+                  ABS(t.deployable_alpha_utility
+                      - COALESCE(y.deployable_alpha_utility, 50)) > 15
+              )
+            ORDER BY dau_change DESC
+            LIMIT 20
+            """,
+            (aod,),
+        )
+        alerts = []
+        for row in (rows or []):
+            sym, today_dau, yest_dau, tier, change = row
+            direction = "BUY" if float(today_dau or 50) >= 60 else "SELL"
+            alerts.append({
+                "symbol": sym,
+                "dau": float(today_dau or 50),
+                "yesterday_dau": float(yest_dau) if yest_dau is not None else None,
+                "change": float(change or 0),
+                "direction": direction,
+                "tier": tier,
+            })
+        return alerts
+    except Exception as exc:
+        logger.warning("check_signal_alerts failed err=%s", exc)
+        return []
+
+
+def _load_sector_briefings(aod: dt.date) -> Optional[Dict[str, Any]]:
+    if not db.db_read_enabled():
+        return None
+    try:
+        rows = db.safe_fetchall(
+            """
+            SELECT sector, brief_text, signal_summary
+            FROM axiom_sector_briefings
+            WHERE briefing_date = %s
+            ORDER BY sector
+            """,
+            (aod,),
+        )
+        if not rows:
+            return None
+        return {
+            "briefing_date": aod.isoformat(),
+            "sectors": {
+                r[0]: {
+                    "brief_text": r[1],
+                    "signal_summary": r[2] if isinstance(r[2], dict) else
+                                      (json.loads(r[2]) if r[2] else {}),
+                }
+                for r in rows
+            },
+        }
+    except Exception:
+        return None
+
+
+@router.get("/sectors/latest", dependencies=[Depends(security.require_prosperity_api_key)])
+def get_sector_briefings_latest() -> Dict[str, Any]:
+    """Return the most recent sector briefings for all sectors."""
+    if not db.db_read_enabled():
+        return {"briefing_date": None, "sectors": {}}
+    try:
+        row = db.safe_fetchone(
+            "SELECT MAX(briefing_date) FROM axiom_sector_briefings"
+        )
+        latest = row[0] if (row and row[0]) else None
+        if not latest:
+            return {"briefing_date": None, "sectors": {}}
+        result = _load_sector_briefings(latest)
+        return result or {"briefing_date": str(latest), "sectors": {}}
+    except Exception as exc:
+        logger.warning("sector_briefings_latest_failed err=%s", exc)
+        return {"briefing_date": None, "sectors": {}}
+
+
+@router.get("/sectors/{date}", dependencies=[Depends(security.require_prosperity_api_key)])
+def get_sector_briefings_by_date(date: str) -> Dict[str, Any]:
+    """Return sector briefings for a given date (ISO format). Falls back to latest."""
+    try:
+        aod = dt.date.fromisoformat(date)
+    except ValueError:
+        return {"error": "invalid date format, use YYYY-MM-DD"}
+
+    result = _load_sector_briefings(aod)
+    if result:
+        return result
+
+    # Fall back to most recent available date
+    if db.db_read_enabled():
+        try:
+            row = db.safe_fetchone("SELECT MAX(briefing_date) FROM axiom_sector_briefings")
+            latest = row[0] if (row and row[0]) else None
+            if latest:
+                fallback = _load_sector_briefings(latest)
+                if fallback:
+                    fallback["requested_date"] = date
+                    fallback["fallback"] = True
+                    return fallback
+        except Exception:
+            pass
+    return {"briefing_date": date, "sectors": {}}
+
+
+@router.get("/alerts", dependencies=[Depends(security.require_prosperity_api_key)])
+def get_signal_alerts(
+    as_of_date: Optional[str] = Query(default=None),
+) -> Dict[str, Any]:
+    """Return today's signal alerts — Tier 1 threshold crossings and large DAU moves."""
+    aod = dt.date.fromisoformat(as_of_date) if as_of_date else dt.date.today()
+    alerts = check_signal_alerts(aod)
+    return {
+        "as_of_date": aod.isoformat(),
+        "alert_count": len(alerts),
+        "alerts": alerts,
+    }

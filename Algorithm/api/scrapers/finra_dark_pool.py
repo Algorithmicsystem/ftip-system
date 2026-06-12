@@ -91,6 +91,32 @@ def fetch_finra_otc_data(symbol: str) -> Dict[str, Any]:
         return _default_dark_pool_result(symbol)
 
 
+def fetch_dark_pool_data(symbols: list) -> dict:
+    """Fetch FINRA dark pool data for all symbols in parallel.
+
+    Runs up to 10 concurrent calls with a small delay.
+    Returns: {symbol: dark_pool_result_dict}
+    """
+    import time as _time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    results: dict = {}
+
+    def _fetch_one(sym: str) -> tuple:
+        _time.sleep(0.05)
+        return sym, fetch_finra_otc_data(sym)
+
+    n_workers = min(10, len(symbols)) if symbols else 1
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = {executor.submit(_fetch_one, sym): sym for sym in symbols}
+        for future in as_completed(futures):
+            sym, data = future.result()
+            results[sym] = data
+
+    logger.info("dark_pool_bulk_fetch symbols=%d", len(results))
+    return results
+
+
 def _default_dark_pool_result(symbol: str) -> Dict[str, Any]:
     return {
         "symbol": symbol,

@@ -958,6 +958,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "109_axiom_universe_registry",
         lambda cur: cur.execute(Path(__file__).with_name("109_axiom_universe_registry.sql").read_text()),
     ),
+    (
+        "110_sector_briefings",
+        lambda cur: cur.execute(Path(__file__).with_name("110_sector_briefings.sql").read_text()),
+    ),
 ]
 
 
