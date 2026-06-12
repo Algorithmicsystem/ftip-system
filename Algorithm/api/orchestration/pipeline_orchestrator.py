@@ -240,9 +240,11 @@ def _real_stage(name: str) -> Dict[str, Any]:
         try:
             import httpx
             from api import config
+            from api.universe import get_pipeline_universe
+            symbols = get_pipeline_universe()
             resp = httpx.post(
                 f"{_BASE}/jobs/features/daily",
-                json={"as_of_date": today.isoformat()},
+                json={"as_of_date": today.isoformat(), "symbols": symbols},
                 headers={"X-FTIP-API-Key": config.get_api_key()},
                 timeout=300.0,
             )
@@ -263,9 +265,11 @@ def _real_stage(name: str) -> Dict[str, Any]:
         try:
             import httpx
             from api import config
+            from api.universe import get_pipeline_universe
+            symbols = get_pipeline_universe()
             resp = httpx.post(
                 f"{_BASE}/jobs/signals/daily",
-                json={"as_of_date": today.isoformat()},
+                json={"as_of_date": today.isoformat(), "symbols": symbols},
                 headers={"X-FTIP-API-Key": config.get_api_key()},
                 timeout=300.0,
             )
@@ -283,47 +287,23 @@ def _real_stage(name: str) -> Dict[str, Any]:
         return {"records_processed": 0}
 
     if name == "axiom_scoring":
-        # run_axiom_replay reads bars directly from DB (market_bars_daily /
-        # prosperity_daily_bars fallback) — no HTTP server dependency.
-        # Use the latest date that has bars rather than strictly today so the
-        # stage works on weekends/holidays and in local dev without a running server.
         try:
-            from api import config
-            from api.axiom.replay import run_axiom_replay
-            universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
-            if not universe:
-                from api.universe import get_pipeline_universe
-                symbols = get_pipeline_universe()
-            else:
-                symbols = [s.strip() for s in universe.split(",") if s.strip()]
-            # Resolve target date: prefer today if bars exist, else latest bar date
-            bar_date_row = db.safe_fetchone(
-                """
-                SELECT GREATEST(
-                    COALESCE((SELECT MAX(date) FROM prosperity_daily_bars), %s::date),
-                    COALESCE((SELECT MAX(as_of_date) FROM market_bars_daily), %s::date)
-                )
-                """,
-                (today, today),
+            from api.axiom.tiered_scorer import score_universe_tiered
+            results = score_universe_tiered(
+                as_of_date=today,
+                force_full=False,
             )
-            target_date = (bar_date_row[0] if (bar_date_row and bar_date_row[0]) else today)
+            count = results["total_scored"]
             logger.info(
-                "axiom_scoring_start symbols=%d date=%s",
-                len(symbols), target_date.isoformat(),
+                "axiom_scoring_done total=%d t1=%d t2=%d t3=%d "
+                "errors=%d duration=%.1fs",
+                count,
+                results["tier1_scored"],
+                results["tier2_scored"],
+                results["tier3_scored"],
+                len(results["errors"]),
+                results["duration_seconds"],
             )
-            run_axiom_replay(
-                symbols=symbols,
-                start_date=target_date.isoformat(),
-                end_date=target_date.isoformat(),
-                lookback=252,
-                persist=True,
-            )
-            row = db.safe_fetchone(
-                "SELECT COUNT(*)::int FROM axiom_scores_daily WHERE as_of_date = %s",
-                (target_date,),
-            )
-            count = int(row[0]) if row else 0
-            logger.info("axiom_scoring_done scores_written=%d date=%s", count, target_date.isoformat())
             return {"records_processed": count}
         except Exception as exc:
             logger.error("axiom_scoring_stage error=%s", exc)

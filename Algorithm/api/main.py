@@ -3314,6 +3314,37 @@ def _seed_universe_background() -> None:
     )
 
 
+@app.post("/admin/score-symbol/{symbol}")
+async def score_symbol_on_demand(
+    symbol: str,
+    background_tasks: BackgroundTasks,
+) -> Dict[str, Any]:
+    """Force full 7-engine score for a symbol on-demand."""
+    sym = symbol.upper()
+    background_tasks.add_task(_score_symbol_background, sym)
+    return {
+        "status": "started",
+        "symbol": sym,
+        "message": f"Full scoring for {sym} running in background",
+    }
+
+
+def _score_symbol_background(symbol: str) -> None:
+    import datetime as dt
+    from api.axiom.replay import run_axiom_replay
+    try:
+        run_axiom_replay(
+            symbols=[symbol],
+            start_date=dt.date.today().isoformat(),
+            end_date=dt.date.today().isoformat(),
+            lookback=252,
+            persist=True,
+        )
+        logger.info("on_demand_score_complete symbol=%s", symbol)
+    except Exception as exc:
+        logger.error("on_demand_score_failed symbol=%s err=%s", symbol, exc)
+
+
 @app.get("/intelligence/congress/{symbol}")
 def congress_intelligence(symbol: str) -> Dict[str, Any]:
     """Congressional trading intelligence for a symbol."""
