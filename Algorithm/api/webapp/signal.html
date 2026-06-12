@@ -101,6 +101,13 @@
       <button class="ax-btn ax-btn--sm" onclick="loadSmartMoney()">Refresh</button>
     </div>
     <div id="sig-sm-table"></div>
+    <div style="margin-top:20px;">
+      <div class="ax-panel-header" style="margin-bottom:10px;">
+        <h3 class="ax-section-label">Congressional Activity Feed</h3>
+        <button class="ax-btn ax-btn--sm" onclick="loadCongressFeed()">Refresh</button>
+      </div>
+      <div id="sig-congress-feed"></div>
+    </div>
   </section>
 
   <!-- Risk Monitor -->
@@ -304,6 +311,43 @@ async function loadSmartMoney() {
     });
   } catch (e) {
     document.getElementById('sig-sm-table').innerHTML = `<div class="ax-alert-warn">${e.message}</div>`;
+  }
+  loadCongressFeed();
+}
+
+// ── Congressional Activity Feed ────────────────────────────────
+async function loadCongressFeed() {
+  const el = document.getElementById('sig-congress-feed');
+  if (!el) return;
+  try {
+    const d = await axiomFetch('/intelligence/congress/feed?days_back=30');
+    const trades = d.trades || [];
+    if (!trades.length) {
+      el.innerHTML = `<div class="ax-empty-state" style="font-size:11px;">No congressional trades in universe in last 30 days${d.total_all === 0 ? ' — source unavailable (defaulting to neutral CIS)' : ''}.</div>`;
+      return;
+    }
+    el.innerHTML = `
+      <div style="font-size:11px;color:var(--ax-text-muted);margin-bottom:8px;">${trades.length} trades in last 30 days · ${d.total_all} total · source: live</div>
+      <table class="ax-table" style="width:100%;border-collapse:collapse;">
+        <thead><tr>
+          <th>Symbol</th><th>Politician</th><th>Chamber</th>
+          <th>Type</th><th>Date</th><th>Source</th>
+        </tr></thead>
+        <tbody>${trades.slice(0, 20).map(t => `
+          <tr>
+            <td><strong style="color:var(--ax-accent)">${t.symbol || '—'}</strong></td>
+            <td style="font-size:11px;">${t.politician || '—'}</td>
+            <td><span class="ax-badge">${(t.chamber || '—').toUpperCase()}</span></td>
+            <td>${t.transaction_type === 'buy'
+              ? '<span style="color:#3fb950;font-weight:600;">BUY</span>'
+              : '<span style="color:#f85149;font-weight:600;">SELL</span>'}</td>
+            <td style="font-size:11px;color:var(--ax-text-muted);">${Fmt.date(t.transaction_date)}</td>
+            <td style="font-size:10px;color:var(--ax-text-muted);">${t.source || ''}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    el.innerHTML = `<div class="ax-alert-warn" style="font-size:11px;">Congress feed unavailable: ${e.message}</div>`;
   }
 }
 

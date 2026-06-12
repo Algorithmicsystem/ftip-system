@@ -166,15 +166,23 @@ def _real_stage(name: str) -> Dict[str, Any]:
                         sym_name = f.get("symbol", "?") if isinstance(f, dict) else str(f)
                         err = f.get("error", "") if isinstance(f, dict) else ""
                         logger.warning("bar_ingestion_symbol_failed symbol=%s err=%.120s", sym_name, err)
-                # Log total bars written today
+                # Log bars written — use latest available date (bars may be prior trading day)
                 try:
                     post_row = db.safe_fetchone(
+                        "SELECT COUNT(*), MAX(date) FROM prosperity_daily_bars WHERE date >= %s",
+                        (today - dt.timedelta(days=5),),
+                    )
+                    today_count = db.safe_fetchone(
                         "SELECT COUNT(*) FROM prosperity_daily_bars WHERE date = %s",
                         (today,),
                     )
+                    latest_date = post_row[1] if post_row else None
                     logger.info(
-                        "bar_ingestion_complete today_bars_in_db=%s symbols_ok=%d",
-                        post_row[0] if post_row else 0, records,
+                        "bar_ingestion_complete today_bars_in_db=%s latest_bars_in_db=%s "
+                        "latest_date=%s symbols_ok=%d",
+                        today_count[0] if today_count else 0,
+                        post_row[0] if post_row else 0,
+                        latest_date, records,
                     )
                 except Exception:
                     pass

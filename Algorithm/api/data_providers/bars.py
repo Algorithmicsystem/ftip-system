@@ -258,6 +258,8 @@ def _fetch_daily_massive(
             )
         return _date_range_filter(rows, start, end)
 
+    import time as _time
+
     api_key = config.massive_api_key()
     if not api_key:
         legacy_rows = _legacy_rows()
@@ -269,18 +271,28 @@ def _fetch_daily_massive(
             provider_name="massive_polygon",
             source_type="market_data",
         )
+
+    _rate_delay = float(config.env("POLYGON_RATE_LIMIT_DELAY", "1.2"))
+    if _rate_delay > 0:
+        _time.sleep(_rate_delay)
+
     base_url = config.massive_base_url().rstrip("/")
     url = f"{base_url}/v2/aggs/ticker/{canonical_symbol(symbol)}/range/1/day/{start.isoformat()}/{end.isoformat()}"
-    resp = httpx.get(
-        url,
-        params={
-            "adjusted": "true",
-            "sort": "asc",
-            "limit": 50000,
-            "apiKey": api_key,
-        },
-        timeout=config.data_fabric_timeout_seconds(),
-    )
+    params = {"adjusted": "true", "sort": "asc", "limit": 50000, "apiKey": api_key}
+
+    resp = httpx.get(url, params=params, timeout=config.data_fabric_timeout_seconds())
+    if resp.status_code == 429:
+        logger.warning("polygon_rate_limited symbol=%s — waiting 2s then retrying once", symbol)
+        _time.sleep(2.0)
+        resp = httpx.get(url, params=params, timeout=config.data_fabric_timeout_seconds())
+        if resp.status_code == 429:
+            logger.warning("polygon_rate_limited_skip symbol=%s — falling back to yfinance", symbol)
+            raise ProviderUnavailable(
+                "PROVIDER_RATE_LIMITED",
+                f"massive/polygon 429 after retry — symbol={symbol}",
+                provider_name="massive_polygon",
+                source_type="market_data",
+            )
     if resp.status_code != 200:
         raise ProviderUnavailable(
             "PROVIDER_UNAVAILABLE",

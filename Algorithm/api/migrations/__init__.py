@@ -950,6 +950,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "107_extraction_audit",
         lambda cur: cur.execute(Path(__file__).with_name("107_extraction_audit.sql").read_text()),
     ),
+    (
+        "108_congress_trades",
+        lambda cur: cur.execute(Path(__file__).with_name("108_congress_trades.sql").read_text()),
+    ),
 ]
 
 

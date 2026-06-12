@@ -2788,7 +2788,8 @@ def run_backtest(req: BacktestRequest) -> Dict[str, Any]:
     return {"backtest_summary": summary.model_dump(exclude_none=True)}
 
 
-@app.get("/signal")
+@app.get("/compute/signal")
+@app.get("/signal/compute")
 def signal(
     symbol: str = Query(...),
     as_of: str = Query(..., description="YYYY-MM-DD"),
@@ -3324,6 +3325,23 @@ def congress_universe() -> Dict[str, Any]:
     scores = [compute_congress_score(sym, trades) for sym in AXIOM_UNIVERSE]
     scores.sort(key=lambda x: x["congress_score"], reverse=True)
     return {"scores": scores, "total_trades": len(trades)}
+
+
+@app.get("/intelligence/congress/feed")
+def congress_feed(days_back: int = 30) -> Dict[str, Any]:
+    """Recent congressional trades feed — sorted by date desc."""
+    from api.scrapers.congress_trading import fetch_recent_congress_trades
+    from api.universe import AXIOM_UNIVERSE
+    universe_set = set(AXIOM_UNIVERSE)
+    all_trades = fetch_recent_congress_trades(days_back=days_back)
+    universe_trades = [t for t in all_trades if t.get("symbol") in universe_set]
+    universe_trades.sort(key=lambda t: t.get("transaction_date", ""), reverse=True)
+    return {
+        "trades": universe_trades[:50],
+        "total_in_universe": len(universe_trades),
+        "total_all": len(all_trades),
+        "days_back": days_back,
+    }
 
 
 @app.get("/intelligence/insider/{symbol}")
