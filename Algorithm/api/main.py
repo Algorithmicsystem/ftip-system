@@ -3227,7 +3227,7 @@ async def seed_universe_registry(background_tasks: BackgroundTasks) -> Dict[str,
     """Seed the axiom_universe_registry from yfinance metadata.
 
     Runs in background — returns immediately. Check /admin/universe/stats for progress.
-    Seeds in order: current 30 AXIOM_UNIVERSE → S&P 500 (Wikipedia) → BOOTSTRAP_TIER1.
+    Seeds in order: current 30 AXIOM_UNIVERSE → BOOTSTRAP_TIER1 (full S&P 500) → SEC EDGAR.
     """
     background_tasks.add_task(_seed_universe_background)
     return {
@@ -3237,7 +3237,13 @@ async def seed_universe_registry(background_tasks: BackgroundTasks) -> Dict[str,
 
 
 def _seed_universe_background() -> None:
-    """Background task: seed universe registry from yfinance."""
+    """Background task: seed universe registry from yfinance.
+
+    Sources (in priority order):
+      1. Hardcoded BOOTSTRAP_TIER1 — full S&P 500, always available
+      2. SEC EDGAR company_tickers.json — official, free, no auth required
+    Wikipedia scraper removed (unreliable HTML parsing, only ~109 symbols).
+    """
     import time
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from api.universe import AXIOM_UNIVERSE
@@ -3246,8 +3252,8 @@ def _seed_universe_background() -> None:
     seeded = 0
     errors = 0
 
-    # Phase 1: seed the current 30 AXIOM_UNIVERSE synchronously so pipeline
-    # is unaffected immediately
+    # Phase 1: seed the core 30-symbol AXIOM_UNIVERSE synchronously so the
+    # pipeline is unaffected immediately after this task starts.
     for sym in AXIOM_UNIVERSE:
         try:
             sync_symbol_metadata_from_yfinance(sym)
@@ -3257,31 +3263,42 @@ def _seed_universe_background() -> None:
             errors += 1
     logger.info("seed_universe_phase1_done seeded=%d errors=%d", seeded, errors)
 
-    # Phase 2: fetch S&P 500 list from Wikipedia
-    sp500_symbols: list = []
+    # Phase 2: try SEC EDGAR company_tickers.json for additional symbols
+    edgar_symbols: list = []
     try:
         import httpx
         resp = httpx.get(
-            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
-            headers={"User-Agent": "Mozilla/5.0 (compatible; AXIOM/1.0)"},
+            "https://www.sec.gov/files/company_tickers.json",
+            headers={"User-Agent": "AXIOM Financial Intelligence axiom@axiom.ai"},
             timeout=30,
             follow_redirects=True,
         )
         if resp.status_code == 200:
-            import re
-            # Extract ticker symbols from the first HTML table
-            # Pattern: table cell containing a ticker like "AAPL"
-            matches = re.findall(r'<td><a[^>]*>([A-Z]{1,5}(?:\.[A-Z])?)</a></td>', resp.text)
-            sp500_symbols = list(dict.fromkeys(matches))[:505]
-            logger.info("seed_universe_sp500_fetched count=%d", len(sp500_symbols))
+            data = resp.json()
+            # data = {"0": {"cik_str": 320193, "ticker": "AAPL", "title": "..."}, ...}
+            # Take up to 2,000 entries — covers all major US-listed companies
+            tickers = [
+                v["ticker"].upper()
+                for v in data.values()
+                if v.get("ticker") and len(v["ticker"]) <= 5
+            ]
+            # Deduplicate while preserving order
+            seen: set = set()
+            for t in tickers:
+                if t not in seen:
+                    edgar_symbols.append(t)
+                    seen.add(t)
+            edgar_symbols = edgar_symbols[:2000]
+            logger.info("seed_universe_edgar_fetched count=%d", len(edgar_symbols))
     except Exception as exc:
-        logger.warning("seed_universe_sp500_fetch_failed err=%s", exc)
+        logger.warning("seed_universe_edgar_fetch_failed err=%s", exc)
 
-    # Phase 3: combine S&P 500 + BOOTSTRAP_TIER1, deduplicate
+    # Phase 3: combine BOOTSTRAP_TIER1 (full S&P 500) + EDGAR symbols, deduplicate.
+    # BOOTSTRAP_TIER1 is the primary guaranteed source.
     all_symbols = list(dict.fromkeys(
-        [s for s in AXIOM_UNIVERSE]
-        + sp500_symbols
-        + [s for s in BOOTSTRAP_TIER1 if s not in set(AXIOM_UNIVERSE)]
+        list(AXIOM_UNIVERSE)
+        + list(BOOTSTRAP_TIER1)
+        + edgar_symbols
     ))
     remaining = [s for s in all_symbols if s not in set(AXIOM_UNIVERSE)]
     logger.info("seed_universe_phase2_start total_to_seed=%d", len(remaining))
