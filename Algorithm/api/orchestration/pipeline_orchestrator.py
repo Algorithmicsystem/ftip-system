@@ -117,9 +117,11 @@ def _real_stage(name: str) -> Dict[str, Any]:
             from api import config
             universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
             if not universe:
-                from api.universe import AXIOM_UNIVERSE
-                universe = ",".join(AXIOM_UNIVERSE)
-            symbols = [s.strip() for s in universe.split(",") if s.strip()]
+                from api.universe import get_pipeline_universe
+                symbols = get_pipeline_universe()
+                universe = ",".join(symbols)
+            else:
+                symbols = [s.strip() for s in universe.split(",") if s.strip()]
             logger.info(
                 "bar_ingestion_start symbols=%d date=%s",
                 len(symbols), today.isoformat(),
@@ -259,9 +261,10 @@ def _real_stage(name: str) -> Dict[str, Any]:
             from api.axiom.replay import run_axiom_replay
             universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
             if not universe:
-                from api.universe import AXIOM_UNIVERSE
-                universe = ",".join(AXIOM_UNIVERSE)
-            symbols = [s.strip() for s in universe.split(",") if s.strip()]
+                from api.universe import get_pipeline_universe
+                symbols = get_pipeline_universe()
+            else:
+                symbols = [s.strip() for s in universe.split(",") if s.strip()]
             # Resolve target date: prefer today if bars exist, else latest bar date
             bar_date_row = db.safe_fetchone(
                 """
@@ -302,8 +305,8 @@ def _real_stage(name: str) -> Dict[str, Any]:
             from api.scrapers.congress_trading import fetch_recent_congress_trades
             universe = config.env("FTIP_UNIVERSE_DEFAULT", "") or ""
             if not universe:
-                from api.universe import AXIOM_UNIVERSE
-                symbols = list(AXIOM_UNIVERSE)
+                from api.universe import get_pipeline_universe
+                symbols = get_pipeline_universe()
             else:
                 symbols = [s.strip() for s in universe.split(",") if s.strip()]
             congress_trades = fetch_recent_congress_trades(days_back=90)

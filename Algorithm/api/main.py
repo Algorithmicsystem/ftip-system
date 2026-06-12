@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -3143,8 +3143,9 @@ def seed_market_data() -> Dict[str, Any]:
     """
     import datetime as _dt
     import json as _json
-    from api.universe import AXIOM_UNIVERSE
+    from api.universe import get_pipeline_universe
     from api.data_providers.bars import _fetch_daily_yfinance
+    AXIOM_UNIVERSE = get_pipeline_universe()
 
     def _bar_to_raw_json(bar: dict) -> str:
         safe = {}
@@ -3299,6 +3300,105 @@ def seed_market_data() -> Dict[str, Any]:
         "prosperity_bars_written": prosperity_bars,
         "errors": errors[:20],
     }
+
+
+@app.get("/admin/universe/stats")
+def universe_stats() -> Dict[str, Any]:
+    """Return current state of the axiom_universe_registry table."""
+    from api.universe_registry import get_registry_stats
+    return get_registry_stats()
+
+
+@app.post("/admin/seed-universe")
+async def seed_universe_registry(background_tasks: BackgroundTasks) -> Dict[str, Any]:
+    """Seed the axiom_universe_registry from yfinance metadata.
+
+    Runs in background — returns immediately. Check /admin/universe/stats for progress.
+    Seeds in order: current 30 AXIOM_UNIVERSE → S&P 500 (Wikipedia) → BOOTSTRAP_TIER1.
+    """
+    background_tasks.add_task(_seed_universe_background)
+    return {
+        "status": "started",
+        "message": "Universe seeding running in background. Check /admin/universe/stats for progress.",
+    }
+
+
+def _seed_universe_background() -> None:
+    """Background task: seed universe registry from yfinance."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from api.universe import AXIOM_UNIVERSE
+    from api.universe_registry import sync_symbol_metadata_from_yfinance, BOOTSTRAP_TIER1
+
+    seeded = 0
+    errors = 0
+
+    # Phase 1: seed the current 30 AXIOM_UNIVERSE synchronously so pipeline
+    # is unaffected immediately
+    for sym in AXIOM_UNIVERSE:
+        try:
+            sync_symbol_metadata_from_yfinance(sym)
+            seeded += 1
+        except Exception as exc:
+            logger.warning("seed_universe phase1 symbol=%s err=%s", sym, exc)
+            errors += 1
+    logger.info("seed_universe_phase1_done seeded=%d errors=%d", seeded, errors)
+
+    # Phase 2: fetch S&P 500 list from Wikipedia
+    sp500_symbols: list = []
+    try:
+        import httpx
+        resp = httpx.get(
+            "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; AXIOM/1.0)"},
+            timeout=30,
+            follow_redirects=True,
+        )
+        if resp.status_code == 200:
+            import re
+            # Extract ticker symbols from the first HTML table
+            # Pattern: table cell containing a ticker like "AAPL"
+            matches = re.findall(r'<td><a[^>]*>([A-Z]{1,5}(?:\.[A-Z])?)</a></td>', resp.text)
+            sp500_symbols = list(dict.fromkeys(matches))[:505]
+            logger.info("seed_universe_sp500_fetched count=%d", len(sp500_symbols))
+    except Exception as exc:
+        logger.warning("seed_universe_sp500_fetch_failed err=%s", exc)
+
+    # Phase 3: combine S&P 500 + BOOTSTRAP_TIER1, deduplicate
+    all_symbols = list(dict.fromkeys(
+        [s for s in AXIOM_UNIVERSE]
+        + sp500_symbols
+        + [s for s in BOOTSTRAP_TIER1 if s not in set(AXIOM_UNIVERSE)]
+    ))
+    remaining = [s for s in all_symbols if s not in set(AXIOM_UNIVERSE)]
+    logger.info("seed_universe_phase2_start total_to_seed=%d", len(remaining))
+
+    def _sync_one(sym: str) -> bool:
+        try:
+            time.sleep(0.12)  # ~8 req/s per worker, 10 workers = ~80 req/s total
+            return sync_symbol_metadata_from_yfinance(sym)
+        except Exception:
+            return False
+
+    phase2_ok = 0
+    phase2_err = 0
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_sync_one, sym): sym for sym in remaining}
+        for future in as_completed(futures):
+            if future.result():
+                phase2_ok += 1
+            else:
+                phase2_err += 1
+            if (phase2_ok + phase2_err) % 50 == 0:
+                logger.info(
+                    "seed_universe_progress ok=%d err=%d total=%d",
+                    phase2_ok, phase2_err, len(remaining),
+                )
+
+    logger.info(
+        "seed_universe_complete total_seeded=%d errors=%d",
+        seeded + phase2_ok, errors + phase2_err,
+    )
 
 
 @app.get("/intelligence/congress/{symbol}")
