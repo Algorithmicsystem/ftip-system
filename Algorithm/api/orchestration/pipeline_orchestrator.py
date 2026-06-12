@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 PIPELINE_STAGES: List[str] = [
-    "bar_ingestion",
+    "batch_bar_ingestion",   # fast parallel batch fetch — primary bar source
+    "bar_ingestion",         # fallback via /prosperity/snapshot/run
     "feature_computation",
     "signal_generation",
     "axiom_scoring",
@@ -39,14 +40,16 @@ PIPELINE_STAGES: List[str] = [
     "cache_refresh",
 ]
 
-_BLOCKING_STAGES = {"bar_ingestion", "feature_computation"}
+# batch_bar_ingestion blocks downstream just like bar_ingestion
+_BLOCKING_STAGES = {"batch_bar_ingestion", "bar_ingestion", "feature_computation"}
 
 # Dependency map: stage → list of stages that must have succeeded
 _STAGE_DEPS: Dict[str, List[str]] = {
-    "bar_ingestion": [],
-    "feature_computation": ["bar_ingestion"],
+    "batch_bar_ingestion": [],
+    "bar_ingestion": [],          # runs independently as fallback / verification
+    "feature_computation": ["batch_bar_ingestion"],
     "signal_generation": ["feature_computation"],
-    "axiom_scoring": ["bar_ingestion"],
+    "axiom_scoring": ["batch_bar_ingestion"],
     "alt_data_update": [],
     "factor_computation": ["feature_computation"],
     "ml_inference": ["axiom_scoring"],
@@ -110,6 +113,34 @@ def _make_db_graceful_stage(name: str) -> Callable[[], Dict[str, Any]]:
 
 def _real_stage(name: str) -> Dict[str, Any]:
     today = dt.date.today()
+
+    if name == "batch_bar_ingestion":
+        try:
+            from api.universe import get_pipeline_universe
+            from api.data_providers.batch_bars import fetch_bars_batch
+            from api.data_providers.batch_bars_writer import (
+                ensure_prosperity_universe,
+                write_bars_to_db,
+            )
+            symbols = get_pipeline_universe()
+            from_date = today - dt.timedelta(days=365)
+            logger.info(
+                "batch_bar_ingestion_start total_symbols=%d date=%s",
+                len(symbols), today.isoformat(),
+            )
+            bars_by_symbol = fetch_bars_batch(symbols, from_date, today)
+            ensure_prosperity_universe(list(bars_by_symbol.keys()))
+            written = write_bars_to_db(bars_by_symbol)
+            symbols_ok = sum(1 for v in written.values() if v > 0)
+            total_rows = sum(written.values())
+            logger.info(
+                "batch_bar_ingestion_done symbols_ok=%d total_rows=%d",
+                symbols_ok, total_rows,
+            )
+            return {"records_processed": symbols_ok}
+        except Exception as exc:
+            logger.error("batch_bar_ingestion_stage error=%s", exc)
+            return {"records_processed": 0}
 
     if name == "bar_ingestion":
         try:
