@@ -3451,6 +3451,55 @@ def refresh_smart_money() -> Dict[str, Any]:
     return {"status": "ok", "refreshed": len(results), "errors": len(errors), "results": results}
 
 
+@app.post("/admin/seed-xbrl")
+async def seed_xbrl(
+    background_tasks: BackgroundTasks,
+    symbols: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Seed XBRL fundamentals cache for universe symbols (background task)."""
+    from api.universe_registry import get_all_active_symbols
+    syms = symbols or get_all_active_symbols()[:100]
+    background_tasks.add_task(_seed_xbrl_background, syms)
+    return {"status": "started", "symbol_count": len(syms)}
+
+
+def _seed_xbrl_background(symbols: List[str]) -> None:
+    from api.scrapers.edgar_xbrl import fetch_xbrl_fundamentals_bulk
+    results = fetch_xbrl_fundamentals_bulk(symbols, n_quarters=4)
+    stored = 0
+    for symbol, data in results.items():
+        if data:
+            stored += _store_xbrl_to_db(symbol, data)
+    logger.info("seed_xbrl_complete stored_records=%d symbols=%d", stored, len(symbols))
+
+
+def _store_xbrl_to_db(symbol: str, data: Dict[str, Any]) -> int:
+    import json as _json
+    from api import db
+    if not db.db_enabled():
+        return 0
+    try:
+        cik = data.get("cik", "")
+        quarters = data.get("quarterly_data") or {}
+        count = 0
+        for quarter, metrics in quarters.items():
+            db.safe_execute(
+                """
+                INSERT INTO xbrl_fundamentals (symbol, cik, fiscal_quarter, metrics)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (symbol, fiscal_quarter) DO UPDATE SET
+                    metrics    = EXCLUDED.metrics,
+                    fetched_at = now()
+                """,
+                (symbol, cik, quarter, _json.dumps(metrics)),
+            )
+            count += 1
+        return count
+    except Exception as exc:
+        logger.warning("store_xbrl_failed symbol=%s err=%s", symbol, exc)
+        return 0
+
+
 _register_providers_health(app)
 _providers_paths = {getattr(route, "path", None) for route in app.router.routes}
 logger.info(

@@ -74,6 +74,23 @@ def load_company_fundamentals(symbol: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("fundamental_loader.yfinance symbol=%s err=%s", symbol, exc)
 
+    # --- XBRL enrichment (override margins if available) ---
+    try:
+        from api.scrapers.edgar_xbrl import fetch_xbrl_fundamentals
+        xbrl = fetch_xbrl_fundamentals(symbol, n_quarters=8)
+        if xbrl:
+            if xbrl.get("gross_margin") is not None:
+                result["gross_margin"] = xbrl["gross_margin"]
+            if xbrl.get("op_margin") is not None:
+                result["op_margin"] = xbrl["op_margin"]
+            if xbrl.get("fcf_margin") is not None:
+                result["fcf_margin"] = xbrl["fcf_margin"]
+            if xbrl.get("revenue") is not None and result["revenue_ttm"] is None:
+                result["revenue_ttm"] = xbrl["revenue"]
+            result["xbrl_available"] = True
+    except Exception as exc:
+        logger.debug("fundamental_loader.xbrl symbol=%s err=%s", symbol, exc)
+
     # --- AXIOM DB scores ---
     try:
         from api import db
