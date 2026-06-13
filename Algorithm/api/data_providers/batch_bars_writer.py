@@ -98,7 +98,43 @@ def write_bars_to_db(
         "bars_writer.done symbols_ok=%d total_rows=%d",
         total_ok, total_rows,
     )
+
+    # Deactivate symbols that produced 0 bars in this run AND have no bars
+    # in the last 7 days — they are likely delisted or otherwise invalid.
+    failed_symbols = [sym for sym, cnt in results.items() if cnt == 0]
+    if failed_symbols:
+        _deactivate_persistently_failing(failed_symbols)
+
     return results
+
+
+def _deactivate_persistently_failing(symbols: List[str]) -> None:
+    """Mark symbols as inactive in axiom_universe_registry if they have no bars
+    in the last 7 days. Prevents delisted symbols from clogging every pipeline run.
+    """
+    if not db.db_enabled():
+        return
+    for symbol in symbols:
+        try:
+            row = db.safe_fetchone(
+                """SELECT COUNT(*) FROM prosperity_daily_bars
+                   WHERE symbol = %s
+                   AND date >= CURRENT_DATE - INTERVAL '7 days'""",
+                (symbol,),
+            )
+            if row and int(row[0]) == 0:
+                db.safe_execute(
+                    """UPDATE axiom_universe_registry
+                       SET active = FALSE, updated_at = now()
+                       WHERE symbol = %s AND active = TRUE""",
+                    (symbol,),
+                )
+                logger.info(
+                    "universe_registry.deactivated_delisted symbol=%s reason=no_bars_7d",
+                    symbol,
+                )
+        except Exception as exc:
+            logger.debug("bars_writer.deactivate_check_failed sym=%s err=%s", symbol, exc)
 
 
 def _bar_to_raw_json(bar: dict) -> str:

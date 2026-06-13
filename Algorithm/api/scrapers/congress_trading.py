@@ -291,6 +291,172 @@ def _fetch_s3_senate(cutoff: dt.date) -> List[Dict[str, Any]]:
         return []
 
 
+def _fetch_from_finnhub_congress(days_back: int = 90) -> List[Dict[str, Any]]:
+    """Fetch congressional trading from Finnhub API (premium tier required).
+
+    Returns [] if the API key lacks access (403) or the key is absent.
+    """
+    try:
+        import httpx
+        from api import config
+        api_key = config.finnhub_api_key() or ""
+        if not api_key:
+            return []
+        cutoff = dt.date.today() - dt.timedelta(days=days_back)
+        trades: List[Dict[str, Any]] = []
+        url = "https://finnhub.io/api/v1/stock/congressional-trading"
+        # Finnhub endpoint accepts from/to query params
+        params = {
+            "from": cutoff.isoformat(),
+            "to": dt.date.today().isoformat(),
+            "token": api_key,
+        }
+        resp = httpx.get(url, params=params, timeout=15)
+        if resp.status_code in (401, 403):
+            logger.info("finnhub_congress_not_on_plan status=%d", resp.status_code)
+            return []
+        if resp.status_code != 200:
+            logger.debug("finnhub_congress_failed status=%d", resp.status_code)
+            return []
+        data = resp.json()
+        items = data if isinstance(data, list) else data.get("data", [])
+        for item in items:
+            try:
+                tx_date_str = (
+                    item.get("transactionDate") or item.get("date") or item.get("transaction_date") or ""
+                )
+                if not tx_date_str:
+                    continue
+                tx_date = dt.date.fromisoformat(tx_date_str[:10])
+                if tx_date < cutoff:
+                    continue
+                ticker = (item.get("symbol") or item.get("ticker") or "").strip().upper()
+                if not ticker or ticker in ("N/A", "--", ""):
+                    continue
+                tx_type = (item.get("transactionType") or item.get("type") or "").lower()
+                if "purchase" in tx_type or "buy" in tx_type:
+                    direction = "buy"
+                elif "sale" in tx_type or "sell" in tx_type:
+                    direction = "sell"
+                else:
+                    continue
+                amount_str = str(item.get("amount") or item.get("size") or "")
+                amin, amax = _parse_amount_range(amount_str)
+                trades.append({
+                    "symbol": ticker,
+                    "transaction_date": tx_date.isoformat(),
+                    "politician": item.get("name") or item.get("politician") or "",
+                    "party": item.get("party") or "",
+                    "chamber": (item.get("chamber") or "unknown").lower(),
+                    "transaction_type": direction,
+                    "amount_range": amount_str,
+                    "amount_min": amin,
+                    "amount_max": amax,
+                    "disclosure_date": item.get("filingDate") or item.get("disclosure_date") or "",
+                    "source": "finnhub",
+                })
+            except Exception:
+                continue
+        logger.info("finnhub_congress_fetched trades=%d", len(trades))
+        return trades
+    except Exception as exc:
+        logger.debug("finnhub_congress_error err=%s", exc)
+        return []
+
+
+_GITHUB_RAW_URLS = [
+    # Maintained mirrors of house/senate stock watcher data (try each)
+    "https://raw.githubusercontent.com/rcos/senate-stock-watcher-data/main/data/all_transactions.json",
+    "https://raw.githubusercontent.com/alexlugovsky/house-stock-watcher/main/data/all_transactions.json",
+    "https://raw.githubusercontent.com/Roshan818/StockWatcher/main/data/congress_trades.json",
+]
+
+
+def _fetch_from_github_raw(days_back: int = 90) -> List[Dict[str, Any]]:
+    """Attempt to fetch congressional trading data from GitHub raw file mirrors.
+
+    Several community projects maintain mirrors of house/senate-stock-watcher
+    data on GitHub, which are accessible from cloud IPs unlike the official S3 buckets.
+    Returns [] if no working URL is found.
+    """
+    try:
+        import httpx
+        cutoff = dt.date.today() - dt.timedelta(days=days_back)
+        gh_headers = {
+            "User-Agent": "AXIOM/1.0 (congressional-trading-research)",
+            "Accept": "application/json",
+        }
+        for url in _GITHUB_RAW_URLS:
+            try:
+                resp = httpx.get(url, headers=gh_headers, timeout=15, follow_redirects=True)
+                if resp.status_code != 200:
+                    logger.debug("github_raw_failed url=%s status=%d", url, resp.status_code)
+                    continue
+                data = resp.json()
+                items = data if isinstance(data, list) else data.get("data", [])
+                if not items:
+                    continue
+                trades: List[Dict[str, Any]] = []
+                for item in items:
+                    try:
+                        tx_date_str = (
+                            item.get("transaction_date")
+                            or item.get("txDate")
+                            or item.get("date")
+                            or ""
+                        )
+                        if not tx_date_str or tx_date_str == "N/A":
+                            continue
+                        tx_date = dt.date.fromisoformat(tx_date_str[:10])
+                        if tx_date < cutoff:
+                            continue
+                        ticker = (
+                            item.get("ticker") or item.get("symbol") or ""
+                        ).strip().upper()
+                        if not ticker or ticker in ("N/A", "--", ""):
+                            continue
+                        tx_type = (item.get("type") or item.get("transaction_type") or "").lower()
+                        if "purchase" in tx_type or "buy" in tx_type:
+                            direction = "buy"
+                        elif "sale" in tx_type or "sell" in tx_type:
+                            direction = "sell"
+                        else:
+                            continue
+                        amount_str = str(item.get("amount") or item.get("size") or "")
+                        amin, amax = _parse_amount_range(amount_str)
+                        trades.append({
+                            "symbol": ticker,
+                            "transaction_date": tx_date.isoformat(),
+                            "politician": (
+                                item.get("representative")
+                                or item.get("senator")
+                                or item.get("politician")
+                                or ""
+                            ),
+                            "party": item.get("party", ""),
+                            "chamber": "senate" if "senate" in url else "house",
+                            "transaction_type": direction,
+                            "amount_range": amount_str,
+                            "amount_min": amin,
+                            "amount_max": amax,
+                            "disclosure_date": item.get("disclosure_date", ""),
+                            "source": "github_raw",
+                        })
+                    except Exception:
+                        continue
+                if trades:
+                    logger.info("github_raw_fetched url=%s trades=%d", url, len(trades))
+                    return trades
+            except Exception as exc:
+                logger.debug("github_raw_url_error url=%s err=%s", url, exc)
+                continue
+        logger.info("github_raw_all_urls_failed — no working mirror found")
+        return []
+    except Exception as exc:
+        logger.debug("github_raw_error err=%s", exc)
+        return []
+
+
 def _get_committee_assignments() -> Dict[str, List[str]]:
     """Fetch congressional committee assignments from congress.gov API v3.
 
@@ -437,7 +603,16 @@ def _fetch_from_capitoltrades(days_back: int = 90) -> List[Dict[str, Any]]:
 
 
 def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
-    """Fetch recent congressional stock trades — tries Capitol Trades, QuiverQuant, SEC EDGAR, S3.
+    """Fetch recent congressional stock trades.
+
+    Source order (most-accessible-from-cloud first):
+      1. Finnhub congressional (if API key has premium access)
+      2. GitHub raw mirrors (community-maintained JSON files)
+      3. Capitol Trades scraper (blocks Railway IPs with 429)
+      4. QuiverQuant (free tier returns 0 trades)
+      5. S3 house/senate watchers (403 from Railway IPs)
+      6. SEC EDGAR (symbols not parseable)
+      7. Neutral default (CIS=50)
 
     Returns list of trade dicts with:
       symbol, transaction_date, politician, party, chamber,
@@ -446,19 +621,31 @@ def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
     """
     cutoff = dt.date.today() - dt.timedelta(days=days_back)
 
-    # Source 1: Capitol Trades (public, no auth, most reliable from cloud)
+    # Source 1: Finnhub (premium plan only; returns [] with 403 if not on plan)
+    trades = _fetch_from_finnhub_congress(days_back)
+    if trades:
+        logger.info("congress_trades_fetched source=finnhub total=%d", len(trades))
+        return trades
+
+    # Source 2: GitHub raw mirrors (community-maintained, no auth, no IP blocks)
+    trades = _fetch_from_github_raw(days_back)
+    if trades:
+        logger.info("congress_trades_fetched source=github_raw total=%d", len(trades))
+        return trades
+
+    # Source 3: Capitol Trades (blocks Railway IPs with 429)
     trades = _fetch_from_capitoltrades(days_back)
     if trades:
         logger.info("congress_trades_fetched source=capitoltrades total=%d", len(trades))
         return trades
 
-    # Source 2: QuiverQuant (requires paid API key)
+    # Source 4: QuiverQuant (free tier returns 0 trades)
     trades = _fetch_quiverquant(cutoff)
     if trades:
         logger.info("congress_trades_fetched source=quiverquant total=%d", len(trades))
         return trades
 
-    # Source 3: S3 house/senate watchers (may be blocked on Railway)
+    # Source 5: S3 house/senate watchers (403 from Railway IPs)
     house = _fetch_s3_house(cutoff)
     senate = _fetch_s3_senate(cutoff)
     trades = house + senate
@@ -469,7 +656,7 @@ def fetch_recent_congress_trades(days_back: int = 90) -> List[Dict[str, Any]]:
         )
         return trades
 
-    # Source 4: SEC EDGAR (symbol parsing limited, used as availability signal)
+    # Source 6: SEC EDGAR (symbol parsing limited)
     edgar = _fetch_edgar_congress(cutoff)
     if edgar:
         symbol_trades = [t for t in edgar if t.get("symbol")]

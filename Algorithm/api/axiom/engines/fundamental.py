@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import Dict, List, Optional
 
 from api.assistant.phase3.common import bounded_score, clamp, first_available, inverse_metric, mean, safe_float
 from api.axiom.contracts import AxiomEngineInput, EngineScore
 from api.axiom.engines.earnings_intelligence import compute_pess, evaluate_pess_flags
+
+logger = logging.getLogger(__name__)
 
 
 _VALUATION_WEIGHT = 0.14
@@ -177,6 +180,19 @@ def _weighted_average(items: List[tuple[Optional[float], float]]) -> Optional[fl
 
 def score_fundamental_reality(engine_input: AxiomEngineInput) -> EngineScore:
     candidate = engine_input.fundamental
+    _symbol = engine_input.source_context.get("symbol", "unknown")
+    if candidate.coverage_score < 20:
+        logger.warning(
+            "fundamental_reality_engine: thin_data symbol=%s coverage=%.1f "
+            "gross_margin=%s op_margin=%s roe=%s fcf_margin=%s — "
+            "all components will default to 50. Enrich via XBRL or yfinance.",
+            _symbol,
+            candidate.coverage_score,
+            candidate.gross_margin,
+            candidate.operating_margin,
+            candidate.return_on_equity,
+            candidate.free_cash_flow_margin,
+        )
     analyst_target_gap = None
     if candidate.latest_close not in (None, 0) and candidate.analyst_target_price is not None:
         analyst_target_gap = candidate.analyst_target_price / candidate.latest_close - 1.0

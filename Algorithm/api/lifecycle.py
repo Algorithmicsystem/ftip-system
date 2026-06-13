@@ -58,7 +58,14 @@ def _enforce_db_runtime_contract() -> None:
 
 
 def _check_and_trigger_stale_pipeline() -> None:
-    """If no data today, trigger pipeline automatically after startup."""
+    """If no data today, trigger pipeline automatically after startup.
+
+    Guards:
+      1. Only runs once per process lifetime.
+      2. Only triggers between 06:00–23:00 UTC (avoids overnight deploys).
+      3. Skips if a pipeline already ran within the last 4 hours
+         (prevents multiple rapid deploys from queuing duplicate runs).
+    """
     global _STALE_PIPELINE_TRIGGERED
     if "pytest" in sys.modules:
         return
@@ -71,26 +78,50 @@ def _check_and_trigger_stale_pipeline() -> None:
     try:
         if not db.db_enabled():
             return
+
+        now_utc = dt.datetime.utcnow()
+        if not (6 <= now_utc.hour < 23):
+            logger.info(
+                "startup.pipeline_skipped reason=outside_window utc_hour=%d",
+                now_utc.hour,
+            )
+            return
+
         row = db.safe_fetchone("SELECT MAX(as_of_date) FROM axiom_scores_daily")
         if not row or not row[0]:
             return
         last_date = row[0]
         today = dt.date.today()
-        if last_date < today:
-            logger.info("startup.data_stale last=%s triggering_pipeline", last_date)
-            try:
-                from api.realtime.websocket_manager import ws_manager
-                ws_manager.broadcast_from_thread({
-                    "type": "pipeline_starting",
-                    "reason": "stale_data",
-                    "last_run": str(last_date),
-                    "message": f"Data from {last_date} — starting pipeline update...",
-                })
-            except Exception:
-                pass
-            from api.jobs.scheduler import _job_full_daily_pipeline
-            import threading
-            threading.Thread(target=_job_full_daily_pipeline, daemon=True).start()
+        if last_date >= today:
+            return  # already scored today
+
+        # Guard: skip if a score was written for today within the last 4 hours
+        # (catches the case where a prior deploy already triggered the pipeline)
+        recent_row = db.safe_fetchone(
+            """SELECT MAX(updated_at) FROM axiom_scores_daily
+               WHERE updated_at >= NOW() - INTERVAL '4 hours'"""
+        )
+        if recent_row and recent_row[0]:
+            logger.info(
+                "startup.pipeline_skipped reason=recent_run last_update=%s",
+                recent_row[0],
+            )
+            return
+
+        logger.info("startup.data_stale last=%s triggering_pipeline", last_date)
+        try:
+            from api.realtime.websocket_manager import ws_manager
+            ws_manager.broadcast_from_thread({
+                "type": "pipeline_starting",
+                "reason": "stale_data",
+                "last_run": str(last_date),
+                "message": f"Data from {last_date} — starting pipeline update...",
+            })
+        except Exception:
+            pass
+        from api.jobs.scheduler import _job_full_daily_pipeline
+        import threading
+        threading.Thread(target=_job_full_daily_pipeline, daemon=True).start()
     except Exception as exc:
         logger.debug("startup_pipeline_check_failed err=%s", exc)
 

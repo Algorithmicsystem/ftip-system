@@ -1,4 +1,4 @@
-/* Universe Screen Panel — full 30-symbol ranked view */
+/* Universe Screen Panel — full scored-universe ranked view */
 
 async function loadUniverseScreen() {
   const body = document.getElementById('opportunities-body');
