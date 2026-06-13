@@ -74,22 +74,35 @@ def load_company_fundamentals(symbol: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.debug("fundamental_loader.yfinance symbol=%s err=%s", symbol, exc)
 
-    # --- XBRL enrichment (override margins if available) ---
+    # --- XBRL DB enrichment (fast — reads from pre-seeded xbrl_fundamentals table) ---
     try:
-        from api.scrapers.edgar_xbrl import fetch_xbrl_fundamentals
-        xbrl = fetch_xbrl_fundamentals(symbol, n_quarters=8)
-        if xbrl:
-            if xbrl.get("gross_margin") is not None:
-                result["gross_margin"] = xbrl["gross_margin"]
-            if xbrl.get("op_margin") is not None:
-                result["op_margin"] = xbrl["op_margin"]
-            if xbrl.get("fcf_margin") is not None:
-                result["fcf_margin"] = xbrl["fcf_margin"]
-            if xbrl.get("revenue") is not None and result["revenue_ttm"] is None:
-                result["revenue_ttm"] = xbrl["revenue"]
-            result["xbrl_available"] = True
+        from api import db
+        if db.db_enabled():
+            row = db.safe_fetchone(
+                """
+                SELECT metrics FROM xbrl_fundamentals
+                WHERE symbol = %s
+                ORDER BY fiscal_quarter DESC
+                LIMIT 1
+                """,
+                (symbol,),
+            )
+            if row and row[0]:
+                import json as _xjson
+                m = row[0] if isinstance(row[0], dict) else _xjson.loads(row[0])
+                if m.get("gross_margin") is not None:
+                    result["gross_margin"] = float(m["gross_margin"])
+                if m.get("op_margin") is not None:
+                    result["op_margin"] = float(m["op_margin"])
+                if m.get("net_margin") is not None:
+                    result["net_margin"] = float(m["net_margin"])
+                if m.get("fcf_margin") is not None:
+                    result["fcf_margin"] = float(m["fcf_margin"])
+                if m.get("revenue") is not None and result["revenue_ttm"] is None:
+                    result["revenue_ttm"] = float(m["revenue"])
+                result["xbrl_db_available"] = True
     except Exception as exc:
-        logger.debug("fundamental_loader.xbrl symbol=%s err=%s", symbol, exc)
+        logger.debug("fundamental_loader.xbrl_db symbol=%s err=%s", symbol, exc)
 
     # --- AXIOM DB scores ---
     try:

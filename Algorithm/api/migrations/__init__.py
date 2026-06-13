@@ -966,6 +966,10 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "111_xbrl_fundamentals",
         lambda cur: cur.execute(Path(__file__).with_name("111_xbrl_fundamentals.sql").read_text()),
     ),
+    (
+        "112_job_postings",
+        lambda cur: cur.execute(Path(__file__).with_name("112_job_postings.sql").read_text()),
+    ),
 ]
 
 

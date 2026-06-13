@@ -28,6 +28,8 @@ PIPELINE_STAGES: List[str] = [
     "signal_generation",
     "axiom_scoring",
     "alt_data_update",
+    "scraper_job_postings",  # Indeed job posting velocity
+    "scraper_gov_contracts", # SAM.gov federal awards + FDA enforcement
     "factor_computation",
     "ml_inference",
     "pnl_compute",
@@ -51,6 +53,8 @@ _STAGE_DEPS: Dict[str, List[str]] = {
     "signal_generation": ["feature_computation"],
     "axiom_scoring": ["batch_bar_ingestion"],
     "alt_data_update": [],
+    "scraper_job_postings": [],
+    "scraper_gov_contracts": [],
     "factor_computation": ["feature_computation"],
     "ml_inference": ["axiom_scoring"],
     "pnl_compute": ["signal_generation"],
@@ -467,6 +471,40 @@ def _real_stage(name: str) -> Dict[str, Any]:
                 pass
             return {"records_processed": len(rows)}
         except Exception:
+            return {"records_processed": 0}
+
+    if name == "scraper_job_postings":
+        try:
+            from api.universe import get_pipeline_universe
+            from api.scrapers.job_postings import fetch_job_posting_velocity, store_job_postings
+            tier1 = get_pipeline_universe()[:50]
+            results = fetch_job_posting_velocity(tier1)
+            written = store_job_postings(results)
+            logger.info(
+                "scraper_job_postings_done symbols=%d stored=%d",
+                len(results), written,
+            )
+            return {"records_processed": written}
+        except Exception as exc:
+            logger.warning("scraper_job_postings_stage error=%s", exc)
+            return {"records_processed": 0}
+
+    if name == "scraper_gov_contracts":
+        try:
+            from api.scrapers.sam_contracts import fetch_recent_contract_awards
+            from api.scrapers.fda_warnings import fetch_recent_fda_warnings
+            contracts = fetch_recent_contract_awards(days_back=7)
+            fda = fetch_recent_fda_warnings(days_back=30)
+            matched_contracts = sum(1 for c in contracts if c.get("ticker"))
+            matched_fda = sum(1 for f in fda if f.get("ticker"))
+            logger.info(
+                "scraper_gov_contracts_done contracts=%d contracts_matched=%d "
+                "fda=%d fda_matched=%d",
+                len(contracts), matched_contracts, len(fda), matched_fda,
+            )
+            return {"records_processed": len(contracts) + len(fda)}
+        except Exception as exc:
+            logger.warning("scraper_gov_contracts_stage error=%s", exc)
             return {"records_processed": 0}
 
     # All other stages: no-op (handled externally or via daily snapshot)
