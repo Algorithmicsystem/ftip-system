@@ -2666,27 +2666,26 @@ def llm_chat(req: LLMChatRequest) -> Dict[str, Any]:
 
 
 @app.get("/intelligence/universe/scores")
-def universe_scores() -> List[Dict[str, Any]]:
-    """Public endpoint — returns latest AXIOM scores for all 30 universe symbols."""
-    from api.universe import AXIOM_UNIVERSE
+def universe_scores(
+    limit: int = Query(500, ge=1, le=1000),
+) -> List[Dict[str, Any]]:
+    """Returns latest AXIOM scores for all scored symbols.
 
+    Uses the most recent available scoring date (today if scored, else latest).
+    Accepts optional ?limit=N (default 500, max 1000).
+    """
     def _sig(dau):
         if dau is None:
             return "NO_DATA"
         return "BUY" if dau >= 65 else ("SELL" if dau <= 40 else "HOLD")
 
     if not db.db_enabled():
-        return [
-            {"symbol": s, "signal": "NO_DATA", "dau": None, "regime_label": None,
-             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None}
-            for s in AXIOM_UNIVERSE
-        ]
+        return []
 
     try:
         rows = db.safe_fetchall(
             """
-            SELECT DISTINCT ON (symbol)
-                   symbol,
+            SELECT symbol,
                    deployable_alpha_utility AS dau,
                    regime_label,
                    as_of_date,
@@ -2694,20 +2693,22 @@ def universe_scores() -> List[Dict[str, Any]]:
                    (payload->'engine_scores'->'fundamental_reality'->'components'->>'earnings_quality_component')::numeric AS eis_score,
                    (payload->'engine_scores'->'fundamental_reality'->'components'->>'caps_component')::numeric AS caps_score
               FROM axiom_scores_daily
-             WHERE symbol = ANY(%s)
-             ORDER BY symbol, as_of_date DESC
+             WHERE as_of_date = (
+                   SELECT MAX(as_of_date) FROM axiom_scores_daily
+             )
+             ORDER BY deployable_alpha_utility DESC NULLS LAST
+             LIMIT %s
             """,
-            (list(AXIOM_UNIVERSE),),
+            (limit,),
         ) or []
     except Exception:
         rows = []
 
-    result_map: Dict[str, Any] = {}
+    results = []
     for row in rows:
-        sym = row[0]
         dau = float(row[1]) if row[1] is not None else None
-        result_map[sym] = {
-            "symbol": sym,
+        results.append({
+            "symbol": row[0],
             "signal": _sig(dau),
             "dau": dau,
             "regime_label": row[2],
@@ -2715,17 +2716,8 @@ def universe_scores() -> List[Dict[str, Any]]:
             "ic_state": row[4],
             "eis_score": float(row[5]) if row[5] is not None else None,
             "caps_score": float(row[6]) if row[6] is not None else None,
-        }
-
-    results = []
-    for sym in AXIOM_UNIVERSE:
-        results.append(result_map.get(sym) or {
-            "symbol": sym, "signal": "NO_DATA", "dau": None, "regime_label": None,
-            "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None,
         })
 
-    # Sort by signal strength: most extreme DAU (furthest from neutral 50) first
-    results.sort(key=lambda x: (x["dau"] is None, -abs((x["dau"] or 50) - 50)))
     return results
 
 
