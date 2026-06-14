@@ -970,6 +970,22 @@ MIGRATIONS: List[tuple[str, Migration]] = [
         "112_job_postings",
         lambda cur: cur.execute(Path(__file__).with_name("112_job_postings.sql").read_text()),
     ),
+    (
+        "113_entity_resolution",
+        lambda cur: cur.execute(Path(__file__).with_name("113_entity_resolution.sql").read_text()),
+    ),
+    (
+        "114_employee_sentiment",
+        lambda cur: cur.execute(Path(__file__).with_name("114_employee_sentiment.sql").read_text()),
+    ),
+    (
+        "115_epa_violations",
+        lambda cur: cur.execute(Path(__file__).with_name("115_epa_violations.sql").read_text()),
+    ),
+    (
+        "116_litigation_risk",
+        lambda cur: cur.execute(Path(__file__).with_name("116_litigation_risk.sql").read_text()),
+    ),
 ]
 
 

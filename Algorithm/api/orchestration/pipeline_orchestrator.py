@@ -369,6 +369,36 @@ def _real_stage(name: str) -> Dict[str, Any]:
                     logger.debug("alt_data_symbol_failed sym=%s err=%s", symbol, exc)
 
             logger.info("alt_data_update_done symbols_ok=%d", ok)
+
+            # --- Step 7: Employee sentiment (top 100 tier-1 by position in universe list) ---
+            try:
+                from api.scrapers.glassdoor_sentiment import fetch_bulk_employee_sentiment, store_employee_sentiment
+                tier1_100 = symbols[:100]
+                sentiment_records = fetch_bulk_employee_sentiment(tier1_100, delay_seconds=0.5)
+                sentiment_stored = store_employee_sentiment(sentiment_records)
+                logger.info("alt_data_employee_sentiment_done stored=%d", sentiment_stored)
+            except Exception as exc:
+                logger.warning("alt_data_employee_sentiment_failed err=%s", exc)
+
+            # --- Step 7: EPA ECHO violations (all universe, 7-day cache) ---
+            try:
+                from api.scrapers.epa_echo import fetch_bulk_epa_violations, store_epa_violations
+                epa_records = fetch_bulk_epa_violations(symbols, skip_cached=True, delay_seconds=1.0)
+                epa_stored = store_epa_violations(epa_records)
+                logger.info("alt_data_epa_violations_done fetched=%d stored=%d", len(epa_records), epa_stored)
+            except Exception as exc:
+                logger.warning("alt_data_epa_violations_failed err=%s", exc)
+
+            # --- Step 7: CourtListener litigation risk (top 200 by position in universe list) ---
+            try:
+                from api.scrapers.court_listener import fetch_bulk_litigation_risk, store_litigation_risk
+                tier1_200 = symbols[:200]
+                lit_records = fetch_bulk_litigation_risk(tier1_200, delay_seconds=0.5)
+                lit_stored = store_litigation_risk(lit_records)
+                logger.info("alt_data_litigation_risk_done fetched=%d stored=%d", len(lit_records), lit_stored)
+            except Exception as exc:
+                logger.warning("alt_data_litigation_risk_failed err=%s", exc)
+
             return {"records_processed": ok}
 
         except Exception as exc:

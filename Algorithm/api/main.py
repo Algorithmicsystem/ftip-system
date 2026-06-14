@@ -3230,6 +3230,31 @@ def universe_stats() -> Dict[str, Any]:
     return get_registry_stats()
 
 
+@app.post("/admin/entity-resolution/seed")
+async def seed_entity_resolution_endpoint(
+    background_tasks: BackgroundTasks,
+    max_symbols: int = Query(100, ge=1, le=500, description="Max symbols to seed per call"),
+) -> Dict[str, Any]:
+    """Seed the entity_resolution table from the universe registry.
+
+    Runs in background — returns immediately.
+    Capped at max_symbols per call to avoid Railway timeouts.
+    """
+    def _run_seed(n: int) -> None:
+        try:
+            from api.scrapers.entity_resolver import seed_entity_resolution
+            result = seed_entity_resolution(max_symbols=n)
+            logger.info("entity_resolution.seed_done result=%s", result)
+        except Exception as exc:
+            logger.warning("entity_resolution.seed_failed err=%s", exc)
+
+    background_tasks.add_task(_run_seed, max_symbols)
+    return {
+        "status": "started",
+        "message": f"Entity resolution seeding running in background (max_symbols={max_symbols}).",
+    }
+
+
 @app.post("/admin/seed-universe")
 async def seed_universe_registry(background_tasks: BackgroundTasks) -> Dict[str, Any]:
     """Seed the axiom_universe_registry from yfinance metadata.

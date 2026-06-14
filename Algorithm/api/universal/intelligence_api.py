@@ -125,6 +125,11 @@ class UniversalIntelligenceResponse:
     cross_asset_adjusted_dau: Optional[float] = None
     macro_narrative: Optional[str] = None
 
+    # Alt data overlays (Step 7)
+    esg_risk_score: Optional[float] = None
+    litigation_score: Optional[float] = None
+    employee_sentiment_score: Optional[float] = None
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -403,6 +408,58 @@ def assemble_universal_intelligence(
         except Exception:
             pass
 
+        # Step 13: Alt data overlays (Step 7 scrapers)
+        esg_risk: Optional[float] = None
+        litigation: Optional[float] = None
+        sentiment: Optional[float] = None
+        try:
+            esg_row = db.safe_fetchone(
+                """
+                SELECT esg_risk_score FROM epa_violations
+                WHERE symbol = %s
+                ORDER BY as_of_date DESC LIMIT 1
+                """,
+                (symbol,),
+            )
+            if esg_row and esg_row[0] is not None:
+                esg_risk = float(esg_row[0])
+        except Exception:
+            pass
+
+        try:
+            lit_row = db.safe_fetchone(
+                """
+                SELECT total_litigation_score FROM litigation_risk
+                WHERE symbol = %s
+                ORDER BY as_of_date DESC LIMIT 1
+                """,
+                (symbol,),
+            )
+            if lit_row and lit_row[0] is not None:
+                litigation = float(lit_row[0])
+        except Exception:
+            pass
+
+        try:
+            sent_row = db.safe_fetchone(
+                """
+                SELECT overall_rating FROM employee_sentiment
+                WHERE symbol = %s
+                ORDER BY as_of_date DESC LIMIT 1
+                """,
+                (symbol,),
+            )
+            if sent_row and sent_row[0] is not None:
+                sentiment = float(sent_row[0])
+        except Exception:
+            pass
+
+        # EPA ESG penalty: reduce DAU by up to 5 points for high violators (esg_risk > 50)
+        if esg_risk is not None and esg_risk > 50.0:
+            penalty = min(5.0, (esg_risk - 50.0) / 10.0)
+            dau = round(max(0.0, dau - penalty), 2)
+            signal_label = _signal_from_dau(dau)
+
         # Primary conclusion from reasoning
         primary_conclusion = (
             f"{symbol} receives a {signal_label} signal with DAU {dau:.1f}; "
@@ -446,6 +503,9 @@ def assemble_universal_intelligence(
             cross_asset_amplifier=cross_amplifier,
             cross_asset_adjusted_dau=cross_adjusted_dau,
             macro_narrative=macro_narrative_txt,
+            esg_risk_score=esg_risk,
+            litigation_score=litigation,
+            employee_sentiment_score=sentiment,
         )
 
     except Exception as exc:
