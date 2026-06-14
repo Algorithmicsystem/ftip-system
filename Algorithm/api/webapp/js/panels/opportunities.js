@@ -2,7 +2,8 @@
 
 let _OPP_ALL_ROWS = [];
 let _OPP_SHOW_ALL = false;
-const OPP_DEFAULT_LIMIT = 50;
+const OPP_DEFAULT_LIMIT = 10;
+const sigOrder = {BUY: 0, HOLD: 1, SELL: 2};
 
 async function loadOpportunities() {
   const body = document.getElementById('opportunities-body');
@@ -26,8 +27,11 @@ async function loadOpportunities() {
         setTimeout(() => loadOpportunities(), 60000);
         return;
       }
-      // Sort by DAU descending: BUY signals first, SELL last
-      const sorted = [...withData].sort((a, b) => (b.dau || 0) - (a.dau || 0));
+      // Sort BUY first, then HOLD, then SELL; tiebreak by DAU descending
+      const sorted = [...withData].sort((a, b) => {
+        const so = (sigOrder[a.signal] ?? 1) - (sigOrder[b.signal] ?? 1);
+        return so !== 0 ? so : (b.dau || 0) - (a.dau || 0);
+      });
       const noData = rows.filter(r => r.dau === null || r.dau === undefined || isNaN(Number(r.dau)));
       _OPP_ALL_ROWS = [...sorted, ...noData];
       renderOpportunitiesList(_OPP_ALL_ROWS, '');
@@ -58,8 +62,8 @@ function renderOpportunitiesList(allRows, filterText) {
 
   const q = (filterText || '').trim().toUpperCase();
   const filtered = q ? allRows.filter(r => r.symbol && r.symbol.includes(q)) : allRows;
-  const display  = _OPP_SHOW_ALL ? filtered : filtered.slice(0, OPP_DEFAULT_LIMIT);
-  const hasMore  = !_OPP_SHOW_ALL && filtered.length > OPP_DEFAULT_LIMIT;
+  const display  = _OPP_SHOW_ALL ? filtered : filtered.slice(0, 10);
+  const hasMore  = !_OPP_SHOW_ALL && filtered.length > 10;
 
   const summaryHTML = `
     <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
