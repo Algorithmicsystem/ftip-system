@@ -192,13 +192,14 @@ def _real_stage(name: str) -> Dict[str, Any]:
             except Exception:
                 pass
 
+            latest_date = _get_latest_score_date(today)
             resp = httpx.post(
                 f"{_BASE}/prosperity/snapshot/run",
                 json={
                     "symbols": symbols,
                     "from_date": (today - dt.timedelta(days=365)).isoformat(),
                     "to_date": today.isoformat(),
-                    "as_of_date": today.isoformat(),
+                    "as_of_date": latest_date,
                     "lookback": 252,
                     "concurrency": 2,
                 },
@@ -310,8 +311,9 @@ def _real_stage(name: str) -> Dict[str, Any]:
     if name == "axiom_scoring":
         try:
             from api.axiom.tiered_scorer import score_universe_tiered
+            score_date = dt.date.fromisoformat(_get_latest_score_date(today))
             results = score_universe_tiered(
-                as_of_date=today,
+                as_of_date=score_date,
                 force_full=False,
             )
             count = results["total_scored"]
@@ -376,7 +378,8 @@ def _real_stage(name: str) -> Dict[str, Any]:
     if name == "pnl_compute":
         try:
             from api.jobs.pnl import compute_pnl_batch
-            r = compute_pnl_batch(today, horizons=[5, 21, 63], store=True)
+            pnl_date = dt.date.fromisoformat(_get_latest_score_date(today))
+            r = compute_pnl_batch(pnl_date, horizons=[5, 21, 63], store=True)
             return {"records_processed": r.get("computed", 0)}
         except Exception:
             return {"records_processed": 0}
@@ -384,7 +387,8 @@ def _real_stage(name: str) -> Dict[str, Any]:
     if name == "ic_computation":
         try:
             from api.jobs.ic_snapshot import compute_ic_snapshot
-            r = compute_ic_snapshot(today)
+            ic_date = dt.date.fromisoformat(_get_latest_score_date(today))
+            r = compute_ic_snapshot(ic_date)
             return {"records_processed": 1 if r else 0}
         except Exception:
             return {"records_processed": 0}
@@ -392,7 +396,8 @@ def _real_stage(name: str) -> Dict[str, Any]:
     if name == "breadth_computation":
         try:
             from api.jobs.breadth_snapshot import compute_breadth_snapshot
-            r = compute_breadth_snapshot(today)
+            breadth_date = dt.date.fromisoformat(_get_latest_score_date(today))
+            r = compute_breadth_snapshot(breadth_date)
             return {"records_processed": 1 if r else 0}
         except Exception:
             return {"records_processed": 0}
