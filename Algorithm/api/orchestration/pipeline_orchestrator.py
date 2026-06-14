@@ -204,7 +204,7 @@ def _real_stage(name: str) -> Dict[str, Any]:
                     "concurrency": 2,
                 },
                 headers={"X-FTIP-API-Key": config.get_api_key()},
-                timeout=300.0,
+                timeout=3600.0,
             )
             if resp.status_code == 200:
                 data = resp.json()
@@ -609,6 +609,27 @@ def run_full_pipeline(
             continue
 
         executor = executors.get(stage_name, _noop_stage)
+
+        # Skip bar_ingestion (fallback) if batch_bar_ingestion already succeeded
+        if stage_name == "bar_ingestion":
+            batch_res = stage_results.get("batch_bar_ingestion")
+            if batch_res is not None and batch_res.records_processed > 500:
+                logger.info(
+                    "bar_ingestion_skipped — batch already succeeded symbols=%d",
+                    batch_res.records_processed,
+                )
+                stage_end = dt.datetime.utcnow()
+                stage_results[stage_name] = StageResult(
+                    stage_name=stage_name,
+                    status="success",
+                    started_at=stage_start,
+                    finished_at=stage_end,
+                    duration_seconds=(stage_end - stage_start).total_seconds(),
+                    records_processed=0,
+                    error_message="skipped_batch_succeeded",
+                )
+                continue
+
         try:
             result = executor()
             if isinstance(result, dict):

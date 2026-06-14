@@ -197,44 +197,52 @@ def run_production_readiness_check() -> Dict[str, Any]:
         checks["pipeline_ran_recently"] = _check(False, "DB disabled")
 
     # ── API checks ────────────────────────────────────────────────────────────
+    # NOTE: These use httpx against localhost — NOT TestClient(app).
+    # TestClient creates a nested ASGI lifespan scope which calls
+    # scheduler_manager.stop() on exit, causing a crash loop.
+
+    import httpx as _httpx
+    _port = os.environ.get("PORT", "8000")
+    _base = f"http://localhost:{_port}"
+    try:
+        from api import config as _cfg
+        _api_key = _cfg.get_api_key()
+    except Exception:
+        _api_key = ""
+    _auth_headers = {"X-FTIP-API-Key": _api_key} if _api_key else {}
 
     # 14. health_endpoint_responds
     try:
-        from fastapi.testclient import TestClient
-        from api.main import app
-        with TestClient(app) as client:
-            r = client.get("/orchestration/health")
-            checks["health_endpoint_responds"] = _check(
-                r.status_code == 200,
-                f"GET /orchestration/health → {r.status_code}",
-                critical=True,
-            )
+        _r = _httpx.get(f"{_base}/orchestration/health", timeout=10.0)
+        checks["health_endpoint_responds"] = _check(
+            _r.status_code == 200,
+            f"GET /orchestration/health → {_r.status_code}",
+            critical=True,
+        )
     except Exception as exc:
         checks["health_endpoint_responds"] = _check(False, f"Health check failed: {exc}", critical=True)
 
     # 15. universal_endpoint_responds
     try:
-        from fastapi.testclient import TestClient
-        from api.main import app
-        with TestClient(app) as client:
-            r = client.get("/intelligence/universal/AAPL")
-            checks["universal_endpoint_responds"] = _check(
-                r.status_code in (200, 404),
-                f"GET /intelligence/universal/AAPL → {r.status_code}",
-            )
+        _r = _httpx.get(
+            f"{_base}/intelligence/universal/AAPL",
+            headers=_auth_headers,
+            timeout=10.0,
+        )
+        checks["universal_endpoint_responds"] = _check(
+            _r.status_code in (200, 404),
+            f"GET /intelligence/universal/AAPL → {_r.status_code}",
+        )
     except Exception as exc:
         checks["universal_endpoint_responds"] = _check(False, f"Universal endpoint failed: {exc}")
 
     # 16. docs_accessible
     try:
-        from fastapi.testclient import TestClient
-        from api.main import app
-        with TestClient(app) as client:
-            r = client.get("/developer/api-docs")
-            checks["docs_accessible"] = _check(
-                r.status_code == 200,
-                f"GET /developer/api-docs → {r.status_code}",
-            )
+        _r = _httpx.get(f"{_base}/developer/api-docs", headers=_auth_headers, timeout=10.0)
+        checks["docs_accessible"] = _check(
+            _r.status_code == 200,
+            f"GET /developer/api-docs → {_r.status_code}",
+        )
     except Exception as exc:
         checks["docs_accessible"] = _check(False, f"Docs endpoint failed: {exc}")
 

@@ -390,11 +390,12 @@ def _scheduler_heartbeat_loop() -> None:
 
 
 def _scheduler_watchdog() -> None:
-    """Restart the scheduler if it stops unexpectedly in production.
+    """Restart the scheduler if it stops unexpectedly.
 
     Only restarts if THIS process originally won the scheduler lock (i.e.,
     _SCHEDULER_STARTED_IN_THIS_PROCESS is True). Workers that lost the
     initial lock race must never start the scheduler, even via watchdog.
+    Checks the DB lock before restarting to guard against multi-worker races.
     """
     import time
     while True:
@@ -405,16 +406,14 @@ def _scheduler_watchdog() -> None:
             # This process lost the lock race — exit the watchdog thread entirely.
             return
         if not scheduler_manager.running:
-            env = os.environ.get("FTIP_ENV") or os.environ.get("RAILWAY_ENVIRONMENT", "")
-            if env == "production":
-                if not _should_run_scheduler():
-                    logger.info("scheduler.watchdog skipped — lost lock to another worker")
-                    continue
-                logger.warning("scheduler.watchdog detected stopped scheduler — restarting")
-                try:
-                    scheduler_manager.start()
-                except Exception as exc:
-                    logger.error("scheduler.watchdog restart failed: %s", exc)
+            if not _should_run_scheduler():
+                logger.info("scheduler.watchdog skipped — lost lock to another worker")
+                continue
+            logger.warning("scheduler.watchdog detected stopped scheduler — restarting")
+            try:
+                scheduler_manager.start()
+            except Exception as exc:
+                logger.error("scheduler.watchdog restart failed: %s", exc)
 
 
 def start_scheduler() -> None:
