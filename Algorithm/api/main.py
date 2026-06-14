@@ -2682,8 +2682,9 @@ def universe_scores(
     if not db.db_enabled():
         from api.universe import AXIOM_UNIVERSE
         return [
-            {"symbol": s, "signal": "NO_DATA", "dau": None, "regime_label": None,
-             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None}
+            {"symbol": s, "signal": "NO_DATA", "dau": None, "dau_score": None,
+             "regime_label": None, "as_of_date": None, "ic_state": None,
+             "eis_score": None, "caps_score": None}
             for s in AXIOM_UNIVERSE[:limit]
         ]
 
@@ -2712,8 +2713,9 @@ def universe_scores(
     if not rows:
         from api.universe import AXIOM_UNIVERSE
         return [
-            {"symbol": s, "signal": "NO_DATA", "dau": None, "regime_label": None,
-             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None}
+            {"symbol": s, "signal": "NO_DATA", "dau": None, "dau_score": None,
+             "regime_label": None, "as_of_date": None, "ic_state": None,
+             "eis_score": None, "caps_score": None}
             for s in AXIOM_UNIVERSE[:limit]
         ]
 
@@ -2724,6 +2726,7 @@ def universe_scores(
             "symbol": row[0],
             "signal": _sig(dau),
             "dau": dau,
+            "dau_score": dau,   # alias for frontend compatibility
             "regime_label": row[2],
             "as_of_date": str(row[3]) if row[3] else None,
             "ic_state": row[4],

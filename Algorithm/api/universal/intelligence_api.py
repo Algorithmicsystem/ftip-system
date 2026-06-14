@@ -256,7 +256,7 @@ def _default_response(symbol: str, as_of_date: dt.date) -> UniversalIntelligence
         dossier_event_count=0,
         moat_score=None,
         data_freshness_hours=freshness,
-        staleness_warning=freshness > 24.0,
+        staleness_warning=freshness > 96.0,
     )
 
 
@@ -268,7 +268,16 @@ def assemble_universal_intelligence(
     symbol: str,
     as_of_date: Optional[dt.date] = None,
 ) -> UniversalIntelligenceResponse:
-    as_of_date = as_of_date or dt.date.today()
+    if as_of_date is None:
+        # Use the most recent scored date, not today — prevents weekend/holiday misses
+        if db.db_enabled():
+            try:
+                row = db.safe_fetchone("SELECT MAX(as_of_date) FROM axiom_scores_daily")
+                as_of_date = row[0] if row and row[0] else dt.date.today()
+            except Exception:
+                as_of_date = dt.date.today()
+        else:
+            as_of_date = dt.date.today()
 
     if not db.db_enabled():
         return _default_response(symbol, as_of_date)
@@ -433,7 +442,7 @@ def assemble_universal_intelligence(
             dossier_event_count=dossier_count,
             moat_score=None,
             data_freshness_hours=freshness,
-            staleness_warning=freshness > 24.0,
+            staleness_warning=freshness > 96.0,
             cross_asset_amplifier=cross_amplifier,
             cross_asset_adjusted_dau=cross_adjusted_dau,
             macro_narrative=macro_narrative_txt,

@@ -17,6 +17,23 @@ _BASE = f"http://localhost:{_PORT}"
 
 logger = logging.getLogger(__name__)
 
+
+def _get_latest_score_date(fallback: dt.date) -> str:
+    """Return the most recent as_of_date in axiom_scores_daily, fallback to today.
+
+    Prevents weekend/holiday date mismatches where today != last trading day.
+    """
+    try:
+        row = db.safe_fetchone(
+            "SELECT MAX(as_of_date) FROM axiom_scores_daily"
+        )
+        if row and row[0]:
+            return str(row[0])
+    except Exception:
+        pass
+    return fallback.isoformat()
+
+
 # ---------------------------------------------------------------------------
 # Stage registry
 # ---------------------------------------------------------------------------
@@ -248,7 +265,7 @@ def _real_stage(name: str) -> Dict[str, Any]:
             symbols = get_pipeline_universe()
             resp = httpx.post(
                 f"{_BASE}/jobs/features/daily",
-                json={"as_of_date": today.isoformat(), "symbols": symbols},
+                json={"as_of_date": _get_latest_score_date(today), "symbols": symbols},
                 headers={"X-FTIP-API-Key": config.get_api_key()},
                 timeout=300.0,
             )
@@ -273,7 +290,7 @@ def _real_stage(name: str) -> Dict[str, Any]:
             symbols = get_pipeline_universe()
             resp = httpx.post(
                 f"{_BASE}/jobs/signals/daily",
-                json={"as_of_date": today.isoformat(), "symbols": symbols},
+                json={"as_of_date": _get_latest_score_date(today), "symbols": symbols},
                 headers={"X-FTIP-API-Key": config.get_api_key()},
                 timeout=300.0,
             )
@@ -444,7 +461,11 @@ def _real_stage(name: str) -> Dict[str, Any]:
                 cache_universal_response,
             )
             rows = db.safe_fetchall(
-                "SELECT DISTINCT symbol FROM axiom_scores_daily ORDER BY symbol LIMIT 100"
+                """SELECT DISTINCT ON (symbol) symbol
+                   FROM axiom_scores_daily
+                   WHERE as_of_date = (SELECT MAX(as_of_date) FROM axiom_scores_daily)
+                   ORDER BY symbol, deployable_alpha_utility DESC NULLS LAST
+                   LIMIT 750"""
             ) or []
             buy_signals = []
             for row in rows:
