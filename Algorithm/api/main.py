@@ -2680,7 +2680,12 @@ def universe_scores(
         return "BUY" if dau >= 65 else ("SELL" if dau <= 40 else "HOLD")
 
     if not db.db_enabled():
-        return []
+        from api.universe import AXIOM_UNIVERSE
+        return [
+            {"symbol": s, "signal": "NO_DATA", "dau": None, "regime_label": None,
+             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None}
+            for s in AXIOM_UNIVERSE[:limit]
+        ]
 
     try:
         rows = db.safe_fetchall(
@@ -2703,6 +2708,14 @@ def universe_scores(
         ) or []
     except Exception:
         rows = []
+
+    if not rows:
+        from api.universe import AXIOM_UNIVERSE
+        return [
+            {"symbol": s, "signal": "NO_DATA", "dau": None, "regime_label": None,
+             "as_of_date": None, "ic_state": None, "eis_score": None, "caps_score": None}
+            for s in AXIOM_UNIVERSE[:limit]
+        ]
 
     results = []
     for row in rows:

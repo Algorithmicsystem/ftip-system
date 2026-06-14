@@ -100,9 +100,10 @@ def _compute_stats_from_pnl_rows(rows: List[Dict]) -> Dict:
         except Exception:
             ic = 0.0
 
-    import math as _math
-    # Full WAR formula: (BA - league_avg) * sqrt(N) * (1 + max(0, IC))
-    signal_war = round((overall_ba - _SPY_BASELINE) * _math.sqrt(max(n, 1)) * (1.0 + max(0.0, ic)), 4)
+    # WAR formula: (BA - league_avg) * (1 + max(0, IC))
+    # IC component boosts WAR when signal quality is high; sqrt(N) excluded
+    # to keep the metric interpretable (excess hit rate, IC-adjusted).
+    signal_war = round((overall_ba - _SPY_BASELINE) * (1.0 + max(0.0, ic)), 4)
 
     regime_map: Dict[str, Dict[str, int]] = {}
     for r in rows:

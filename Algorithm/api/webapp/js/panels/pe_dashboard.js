@@ -2,6 +2,9 @@
 
 let _currentPEOrg = null;
 
+// DEMO PORTFOLIO symbols for the PE Intelligence demo view
+const _PE_DEMO_SYMBOLS = ['NVDA', 'LLY', 'JPM', 'MSFT', 'AAPL', 'AMZN', 'META', 'GOOGL', 'V', 'MA'];
+
 async function loadPEDemo() {
   const body = document.getElementById('pe-body');
   if (!body) return;

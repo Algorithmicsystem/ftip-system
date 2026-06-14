@@ -2,8 +2,11 @@
 
 let _currentSMBEntity = null;
 
+// Demo entity IDs for the SMB Intelligence demo view
+const _SMB_DEMO_ENTITIES = ['DEMO_RESTAURANT', 'DEMO_RETAIL', 'DEMO_TECH_STARTUP'];
+
 async function loadSMBDemo() {
-  // Auto-load COST as the default ticker example
+  // Auto-load COST as the default ticker example; _SMB_DEMO_ENTITIES available for guided tours
   await loadSMBIntelligence('COST');
 }
 
